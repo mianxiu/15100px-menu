@@ -1,21 +1,17 @@
-import photoshop.api as ps
-app = ps.Application()
-doc = app.documents.add()
-new_doc = doc.artLayers.add()
-text_color = ps.SolidColor()
-text_color.rgb.red = 0
-text_color.rgb.green = 255
-text_color.rgb.blue = 0
-new_text_layer = new_doc
-new_text_layer.kind = ps.LayerKind.TextLayer
-new_text_layer.textItem.contents = 'Hello, World!'
-new_text_layer.textItem.position = [160, 167]
-new_text_layer.textItem.size = 40
-new_text_layer.textItem.color = text_color
-options = ps.JPEGSaveOptions(quality=5)
-# # save to jpg
-jpg = 'd:/hello_world.jpg'
-doc.saveAs(jpg, options, asCopy=True)
-app.doJavaScript(f'alert("save to jpg: {jpg}")')
+import sys
+from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtQml import QQmlApplicationEngine
 
-print("151500px-menu")
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("1500px-menu")
+
+          
+app = QApplication(sys.argv)
+engine = QQmlApplicationEngine()
+engine.quit.connect(app.quit)
+engine.load('app.qml')
+# window = MainWindow()
+# window.show()
+app.exec()
