@@ -21,6 +21,7 @@ Rectangle {
         checkable: true
         anchors.horizontalCenter: parent.horizontalCenter
         font.pixelSize:16
+  
 
         Item {
             QtObject {
