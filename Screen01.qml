@@ -8,7 +8,6 @@ Check out https://doc.qt.io/qtcreator/creator-quick-ui-forms.html for details on
 import QtQuick 6.2
 import QtQuick.Controls 6.2
 
-
 Rectangle {
     id: rectangle
     width: 500
@@ -21,11 +20,7 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         checkable: true
         anchors.horizontalCenter: parent.horizontalCenter
-
-        Connections {
-            target: button
-            onClicked: animation.start()
-        }
+        font.pixelSize:16
 
         Item {
             QtObject {
@@ -45,29 +40,10 @@ Rectangle {
         id: label
         text: qsTr("S 2023-3-12")
         anchors.top: button.bottom
-        font.family: Constants.font.family
         anchors.topMargin: 45
         anchors.horizontalCenter: parent.horizontalCenter
-
-        SequentialAnimation {
-            id: animation
-
-            ColorAnimation {
-                id: colorAnimation1
-                target: rectangle
-                property: "color"
-                to: "#2294c6"
-                from: Constants.backgroundColor
-            }
-
-            ColorAnimation {
-                id: colorAnimation2
-                target: rectangle
-                property: "color"
-                to: Constants.backgroundColor
-                from: "#2294c6"
-            }
-        }
+        font.pixelSize: 16
+        color:"#ffffff"
     }
     states: [
         State {
