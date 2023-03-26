@@ -16,12 +16,15 @@ Rectangle {
 
     Button {
         id: button
-        text: qsTr("Press me")
-        anchors.verticalCenter: parent.verticalCenter
-        checkable: true
-        anchors.horizontalCenter: parent.horizontalCenter
-        font.pixelSize:16
-  
+        text: "A Special Button"
+        background: Rectangle {
+            implicitWidth: 100
+            implicitHeight: 40
+            color: button.down ? "#d6d6d6" : "#f6f6f6"
+            border.color: "#26282a"
+            border.width: 1
+            radius: 10
+        }
 
         Item {
             QtObject {
