@@ -8,22 +8,40 @@ Check out https://doc.qt.io/qtcreator/creator-quick-ui-forms.html for details on
 import QtQuick 6.2
 import QtQuick.Controls 6.2
 
+
+
 Rectangle {
     id: rectangle
     width: 500
     height: 500
     color: "#00ffffff"
 
-    Button {
+    RoundButton {
+        id: roundButton
+        width: 209
+        height: 36
+        text: "+1234"
+    }
+
+    RoundButton {
         id: button
         text: "A Special Button"
+        checkable: true
+
         background: Rectangle {
             implicitWidth: 100
             implicitHeight: 40
-            color: button.down ? "#d6d6d6" : "#f6f6f6"
+            color: button.pressed ? "#00cc00" : button.hovered ? "#00cc00" : button.activeFocus ? "#00cc00" : "#ffff00"
             border.color: "#26282a"
-            border.width: 1
-            radius: 10
+            border.width: 2
+            radius: 20
+            
+        }
+
+        HoverHandler {
+        id: stylus
+        acceptedDevices: PointerDevice.Stylus
+        cursorShape: Qt.CrossCursor
         }
 
         Item {
