@@ -33,14 +33,15 @@ dpg.create_context()
 dpg.set_global_font_scale(SCALE_FACTOR)
 
 print(dpg.get_mouse_pos())
-dpg.show_style_editor()
+
 
 # x_pos orignpos : scale 1:4 (may affected from monitor & scale)
 dpg.create_viewport(title="Dear Pygui", clear_color=[0, 0, 0, 0],
                     always_on_top=True, height=round(250*SCALE_FACTOR), width=round(250*SCALE_FACTOR),x_pos=round(mouseX),y_pos=round(mouseY))
-dpg.setup_dearpygui()
 
-with dpg.window(label="Example Window", tag="Primary Window"):
+
+
+with dpg.window(label="MainWindow", tag="Primary Window"):
     dpg.add_text("Hello Word",label="text001")
     dpg.add_button(label="Save", callback=save_callback, tag="button1")
     with dpg.tooltip("button1"):
@@ -48,13 +49,35 @@ with dpg.window(label="Example Window", tag="Primary Window"):
     dpg.add_input_text(label="string")
     dpg.add_slider_int(label="int")
 
-
     
-    with dpg.popup(dpg.last_item()):
-        dpg.add_text("A popup")
+    # with dpg.popup(dpg.last_item()):
+    #     dpg.add_text("A popup")
 
+
+
+
+def on_key_la(sender, app_data):
+    if dpg.is_key_down(dpg.mvKey_A):
+        print("Ctrl + A")
+        print("I'm hide")
+        print(dpg.get_all_items())
+        dpg.hide_item(21)
+        print(dpg.get_item_label(21))
+        
+            
+
+        
+with dpg.handler_registry():
+    dpg.add_key_press_handler(dpg.mvKey_Control, callback=on_key_la)
+
+
+dpg.show_style_editor()
+dpg.setup_dearpygui()
 dpg.show_viewport()
 dpg.set_primary_window("Primary Window", True)
 dpg.start_dearpygui()
 dpg.destroy_context()
+
+
+
 
