@@ -10,7 +10,12 @@ def Worker():
         print(i)
         time.sleep(1)
         
-Worker()
+
+def Theard():
+    t1 = thread.Thread(target=Worker)
+    t1.start()
+
+Theard()
 
 def on_activate_h():
     print('<ctrl>+<alt>+h pressed')
