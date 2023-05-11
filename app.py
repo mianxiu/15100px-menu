@@ -3,25 +3,17 @@ from pynput import mouse, keyboard
 import dearpygui.dearpygui as dpg
 import threading as thread
 import time as time
+import get_monitor_scale_factor
 
-# get monitor scale_factor
-import ctypes
-user32 = ctypes.windll.user32
-O_Width = user32.GetSystemMetrics(0)
-O_Height = user32.GetSystemMetrics(1)
-user32.SetProcessDPIAware(2)
-Width = user32.GetSystemMetrics(0)
-Height = user32.GetSystemMetrics(1)
-
-SCALE_FACTOR = Width/O_Width
-print(O_Width,O_Height,Width,Height,"Scale:",SCALE_FACTOR)
-
+SCALE_FACTOR = get_monitor_scale_factor.getMonitorScaleFactor()
 # get mouse position
 mController = mouse.Controller()
 print(mController.position)
 mouseX = mController.position[0]
 mouseY = mController.position[1]
 
+DEFAULT_WIDTH = 250*SCALE_FACTOR
+DEFAULT_HEIGHT = 250*SCALE_FACTOR
 
 
 def drawGui(*args):
@@ -31,14 +23,15 @@ def drawGui(*args):
             dpg.set_value(item="text001",value="21313")
     
         dpg.create_context()
-
+        # sclae
         dpg.set_global_font_scale(SCALE_FACTOR)
+
 
         print(dpg.get_mouse_pos())
 
         # x_pos orignpos : scale 1:4 (may affected from monitor & scale)
         dpg.create_viewport(title="Dear Pygui", clear_color=[0, 0, 0, 0],
-                            always_on_top=True, height=round(250*SCALE_FACTOR), width=round(250*SCALE_FACTOR),x_pos=round(mouseX),y_pos=round(mouseY))
+                            always_on_top=True, width=round(DEFAULT_WIDTH),height=round(DEFAULT_HEIGHT), x_pos=round(mouseX),y_pos=round(mouseY))
 
         with dpg.window(label="MainWindow", tag="Primary Window"):
             dpg.add_text("Hello Word",label="text001")
@@ -51,7 +44,23 @@ def drawGui(*args):
            
             with dpg.popup(dpg.last_item()):
                 dpg.add_text("A popup")
+                
 
+        with dpg.theme() as global_theme:
+            with dpg.theme_component(dpg.mvAll):
+                itemSpacing = round(dpg.mvStyleVar_ItemSpacing)
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing,itemSpacing,itemSpacing, category=dpg.mvThemeCat_Core)
+                itemInnerSpacing = dpg.mvStyleVar_ItemInnerSpacing
+                dpg.add_theme_style(dpg.mvStyleVar_ItemInnerSpacing,itemInnerSpacing,itemInnerSpacing ,category=dpg.mvThemeCat_Core)
+                # dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (255, 140, 23), category=dpg.mvThemeCat_Core)
+                # dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4, category=dpg.mvThemeCat_Core)
+
+
+            # with dpg.theme_component(dpg.mvInputInt):
+            #     dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (140, 255, 23), category=dpg.mvThemeCat_Core)
+            #     dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 5, category=dpg.mvThemeCat_Core)
+
+        dpg.bind_theme(global_theme)
         # def on_key_la(sender, app_data):
         #     if dpg.is_key_down(dpg.mvKey_A):
         #         print("Ctrl + A")
@@ -64,6 +73,7 @@ def drawGui(*args):
                 
         # with dpg.handler_registry():
         #     dpg.add_key_press_handler(dpg.mvKey_Control, callback=on_key_la)
+        
         dpg.show_style_editor()
         dpg.setup_dearpygui()
         dpg.show_viewport()
@@ -72,12 +82,10 @@ def drawGui(*args):
         dpg.destroy_context()
 
 
-def openGui():
+def startGuiThread():
     t1 = GuiThread(drawGui)
     t1.start()
    #t1.join()
-
-
 
 class GuiThread(thread.Thread):
     def __init__(self,func,*args):
@@ -89,31 +97,24 @@ class GuiThread(thread.Thread):
         self.func(*self.args)
     
 
-
-# def Worker():
-#     for i in range(10):
-#         print(i)
-#         time.sleep(1)
-        
-
-# def Theard():
-#     t1 = thread.Thread(target=Worker)
-#     t1.start()
-
 # Theard()
 if __name__ == '__main__':
     
-    openGui()
-    
+    startGuiThread()
     
     def on_activate_h():
         print('<ctrl>+<alt>+h pressed')       
         print(dpg.get_all_items())
+        dpg.set_viewport_height(DEFAULT_HEIGHT)
+        dpg.set_viewport_width(DEFAULT_WIDTH)
         
 
     def on_activate_i():
         print('<ctrl>+<alt>+i pressed')
-        dpg.hide_item(21)
+        #dpg.hide_item(21)
+        dpg.set_viewport_height(0)
+        dpg.set_viewport_width(0)
+        
 
     with keyboard.GlobalHotKeys({
             '<ctrl>+<alt>+h': on_activate_h,
