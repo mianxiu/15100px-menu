@@ -12,3 +12,6 @@ def getMonitorScaleFactor():
     SCALE_FACTOR = Width/O_Width
     print(O_Width,O_Height,Width,Height,"Scale:",SCALE_FACTOR)
     return SCALE_FACTOR
+
+    
+    
