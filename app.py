@@ -12,15 +12,6 @@ import win32gui
 import win32gui
 import win32process
 
-# 获取激活窗口句柄
-hwnd = win32gui.GetForegroundWindow()
-
-# 获取窗口所属进程ID
-pid = win32process.GetWindowThreadProcessId(hwnd)[1]
-
-# 获取进程名
-
-print("激活窗口所属进程ID：", pid)
 
 
 SCALE_FACTOR = get_monitor_scale_factor.getMonitorScaleFactor()
@@ -126,15 +117,34 @@ if __name__ == '__main__':
     
     
     def on_activate_tab():
-        print('caps lock')
-        dpg.set_viewport_pos(getMousePos())
+
+        hwnd = win32gui.GetForegroundWindow()
+
+        # 获取窗口所属进程ID
+        pid = win32process.GetWindowThreadProcessId(hwnd)[1]
+        className = win32gui.GetClassName(hwnd)
+        # 获取进程名
+        print("激活窗口所属进程ID：", pid)
+        print(className)
+        print(win32gui.GetCursorPos())
+
         
-        dpg.set_viewport_height(DEFAULT_HEIGHT)
-        dpg.set_viewport_width(DEFAULT_WIDTH)
-        
-        
-        import pygetwindow as gw
-        print(gw.getActiveWindowTitle())
+        if(className=="Photoshop"):
+                print('caps lock')
+                dpg.set_viewport_pos(getMousePos())
+                
+                dpg.set_viewport_height(DEFAULT_HEIGHT)
+                dpg.set_viewport_width(DEFAULT_WIDTH)
+                
+                
+                import pygetwindow as gw
+                print(gw.getActiveWindowTitle())
+                
+                windowRect = win32gui.GetWindowRect(hwnd)
+                
+                
+                
+
 
  
     
@@ -152,8 +162,10 @@ if __name__ == '__main__':
         #dpg.hide_item("Primary Window")
         dpg.set_viewport_height(0)
         dpg.set_viewport_width(0)
-        
+    
+    
     keyboard.add_hotkey("tab",on_activate_tab,suppress=True)
+    #keyboard.clear_hotkey("tab")
     #keyboard.add_hotkey("capslock",on_activate_tab)
     keyboard.add_hotkey('ctrl+alt+h',on_activate_h)
     
