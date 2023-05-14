@@ -1,19 +1,37 @@
 
-from pynput import mouse, keyboard
+
+import mouse
+import keyboard
 import dearpygui.dearpygui as dpg
 import threading as thread
 import time as time
 import get_monitor_scale_factor
+
+import win32gui
+
+import win32gui
+import win32process
+
+# 获取激活窗口句柄
+hwnd = win32gui.GetForegroundWindow()
+
+# 获取窗口所属进程ID
+pid = win32process.GetWindowThreadProcessId(hwnd)[1]
+
+# 获取进程名
+
+print("激活窗口所属进程ID：", pid)
+
 
 SCALE_FACTOR = get_monitor_scale_factor.getMonitorScaleFactor()
 
 
 def getMousePos():
     # get mouse position
-    mController = mouse.Controller()
-    print(mController.position)
-    mouseX = mController.position[0]
-    mouseY = mController.position[1]
+    mousePos = mouse.get_position()
+    print(mousePos)
+    mouseX = mousePos[0]
+    mouseY = mousePos[1]
     return [mouseX,mouseY]
 
 CURRENT_MOUSE_POS = getMousePos()
@@ -45,7 +63,8 @@ def drawGui(*args):
         print(dpg.get_mouse_pos())
 
 
-        dpg.create_viewport(title="Dear Pygui", clear_color=[0, 0, 0, 0], always_on_top=True, width=round(DEFAULT_WIDTH),height=round(DEFAULT_HEIGHT), x_pos=round(CURRENT_MOUSE_POS[0]),y_pos=round(CURRENT_MOUSE_POS[1]))
+        dpg.create_viewport(title="Dear Pygui", decorated=False,
+                            clear_color=[0, 0, 0, 0], always_on_top=True, width=round(DEFAULT_WIDTH),height=round(DEFAULT_HEIGHT), x_pos=round(CURRENT_MOUSE_POS[0]),y_pos=round(CURRENT_MOUSE_POS[1]))
 
         with dpg.window(label="MainWindow", tag="Primary Window"):
             dpg.add_text("Hello Word",tag="text001")
@@ -103,17 +122,28 @@ if __name__ == '__main__':
     
     startGuiThread()
     
+
+    
     
     def on_activate_tab():
-        print('tab')
+        print('caps lock')
+        dpg.set_viewport_pos(getMousePos())
+        
+        dpg.set_viewport_height(DEFAULT_HEIGHT)
+        dpg.set_viewport_width(DEFAULT_WIDTH)
+        
+        
+        import pygetwindow as gw
+        print(gw.getActiveWindowTitle())
+
+ 
     
     def on_activate_h():
         print('<ctrl>+<alt>+h pressed')       
         print(dpg.get_all_items())
         dpg.show_debug()
         #dpg.show_item("Primary Window")
-        dpg.set_viewport_height(DEFAULT_HEIGHT)
-        dpg.set_viewport_width(DEFAULT_WIDTH)
+
         
         dpg.set_viewport_pos(getMousePos())
 
@@ -123,16 +153,21 @@ if __name__ == '__main__':
         dpg.set_viewport_height(0)
         dpg.set_viewport_width(0)
         
+    keyboard.add_hotkey("tab",on_activate_tab,suppress=True)
+    #keyboard.add_hotkey("capslock",on_activate_tab)
+    keyboard.add_hotkey('ctrl+alt+h',on_activate_h)
+    
+    keyboard.add_hotkey('ctrl+alt+i',on_activate_i)
 
-    with keyboard.GlobalHotKeys({
-            '<ctrl>+<alt>+h': on_activate_h,
-            '<ctrl>+<alt>+i': on_activate_i,
-            '<tab>':on_activate_tab
-            }) as h:
-                    h.join()
+    # with keyboard.GlobalHotKeys({
+    #         '<ctrl>+<alt>+h': on_activate_h,
+    #         '<ctrl>+<alt>+i': on_activate_i,
+    #         '<tab>':on_activate_tab
+    #         }) as h:
+    #                 h.join()
 
 
-
+    
 
 
 
