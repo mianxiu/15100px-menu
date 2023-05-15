@@ -54,7 +54,7 @@ def drawGui(*args):
         print(dpg.get_mouse_pos())
 
 
-        dpg.create_viewport(title="Dear Pygui", decorated=False,
+        dpg.create_viewport(title="Dear Pygui", decorated=False,vsync=True,
                             clear_color=[0, 0, 0, 0], always_on_top=True, width=round(DEFAULT_WIDTH),height=round(DEFAULT_HEIGHT), x_pos=round(CURRENT_MOUSE_POS[0]),y_pos=round(CURRENT_MOUSE_POS[1]))
 
         with dpg.window(label="MainWindow", tag="Primary Window"):
@@ -130,21 +130,35 @@ if __name__ == '__main__':
 
         
         if(className=="Photoshop"):
-                print('caps lock')
-                dpg.set_viewport_pos(getMousePos())
-                
-                dpg.set_viewport_height(DEFAULT_HEIGHT)
-                dpg.set_viewport_width(DEFAULT_WIDTH)
-                
+
                 
                 import pygetwindow as gw
                 print(gw.getActiveWindowTitle())
                 
-                windowRect = win32gui.GetWindowRect(hwnd)
+                rect = win32gui.GetWindowRect(hwnd)
                 
+                x = rect[0]
+                y = rect[1]
+                maxX = rect[2]
+                maxY = rect[3]
+                w = rect[2] - x
+                h = rect[3] - y
+                print("Window %s:" % win32gui.GetWindowText(hwnd))
+                print("\tLocation: (%d, %d)" % (x, y))
+                print("\t    Size: (%d, %d)" % (w, h))
                 
+                mousePos = getMousePos()
                 
-
+                if((mousePos[0]>x and mousePos[0]<maxX) and (mousePos[1]>y and mousePos[1]<maxY)):
+                    print('tab')
+                    mousePosX = mousePos[0] if mousePos[0]+DEFAULT_WIDTH < maxX else (maxX-DEFAULT_WIDTH)
+                    mousePosY = mousePos[1] if mousePos[1]+DEFAULT_HEIGHT < maxY else(maxY-DEFAULT_HEIGHT)
+                    
+                    dpg.set_viewport_pos((mousePosX,mousePosY))
+                    
+                    dpg.set_viewport_height(DEFAULT_HEIGHT)
+                    dpg.set_viewport_width(DEFAULT_WIDTH)
+                
 
  
     
