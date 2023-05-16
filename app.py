@@ -8,8 +8,6 @@ import time as time
 import get_monitor_scale_factor
 
 import win32gui
-
-import win32gui
 import win32process
 
 
@@ -111,10 +109,12 @@ class GuiThread(thread.Thread):
 # Theard()
 if __name__ == '__main__':
     
+    
+    
     startGuiThread()
     
 
-    
+    OVERLAYER_IS_SHOW = False
     
     def on_activate_tab():
 
@@ -143,6 +143,7 @@ if __name__ == '__main__':
                 maxY = rect[3]
                 w = rect[2] - x
                 h = rect[3] - y
+                
                 print("Window %s:" % win32gui.GetWindowText(hwnd))
                 print("\tLocation: (%d, %d)" % (x, y))
                 print("\t    Size: (%d, %d)" % (w, h))
@@ -156,9 +157,20 @@ if __name__ == '__main__':
                     
                     dpg.set_viewport_pos((mousePosX,mousePosY))
                     
-                    dpg.set_viewport_height(DEFAULT_HEIGHT)
-                    dpg.set_viewport_width(DEFAULT_WIDTH)
+
                 
+                    global OVERLAYER_IS_SHOW
+                    OVERLAYER_IS_SHOW = True if OVERLAYER_IS_SHOW is False else False
+                    
+                    if OVERLAYER_IS_SHOW is True:
+                        dpg.set_viewport_height(DEFAULT_HEIGHT)
+                        dpg.set_viewport_width(DEFAULT_WIDTH)
+                        print(OVERLAYER_IS_SHOW)
+                    else:
+                        dpg.set_viewport_height(0)
+                        dpg.set_viewport_width(0)
+                        print(OVERLAYER_IS_SHOW)
+                    
 
  
     
@@ -192,8 +204,6 @@ if __name__ == '__main__':
     #         }) as h:
     #                 h.join()
 
-
-    
 
 
 
