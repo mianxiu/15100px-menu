@@ -20,12 +20,17 @@ def getMousePos():
     mouseY = mousePos[1]
     return [mouseX, mouseY]
 
+FOCUS_PROGRAM_CLASSNAME = "Photoshop"
+OPEN_HOTKEY = "tab"
 
 CURRENT_MOUSE_POS = getMousePos()
 
 DEFAULT_WIDTH = 250 * SCALE_FACTOR
 DEFAULT_HEIGHT = 250 * SCALE_FACTOR
 
+IS_ADD_TAB = False
+FOREGROUNDWINDOW_HWND = 0
+FOREGROUNDWINDOW_CLASSNAME = ""
 
 def drawGui(*args):
     def save_callback(sender, data):
@@ -101,15 +106,101 @@ def drawGui(*args):
     dpg.destroy_context()
 
 
-def startGuiThread():
-    t1 = GuiThread(drawGui)
-    t1.start()
+def windowFocusHook(*args):
+    global FOREGROUNDWINDOW_HWND,FOREGROUNDWINDOW_CLASSNAME,FOCUS_PROGRAM_CLASSNAME
+    def on_activate_tab():
+            # hwnd = win32gui.GetForegroundWindow()
 
+            # 获取窗口所属进程ID
+            # pid = win32process.GetWindowThreadProcessId(hwnd)[1]
+            # className = win32gui.GetClassName(hwnd)
+            # 获取进程名
+            # print("激活窗口所属进程ID：", pid)            
+            # print(className)
+            # print(win32gui.GetCursorPos())
+
+            if FOREGROUNDWINDOW_CLASSNAME == FOCUS_PROGRAM_CLASSNAME:
+                # import pygetwindow as gw
+
+                # print(gw.getActiveWindowTitle())
+
+                rect = win32gui.GetWindowRect(FOREGROUNDWINDOW_HWND)
+
+                x = rect[0]
+                y = rect[1]
+                maxX = rect[2]
+                maxY = rect[3]
+                w = rect[2] - x
+                h = rect[3] - y
+
+                print("\t    Size: (%d, %d)" % (w, h))
+
+                mousePos = getMousePos()
+
+                if (mousePos[0] > x and mousePos[0] < maxX) and (
+                    mousePos[1] > y and mousePos[1] < maxY
+                ):
+
+                    mousePosX = (
+                        mousePos[0]
+                        if mousePos[0] + DEFAULT_WIDTH < maxX
+                        else (maxX - DEFAULT_WIDTH)
+                    )
+                    mousePosY = (
+                        mousePos[1]
+                        if mousePos[1] + DEFAULT_HEIGHT < maxY
+                        else (maxY - DEFAULT_HEIGHT)
+                    )
+
+                    dpg.set_viewport_pos((mousePosX, mousePosY))
+
+                    # global OVERLAYER_IS_SHOW
+                    # OVERLAYER_IS_SHOW = True if OVERLAYER_IS_SHOW is False else False
+
+                    # if OVERLAYER_IS_SHOW is True:
+                    dpg.set_viewport_height(DEFAULT_HEIGHT)
+                    dpg.set_viewport_width(DEFAULT_WIDTH)
+                        # print(OVERLAYER_IS_SHOW)
+                    # else:
+                    #     dpg.set_viewport_height(0)
+                    #     dpg.set_viewport_width(0)
+                        # print(OVERLAYER_IS_SHOW)
+    
+    
+    import hook
+    def callback():
+        
+        global IS_ADD_TAB,FOREGROUNDWINDOW_HWND,FOREGROUNDWINDOW_CLASSNAME,FOCUS_PROGRAM_CLASSNAME,OPEN_HOTKEY
+        
+        FOREGROUNDWINDOW_HWND =  win32gui.GetForegroundWindow()
+        FOREGROUNDWINDOW_CLASSNAME = win32gui.GetClassName(FOREGROUNDWINDOW_HWND)
+        
+        if FOREGROUNDWINDOW_CLASSNAME == FOCUS_PROGRAM_CLASSNAME:
+            if IS_ADD_TAB == False:
+                keyboard.add_hotkey(OPEN_HOTKEY,on_activate_tab,suppress=True)
+                IS_ADD_TAB = True
+                print(OPEN_HOTKEY,"key is hook")
+        else:
+            if IS_ADD_TAB == True:
+                keyboard.clear_hotkey(OPEN_HOTKEY)
+                IS_ADD_TAB = False
+                print(OPEN_HOTKEY,"tab key is clear")
+    hook.hook(callback)
+
+
+
+def startHookThread():
+    t1 = HookThread(drawGui)
+    t1.name="draw_gui"
+    t1.start()
+    t2 = HookThread(windowFocusHook)
+    t2.name="window_focus_hook_key"
+    t2.start()
 
 # t1.join()
 
 
-class GuiThread(thread.Thread):
+class HookThread(thread.Thread):
     def __init__(self, func, *args):
         thread.Thread.__init__(self)
         self.func = func
@@ -118,93 +209,18 @@ class GuiThread(thread.Thread):
     def run(self):
         self.func(*self.args)
 
+        
 
 # Theard()
 if __name__ == "__main__":
-    startGuiThread()
+    
+    startHookThread()
 
     OVERLAYER_IS_SHOW = False
 
-    def on_activate_tab():
-        hwnd = win32gui.GetForegroundWindow()
-
-        # 获取窗口所属进程ID
-        pid = win32process.GetWindowThreadProcessId(hwnd)[1]
-        className = win32gui.GetClassName(hwnd)
-        # 获取进程名
-        print("激活窗口所属进程ID：", pid)
-        print(className)
-        print(win32gui.GetCursorPos())
-
-        if className == "Photoshop":
-            import pygetwindow as gw
-
-            print(gw.getActiveWindowTitle())
-
-            rect = win32gui.GetWindowRect(hwnd)
-
-            x = rect[0]
-            y = rect[1]
-            maxX = rect[2]
-            maxY = rect[3]
-            w = rect[2] - x
-            h = rect[3] - y
-
-            print("Window %s:" % win32gui.GetWindowText(hwnd))
-            print("\tLocation: (%d, %d)" % (x, y))
-            print("\t    Size: (%d, %d)" % (w, h))
-
-            mousePos = getMousePos()
-
-            if (mousePos[0] > x and mousePos[0] < maxX) and (
-                mousePos[1] > y and mousePos[1] < maxY
-            ):
-                print("tab")
-                mousePosX = (
-                    mousePos[0]
-                    if mousePos[0] + DEFAULT_WIDTH < maxX
-                    else (maxX - DEFAULT_WIDTH)
-                )
-                mousePosY = (
-                    mousePos[1]
-                    if mousePos[1] + DEFAULT_HEIGHT < maxY
-                    else (maxY - DEFAULT_HEIGHT)
-                )
-
-                dpg.set_viewport_pos((mousePosX, mousePosY))
-
-                global OVERLAYER_IS_SHOW
-                OVERLAYER_IS_SHOW = True if OVERLAYER_IS_SHOW is False else False
-
-                if OVERLAYER_IS_SHOW is True:
-                    dpg.set_viewport_height(DEFAULT_HEIGHT)
-                    dpg.set_viewport_width(DEFAULT_WIDTH)
-                    print(OVERLAYER_IS_SHOW)
-                else:
-                    dpg.set_viewport_height(0)
-                    dpg.set_viewport_width(0)
-                    print(OVERLAYER_IS_SHOW)
-
-    def on_activate_h():
-        print("<ctrl>+<alt>+h pressed")
-        print(dpg.get_all_items())
-        dpg.show_debug()
-        # dpg.show_item("Primary Window")
-
-        dpg.set_viewport_pos(getMousePos())
-
-    def on_activate_i():
-        print("<ctrl>+<alt>+i pressed")
-        # dpg.hide_item("Primary Window")
-        dpg.set_viewport_height(0)
-        dpg.set_viewport_width(0)
-
-    # keyboard.add_hotkey("tab",on_activate_tab,suppress=True)
     # keyboard.add_hotkey("capslock",on_activate_tab)
     # keyboard.clear_hotkey("tab")
-    keyboard.add_hotkey("ctrl+alt+h", on_activate_h)
-
-    keyboard.add_hotkey("ctrl+alt+i", on_activate_i)
+        
 
     # with keyboard.GlobalHotKeys({
     #         '<ctrl>+<alt>+h': on_activate_h,
@@ -212,23 +228,3 @@ if __name__ == "__main__":
     #         '<tab>':on_activate_tab
     #         }) as h:
     #                 h.join()
-
-    isAddTab = False
-
-    def fff():
-        global isAddTab
-        w = win32gui.GetForegroundWindow()
-        j = win32gui.GetClassName(w)
-        print(j)
-        if j == "Photoshop":
-            keyboard.add_hotkey("tab", on_activate_tab, suppress=True)      
-            isAddTab = True
-        else:
-            if isAddTab:
-                keyboard.clear_hotkey("tab")
-                isAddTab = False
-
-    import hook
-    hook.hook(fff)
-    # mouse.on_click(fff)
-    # mouse.hook(fff)

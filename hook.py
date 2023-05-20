@@ -57,9 +57,9 @@ def hook(FocusCallback,*log:bool):
     ole32.CoUninitialize()
 
 
-def callback(): 
-    import win32gui
-    hwdn = win32gui.GetForegroundWindow()
-    print(win32gui.GetClassName(hwdn))
+# def callback(): 
+#     import win32gui
+#     hwdn = win32gui.GetForegroundWindow()
+#     print(win32gui.GetClassName(hwdn))
     
-hook(callback,True)
+# hook(callback,True)
