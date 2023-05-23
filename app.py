@@ -69,13 +69,13 @@ def drawGui(*args):
         always_on_top=True,
         clear_color=[0.0, 0.0, 0.0, 0.0],
         decorated=False,
-        width=round(DEFAULT_WIDTH),
-        height=round(DEFAULT_HEIGHT),
+        # width=round(DEFAULT_WIDTH),
+        # height=round(DEFAULT_HEIGHT),
         x_pos=round(CURRENT_MOUSE_POS[0]),
         y_pos=round(CURRENT_MOUSE_POS[1]),
     )
 
-    with dpg.window(label="MainWindow", tag="Primary Window",no_title_bar=True):
+    with dpg.window(label="MainWindow", tag="right_panel",no_title_bar=True,width=300,height=600,pos=(0,0)):
         dpg.add_text("Hello Word", tag="text001")
         dpg.add_button(label="Save", callback=save_callback, tag="button1")
 
@@ -100,7 +100,20 @@ def drawGui(*args):
     # with dpg.handler_registry():
     #     dpg.add_key_press_handler(dpg.mvKey_Control, callback=on_key_la)
 
-    dpg.show_style_editor()
+    with dpg.window(tag="left_panel",pos=(350,0),width=400,height=400):
+        dpg.add_color_picker(tag="pick")
+    
+    
+    viewport_width = 0
+    all_item = dpg.get_windows()
+    for w in all_item:
+        viewport_width += dpg.get_item_width(w)
+        print(dpg.get_item_width(w))
+    
+    global DEFAULT_WIDTH
+    DEFAULT_WIDTH = viewport_width*SCALE_FACTOR
+    dpg.set_viewport_width(round(DEFAULT_WIDTH))
+    #dpg.show_style_editor()
     dpg.setup_dearpygui()
     dpg.show_viewport()
 
