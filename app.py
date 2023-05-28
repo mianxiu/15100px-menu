@@ -25,8 +25,19 @@ OPEN_HOTKEY = "tab"
 
 CURRENT_MOUSE_POS = getMousePos()
 
-DEFAULT_WIDTH = 250 * SCALE_FACTOR
-DEFAULT_HEIGHT = 250 * SCALE_FACTOR
+DEFAULT_VIEWPORT_PADDING = 10
+
+DEFAULT_VIEWPORT_WIDTH = 750
+DEFAULT_VIEWPORT_HEIGHT = 600 
+
+
+DEFAULT_LEFT_PANEL_WIDTH = 400
+DEFAULT_LEFT_PANEL_HEIGHT = 400
+
+DEFAULT_RIGHT_PANEL_WIDTH =300
+DEFAULT_RIGHT_PANEL_HEIGHT = 600
+
+
 
 IS_ADD_TAB = False
 FOREGROUNDWINDOW_HWND = 0
@@ -75,7 +86,7 @@ def drawGui(*args):
         y_pos=round(CURRENT_MOUSE_POS[1]),
     )
 
-    with dpg.window(label="MainWindow", tag="right_panel",no_title_bar=True,width=300,height=600,pos=(0,0)):
+    with dpg.window(label="MainWindow", tag="right_panel",no_title_bar=True,width=DEFAULT_RIGHT_PANEL_WIDTH,height=DEFAULT_RIGHT_PANEL_HEIGHT,pos=(0,0),no_move=True):
         dpg.add_text("Hello Word", tag="text001")
         dpg.add_button(label="Save", callback=save_callback, tag="button1")
 
@@ -100,19 +111,12 @@ def drawGui(*args):
     # with dpg.handler_registry():
     #     dpg.add_key_press_handler(dpg.mvKey_Control, callback=on_key_la)
 
-    with dpg.window(tag="left_panel",pos=(350,0),width=400,height=400):
+    with dpg.window(tag="left_panel",pos=(350,0),no_title_bar=True,width=DEFAULT_LEFT_PANEL_WIDTH,height=DEFAULT_LEFT_PANEL_HEIGHT,no_move=True):
         dpg.add_color_picker(tag="pick")
     
-    
-    viewport_width = 0
-    all_item = dpg.get_windows()
-    for w in all_item:
-        viewport_width += dpg.get_item_width(w)
-        print(dpg.get_item_width(w))
-    
-    global DEFAULT_WIDTH
-    DEFAULT_WIDTH = viewport_width*SCALE_FACTOR
-    dpg.set_viewport_width(round(DEFAULT_WIDTH))
+
+    dpg.set_viewport_width(round(DEFAULT_VIEWPORT_WIDTH))
+    dpg.set_viewport_height(round(DEFAULT_VIEWPORT_HEIGHT))
     #dpg.show_style_editor()
     dpg.setup_dearpygui()
     dpg.show_viewport()
@@ -170,19 +174,19 @@ def windowFocusHook(*args):
             ):
                 mousePosX = (
                     mousePos[0]
-                    if mousePos[0] + DEFAULT_WIDTH < maxX
-                    else (maxX - DEFAULT_WIDTH)
+                    if mousePos[0] + DEFAULT_VIEWPORT_WIDTH < maxX
+                    else (maxX - DEFAULT_VIEWPORT_WIDTH)
                 )
                 mousePosY = (
                     mousePos[1] + TITTLE_HEIGHT
-                    if mousePos[1] + DEFAULT_HEIGHT < maxY
-                    else (maxY - DEFAULT_HEIGHT)
+                    if mousePos[1] + DEFAULT_VIEWPORT_HEIGHT < maxY
+                    else (maxY - DEFAULT_VIEWPORT_HEIGHT)
                 )
 
                 dpg.set_viewport_pos((mousePosX, mousePosY))
 
-                dpg.set_viewport_height(DEFAULT_HEIGHT)
-                dpg.set_viewport_width(DEFAULT_WIDTH)
+                dpg.set_viewport_height(DEFAULT_VIEWPORT_HEIGHT)
+                dpg.set_viewport_width(DEFAULT_VIEWPORT_WIDTH)
 
     def hide_overlay():
         dpg.set_viewport_height(0)
