@@ -55,11 +55,11 @@ Layer.loopLayers = function (callback) {
     var desc = executeActionGet(ref);    
     var layerCount = desc.getInteger(charIDToTypeID('NmbL'));
     // 索引起始值，会受是否有背景图层影响，需要做一下处理
-    var i = 0;
+    var i = curLay.itemIndex;
     try {
         activeDocument.backgroundLayer;
     } catch(e) {
-        i = 1;
+        i = curLay.itemIndex;
     }
     // 开始逐级遍历图层index，根据index来获取到图层实例
     for (i; i<layerCount+1; i++) {
@@ -93,7 +93,7 @@ Layer.loopLayersBegin =  function(callback){
         var forward = i+1
         if(forward < layerCount+1){
 
-                    var ref = new ActionReference();
+             var ref = new ActionReference();
             ref.putIndex( charIDToTypeID( 'Lyr ' ), forward );
         var desc = executeActionGet(ref);
         var id = desc.getInteger(stringIDToTypeID( 'layerID' ));
