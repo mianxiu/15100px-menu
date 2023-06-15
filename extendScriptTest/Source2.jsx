@@ -1,6 +1,6 @@
 ﻿var doc = activeDocument;
 var curLay = doc.activeLayer;
-
+var curLayIndex = curLay.itemIndex;
 var p = curLay.parent
 var it = p.itemIndex
 var n = p.name
@@ -81,11 +81,11 @@ Layer.loopLayersBegin =  function(callback){
     var desc = executeActionGet(ref);    
     var layerCount = desc.getInteger(charIDToTypeID('NmbL'));
     // 索引起始值，会受是否有背景图层影响，需要做一下处理
-    var i = 0;
+    var i = curLayIndex;
     try {
         activeDocument.backgroundLayer;
     } catch(e) {
-        i = 1;
+        i = curLayIndex
     }
     // 开始逐级遍历图层index，根据index来获取到图层实例
     for (i; i<layerCount+1; i++) {
@@ -94,15 +94,18 @@ Layer.loopLayersBegin =  function(callback){
         if(forward < layerCount+1){
 
              var ref = new ActionReference();
-            ref.putIndex( charIDToTypeID( 'Lyr ' ), forward );
+            ref.putIndex( charIDToTypeID( 'Lyr ' ), i);
         var desc = executeActionGet(ref);
         var id = desc.getInteger(stringIDToTypeID( 'layerID' ));
         var layer = new Layer(id);
         var layerName= layer.name()
-        if(layerName == n){
-                    $.writeln("++++++",layer.index()," ",layer.name(),"=",forward,"+",i)
+        var layerKind = layer.kind()
+        if(layerName == n || layerKind == 7){
+                    $.writeln("++++++",layer.index()," ",layer.name(),"=",forward,"+",i,"kind: ",layerKind)
                     break;
-            }
+           }else{
+               $.writeln("+~~++",layer.index()," ",layer.name(),"=",forward,"+",i,"kind: ",layerKind)
+               }
 
          //$.writeln("++++++",layer.index()," ",layer.name(),"=",forward,"+",i)
         // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
