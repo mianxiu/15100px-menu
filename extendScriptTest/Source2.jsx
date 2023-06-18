@@ -1,9 +1,11 @@
-﻿var doc = activeDocument
+﻿var SHOWDIALOG = false
+
+var doc = activeDocument
 var curLay = doc.activeLayer
 var curLayIndex = curLay.itemIndex
-var p = curLay.parent
-var it = p.itemIndex
-var n = p.name
+var curLayParent = curLay.parent
+var it = curLayParent.itemIndex
+var curLayParentName = curLayParent.name
 
 $.writeln(
   '---SELECT------',
@@ -11,7 +13,7 @@ $.writeln(
   ' layername: ',
   curLay.name,
   ' parentname: ',
-  n,
+  curLayParentName,
 )
 var o = []
 
@@ -61,33 +63,7 @@ Layer.getSelectedLayers = function () {
  * 高效遍历图层
  * @param callback
  */
-/*
-Layer.loopLayers = function (callback) {
-    var ref = new ActionReference();
-        // 当前文档的图层数量属性key
-        ref.putProperty(charIDToTypeID("Prpr"), charIDToTypeID('NmbL'));
-        ref.putEnumerated( charIDToTypeID('Dcmn'), charIDToTypeID('Ordn'), charIDToTypeID('Trgt') );
-    var desc = executeActionGet(ref);    
-    var layerCount = desc.getInteger(charIDToTypeID('NmbL'));
-    // 索引起始值，会受是否有背景图层影响，需要做一下处理
-    var i = curLay.itemIndex;
-    try {
-        activeDocument.backgroundLayer;
-    } catch(e) {
-        i = curLay.itemIndex;
-    }
-    // 开始逐级遍历图层index，根据index来获取到图层实例
-    for (i; i<layerCount+1; i++) {
-        var ref = new ActionReference();
-            ref.putIndex( charIDToTypeID( 'Lyr ' ), i );
-        var desc = executeActionGet(ref);
-        var id = desc.getInteger(stringIDToTypeID( 'layerID' ));
-        var layer = new Layer(id);
-        // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
-        callback && callback(layer);
-    }
-}
-*/
+
 Layer.loopLayersBegin = function (callback) {
   var ref = new ActionReference()
   // 当前文档的图层数量属性key
@@ -100,9 +76,8 @@ Layer.loopLayersBegin = function (callback) {
   var desc = executeActionGet(ref)
   var layerCount = desc.getInteger(charIDToTypeID('NmbL'))
 
-
   var i = curLayIndex
-  var j = curLayIndex-1
+  var j = curLayIndex - 1
   // 索引起始值，会受是否有背景图层影响，需要做一下处理
   var firstLayerIndex = 0
   try {
@@ -122,20 +97,35 @@ Layer.loopLayersBegin = function (callback) {
   // 开始逐级遍历图层index，根据index来获取到图层实例
   // up find
   for (i; i < layerCount + 1; i++) {
-    var forward = i + 1
+    // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
+    var forward = i  + firstLayerIndex - 1
     if (forward <= layerCount + 1) {
-      var layer = new Layer(LyrId(i))
+      var layer = new Layer(LyrId(forward))
       var layerName = layer.name()
       var layerKind = layer.kind()
-      if (layerName == "</Layer group>"  || layerName == n || layerKind == 7) {
+      if (
+        layerName == '</Layer group>' ||
+        layerName == curLayParentName ||
+        layerKind == 7
+      ) {
         // find group
         // $.writeln(layer.name()+' | forward num: '+forward+' |  i num: '+i+' | kind: '+layerKind+' | index: '+layer.index()+' | ▲')
         break
       } else {
-        $.writeln(layer.name()+' | forward num: '+forward+' |  i num: '+i+' | kind: '+layerKind+' | index: '+layer.index()+' | ▲')
+        $.writeln(
+          layer.name() +
+            ' | forward num: ' +
+            forward +
+            ' |  i num: ' +
+            i +
+            ' | kind: ' +
+            layerKind +
+            ' | index: ' +
+            layer.index() +
+            ' | ▲',
+        )
       }
 
-  
       // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
       callback && callback(layer)
     }
@@ -146,18 +136,28 @@ Layer.loopLayersBegin = function (callback) {
   for (j; j > 0; j--) {
     // 无Background  after = j ， 有 after = j-1
     var after = j - 1 + firstLayerIndex
-    if (after >=  firstLayerIndex) {
+    if (after >= firstLayerIndex) {
       var layer = new Layer(LyrId(after))
       var layerName = layer.name()
       var layerKind = layer.kind()
 
-      if (layerName == "</Layer group>" || layerKind == 7) {
+      if (layerName == '</Layer group>' || layerKind == 7) {
         // find group
-         // $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼')
-        
+        // $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼')
         break
       } else {
-        $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼')
+        $.writeln(
+          layer.name() +
+            ' | after num: ' +
+            after +
+            ' |  j num: ' +
+            j +
+            ' | kind: ' +
+            layerKind +
+            ' | index: ' +
+            layer.index() +
+            ' | ▼',
+        )
       }
 
       //$.writeln("++++++",layer.index()," ",layer.name(),"=",forward,"+",i)
@@ -192,8 +192,6 @@ Layer.prototype.index = function () {
   return descriptor.getInteger(charIDToTypeID('ItmI'))
 }
 
-
-
 /**
  * 获取当前实例图层的类型
  * @return {number}
@@ -211,5 +209,5 @@ Layer.prototype.kind = function () {
 
 // 使用方法
 Layer.loopLayersBegin(function (layer) {
-  //$.writeln(layer.index()," ",layer.name())
+  //$.writeln(layer.index(), ' ', layer.name())
 })
