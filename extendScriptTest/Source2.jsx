@@ -65,6 +65,7 @@ Layer.getSelectedLayers = function () {
  */
 
 Layer.loopLayersBegin = function (callback) {
+  /*
   var ref = new ActionReference()
   // 当前文档的图层数量属性key
   ref.putProperty(charIDToTypeID('Prpr'), charIDToTypeID('NmbL'))
@@ -75,7 +76,7 @@ Layer.loopLayersBegin = function (callback) {
   )
   var desc = executeActionGet(ref)
   var layerCount = desc.getInteger(charIDToTypeID('NmbL'))
-
+*/
   var i = curLayIndex
   var j = curLayIndex - 1
   // 索引起始值，会受是否有背景图层影响，需要做一下处理
@@ -96,11 +97,17 @@ Layer.loopLayersBegin = function (callback) {
 
   // 开始逐级遍历图层index，根据index来获取到图层实例
   // up find
+  layerCount = 30000
   for (i; i < layerCount + 1; i++) {
     // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
     var forward = i  + firstLayerIndex - 1
     if (forward <= layerCount + 1) {
+      try{
       var layer = new Layer(LyrId(forward))
+      }catch(e){
+          $.writeln(layer.name()," - Top Layer")
+          break
+       }
       var layerName = layer.name()
       var layerKind = layer.kind()
       if (
@@ -109,7 +116,8 @@ Layer.loopLayersBegin = function (callback) {
         layerKind == 7
       ) {
         // find group
-        // $.writeln(layer.name()+' | forward num: '+forward+' |  i num: '+i+' | kind: '+layerKind+' | index: '+layer.index()+' | ▲')
+        /* $.writeln(layer.name()+' | forward num: '+forward+' |  i num: '+i+' | kind: '+layerKind+' | index: '+layer.index()+' | ▲') */
+        $.writeln(new Layer(LyrId(forward-1)).name()," Top Layer")
         break
       } else {
         $.writeln(
@@ -143,7 +151,7 @@ Layer.loopLayersBegin = function (callback) {
 
       if (layerName == '</Layer group>' || layerKind == 7) {
         // find group
-        // $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼')
+        /* $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼') */
         break
       } else {
         $.writeln(
@@ -160,7 +168,6 @@ Layer.loopLayersBegin = function (callback) {
         )
       }
 
-      //$.writeln("++++++",layer.index()," ",layer.name(),"=",forward,"+",i)
       // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
       callback && callback(layer)
     }
@@ -210,4 +217,6 @@ Layer.prototype.kind = function () {
 // 使用方法
 Layer.loopLayersBegin(function (layer) {
   //$.writeln(layer.index(), ' ', layer.name())
+  
+  
 })
