@@ -162,3 +162,4 @@ Include/
 Lib/
 Scripts/
 .vscode/
+extendScriptTest/TESTFILE.psd
