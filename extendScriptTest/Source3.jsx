@@ -21,12 +21,11 @@ function actionManagerSelectLayerByIndex(itemIndex, makeVisible){
     r1.putIndex( sTT('layer'), itemIndex );
     d1.putReference( sTT('null'), r1 );
     d1.putBoolean( sTT('MkVs'), makeVisible );
-    
     executeAction( sTT('select'), d1, DialogModes.NO );
     }
 
-alert("Selected Layer: " + activeDocument.activeLayer + " - ItemIndex: " + activeDocument.activeLayer.itemIndex)
+//alert("Selected Layer: " + activeDocument.activeLayer + " - ItemIndex: " + activeDocument.activeLayer.itemIndex)
 
 actionManagerSelectLayerByIndex(activeDocument.activeLayer.itemIndex-5, true);
 
-alert("Selected Layer next: " + activeDocument.activeLayer + " - ItemIndex: " + activeDocument.activeLayer.itemIndex)
+//alert("Selected Layer next: " + activeDocument.activeLayer + " - ItemIndex: " + activeDocument.activeLayer.itemIndex)

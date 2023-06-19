@@ -1,4 +1,28 @@
-﻿var SHOWDIALOG = false
+﻿
+
+sTT = stringIDToTypeID;
+
+function actionManagerSelectLayerByIndex(itemIndex, makeVisible){
+
+    var d1 = new ActionDescriptor();
+    var r1 = new ActionReference();
+
+    r1.putIndex( sTT('layer'), itemIndex );
+    d1.putReference( sTT('null'), r1 );
+    d1.putBoolean( sTT('MkVs'), makeVisible );
+    
+    executeAction( sTT('select'), d1, DialogModes.NO );
+    }
+
+//alert("Selected Layer: " + activeDocument.activeLayer + " - ItemIndex: " + activeDocument.activeLayer.itemIndex)
+
+
+
+
+var TopLayerIndex = 0
+var BottomLayerIndex = 0
+
+var SHOWDIALOG = false
 
 var doc = activeDocument
 var curLay = doc.activeLayer
@@ -105,6 +129,7 @@ Layer.loopLayersBegin = function (callback) {
       try{
       var layer = new Layer(LyrId(forward))
       }catch(e){
+          TopLayerIndex = forward
           $.writeln(layer.name()," - Top Layer")
           break
        }
@@ -117,6 +142,7 @@ Layer.loopLayersBegin = function (callback) {
       ) {
         // find group
         /* $.writeln(layer.name()+' | forward num: '+forward+' |  i num: '+i+' | kind: '+layerKind+' | index: '+layer.index()+' | ▲') */
+        TopLayerIndex = forward-1
         $.writeln(new Layer(LyrId(forward-1)).name()," Top Layer")
         break
       } else {
@@ -151,6 +177,7 @@ Layer.loopLayersBegin = function (callback) {
 
       if (layerName == '</Layer group>' || layerKind == 7) {
         // find group
+        BottomLayerIndex  = after + 1
         $.writeln(new Layer(LyrId(after +1 )).name()," Bottom Layer")
         /* $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼') */
         break
@@ -221,3 +248,7 @@ Layer.loopLayersBegin(function (layer) {
   
   
 })
+
+
+actionManagerSelectLayerByIndex(BottomLayerIndex, true);
+actionManagerSelectLayerByIndex(TopLayerIndex, true);
