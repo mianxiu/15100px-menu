@@ -13,7 +13,7 @@ executeAction( charIDToTypeID( "slct" ), desc1, DialogModes.NO );
 
 var desc1 = new ActionDescriptor();
 var ref1 = new ActionReference();
- ref1.putIndex( charIDToTypeID( "Lyr " ), 2);
+ref1.putIndex( charIDToTypeID( "Lyr " ), 2);
 //ref1.putName( charIDToTypeID( "Lyr " ), "Layer 17" );
 desc1.putReference( charIDToTypeID( "null" ), ref1 );
 desc1.putEnumerated( stringIDToTypeID( "selectionModifier" ), stringIDToTypeID( "selectionModifierType" ), stringIDToTypeID( "addToSelectionContinuous" ) );
