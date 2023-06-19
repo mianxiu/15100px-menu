@@ -151,6 +151,7 @@ Layer.loopLayersBegin = function (callback) {
 
       if (layerName == '</Layer group>' || layerKind == 7) {
         // find group
+        $.writeln(new Layer(LyrId(after +1 )).name()," Bottom Layer")
         /* $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼') */
         break
       } else {
