@@ -29,11 +29,11 @@ var doc = activeDocument;
 var curLay = doc.activeLayer;
 var curLayIndex = curLay.itemIndex;
 var curLayParent = curLay.parent;
-var it = curLayParent.itemIndex;
+//var it = curLayParent.itemIndex;
 var curLayParentName = curLayParent.name;
 
-$.writeln("---SELECT------", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName);
-var o = [];
+//$.writeln("---SELECT------", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName);
+
 
 /**
  * 图层类的构造函数，传入一个图层ID
@@ -123,18 +123,19 @@ Layer.loopLayersBegin = function (callback) {
       }
       var layerName = layer.name();
       var layerKind = layer.kind();
-      if (layerName == "</Layer group>" || layerName == curLayParentName || layerKind == 7) {
+     // if (layerName == "</Layer group>" || layerName == curLayParentName || layerKind == 7) {
+       if (layerName == "</Layer group>" || layerKind == 7) {
         // find group
         /* $.writeln(layer.name()+' | forward num: '+forward+' |  i num: '+i+' | kind: '+layerKind+' | index: '+layer.index()+' | ▲') */
         TopLayerIndex = forward - 1;
         //$.writeln(new Layer(LyrId(forward-1)).name()," Top Layer")
         break;
       } else {
-        $.writeln(layer.name() + " | forward num: " + forward + " |  i num: " + i + " | kind: " + layerKind + " | index: " + layer.index() + " | ▲");
+        //$.writeln(layer.name() + " | forward num: " + forward + " |  i num: " + i + " | kind: " + layerKind + " | index: " + layer.index() + " | ▲");
       }
 
       // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
-      callback && callback(layer);
+      //callback && callback(layer);
     }
   }
 
@@ -155,11 +156,11 @@ Layer.loopLayersBegin = function (callback) {
         /* $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼') */
         break;
       } else {
-        $.writeln(layer.name() + " | after num: " + after + " |  j num: " + j + " | kind: " + layerKind + " | index: " + layer.index() + " | ▼");
+        //$.writeln(layer.name() + " | after num: " + after + " |  j num: " + j + " | kind: " + layerKind + " | index: " + layer.index() + " | ▼");
       }
 
       // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
-      callback && callback(layer);
+      //callback && callback(layer);
     }
   }
 };
