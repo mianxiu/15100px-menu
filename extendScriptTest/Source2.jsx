@@ -1,4 +1,8 @@
-﻿function actionManagerSelectLayerByIndex(itemIndex, makeVisible) {
+﻿// 选中组内的所有图层
+// 选中组间的所有图层
+// 选择同级的
+
+function actionManagerSelectLayerByIndex(itemIndex, makeVisible) {
   var d1 = new ActionDescriptor();
   var r1 = new ActionReference();
   r1.putIndex(stringIDToTypeID("layer"), itemIndex);
@@ -28,12 +32,13 @@ var SHOWDIALOG = false;
 var doc = activeDocument;
 var curLay = doc.activeLayer;
 var curLayIndex = curLay.itemIndex;
+var curLayKind = curLay.typename
 var curLayParent = curLay.parent;
-//var it = curLayParent.itemIndex;
+var parentIndex = curLayParent.itemIndex;
 var curLayParentName = curLayParent.name;
 
-//$.writeln("---SELECT------", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName);
 
+$.writeln("---SELECT------", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName, " parentIndex: ", parentIndex," typename: ",curLayKind);
 
 /**
  * 图层类的构造函数，传入一个图层ID
@@ -75,7 +80,15 @@ Layer.getSelectedLayers = function () {
  * @param callback
  */
 
-Layer.loopLayersBegin = function (callback) {
+function LyrId(index) {
+  var ref = new ActionReference();
+  ref.putIndex(charIDToTypeID("Lyr "), index);
+  var desc = executeActionGet(ref);
+  var id = desc.getInteger(stringIDToTypeID("layerID"));
+  return id;
+}
+
+Layer.loopLayerBinarySearch = function (callback) {
   /*
   var ref = new ActionReference()
   // 当前文档的图层数量属性key
@@ -98,14 +111,6 @@ Layer.loopLayersBegin = function (callback) {
     firstLayerIndex = 1;
   }
 
-  function LyrId(index) {
-    var ref = new ActionReference();
-    ref.putIndex(charIDToTypeID("Lyr "), index);
-    var desc = executeActionGet(ref);
-    var id = desc.getInteger(stringIDToTypeID("layerID"));
-    return id;
-  }
-
   // 开始逐级遍历图层index，根据index来获取到图层实例
   // up find
   layerCount = 30000;
@@ -121,10 +126,10 @@ Layer.loopLayersBegin = function (callback) {
         //$.writeln(layer.name()," Top Top Layer")
         break;
       }
-      var layerName = layer.name();
+      //var layerName = layer.name();
       var layerKind = layer.kind();
-     // if (layerName == "</Layer group>" || layerName == curLayParentName || layerKind == 7) {
-       if (layerName == "</Layer group>" || layerKind == 7) {
+      
+      if (layerKind == 13 || layerKind == 7) {
         // find group
         /* $.writeln(layer.name()+' | forward num: '+forward+' |  i num: '+i+' | kind: '+layerKind+' | index: '+layer.index()+' | ▲') */
         TopLayerIndex = forward - 1;
@@ -141,19 +146,61 @@ Layer.loopLayersBegin = function (callback) {
 
   // finish
   // down
+
   for (j; j > 0; j--) {
     // 无Background  after = j ， 有 after = j-1
     var after = j - 1 + firstLayerIndex;
     if (after >= firstLayerIndex) {
       var layer = new Layer(LyrId(after));
-      var layerName = layer.name();
+      //var layerName = layer.name();
       var layerKind = layer.kind();
 
-      if (layerName == "</Layer group>" || layerKind == 7) {
+      if (layerKind == 13 || layerKind == 7) {
         // find group
         BottomLayerIndex = after + 1;
         //$.writeln(new Layer(LyrId(after +1 )).name()," Bottom Layer")
-        /* $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼') */
+        // $.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼')
+        break;
+      } else {
+        //$.writeln(layer.name() + " | after num: " + after + " |  j num: " + j + " | kind: " + layerKind + " | index: " + layer.index() + " | ▼");
+      }
+
+      // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
+      //callback && callback(layer);
+    }
+  }
+};
+
+Layer.loopForwardDown = function () {
+
+  var j = parentIndex - 1;
+  
+  if (curLayKind == "LayerSet"){
+      j = curLayIndex - 1
+  }
+  // 索引起始值，会受是否有背景图层影响，需要做一下处理
+  var firstLayerIndex = 0;
+  try {
+    activeDocument.backgroundLayer;
+  } catch (e) {
+    firstLayerIndex = 1;
+  }
+
+  TopLayerIndex = j - 1 + firstLayerIndex;
+
+  for (j; j > 0; j--) {
+    // 无Background  after = j ， 有 after = j-1
+    var after = j - 1 + firstLayerIndex;
+    if (after >= firstLayerIndex) {
+      var layer = new Layer(LyrId(after));
+      //var layerName = layer.name();
+      var layerKind = layer.kind();
+      
+      if (layerKind == 13 || layerKind == 7) {
+        // find group
+        BottomLayerIndex = after + 1;
+        //$.writeln(new Layer(LyrId(after +1 )).name()," Bottom Layer")
+        //$.writeln(layer.name()+' | after num: '+after+' |  j num: '+j+' | kind: '+layerKind+' | index: '+layer.index()+' | ▼')
         break;
       } else {
         //$.writeln(layer.name() + " | after num: " + after + " |  j num: " + j + " | kind: " + layerKind + " | index: " + layer.index() + " | ▼");
@@ -203,10 +250,22 @@ Layer.prototype.kind = function () {
 };
 
 // 使用方法
+/*
 Layer.loopLayersBegin(function (layer) {
   //$.writeln(layer.index(), ' ', layer.name())
 });
-
+*/
+ Layer.loopLayerBinarySearch();
+/*
+if (parentIndex == undefined) {
+  Layer.loopLayerBinarySearch();
+} else {
+  Layer.loopForwardDown();
+}
+    
+    
+    */
+$.writeln(TopLayerIndex,BottomLayerIndex)
 actionManagerSelectLayerByIndex(BottomLayerIndex, true);
 selectLayerByIndexContinuous(TopLayerIndex, true);
 //actionManagerSelectLayerByIndex(TopLayerIndex, true);

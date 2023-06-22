@@ -101,7 +101,7 @@ Layer.loopLayers = function (callback) {
         var desc = executeActionGet(ref);
         var id = desc.getInteger(stringIDToTypeID( 'layerID' ));
         var layer = new Layer(id);
-        $.writeln(layer.name())
+        $.writeln(layer.name()+"=index"+layer.index()+"|"+layer.kind())
         // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
         callback && callback(layer);
     }
