@@ -1,6 +1,8 @@
 ﻿// 选中组内的所有图层
 // 选中组间的所有图层
-// 选择同级的
+// 起始选中组则选中子级的所有同级图层
+// 起始选中图层就是区间内的
+// 
 
 function actionManagerSelectLayerByIndex(itemIndex, makeVisible) {
   var d1 = new ActionDescriptor();
@@ -24,17 +26,21 @@ function selectLayerByIndexContinuous(index, makeVisible) {
   executeAction(charIDToTypeID("slct"), desc1, DialogModes.NO);
 }
 
+var TopLayerIndex = 0;
+var BottomLayerIndex = 0;
+
 var SHOWDIALOG = false;
 
 var doc = activeDocument;
 var curLay = doc.activeLayer;
 var curLayIndex = curLay.itemIndex;
-var curLayKind = curLay.typename;
+var curLayKind = curLay.typename
 var curLayParent = curLay.parent;
 var parentIndex = curLayParent.itemIndex;
 var curLayParentName = curLayParent.name;
 
-$.writeln("---SELECT------ cur index", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName, " parentIndex: ", parentIndex, " typename: ", curLayKind);
+
+$.writeln("---SELECT------", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName, " parentIndex: ", parentIndex," typename: ",curLayKind);
 
 /**
  * 图层类的构造函数，传入一个图层ID
@@ -44,32 +50,6 @@ $.writeln("---SELECT------ cur index", curLay.itemIndex, " layername: ", curLay.
 function Layer(id) {
   this.id = id;
 }
-
-// ------- 类方法 -------
-/**
- * 获取当前选中的图层
- * @return {Layer[]}
- */
-Layer.getSelectedLayers = function () {
-  // 创建一个ActionReference
-  var selectedLayersReference = new ActionReference();
-  // 给这个AR设置我们需要从AD中获取的属性值
-  selectedLayersReference.putProperty(charIDToTypeID("Prpr"), stringIDToTypeID("targetLayersIDs"));
-  // 目标对象是当前选中的文档
-  selectedLayersReference.putEnumerated(charIDToTypeID("Dcmn"), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
-  var desc = executeActionGet(selectedLayersReference); // 拿到一个ActionDescriptor
-  var layers = [];
-  if (desc.hasKey(stringIDToTypeID("targetLayersIDs"))) {
-    // 拿到的是一个ID列表，我们遍历它把每个id拿出来，然后实例化Layer对象
-    var list = desc.getList(stringIDToTypeID("targetLayersIDs"));
-    for (var i = 0; i < list.count; i++) {
-      var ar = list.getReference(i);
-      var layerId = ar.getIdentifier();
-      layers.push(new Layer(layerId));
-    }
-  }
-  return layers;
-};
 
 /**
  * 高效遍历图层
@@ -84,58 +64,66 @@ function LyrId(index) {
   return id;
 }
 
-var TopLayerIndex = 0;
-var BottomLayerIndex = 0;
+ var firstLayerIndex = 0;
+ try {
+    activeDocument.backgroundLayer;
+  } catch (e) {
+    firstLayerIndex = 1;
+  }
 
-var backgroundIndex = 0;
-try {
-  activeDocument.backgroundLayer;
-} catch (e) {
-  // if no background
-  backgroundIndex = 1;
-  BottomLayerIndex = 1;
-}
 
 Layer.loopLayerBinarySearch = function (callback) {
+
   var i = curLayIndex;
-  var j = curLayIndex;
+  var j = curLayIndex - 1;
   // 索引起始值，会受是否有背景图层影响，需要做一下处理
 
   // 开始逐级遍历图层index，根据index来获取到图层实例
   // up find
   layerCount = 30000;
-  for (i; i < layerCount; i++) {
+  for (i; i < layerCount + 1; i++) {
     // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
-    var after = i + 1;
+    var forward = i + firstLayerIndex - 1;
+    
+      try {
+        var layer = new Layer(LyrId(forward));
+      } catch (e) {
+        // 向上遍历
+        TopLayerIndex = forward - 1;
+        break;
+      }
 
-    var layer = new Layer(LyrId(after));
-
-    var layerName = layer.name();
-    var layerKind = layer.kind();
-
-    $.writeln("after: " + after + " kind: " + layerKind + " name: " + layerName);
-
-    if (layerKind == 13 || layerKind == 7) {
-      TopLayerIndex = i;
-      break;
-    }
+      var layerKind = layer.kind();
+      
+      if (layerKind == 13 || layerKind == 7) {
+          
+        TopLayerIndex = forward - 1;
+        //$.writeln(new Layer(LyrId(forward-1)).name()," Top Layer")
+        break;
+      }
   }
 
-  for (j; j > backgroundIndex; j--) {
-    var forward = j - 1;
-    var layer = new Layer(LyrId(forward));
+  // finish
+  // down
 
-    var layerName = layer.name();
-    var layerKind = layer.kind();
+  for (j; j > 0; j--) {
+    // 无Background  after = j ， 有 after = j-1
+    var after = j - 1 + firstLayerIndex;
+    if (after >= firstLayerIndex) {
+      var layer = new Layer(LyrId(after));
+      var layerKind = layer.kind();
 
-    $.writeln("forward: " + forward + " j: " + j + " kind: " + layerKind + " name: " + layerName);
-
-    if (layerKind == 13 || layerKind == 7) {
-      BottomLayerIndex = j;
-      break;
+      if (layerKind == 13 || layerKind == 7) {
+        BottomLayerIndex = after + 1;
+        break;
+      }
+      // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
+      //callback && callback(layer);
     }
   }
 };
+
+
 
 // ------- 实例方法 -------
 /**
@@ -175,22 +163,11 @@ Layer.prototype.kind = function () {
 };
 
 // 使用方法
-/*
-Layer.loopLayersBegin(function (layer) {
-  //$.writeln(layer.index(), ' ', layer.name())
-});
-*/
-Layer.loopLayerBinarySearch();
-/*
-if (parentIndex == undefined) {
-  Layer.loopLayerBinarySearch();
-} else {
-  Layer.loopForwardDown();
-}
-    
-    
-    */
-$.writeln("TopLayerIndex: " + TopLayerIndex + " BottomLayerIndex: " + BottomLayerIndex);
+
+ Layer.loopLayerBinarySearch();
+
+  
+$.writeln("TopIndex: "+TopLayerIndex+" BottomIndex: "+BottomLayerIndex)
 actionManagerSelectLayerByIndex(BottomLayerIndex, true);
 selectLayerByIndexContinuous(TopLayerIndex, true);
 //actionManagerSelectLayerByIndex(TopLayerIndex, true);

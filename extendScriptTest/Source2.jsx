@@ -123,7 +123,6 @@ Layer.loopLayerBinarySearch = function (callback) {
       } catch (e) {
         // 向上遍历
         TopLayerIndex = forward - 1;
-        //$.writeln(layer.name()," Top Top Layer")
         break;
       }
       //var layerName = layer.name();
@@ -135,12 +134,7 @@ Layer.loopLayerBinarySearch = function (callback) {
         TopLayerIndex = forward - 1;
         //$.writeln(new Layer(LyrId(forward-1)).name()," Top Layer")
         break;
-      } else {
-        //$.writeln(layer.name() + " | forward num: " + forward + " |  i num: " + i + " | kind: " + layerKind + " | index: " + layer.index() + " | ▲");
       }
-
-      // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
-      //callback && callback(layer);
     }
   }
 
