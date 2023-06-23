@@ -69,6 +69,7 @@ function LyrId(index) {
     activeDocument.backgroundLayer;
   } catch (e) {
     firstLayerIndex = 1;
+    BottomLayerIndex = 1
   }
 
 
@@ -109,7 +110,6 @@ Layer.loopLayerBinarySearch = function (callback) {
   for (j; j > 0; j--) {
     // 无Background  after = j ， 有 after = j-1
     var after = j - 1 + firstLayerIndex;
-    if (after >= firstLayerIndex) {
       var layer = new Layer(LyrId(after));
       var layerKind = layer.kind();
 
@@ -119,11 +119,35 @@ Layer.loopLayerBinarySearch = function (callback) {
       }
       // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
       //callback && callback(layer);
-    }
   }
 };
 
+Layer.loopLayerFromGroup = function (){
+ 
+  var j = curLayIndex - 1;
+  
+  TopLayerIndex = curLayIndex - 2 + firstLayerIndex
+  
+  for (j; j > 0; j--) {
+    // 无Background  after = j ， 有 after = j-1
+    var after = j - 1 + firstLayerIndex;
+      var layer = new Layer(LyrId(after));
+      var layerKind = layer.kind();
+       
+      if (layerKind == 13 || layerKind == 7) {
+         //$.writeln(after + firstLayerIndex)
+        if(curLayIndex !== after + 2){
+        BottomLayerIndex = after + 1;
+        actionManagerSelectLayerByIndex(BottomLayerIndex, true);
+        selectLayerByIndexContinuous(TopLayerIndex, true);
+         }
 
+        break;
+      }
+      // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
+      //callback && callback(layer);
+  }
+}
 
 // ------- 实例方法 -------
 /**
@@ -163,11 +187,14 @@ Layer.prototype.kind = function () {
 };
 
 // 使用方法
-
- Layer.loopLayerBinarySearch();
-
-  
+if (curLayKind !== "LayerSet"){
+Layer.loopLayerBinarySearch();
+   
 $.writeln("TopIndex: "+TopLayerIndex+" BottomIndex: "+BottomLayerIndex)
 actionManagerSelectLayerByIndex(BottomLayerIndex, true);
 selectLayerByIndexContinuous(TopLayerIndex, true);
 //actionManagerSelectLayerByIndex(TopLayerIndex, true);
+}else{
+    Layer.loopLayerFromGroup ()
+ }
+
