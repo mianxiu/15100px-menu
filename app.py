@@ -1,16 +1,17 @@
-import mouse,keyboard
+import mouse, keyboard
 import dearpygui.dearpygui as dpg
-import threading as thread,time
+import threading as thread, time
 
 
 import get_monitor_scale_factor
 
-import ctypes,win32gui
+import ctypes, win32gui
 from ctypes import c_int
 
 SCALE_FACTOR = get_monitor_scale_factor.getMonitorScaleFactor()
 
 IS_SHOW_LOG = True
+
 
 def getMousePos():
     # get mouse position
@@ -18,6 +19,7 @@ def getMousePos():
     mouseX = mousePos[0]
     mouseY = mousePos[1]
     return [mouseX, mouseY]
+
 
 PROGRAM_TITLE = "1500px menu"
 FOCUS_PROGRAM_CLASSNAME = "Photoshop"
@@ -28,15 +30,14 @@ CURRENT_MOUSE_POS = getMousePos()
 DEFAULT_VIEWPORT_PADDING = 10
 
 DEFAULT_VIEWPORT_WIDTH = 750
-DEFAULT_VIEWPORT_HEIGHT = 600 
+DEFAULT_VIEWPORT_HEIGHT = 600
 
 
 DEFAULT_LEFT_PANEL_WIDTH = 400
 DEFAULT_LEFT_PANEL_HEIGHT = 400
 
-DEFAULT_RIGHT_PANEL_WIDTH =300
+DEFAULT_RIGHT_PANEL_WIDTH = 300
 DEFAULT_RIGHT_PANEL_HEIGHT = 600
-
 
 
 IS_ADD_TAB = False
@@ -72,7 +73,7 @@ def drawGui(*args):
     dpg.bind_theme(global_theme)
 
     print(dpg.get_mouse_pos())
-    
+
     global PROGRAM_TITLE
     dpg.create_viewport(
         title=PROGRAM_TITLE,
@@ -86,7 +87,15 @@ def drawGui(*args):
         y_pos=round(CURRENT_MOUSE_POS[1]),
     )
 
-    with dpg.window(label="MainWindow", tag="right_panel",no_title_bar=True,width=DEFAULT_RIGHT_PANEL_WIDTH,height=DEFAULT_RIGHT_PANEL_HEIGHT,pos=(0,0),no_move=True):
+    with dpg.window(
+        label="MainWindow",
+        tag="right_panel",
+        no_title_bar=True,
+        width=DEFAULT_RIGHT_PANEL_WIDTH,
+        height=DEFAULT_RIGHT_PANEL_HEIGHT,
+        pos=(0, 0),
+        no_move=True,
+    ):
         dpg.add_text("Hello Word", tag="text001")
         dpg.add_button(label="Save", callback=save_callback, tag="button1")
 
@@ -111,16 +120,21 @@ def drawGui(*args):
     # with dpg.handler_registry():
     #     dpg.add_key_press_handler(dpg.mvKey_Control, callback=on_key_la)
 
-    with dpg.window(tag="left_panel",pos=(350,0),no_title_bar=True,width=DEFAULT_LEFT_PANEL_WIDTH,height=DEFAULT_LEFT_PANEL_HEIGHT,no_move=True):
+    with dpg.window(
+        tag="left_panel",
+        pos=(350, 0),
+        no_title_bar=True,
+        width=DEFAULT_LEFT_PANEL_WIDTH,
+        height=DEFAULT_LEFT_PANEL_HEIGHT,
+        no_move=True,
+    ):
         dpg.add_color_picker(tag="pick")
-    
 
     dpg.set_viewport_width(round(DEFAULT_VIEWPORT_WIDTH))
     dpg.set_viewport_height(round(DEFAULT_VIEWPORT_HEIGHT))
-    #dpg.show_style_editor()
+    # dpg.show_style_editor()
     dpg.setup_dearpygui()
     dpg.show_viewport()
-
 
     # make background transparent
     dwm = ctypes.windll.dwmapi
@@ -136,9 +150,7 @@ def drawGui(*args):
     hwnd = win32gui.FindWindow(None, PROGRAM_TITLE)
     margins = MARGINS(-1, -1, -1, -1)
     dwm.DwmExtendFrameIntoClientArea(hwnd, margins)
-    
-    
-    
+
     # dpg.set_primary_window("Primary Window", True)
     dpg.start_dearpygui()
     dpg.destroy_context()
@@ -148,24 +160,22 @@ def windowFocusHook(*args):
     global FOREGROUNDWINDOW_HWND, FOREGROUNDWINDOW_CLASSNAME, FOCUS_PROGRAM_CLASSNAME
 
     def show_overlay():
-
         if FOREGROUNDWINDOW_CLASSNAME == FOCUS_PROGRAM_CLASSNAME:
-
             rect = win32gui.GetWindowRect(FOREGROUNDWINDOW_HWND)
 
             x = rect[0]
             y = rect[1]
-            maxX = rect[2]  
+            maxX = rect[2]
             maxY = rect[3]
             w = rect[2] - x
             h = rect[3] - y
 
             TITTLE_HEIGHT = ctypes.windll.user32.GetSystemMetrics(4)
-            
-            if IS_SHOW_LOG:          
+
+            if IS_SHOW_LOG:
                 print("Program rect: ", rect)
                 print("Size: (%d, %d)" % (w, h))
-                print("Title bar height: ",TITTLE_HEIGHT)
+                print("Title bar height: ", TITTLE_HEIGHT)
 
             mousePos = getMousePos()
 
@@ -191,8 +201,9 @@ def windowFocusHook(*args):
     def hide_overlay():
         dpg.set_viewport_height(0)
         dpg.set_viewport_width(0)
-        
+
     import hook
+
     def keyCallback():
         global IS_ADD_TAB, FOREGROUNDWINDOW_HWND, FOREGROUNDWINDOW_CLASSNAME, FOCUS_PROGRAM_CLASSNAME, OPEN_HOTKEY
 
@@ -204,17 +215,19 @@ def windowFocusHook(*args):
                 keyboard.add_hotkey(OPEN_HOTKEY, show_overlay, suppress=True)
                 mouse.on_right_click(hide_overlay)
                 IS_ADD_TAB = True
-                
+
                 #
-                if IS_SHOW_LOG:print(OPEN_HOTKEY, "key is hook")
+                if IS_SHOW_LOG:
+                    print(OPEN_HOTKEY, "key is hook")
         else:
             if IS_ADD_TAB == True:
                 keyboard.clear_hotkey(OPEN_HOTKEY)
                 mouse.unhook_all()
                 IS_ADD_TAB = False
-                
+
                 #
-                if IS_SHOW_LOG : print(OPEN_HOTKEY, "tab key is clear")
+                if IS_SHOW_LOG:
+                    print(OPEN_HOTKEY, "tab key is clear")
 
     hook.hook(keyCallback)
 

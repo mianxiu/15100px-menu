@@ -1,6 +1,6 @@
 ﻿// 选中组内的所有图层
 // 选中组间的所有图层
-// 起始选中组则选中子级的所有同级图层
+// 起始选中组则选中子级的图层
 // 起始选中图层就是区间内的
 // 
 
@@ -35,12 +35,12 @@ var doc = activeDocument;
 var curLay = doc.activeLayer;
 var curLayIndex = curLay.itemIndex;
 var curLayKind = curLay.typename
-var curLayParent = curLay.parent;
-var parentIndex = curLayParent.itemIndex;
-var curLayParentName = curLayParent.name;
+//var curLayParent = curLay.parent;
+//var parentIndex = curLayParent.itemIndex;
+//var curLayParentName = curLayParent.name;
 
 
-$.writeln("---SELECT------", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName, " parentIndex: ", parentIndex," typename: ",curLayKind);
+//$.writeln("---SELECT------", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName, " parentIndex: ", parentIndex," typename: ",curLayKind);
 
 /**
  * 图层类的构造函数，传入一个图层ID
@@ -74,7 +74,7 @@ function LyrId(index) {
 
 
 Layer.loopLayerBinarySearch = function (callback) {
-
+    
   var i = curLayIndex;
   var j = curLayIndex - 1;
   // 索引起始值，会受是否有背景图层影响，需要做一下处理
@@ -122,10 +122,9 @@ Layer.loopLayerBinarySearch = function (callback) {
   }
 };
 
+
 Layer.loopLayerFromGroup = function (){
- 
   var j = curLayIndex - 1;
-  
   TopLayerIndex = curLayIndex - 2 + firstLayerIndex
   
   for (j; j > 0; j--) {
@@ -138,10 +137,7 @@ Layer.loopLayerFromGroup = function (){
          //$.writeln(after + firstLayerIndex)
         if(curLayIndex !== after + 2){
         BottomLayerIndex = after + 1;
-        actionManagerSelectLayerByIndex(BottomLayerIndex, true);
-        selectLayerByIndexContinuous(TopLayerIndex, true);
          }
-
         break;
       }
       // 将遍历拿到的图层实例传递给回调函数，回调函数就可以根据自己的需要对图层进行操作了
@@ -149,18 +145,8 @@ Layer.loopLayerFromGroup = function (){
   }
 }
 
+
 // ------- 实例方法 -------
-/**
- * 获取当前实例图层的名称
- * @return {string}
- */
-Layer.prototype.name = function () {
-  var layerReference = new ActionReference();
-  layerReference.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("Nm  "));
-  layerReference.putIdentifier(charIDToTypeID("Lyr "), this.id);
-  var descriptor = executeActionGet(layerReference);
-  return descriptor.getString(charIDToTypeID("Nm  "));
-};
 
 /**
  * 获取当前实例图层的层级
@@ -190,11 +176,15 @@ Layer.prototype.kind = function () {
 if (curLayKind !== "LayerSet"){
 Layer.loopLayerBinarySearch();
    
-$.writeln("TopIndex: "+TopLayerIndex+" BottomIndex: "+BottomLayerIndex)
+//$.writeln("TopIndex: "+TopLayerIndex+" BottomIndex: "+BottomLayerIndex)
 actionManagerSelectLayerByIndex(BottomLayerIndex, true);
 selectLayerByIndexContinuous(TopLayerIndex, true);
 //actionManagerSelectLayerByIndex(TopLayerIndex, true);
 }else{
     Layer.loopLayerFromGroup ()
+    actionManagerSelectLayerByIndex(BottomLayerIndex, true);
+    selectLayerByIndexContinuous(TopLayerIndex, true);
  }
+
+//app.activeDocument.suspendHistory ("Select All Layer (g", "jsx()")
 

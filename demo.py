@@ -27,7 +27,6 @@ dpg.create_viewport(title='overlay',always_on_top=True,decorated=False,clear_col
 dpg.set_viewport_always_top(True)
 dpg.create_context()
 dpg.setup_dearpygui()
-
 with dpg.window(label="About2",no_background=True, tag='bg_win'):
 	with dpg.draw_node() as root :
 		dpg.draw_polygon([p1,p2,p3,p4,p5], color=[0,255,0,255],fill=[0,0,255,255])
