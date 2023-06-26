@@ -76,6 +76,9 @@ function selectLayerByIndexContinuous(index, makeVisible) {
 
 
 def select_all_layer_in_group():
+    import photoshop.api as ps
+
+    app = ps.Application()
     jsx = (
         r"""
 // 选中组内的所有图层
@@ -207,6 +210,7 @@ if (curLayKind !== "LayerSet") {
 """
     )
     print(jsx)
+    app.doJavaScript(jsx)
 
 
 # app.doJavaScript(jsx)return
