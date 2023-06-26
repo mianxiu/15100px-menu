@@ -33,6 +33,15 @@ Layer.prototype.kind = function () {
 """
 
 LAYERID = r"""
+/**
+ * 图层类的构造函数，传入一个图层ID
+ * @param id
+ * @constructor
+ */
+function Layer(id) {
+  this.id = id;
+}
+
 function LyrId(index) {
   var ref = new ActionReference();
   ref.putIndex(charIDToTypeID("Lyr "), index);
@@ -67,8 +76,24 @@ function selectLayerByIndexContinuous(index, makeVisible) {
 
 
 def select_all_layer_in_group():
-    jsx = r"""
- var TopLayerIndex = 0;
+    jsx = (
+        r"""
+// 选中组内的所有图层
+// 选中组间的所有图层
+// 起始选中组则选中子级的图层
+// 起始选中图层就是区间内的
+//
+"""
+        + LAYER_INDEX
+        + LAYERID
+        + LAYER_KIND
+        + r"""
+
+var selectMulitLayerDesc1 = new ActionDescriptor();
+var selectMulitLayerRef1 = new ActionReference();
+
+
+var TopLayerIndex = 0;
 var BottomLayerIndex = 0;
 
 var SHOWDIALOG = false;
@@ -77,6 +102,7 @@ var doc = activeDocument;
 var curLay = doc.activeLayer;
 var curLayIndex = curLay.itemIndex;
 var curLayKind = curLay.typename;
+
 var firstLayerIndex = 0;
 try {
   activeDocument.backgroundLayer;
@@ -100,15 +126,26 @@ Layer.loopLayerBinarySearch = function (callback) {
     try {
       var layer = new Layer(LyrId(forward));
     } catch (e) {
+      // 向上遍历
       TopLayerIndex = forward - 1;
+      selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), TopLayerIndex);
       break;
     }
+
     var layerKind = layer.kind();
+
     if (layerKind == 13 || layerKind == 7) {
       TopLayerIndex = forward - 1;
+      //$.writeln(new Layer(LyrId(forward-1)).name()," Top Layer")
+      selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), TopLayerIndex);
       break;
+    } else {
+      selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), forward);
     }
   }
+
+  // finish
+  // down
 
   for (j; j > 0; j--) {
     // 无Background  after = j ， 有 after = j-1
@@ -118,7 +155,11 @@ Layer.loopLayerBinarySearch = function (callback) {
 
     if (layerKind == 13 || layerKind == 7) {
       BottomLayerIndex = after + 1;
+
+      selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), BottomLayerIndex);
       break;
+    } else {
+      selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), after);
     }
   }
 };
@@ -126,7 +167,7 @@ Layer.loopLayerBinarySearch = function (callback) {
 Layer.loopLayerFromGroup = function () {
   var j = curLayIndex - 1;
   TopLayerIndex = curLayIndex - 2 + firstLayerIndex;
-
+  selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), TopLayerIndex);
   for (j; j > 0; j--) {
     // 无Background  after = j ， 有 after = j-1
     var after = j - 1 + firstLayerIndex;
@@ -137,13 +178,36 @@ Layer.loopLayerFromGroup = function () {
       //$.writeln(after + firstLayerIndex)
       if (curLayIndex !== after + 2) {
         BottomLayerIndex = after + 1;
+        selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), BottomLayerIndex);
       }
       break;
+    } else {
+      selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), after);
     }
+
   }
 };
 
+// 使用方法
+if (curLayKind !== "LayerSet") {
+  Layer.loopLayerBinarySearch();
+  selectMulitLayerDesc1.putReference(charIDToTypeID("null"), selectMulitLayerRef1);
+  selectMulitLayerDesc1.putBoolean(charIDToTypeID("MkVs"), false);
+  executeAction(charIDToTypeID("slct"), selectMulitLayerDesc1, DialogModes.NO);
+
+} else {
+  Layer.loopLayerFromGroup();
+  selectMulitLayerDesc1.putReference(charIDToTypeID("null"), selectMulitLayerRef1);
+  selectMulitLayerDesc1.putBoolean(charIDToTypeID("MkVs"), false);
+  executeAction(charIDToTypeID("slct"), selectMulitLayerDesc1, DialogModes.NO);
+}
+
+//app.activeDocument.suspendHistory ("Select All Layer (g", "jsx()")
+
 """
+    )
+    print(jsx)
 
 
 # app.doJavaScript(jsx)return
+select_all_layer_in_group()

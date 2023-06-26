@@ -26,4 +26,4 @@ function multiSelectByIDs(ids) {
 }
 
 
-multiSelectByIDs ([6])
+multiSelectByIDs ([1,2,3,4])
