@@ -2,6 +2,7 @@
 # apply l clear filter for all layer in group
 # copy target layer filter and apply
 
+
 LAYER_INDEX = r"""
 /**
  * 获取当前实例图层的层级
@@ -76,17 +77,8 @@ function selectLayerByIndexContinuous(index, makeVisible) {
 
 
 def select_all_layer_in_group():
-    import photoshop.api as ps
-
-    app = ps.Application()
     jsx = (
-        r"""
-// 选中组内的所有图层
-// 选中组间的所有图层
-// 起始选中组则选中子级的图层
-// 起始选中图层就是区间内的
-//
-"""
+        r""""""
         + LAYER_INDEX
         + LAYERID
         + LAYER_KIND
@@ -99,10 +91,8 @@ var selectMulitLayerRef1 = new ActionReference();
 var TopLayerIndex = 0;
 var BottomLayerIndex = 0;
 
-var SHOWDIALOG = false;
 
-var doc = activeDocument;
-var curLay = doc.activeLayer;
+var curLay =activeDocument .activeLayer;
 var curLayIndex = curLay.itemIndex;
 var curLayKind = curLay.typename;
 
@@ -209,9 +199,4 @@ if (curLayKind !== "LayerSet") {
 
 """
     )
-    print(jsx)
-    app.doJavaScript(jsx)
-
-
-# app.doJavaScript(jsx)return
-select_all_layer_in_group()
+    return jsx

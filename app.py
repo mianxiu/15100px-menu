@@ -13,6 +13,25 @@ SCALE_FACTOR = get_monitor_scale_factor.getMonitorScaleFactor()
 IS_SHOW_LOG = True
 
 
+def pstest():
+    import win32com.client
+
+    # 连接到 Photoshop 的 COM 接口
+
+    app = win32com.client.Dispatch("Photoshop.Application")
+
+    # 获取当前文档
+
+    import photoshop_action.group as group
+
+    # 执行 JavaScript 代码
+    # result = app.DoJavaScript("alert('123')")
+    app.DoJavaScript(group.select_all_layer_in_group())
+
+    # 输出执行结果
+    # print(result)
+
+
 def getMousePos():
     # get mouse position
     mousePos = mouse.get_position()
@@ -23,7 +42,10 @@ def getMousePos():
 
 PROGRAM_TITLE = "1500px menu"
 FOCUS_PROGRAM_CLASSNAME = "Photoshop"
-OPEN_HOTKEY = "tab"
+TAB_HOTKEY = "tab"
+
+# group
+SELECT_GROUP_LAYER_HOTKEY = "shift+a"
 
 CURRENT_MOUSE_POS = getMousePos()
 
@@ -97,7 +119,7 @@ def drawGui(*args):
         no_move=True,
     ):
         dpg.add_text("Hello Word", tag="text001")
-        dpg.add_button(label="Save", callback=save_callback, tag="button1")
+        dpg.add_button(label="Save", callback=pstest, tag="button1")
 
         with dpg.tooltip("button1"):
             dpg.add_text("i am a tips")
@@ -205,29 +227,29 @@ def windowFocusHook(*args):
     import hook
 
     def keyCallback():
-        global IS_ADD_TAB, FOREGROUNDWINDOW_HWND, FOREGROUNDWINDOW_CLASSNAME, FOCUS_PROGRAM_CLASSNAME, OPEN_HOTKEY
+        global IS_ADD_TAB, FOREGROUNDWINDOW_HWND, FOREGROUNDWINDOW_CLASSNAME, FOCUS_PROGRAM_CLASSNAME, TAB_HOTKEY
 
         FOREGROUNDWINDOW_HWND = win32gui.GetForegroundWindow()
         FOREGROUNDWINDOW_CLASSNAME = win32gui.GetClassName(FOREGROUNDWINDOW_HWND)
 
         if FOREGROUNDWINDOW_CLASSNAME == FOCUS_PROGRAM_CLASSNAME:
             if IS_ADD_TAB == False:
-                keyboard.add_hotkey(OPEN_HOTKEY, show_overlay, suppress=True)
+                keyboard.add_hotkey(TAB_HOTKEY, show_overlay, suppress=True)
                 mouse.on_right_click(hide_overlay)
                 IS_ADD_TAB = True
 
                 #
                 if IS_SHOW_LOG:
-                    print(OPEN_HOTKEY, "key is hook")
+                    print(TAB_HOTKEY, "key is hook")
         else:
             if IS_ADD_TAB == True:
-                keyboard.clear_hotkey(OPEN_HOTKEY)
+                keyboard.clear_hotkey(TAB_HOTKEY)
                 mouse.unhook_all()
                 IS_ADD_TAB = False
 
                 #
                 if IS_SHOW_LOG:
-                    print(OPEN_HOTKEY, "tab key is clear")
+                    print(TAB_HOTKEY, "tab key is clear")
 
     hook.hook(keyCallback)
 
@@ -253,11 +275,11 @@ class HookThread(thread.Thread):
 
 # Theard()
 if __name__ == "__main__":
+    keyboard.add_hotkey("a", pstest)
     startHookThread()
 
     OVERLAYER_IS_SHOW = False
 
-    # keyboard.add_hotkey("capslock",on_activate_tab)
     # keyboard.clear_hotkey("tab")
 
     # with keyboard.GlobalHotKeys({
