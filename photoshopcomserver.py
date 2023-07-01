@@ -2,8 +2,6 @@ import win32com.client, pythoncom
 
 import socket
 
-import photoshop_action.group as group
-
 
 # 连接到 Photoshop 的 COM 接口
 def runjsx(jsx):
@@ -22,11 +20,14 @@ def runjsx(jsx):
         pythoncom.CoUninitialize()
 
 
+import photoshop_action.group as group
+
 ACTION = {"select": group.select_all_layer_in_group(), "color": group.alert()}
 
 
 def messageHandle(message):
-    runjsx(ACTION[message])
+    if message != "":
+        runjsx(ACTION[message])
 
 
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -39,7 +40,7 @@ print("Server started and listening for connections...")
 while True:
     client_socket, client_address = server_socket.accept()
     print(f"Connection from {client_address} has been established!")
-    message = client_socket.recv(1024).decode()
+    message = client_socket.recv(1024 * 100).decode()
     print(f"Received message: {message}")
     messageHandle(message)
     response = "Message received"

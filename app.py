@@ -102,7 +102,7 @@ def drawGui(*args):
         no_move=True,
     ):
         dpg.add_text("Hello Word", tag="text001")
-        dpg.add_button(label="Save", callback=pstest, tag="button1")
+        dpg.add_button(label="Save", tag="button1")
 
         with dpg.tooltip("button1"):
             dpg.add_text("i am a tips")
@@ -220,12 +220,12 @@ def windowFocusHook(*args):
                 keyboard.add_hotkey(TAB_HOTKEY, show_overlay, suppress=True)
                 keyboard.add_hotkey(
                     "w",
-                    lambda: pstest5("select"),
+                    lambda: sendPhotoshopActionStr("select"),
                     suppress=True,
                 )
                 keyboard.add_hotkey(
                     "a",
-                    lambda: pstest5("color"),
+                    lambda: sendPhotoshopActionStr("color"),
                     suppress=True,
                 )
 
@@ -247,17 +247,6 @@ def windowFocusHook(*args):
                     print(TAB_HOTKEY, "tab key is clear")
 
     hook.hook(keyCallback)
-
-
-def photoshopComHook(*args):
-    # Initialize
-    pythoncom.CoInitialize()
-
-    # Get instance
-    xl = win32com.client.Dispatch("Excel.Application")
-
-    # Create id
-    xl_id = pythoncom.CoMarshalInterThreadInterfaceInStream(pythoncom.IID_IDispatch, xl)
 
 
 def photoshopSeverHook():
@@ -287,43 +276,7 @@ class HookThread(thread.Thread):
         self.func(*self.args)
 
 
-def pstest():
-    pythoncom.CoInitialize()
-
-    # 连接到 Photoshop 的 COM 接口
-    app = win32com.client.Dispatch("Photoshop.Application")
-
-    # 执行 JavaScript 代码
-    # result = app.DoJavaScript("alert('123')")
-    app.DoJavaScript(group.select_all_layer_in_group())
-    # 输出执行结果
-    # print(result)
-    app = None
-
-    pythoncom.CoUninitialize()
-
-
-def pstest2(jsx):
-    pythoncom.CoInitialize()
-
-    # 连接到 Photoshop 的 COM 接口
-    app = win32com.client.Dispatch("Photoshop.Application")
-
-    # 执行 JavaScript 代码
-    # result = app.DoJavaScript("alert('123')")
-    app.DoJavaScript(jsx)
-    # 输出执行结果
-    # print(result)
-    app = None
-
-    pythoncom.CoUninitialize()
-
-
-def pstest3(key):
-    print(key)
-
-
-def pstest5(jsxStr: str):
+def sendPhotoshopActionStr(jsxStr: str):
     import photoshopcomclient as pc
 
     pc.sendSome(jsxStr)
