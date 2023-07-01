@@ -218,19 +218,17 @@ def windowFocusHook(*args):
         if FOREGROUNDWINDOW_CLASSNAME == FOCUS_PROGRAM_CLASSNAME:
             if IS_ADD_TAB == False:
                 keyboard.add_hotkey(TAB_HOTKEY, show_overlay, suppress=True)
-                keyboard.add_hotkey("a", lambda: pstest5(), suppress=True)
                 keyboard.add_hotkey(
-                    "w", lambda: pstest2("alert('no none')"), suppress=True
+                    "w",
+                    lambda: pstest5("select"),
+                    suppress=True,
                 )
                 keyboard.add_hotkey(
-                    "r",
-                    lambda: pstest2(group.select_all_layer_in_group()),
+                    "a",
+                    lambda: pstest5("color"),
+                    suppress=True,
                 )
-                keyboard.add_hotkey(
-                    "e",
-                    lambda: pstest2("alert('123')"),
-                )
-                keyboard.add_hotkey("q", pstest)
+
                 mouse.on_right_click(hide_overlay)
                 IS_ADD_TAB = True
 
@@ -325,10 +323,10 @@ def pstest3(key):
     print(key)
 
 
-def pstest5():
+def pstest5(jsxStr: str):
     import photoshopcomclient as pc
 
-    pc.sendSome(group.select_all_layer_in_group())
+    pc.sendSome(jsxStr)
 
 
 # Theard()
