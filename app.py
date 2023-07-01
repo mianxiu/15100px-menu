@@ -1,7 +1,9 @@
 import mouse, keyboard
 import dearpygui.dearpygui as dpg
 import threading as thread, time
+import pythoncom, win32com.client
 
+import photoshop_action.group as group
 
 import get_monitor_scale_factor
 
@@ -11,25 +13,6 @@ from ctypes import c_int
 SCALE_FACTOR = get_monitor_scale_factor.getMonitorScaleFactor()
 
 IS_SHOW_LOG = True
-
-
-def pstest():
-    import win32com.client
-
-    # 连接到 Photoshop 的 COM 接口
-
-    app = win32com.client.Dispatch("Photoshop.Application")
-
-    # 获取当前文档
-
-    import photoshop_action.group as group
-
-    # 执行 JavaScript 代码
-    # result = app.DoJavaScript("alert('123')")
-    app.DoJavaScript(group.select_all_layer_in_group())
-
-    # 输出执行结果
-    # print(result)
 
 
 def getMousePos():
@@ -235,6 +218,19 @@ def windowFocusHook(*args):
         if FOREGROUNDWINDOW_CLASSNAME == FOCUS_PROGRAM_CLASSNAME:
             if IS_ADD_TAB == False:
                 keyboard.add_hotkey(TAB_HOTKEY, show_overlay, suppress=True)
+                keyboard.add_hotkey("a", lambda: pstest5(), suppress=True)
+                keyboard.add_hotkey(
+                    "w", lambda: pstest2("alert('no none')"), suppress=True
+                )
+                keyboard.add_hotkey(
+                    "r",
+                    lambda: pstest2(group.select_all_layer_in_group()),
+                )
+                keyboard.add_hotkey(
+                    "e",
+                    lambda: pstest2("alert('123')"),
+                )
+                keyboard.add_hotkey("q", pstest)
                 mouse.on_right_click(hide_overlay)
                 IS_ADD_TAB = True
 
@@ -243,7 +239,8 @@ def windowFocusHook(*args):
                     print(TAB_HOTKEY, "key is hook")
         else:
             if IS_ADD_TAB == True:
-                keyboard.clear_hotkey(TAB_HOTKEY)
+                # keyboard.clear_hotkey(TAB_HOTKEY)
+                keyboard.clear_all_hotkeys()
                 mouse.unhook_all()
                 IS_ADD_TAB = False
 
@@ -254,6 +251,21 @@ def windowFocusHook(*args):
     hook.hook(keyCallback)
 
 
+def photoshopComHook(*args):
+    # Initialize
+    pythoncom.CoInitialize()
+
+    # Get instance
+    xl = win32com.client.Dispatch("Excel.Application")
+
+    # Create id
+    xl_id = pythoncom.CoMarshalInterThreadInterfaceInStream(pythoncom.IID_IDispatch, xl)
+
+
+def photoshopSeverHook():
+    import photoshopcomserver
+
+
 def startHookThread():
     t1 = HookThread(drawGui)
     t1.name = "draw_gui"
@@ -261,6 +273,10 @@ def startHookThread():
     t2 = HookThread(windowFocusHook)
     t2.name = "window_focus_hook_key"
     t2.start()
+
+    t3 = HookThread(photoshopSeverHook)
+    t3.name = "photoshop_script_server"
+    t3.start()
 
 
 class HookThread(thread.Thread):
@@ -273,9 +289,50 @@ class HookThread(thread.Thread):
         self.func(*self.args)
 
 
+def pstest():
+    pythoncom.CoInitialize()
+
+    # 连接到 Photoshop 的 COM 接口
+    app = win32com.client.Dispatch("Photoshop.Application")
+
+    # 执行 JavaScript 代码
+    # result = app.DoJavaScript("alert('123')")
+    app.DoJavaScript(group.select_all_layer_in_group())
+    # 输出执行结果
+    # print(result)
+    app = None
+
+    pythoncom.CoUninitialize()
+
+
+def pstest2(jsx):
+    pythoncom.CoInitialize()
+
+    # 连接到 Photoshop 的 COM 接口
+    app = win32com.client.Dispatch("Photoshop.Application")
+
+    # 执行 JavaScript 代码
+    # result = app.DoJavaScript("alert('123')")
+    app.DoJavaScript(jsx)
+    # 输出执行结果
+    # print(result)
+    app = None
+
+    pythoncom.CoUninitialize()
+
+
+def pstest3(key):
+    print(key)
+
+
+def pstest5():
+    import photoshopcomclient as pc
+
+    pc.sendSome(group.select_all_layer_in_group())
+
+
 # Theard()
 if __name__ == "__main__":
-    keyboard.add_hotkey("a", pstest)
     startHookThread()
 
     OVERLAYER_IS_SHOW = False
