@@ -13,9 +13,9 @@ def runjsx(jsx):
 
         # 执行 JavaScript 代码
         # result = app.DoJavaScript("alert('123')")
-        app.DoJavaScript(jsx)
+        r = app.DoJavaScript(jsx)
         # 输出执行结果
-        # print(result)
+        print(r)
         app = None
         pythoncom.CoUninitialize()
 

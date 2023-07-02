@@ -1,7 +1,7 @@
 # select all layer in group
 # apply l clear filter for all layer in group
 # copy target layer filter and apply
-
+import time
 
 LAYER_INDEX = r"""
 /**
@@ -77,6 +77,7 @@ function selectLayerByIndexContinuous(index, makeVisible) {
 
 
 def select_all_layer_in_group():
+    i = time.ctime()
     jsx = (
         r""""""
         + LAYER_INDEX
@@ -182,6 +183,7 @@ Layer.loopLayerFromGroup = function () {
 };
 
 // 使用方法
+function jsx(){
 if (curLayKind !== "LayerSet") {
   Layer.loopLayerBinarySearch();
   selectMulitLayerDesc1.putReference(charIDToTypeID("null"), selectMulitLayerRef1);
@@ -194,8 +196,12 @@ if (curLayKind !== "LayerSet") {
   selectMulitLayerDesc1.putBoolean(charIDToTypeID("MkVs"), false);
   executeAction(charIDToTypeID("slct"), selectMulitLayerDesc1, DialogModes.NO);
 }
-
-//app.activeDocument.suspendHistory ("Select All Layer (g", "jsx()")
+//$.writeln(curLayIndex)
+return curLayIndex
+}
+app.activeDocument.suspendHistory ("Select All Layer """
+        + str(i)
+        + r"""", "jsx()")
 
 """
     )

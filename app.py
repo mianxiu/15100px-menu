@@ -161,6 +161,7 @@ def drawGui(*args):
     dpg.destroy_context()
 
 
+#
 def windowFocusHook(*args):
     global FOREGROUNDWINDOW_HWND, FOREGROUNDWINDOW_CLASSNAME, FOCUS_PROGRAM_CLASSNAME
 
@@ -219,12 +220,12 @@ def windowFocusHook(*args):
             if IS_ADD_TAB == False:
                 keyboard.add_hotkey(TAB_HOTKEY, show_overlay, suppress=True)
                 keyboard.add_hotkey(
-                    "w",
+                    "tab+w",
                     lambda: sendPhotoshopActionStr("select"),
                     suppress=True,
                 )
                 keyboard.add_hotkey(
-                    "a",
+                    "tab+a",
                     lambda: sendPhotoshopActionStr("color"),
                     suppress=True,
                 )
