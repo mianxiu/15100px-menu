@@ -13,9 +13,11 @@ def runjsx(jsx):
 
         # 执行 JavaScript 代码
         # result = app.DoJavaScript("alert('123')")
-        r = app.DoJavaScript(jsx)
+        result = app.DoJavaScript(jsx)
+        # use com
+        # p = app.activeDocument.activeLayer.itemIndex
         # 输出执行结果
-        print(r)
+        print(result)
         app = None
         pythoncom.CoUninitialize()
 

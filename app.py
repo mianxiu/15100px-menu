@@ -220,7 +220,7 @@ def windowFocusHook(*args):
             if IS_ADD_TAB == False:
                 keyboard.add_hotkey(TAB_HOTKEY, show_overlay, suppress=True)
                 keyboard.add_hotkey(
-                    "tab+w",
+                    "capslock+a",
                     lambda: sendPhotoshopActionStr("select"),
                     suppress=True,
                 )

@@ -6,6 +6,7 @@
 // 执行后记得focus ps
 
 //alert("Selected Layer: " + activeDocument.activeLayer + " - ItemIndex: " + activeDocument.activeLayer.itemIndex)
+function jsx(){
 var selectMulitLayerDesc1 = new ActionDescriptor();
 var selectMulitLayerRef1 = new ActionReference();
 
@@ -161,24 +162,31 @@ Layer.prototype.kind = function () {
   return descriptor.getInteger(stringIDToTypeID("layerKind"));
 };
 
+
+  function slct(){
+  selectMulitLayerDesc1.putReference(charIDToTypeID("null"), selectMulitLayerRef1);
+  selectMulitLayerDesc1.putBoolean(charIDToTypeID("MkVs"), false);
+  executeAction(charIDToTypeID("slct"), selectMulitLayerDesc1, DialogModes.NO);
+  }
 // 使用方法
-function jsx(){
+
 if (curLayKind !== "LayerSet") {
   Layer.loopLayerBinarySearch();
   selectMulitLayerDesc1.putReference(charIDToTypeID("null"), selectMulitLayerRef1);
-  selectMulitLayerDesc1.putBoolean(charIDToTypeID("MkVs"), false);
+ selectMulitLayerDesc1.putBoolean(charIDToTypeID("MkVs"), false);
   executeAction(charIDToTypeID("slct"), selectMulitLayerDesc1, DialogModes.NO);
-
+  
   //$.writeln("TopIndex: "+TopLayerIndex+" BottomIndex: "+BottomLayerIndex)
   //actionManagerSelectLayerByIndex(TopLayerIndex, true);
-} else {
-  Layer.loopLayerFromGroup();
-  selectMulitLayerDesc1.putReference(charIDToTypeID("null"), selectMulitLayerRef1);
-  selectMulitLayerDesc1.putBoolean(charIDToTypeID("MkVs"), false);
-  executeAction(charIDToTypeID("slct"), selectMulitLayerDesc1, DialogModes.NO);
-}
-$.writeln(curLayIndex)
-return curLayIndex
-}
 
-app.activeDocument.suspendHistory ("Select All Layer (g", "jsx()")
+} else {
+    selectMulitLayerDesc1.putReference(charIDToTypeID("null"), selectMulitLayerRef1);
+ selectMulitLayerDesc1.putBoolean(charIDToTypeID("MkVs"), false);
+  executeAction(charIDToTypeID("slct"), selectMulitLayerDesc1, DialogModes.NO);
+    //slct ()
+    
+}
+//$.writeln(curLayIndex)
+}
+app.activeDocument.suspendHistory ("Select All Layer g", "jsx()")
+
