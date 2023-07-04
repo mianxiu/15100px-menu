@@ -1,19 +1,15 @@
 import win32com.client, pythoncom
 import socket
 
-CURLAYINDEX = 0
+# caps+z 支持刷新历史记录？测试下历史记录的行为
+HISTORY_STATE = []
 
-
-def is_int(s):
-    global CURLAYINDEX
-    try:
-        CURLAYINDEX = int(s)
-    except ValueError:
-        return False
+CURLAYINDEX_STR = ""
 
 
 # 连接到 Photoshop 的 COM 接口
 def runjsx(jsx):
+    global CURLAYINDEX_STR
     if jsx != "":
         pythoncom.CoInitialize()
 
@@ -26,10 +22,9 @@ def runjsx(jsx):
         # use com
         # p = app.activeDocument.activeLayer.itemIndex
         # 输出执行结果
-        is_int(result)
-        is_int("ss")
+        CURLAYINDEX_STR = result
+        print(CURLAYINDEX_STR)
 
-        print(CURLAYINDEX)
         app = None
         pythoncom.CoUninitialize()
 
