@@ -184,6 +184,7 @@ Layer.loopLayerFromGroup = function () {
 };
 
 // 使用方法
+function jsx(){
 if (curLayKind !== "LayerSet") {
   Layer.loopLayerBinarySearch();
   selectMulitLayerDesc1.putReference(charIDToTypeID("null"), selectMulitLayerRef1);
@@ -196,8 +197,9 @@ if (curLayKind !== "LayerSet") {
   selectMulitLayerDesc1.putBoolean(charIDToTypeID("MkVs"), false);
   executeAction(charIDToTypeID("slct"), selectMulitLayerDesc1, DialogModes.NO);
 }
+}
 
-//app.activeDocument.suspendHistory ("Select All Layer","jsx()")
+app.activeDocument.suspendHistory ("Select All Layer","jsx()")
 // result is index
 activeDocument.activeLayer.itemIndex
 """
