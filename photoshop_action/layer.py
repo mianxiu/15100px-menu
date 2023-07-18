@@ -13,3 +13,27 @@ def s(layerIndex: str):
     }
     """
     )
+
+
+def moveToIndex(layerIndex: str, isTop=True):
+    if isTop is True:
+        mLayerIndex = layerIndex
+    else:
+        mLayerIndex = layerIndex - 1
+    jsx = (
+        r"""
+    var desc1 = new ActionDescriptor();
+    var ref1 = new ActionReference();
+    ref1.putEnumerated( charIDToTypeID( "Lyr " ), charIDToTypeID( "Ordn" ), charIDToTypeID( "Trgt" ) );
+    desc1.putReference( charIDToTypeID( "null" ), ref1 );
+    var ref2 = new ActionReference();
+    ref2.putIndex( charIDToTypeID( "Lyr " ), """
+        + mLayerIndex
+        + r""" );
+    desc1.putReference( charIDToTypeID( "T   " ), ref2 );
+    desc1.putBoolean( charIDToTypeID( "Adjs" ), false );
+    executeAction( charIDToTypeID( "move" ), desc1, DialogModes.NO );
+    """
+    )
+
+    return jsx

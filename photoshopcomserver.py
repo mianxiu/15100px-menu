@@ -30,8 +30,13 @@ def runjsx(jsx):
 
 
 import photoshop_action.group as group
+import photoshop_action.layer as layer
 
-ACTION = {"select": group.select_all_layer_in_group(), "color": group.alert()}
+ACTION = {
+    "select": group.select_all_layer_in_group(),
+    "color": group.alert(),
+    "moveToIndexTop": layer.moveToIndex(),
+}
 
 
 def messageHandle(message):
