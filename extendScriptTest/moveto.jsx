@@ -98,10 +98,10 @@ Layer.loopLayerBinarySearch = function (callback) {
     if (layerKind == 13 || layerKind == 7) {
       TopLayerIndex = forward - 1;
       $.writeln(TopLayerIndex)
-      move(forward )
+      
       break;
     } else {
-       move(forward )
+      // move(forward )
     }
   }
 }
@@ -184,7 +184,7 @@ Layer.prototype.kind = function () {
 
 if (curLayKind !== "LayerSet") {
     Layer.loopLayerBinarySearch();
-
+    move(TopLayerIndex+1)
   //$.writeln("TopIndex: "+TopLayerIndex+" BottomIndex: "+BottomLayerIndex)
   //actionManagerSelectLayerByIndex(TopLayerIndex, true);
 
