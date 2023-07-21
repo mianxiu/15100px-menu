@@ -1,4 +1,4 @@
-﻿//  移动图层到最顶
+﻿//  
 // 
 // 执行后记得focus ps
 
@@ -17,7 +17,7 @@ function move(layerIndex) {
 }
 
 function jsx() {
-  var isMoveToTop = true;
+  var isMoveToTop = false;
 
   var TopLayerIndex = 0;
   var BottomLayerIndex = 0;
@@ -111,25 +111,47 @@ function jsx() {
   };
 
   Layer.loopLayerFromGroup = function () {
+         if (isMoveToTop == true) {}
+         else{
+    var groupCount = 1
     var j = curLayIndex - 1;
     TopLayerIndex = curLayIndex - 2 + firstLayerIndex;
-    selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), TopLayerIndex);
     for (j; j > 0; j--) {
       // 无Background  after = j ， 有 after = j-1
       var after = j - 1 + firstLayerIndex;
       var layer = new Layer(LyrId(after));
       var layerKind = layer.kind();
-
-      if (layerKind == 13 || layerKind == 7) {
-        if (curLayIndex !== after + 2) {
-          BottomLayerIndex = after + 1;
-        }
-        break;
-      }
+      
+      if(layerKind == 7 && groupCount > 0){
+          groupCount += 1
+          $.writeln("子层： ", groupCount)
+       }
+      if(layerKind == 13 && groupCount > 0){
+            groupCount -= 1
+            //$.writeln(groupCount)
+          }
+      if(groupCount <=0){
+          
+           $.writeln("~~层： ", groupCount,"  layerKind :",layerKind," name: ",layer.name())
+           }
+     // if (layerKind == 13 || layerKind == 7) {
+     //   if (curLayIndex !== after + 2) {
+    //      BottomLayerIndex = after + 1;
+    //    }
+   //     break;
+   //   }
     }
   };
-
+}
   // ------- 实例方法 -------
+  Layer.prototype.name = function() {
+    var layerReference = new ActionReference();
+        layerReference.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("Nm  "));
+        layerReference.putIdentifier(charIDToTypeID("Lyr "), this.id);
+    var descriptor = executeActionGet(layerReference);
+    return descriptor.getString(charIDToTypeID("Nm  "));
+}
+
 
   /**
    * 获取当前实例图层的层级
@@ -163,6 +185,7 @@ function jsx() {
       move(BottomLayerIndex);
     }
   } else {
+        Layer.loopLayerFromGroup ()
     // move group
   }
 }
