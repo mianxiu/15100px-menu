@@ -1,9 +1,9 @@
-﻿//  
-// 
+﻿//
+//
 // 执行后记得focus ps
 
 //alert("Selected Layer: " + activeDocument.activeLayer + " - ItemIndex: " + activeDocument.activeLayer.itemIndex)
-
+var isDontMove = false;
 function move(layerIndex) {
   var desc1 = new ActionDescriptor();
   var ref1 = new ActionReference();
@@ -111,47 +111,46 @@ function jsx() {
   };
 
   Layer.loopLayerFromGroup = function () {
-         if (isMoveToTop == true) {}
-         else{
-    var groupCount = 1
-    var j = curLayIndex - 1;
-    TopLayerIndex = curLayIndex - 2 + firstLayerIndex;
-    for (j; j > 0; j--) {
-      // 无Background  after = j ， 有 after = j-1
-      var after = j - 1 + firstLayerIndex;
-      var layer = new Layer(LyrId(after));
-      var layerKind = layer.kind();
-      
-      if(layerKind == 7 && groupCount > 0){
-          groupCount += 1
-          $.writeln("子层： ", groupCount)
-       }
-      if(layerKind == 13 && groupCount > 0){
-            groupCount -= 1
-            //$.writeln(groupCount)
+    if (isMoveToTop == true) {
+    } else {
+      var groupCount = 1;
+      var j = curLayIndex - 1;
+      TopLayerIndex = curLayIndex - 2 + firstLayerIndex;
+      for (j; j > 0; j--) {
+        // 无Background  after = j ， 有 after = j-1
+        var after = j + firstLayerIndex - 1;
+        var layer = new Layer(LyrId(after));
+        var layerKind = layer.kind();
+        $.writeln("层名字： ", layer.name());
+        if (layerKind == 7) {
+          groupCount += 1;
+          $.writeln("层开始： ", groupCount);
+        }
+        if (layerKind == 13) {
+          groupCount -= 1;
+          $.writeln("闭合：", groupCount);
+          BottomLayerIndex = after + 1;
+        }
+        if (groupCount == -1 && layerKind == 13) {
+          var lastLayer = new Layer(LyrId(after + 1));
+          $.writeln("结尾：", groupCount, " ", lastLayer.name(), after);
+          if (groupCount == -1 && lastLayer.kind() == 13) {
+            isDontMove = true;
           }
-      if(groupCount <=0){
-          
-           $.writeln("~~层： ", groupCount,"  layerKind :",layerKind," name: ",layer.name())
-           }
-     // if (layerKind == 13 || layerKind == 7) {
-     //   if (curLayIndex !== after + 2) {
-    //      BottomLayerIndex = after + 1;
-    //    }
-   //     break;
-   //   }
+          BottomLayerIndex = after + 1;
+          break;
+        }
+      }
     }
   };
-}
   // ------- 实例方法 -------
-  Layer.prototype.name = function() {
+  Layer.prototype.name = function () {
     var layerReference = new ActionReference();
-        layerReference.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("Nm  "));
-        layerReference.putIdentifier(charIDToTypeID("Lyr "), this.id);
+    layerReference.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("Nm  "));
+    layerReference.putIdentifier(charIDToTypeID("Lyr "), this.id);
     var descriptor = executeActionGet(layerReference);
     return descriptor.getString(charIDToTypeID("Nm  "));
-}
-
+  };
 
   /**
    * 获取当前实例图层的层级
@@ -179,13 +178,17 @@ function jsx() {
 
   if (curLayKind !== "LayerSet") {
     Layer.loopLayerBinarySearch();
+    if (isDontMove == false) {
+         if (isMoveToTop == true) move(TopLayerIndex) else move(BottomLayerIndex);
+    }
+   
+  } else {
+    Layer.loopLayerFromGroup();
     if (isMoveToTop == true) {
       move(TopLayerIndex);
     } else {
       move(BottomLayerIndex);
     }
-  } else {
-        Layer.loopLayerFromGroup ()
     // move group
   }
 }
