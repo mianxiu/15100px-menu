@@ -111,6 +111,7 @@ function jsx() {
   };
 
   Layer.loopLayerFromGroup = function () {
+    var groupCount = 1;
     if (isMoveToTop == true) {
       // todo
       var i = curLayIndex;
@@ -128,28 +129,27 @@ function jsx() {
 
         var layerKind = layer.kind();
         $.writeln("层名字： ", layer.name());
-        if (layerKind == 7) {
+        if (layerKind == 13) {
           groupCount += 1;
           $.writeln("层开始： ", groupCount);
         }
-        if (layerKind == 13) {
+        if (layerKind == 7) {
           groupCount -= 1;
           $.writeln("闭合：", groupCount);
-          TopLayerIndex  = forward + 1;
+          TopLayerIndex = forward;
         }
-        if (groupCount == -1 && layerKind == 13) {
-          var lastLayer = new Layer(LyrId(forward  + 1));
-          // $.writeln("结尾：", groupCount, " ", lastLayer.name(), after);
-          if (groupCount == -1 && lastLayer.kind() == 13) {
+        if (groupCount == 0 && layerKind == 7) {
+          var lastLayer = new Layer(LyrId(forward-1));
+          $.writeln("结尾：", groupCount, " ", lastLayer.name(), after);
+          if (groupCount == 0 && lastLayer.kind() == 7) {
             isDontMove = true;
           }
-          TopLayerIndex  = forward + 1;
+          TopLayerIndex = forward;
           isEnd = true;
           break;
         }
       }
     } else {
-      var groupCount = 1;
       var j = curLayIndex - 1;
       TopLayerIndex = curLayIndex - 2 + firstLayerIndex;
       for (j; j > 0; j--) {
@@ -169,7 +169,7 @@ function jsx() {
         }
         if (groupCount == -1 && layerKind == 13) {
           var lastLayer = new Layer(LyrId(after + 1));
-          // $.writeln("结尾：", groupCount, " ", lastLayer.name(), after);
+          $.writeln("结尾：", groupCount, " ", lastLayer.name(), after);
           if (groupCount == -1 && lastLayer.kind() == 13) {
             isDontMove = true;
           }
@@ -219,13 +219,16 @@ function jsx() {
     else move(BottomLayerIndex);
   } else {
     Layer.loopLayerFromGroup();
-    if (isDontMove == false && isEnd == true) {
-      if (isMoveToTop == true) move(TopLayerIndex);
-      else move(BottomLayerIndex);
-    } else {
-      if (isMoveToTop == true) move(TopLayerIndex);
-      else move(1);
+    if (isDontMove == false) {
+      if (isEnd == true) {
+        if (isMoveToTop == true) move(TopLayerIndex);
+        else move(BottomLayerIndex);
+      } else {
+        if (isMoveToTop == true) move(TopLayerIndex);
+        else move(1);
+      }
     }
+
     // move group
   }
 }
