@@ -1,3 +1,6 @@
+import photoshop_action.baseStr as baseStr
+
+
 def s(layerIndex: str):
     jsx = (
         r"""
@@ -15,37 +18,28 @@ def s(layerIndex: str):
     )
 
 
-def moveToIndex(layerIndex: str, isTop=True):
-    if isTop is True:
-        mLayerIndex = layerIndex
+def moveToIndex(layerIndex: str, isMoveToTop=True):
+    if isMoveToTop is True:
+        isTrue = "true"
     else:
-        mLayerIndex = layerIndex - 1
-    jsx = (
-        r"""
-    var desc1 = new ActionDescriptor();
-    var ref1 = new ActionReference();
-    ref1.putEnumerated( charIDToTypeID( "Lyr " ), charIDToTypeID( "Ordn" ), charIDToTypeID( "Trgt" ) );
-    desc1.putReference( charIDToTypeID( "null" ), ref1 );
-    var ref2 = new ActionReference();
-    ref2.putIndex( charIDToTypeID( "Lyr " ), """
-        + mLayerIndex
-        + r""" );
-    desc1.putReference( charIDToTypeID( "T   " ), ref2 );
-    desc1.putBoolean( charIDToTypeID( "Adjs" ), false );
-    executeAction( charIDToTypeID( "move" ), desc1, DialogModes.NO );
-    """
-    )
+        isTrue = "false"
+    jsx = ""
 
     return jsx
 
 
-def moveLayerToTopOrBottom(isTop: bool = True):
-    if isTop is True:
+def moveLayerToTopOrBottom(isMoveToTop: bool = True):
+    if isMoveToTop is True:
         boolStr = "true"
     else:
         boolStr = "false"
     jsx = (
-        r"""
+        r""""""
+        + baseStr.init()
+        + r"""
+var isDontMove = false;
+var isEnd = false;
+
 function move(layerIndex) {
   var desc1 = new ActionDescriptor();
   var ref1 = new ActionReference();
@@ -59,6 +53,7 @@ function move(layerIndex) {
 }
 
 function jsx() {
+  var layerCount = 30000;
   var isMoveToTop = """
         + boolStr
         + r"""
@@ -72,29 +67,6 @@ function jsx() {
   var curLay = doc.activeLayer;
   var curLayIndex = curLay.itemIndex;
   var curLayKind = curLay.typename;
-
-
-  /**
-   * 图层类的构造函数，传入一个图层ID
-   * @param id
-   * @constructor
-   */
-  function Layer(id) {
-    this.id = id;
-  }
-
-  /**
-   * 高效遍历图层
-   * @param callback
-   */
-
-  function LyrId(index) {
-    var ref = new ActionReference();
-    ref.putIndex(charIDToTypeID("Lyr "), index);
-    var desc = executeActionGet(ref);
-    var id = desc.getInteger(stringIDToTypeID("layerID"));
-    return id;
-  }
 
   var firstLayerIndex = 0;
   try {
@@ -112,24 +84,22 @@ function jsx() {
     // 开始逐级遍历图层index，根据index来获取到图层实例
     // up find
     if (isMoveToTop == true) {
-      layerCount = 30000;
       for (i; i < layerCount + 1; i++) {
         // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
-        var forward = i + firstLayerIndex - 1;
-
+        var forward = i + firstLayerIndex;
         try {
           var layer = new Layer(LyrId(forward));
         } catch (e) {
           // 向上遍历
-          TopLayerIndex = forward - 1;
+          TopLayerIndex = forward;
           break;
         }
 
         var layerKind = layer.kind();
 
         if (layerKind == 13 || layerKind == 7) {
-          TopLayerIndex = forward;
-          $.writeln(TopLayerIndex);
+          TopLayerIndex = forward - firstLayerIndex;
+          //$.writeln(TopLayerIndex);
           break;
         }
       }
@@ -150,63 +120,84 @@ function jsx() {
   };
 
   Layer.loopLayerFromGroup = function () {
-    var j = curLayIndex - 1;
-    TopLayerIndex = curLayIndex - 2 + firstLayerIndex;
-    selectMulitLayerRef1.putIndex(stringIDToTypeID("layer"), TopLayerIndex);
-    for (j; j > 0; j--) {
-      // 无Background  after = j ， 有 after = j-1
-      var after = j - 1 + firstLayerIndex;
-      var layer = new Layer(LyrId(after));
-      var layerKind = layer.kind();
+    var groupCount = 1;
+    if (isMoveToTop == true) {
+      // todo
+      var i = curLayIndex;
+      for (i; i < layerCount + 1; i++) {
+        // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
+        var forward = i + firstLayerIndex;
+        try {
+          var layer = new Layer(LyrId(forward));
+        } catch (e) {
+          // 向上遍历
+          TopLayerIndex = forward;
+          break;
+        }
 
-      if (layerKind == 13 || layerKind == 7) {
-        if (curLayIndex !== after + 2) {
+        var layerKind = layer.kind();
+        //$.writeln("层名字： ", layer.name());
+        if (layerKind == 13) {
+          groupCount += 1;
+          //$.writeln("层开始： ", groupCount);
+        }
+        if (layerKind == 7) {
+          groupCount -= 1;
+          //$.writeln("闭合：", groupCount);
+          TopLayerIndex = forward;
+        }
+        if (groupCount == 0 && layerKind == 7) {
+          var lastLayer = new Layer(LyrId(forward - 1));
+          //$.writeln("结尾：", groupCount, " ",curLayIndex, i,forward-1);
+          if (curLayIndex == forward) {
+            isDontMove = true;
+          }
+          TopLayerIndex = forward;
+          isEnd = true;
+          break;
+        }
+      }
+    } else {
+      var j = curLayIndex - 1;
+      TopLayerIndex = curLayIndex - 2 + firstLayerIndex;
+      for (j; j > 0; j--) {
+        var after = j + firstLayerIndex - 1;
+        var layer = new Layer(LyrId(after));
+        var layerKind = layer.kind();
+        if (layerKind == 7) {
+          groupCount += 1;
+        }
+        if (layerKind == 13) {
+          groupCount -= 1;
           BottomLayerIndex = after + 1;
         }
-        break;
+        if (groupCount == -1 && layerKind == 13) {
+          var lastLayer = new Layer(LyrId(after + 1));
+          if (groupCount == -1 && lastLayer.kind() == 13) {
+            isDontMove = true;
+          }
+          BottomLayerIndex = after + 1;
+          isEnd = true;
+          break;
+        }
       }
     }
   };
 
-  // ------- 实例方法 -------
-
-  /**
-   * 获取当前实例图层的层级
-   * @return {number}
-   */
-  Layer.prototype.index = function () {
-    var layerReference = new ActionReference();
-    layerReference.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("ItmI"));
-    layerReference.putIdentifier(charIDToTypeID("Lyr "), this.id);
-    var descriptor = executeActionGet(layerReference);
-    return descriptor.getInteger(charIDToTypeID("ItmI"));
-  };
-
-  /**
-   * 获取当前实例图层的类型
-   * @return {number}
-   */
-  Layer.prototype.kind = function () {
-    var layerReference = new ActionReference();
-    layerReference.putProperty(charIDToTypeID("Prpr"), stringIDToTypeID("layerKind"));
-    layerReference.putIdentifier(charIDToTypeID("Lyr "), this.id);
-    var descriptor = executeActionGet(layerReference);
-    return descriptor.getInteger(stringIDToTypeID("layerKind"));
-  };
 
   if (curLayKind !== "LayerSet") {
     Layer.loopLayerBinarySearch();
-    if (isMoveToTop == true) {
-      move(TopLayerIndex);
-    } else {
-      move(BottomLayerIndex);
+    }else{
+      Layer.loopLayerFromGroup();
     }
-  } else {
-    // move group
-  }
+    
+    if (isDontMove == false) {
+      if (isMoveToTop == true) move(TopLayerIndex);
+      else move(BottomLayerIndex);
+    }
+  
 }
-app.activeDocument.suspendHistory("moveTo", "jsx()");  
+app.activeDocument.suspendHistory("moveTo", "jsx()");
     """
     )
-
     return jsx

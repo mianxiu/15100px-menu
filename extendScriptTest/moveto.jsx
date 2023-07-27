@@ -18,7 +18,9 @@ function move(layerIndex) {
 }
 
 function jsx() {
-  var isMoveToTop = true;
+  var layerCount = 30000;
+  var isMoveToTop = false;
+
 
   var TopLayerIndex = 0;
   var BottomLayerIndex = 0;
@@ -74,7 +76,6 @@ function jsx() {
     // 开始逐级遍历图层index，根据index来获取到图层实例
     // up find
     if (isMoveToTop == true) {
-      layerCount = 30000;
       for (i; i < layerCount + 1; i++) {
         // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
         var forward = i + firstLayerIndex;
@@ -89,8 +90,8 @@ function jsx() {
         var layerKind = layer.kind();
 
         if (layerKind == 13 || layerKind == 7) {
-          TopLayerIndex = forward;
-          $.writeln(TopLayerIndex);
+          TopLayerIndex = forward - firstLayerIndex;
+          //$.writeln(TopLayerIndex);
           break;
         }
       }
@@ -115,7 +116,6 @@ function jsx() {
     if (isMoveToTop == true) {
       // todo
       var i = curLayIndex;
-      layerCount = 30000;
       for (i; i < layerCount + 1; i++) {
         // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
         var forward = i + firstLayerIndex;
@@ -128,20 +128,20 @@ function jsx() {
         }
 
         var layerKind = layer.kind();
-        $.writeln("层名字： ", layer.name());
+        //$.writeln("层名字： ", layer.name());
         if (layerKind == 13) {
           groupCount += 1;
-          $.writeln("层开始： ", groupCount);
+          //$.writeln("层开始： ", groupCount);
         }
         if (layerKind == 7) {
           groupCount -= 1;
-          $.writeln("闭合：", groupCount);
+          //$.writeln("闭合：", groupCount);
           TopLayerIndex = forward;
         }
         if (groupCount == 0 && layerKind == 7) {
-          var lastLayer = new Layer(LyrId(forward-1));
-          $.writeln("结尾：", groupCount, " ", lastLayer.name(), after);
-          if (groupCount == 0 && lastLayer.kind() == 7) {
+          var lastLayer = new Layer(LyrId(forward - 1));
+          //$.writeln("结尾：", groupCount, " ",curLayIndex, i,forward-1);
+          if (curLayIndex == forward) {
             isDontMove = true;
           }
           TopLayerIndex = forward;
@@ -157,19 +157,19 @@ function jsx() {
         var after = j + firstLayerIndex - 1;
         var layer = new Layer(LyrId(after));
         var layerKind = layer.kind();
-        $.writeln("层名字： ", layer.name());
+        //$.writeln("层名字： ", layer.name());
         if (layerKind == 7) {
           groupCount += 1;
-          $.writeln("层开始： ", groupCount);
+          //$.writeln("层开始： ", groupCount);
         }
         if (layerKind == 13) {
           groupCount -= 1;
-          $.writeln("闭合：", groupCount);
+          //$.writeln("闭合：", groupCount);
           BottomLayerIndex = after + 1;
         }
         if (groupCount == -1 && layerKind == 13) {
           var lastLayer = new Layer(LyrId(after + 1));
-          $.writeln("结尾：", groupCount, " ", lastLayer.name(), after);
+          //$.writeln("结尾：", groupCount, " ", curLayIndex , after);
           if (groupCount == -1 && lastLayer.kind() == 13) {
             isDontMove = true;
           }
@@ -215,21 +215,14 @@ function jsx() {
 
   if (curLayKind !== "LayerSet") {
     Layer.loopLayerBinarySearch();
-    if (isMoveToTop == true) move(TopLayerIndex);
-    else move(BottomLayerIndex);
   } else {
     Layer.loopLayerFromGroup();
-    if (isDontMove == false) {
-      if (isEnd == true) {
-        if (isMoveToTop == true) move(TopLayerIndex);
-        else move(BottomLayerIndex);
-      } else {
-        if (isMoveToTop == true) move(TopLayerIndex);
-        else move(1);
-      }
-    }
-
-    // move group
   }
+  if (isDontMove == false) {
+    if (isMoveToTop == true) move(TopLayerIndex);
+    else move(BottomLayerIndex);
+  }
+
+  // move group
 }
 app.activeDocument.suspendHistory("moveTo", "jsx()");
