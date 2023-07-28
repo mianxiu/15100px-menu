@@ -35,7 +35,8 @@ import photoshop_action.layer as layer
 ACTION = {
     "select": group.select_all_layer_in_group(),
     "color": group.alert(),
-    "moveToIndexTop": layer.moveToIndex(),
+    "moveToTop": layer.moveLayerToTopOrBottom(True),
+    "moveToBottom": layer.moveLayerToTopOrBottom(False),
 }
 
 

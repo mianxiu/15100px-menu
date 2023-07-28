@@ -229,7 +229,17 @@ def windowFocusHook(*args):
                     lambda: sendPhotoshopActionStr("color"),
                     suppress=True,
                 )
+                keyboard.add_hotkey(
+                    "tab+w",
+                    lambda: sendPhotoshopActionStr("moveToTop"),
+                    suppress=True,
+                )
 
+                keyboard.add_hotkey(
+                    "tab+s",
+                    lambda: sendPhotoshopActionStr("moveToBottom"),
+                    suppress=True,
+                )
                 mouse.on_right_click(hide_overlay)
                 IS_ADD_TAB = True
 
