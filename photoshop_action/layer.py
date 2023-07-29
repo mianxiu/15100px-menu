@@ -172,10 +172,6 @@ function jsx() {
           BottomLayerIndex = after + 1;
         }
         if (groupCount == -1 && layerKind == 13) {
-          var lastLayer = new Layer(LyrId(after + 1));
-          if (groupCount == -1 && lastLayer.kind() == 13) {
-            isDontMove = true;
-          }
           BottomLayerIndex = after + 1;
           isEnd = true;
           break;
@@ -197,7 +193,10 @@ function jsx() {
     }
   
 }
+try{
 app.activeDocument.suspendHistory("moveTo", "jsx()");
+}catch(e){}
+
     """
     )
     return jsx

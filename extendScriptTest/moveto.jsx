@@ -21,7 +21,6 @@ function jsx() {
   var layerCount = 30000;
   var isMoveToTop = false;
 
-
   var TopLayerIndex = 0;
   var BottomLayerIndex = 0;
 
@@ -135,12 +134,12 @@ function jsx() {
         }
         if (layerKind == 7) {
           groupCount -= 1;
-          //$.writeln("闭合：", groupCount);
+          $.writeln("闭合：", groupCount);
           TopLayerIndex = forward;
         }
         if (groupCount == 0 && layerKind == 7) {
           var lastLayer = new Layer(LyrId(forward - 1));
-          //$.writeln("结尾：", groupCount, " ",curLayIndex, i,forward-1);
+          $.writeln("结尾：", groupCount, " ", curLayIndex, i, forward - 1);
           if (curLayIndex == forward) {
             isDontMove = true;
           }
@@ -160,19 +159,14 @@ function jsx() {
         //$.writeln("层名字： ", layer.name());
         if (layerKind == 7) {
           groupCount += 1;
-          //$.writeln("层开始： ", groupCount);
+          $.writeln("层开始： ", groupCount);
         }
         if (layerKind == 13) {
           groupCount -= 1;
-          //$.writeln("闭合：", groupCount);
           BottomLayerIndex = after + 1;
         }
         if (groupCount == -1 && layerKind == 13) {
-          var lastLayer = new Layer(LyrId(after + 1));
-          //$.writeln("结尾：", groupCount, " ", curLayIndex , after);
-          if (groupCount == -1 && lastLayer.kind() == 13) {
-            isDontMove = true;
-          }
+
           BottomLayerIndex = after + 1;
           isEnd = true;
           break;
@@ -218,6 +212,7 @@ function jsx() {
   } else {
     Layer.loopLayerFromGroup();
   }
+  $.writeln(TopLayerIndex, "--", BottomLayerIndex, "-", isDontMove);
   if (isDontMove == false) {
     if (isMoveToTop == true) move(TopLayerIndex);
     else move(BottomLayerIndex);
@@ -225,4 +220,7 @@ function jsx() {
 
   // move group
 }
+try{
 app.activeDocument.suspendHistory("moveTo", "jsx()");
+}catch(e){
+    }
