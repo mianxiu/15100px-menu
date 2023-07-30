@@ -4,7 +4,9 @@
 
 //alert("Selected Layer: " + activeDocument.activeLayer + " - ItemIndex: " + activeDocument.activeLayer.itemIndex)
 var isDontMove = false;
+var isBegin = false;
 var isEnd = false;
+
 function move(layerIndex) {
   var desc1 = new ActionDescriptor();
   var ref1 = new ActionReference();
@@ -14,7 +16,9 @@ function move(layerIndex) {
   ref2.putIndex(charIDToTypeID("Lyr "), layerIndex);
   desc1.putReference(charIDToTypeID("T   "), ref2);
   desc1.putBoolean(charIDToTypeID("Adjs"), false);
-  executeAction(charIDToTypeID("move"), desc1, DialogModes.NO);
+  try {
+    executeAction(charIDToTypeID("move"), desc1, DialogModes.NO);
+  } catch (e) {}
 }
 
 function jsx() {
@@ -31,9 +35,9 @@ function jsx() {
   var curLayIndex = curLay.itemIndex;
   var curLayKind = curLay.typename;
 
-  // var curLayParent = curLay.parent;
-  // var parentIndex = curLayParent.itemIndex;
-  // var curLayParentName = curLayParent.name;
+  var curLayParent = curLay.parent;
+  var parentIndex = curLayParent.itemIndex;
+  var curLayParentName = curLayParent.name;
 
   //$.writeln("---SELECT------ curLayerIndex: ", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName, " parentIndex: ", parentIndex," typename: ",curLayKind);
 
@@ -67,112 +71,52 @@ function jsx() {
     BottomLayerIndex = 1;
   }
 
-  Layer.loopLayerBinarySearch = function (callback) {
+  Layer.loopLayerFromGroup = function () {
+    var groupCount = 1;
     var i = curLayIndex;
     var j = curLayIndex - 1;
     // 索引起始值，会受是否有背景图层影响，需要做一下处理
-
+    layerCount = 30000;
+    //$.writeln("---SELECT------ curLayerIndex: ", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName, " parentIndex: ", parentIndex, " typename: ", curLayKind,"i=",i,"j=",j);
+    if (parentIndex != undefined) {
+      TopLayerIndex = parentIndex - 1;
+    } else {
+      TopLayerIndex = layerCount;
+    }
     // 开始逐级遍历图层index，根据index来获取到图层实例
     // up find
-    if (isMoveToTop == true) {
-      for (i; i < layerCount + 1; i++) {
-        // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
-        var forward = i + firstLayerIndex;
-        try {
-          var layer = new Layer(LyrId(forward));
-        } catch (e) {
-          // 向上遍历
-          TopLayerIndex = forward;
-          break;
-        }
-
-        var layerKind = layer.kind();
-
-        if (layerKind == 13 || layerKind == 7) {
-          TopLayerIndex = forward - firstLayerIndex;
-          //$.writeln(TopLayerIndex);
-          break;
-        }
+    function findGroup(layerKind) {
+     
+      if (layerKind == 7) {
+        $.writeln("开始", groupCount, "+", layerKind);
+        groupCount += 1;
       }
-    } else {
-      for (j; j > 0; j--) {
-        // down
-        // 无Background  after = j ， 有 after = j-1
-        var after = j - 1 + firstLayerIndex;
-        var layer = new Layer(LyrId(after));
-        var layerKind = layer.kind();
 
-        if (layerKind == 13 || layerKind == 7) {
-          BottomLayerIndex = after + 1;
-          break;
-        }
+      if (layerKind == 13) {
+        $.writeln("关闭", groupCount, "-", layerKind);
+        groupCount -= 1;
       }
     }
-  };
 
-  Layer.loopLayerFromGroup = function () {
-    var groupCount = 1;
-    if (isMoveToTop == true) {
-      // todo
-      var i = curLayIndex;
-      for (i; i < layerCount + 1; i++) {
-        // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
-        var forward = i + firstLayerIndex;
+    for (i; i < layerCount + 1; i++) {
+      // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
+      if (i < TopLayerIndex) {
+          
         try {
-          var layer = new Layer(LyrId(forward));
-        } catch (e) {
-          // 向上遍历
-          TopLayerIndex = forward;
-          break;
-        }
+        var layer = new Layer(LyrId(i));
 
-        var layerKind = layer.kind();
-        //$.writeln("层名字： ", layer.name());
-        if (layerKind == 13) {
-          groupCount += 1;
-          //$.writeln("层开始： ", groupCount);
-        }
-        if (layerKind == 7) {
-          groupCount -= 1;
-          $.writeln("闭合：", groupCount);
-          TopLayerIndex = forward;
-        }
-        if (groupCount == 0 && layerKind == 7) {
-          var lastLayer = new Layer(LyrId(forward - 1));
-          $.writeln("结尾：", groupCount, " ", curLayIndex, i, forward - 1);
-          if (curLayIndex == forward) {
-            isDontMove = true;
-          }
-          TopLayerIndex = forward;
-          isEnd = true;
-          break;
-        }
+      } catch (e) {  
+         break
       }
-    } else {
-      var j = curLayIndex - 1;
-      TopLayerIndex = curLayIndex - 2 + firstLayerIndex;
-      for (j; j > 0; j--) {
-        // 无Background  after = j ， 有 after = j-1
-        var after = j + firstLayerIndex - 1;
-        var layer = new Layer(LyrId(after));
-        var layerKind = layer.kind();
-        //$.writeln("层名字： ", layer.name());
-        if (layerKind == 7) {
-          groupCount += 1;
-          $.writeln("层开始： ", groupCount);
-        }
-        if (layerKind == 13) {
-          groupCount -= 1;
-          BottomLayerIndex = after + 1;
-        }
-        if (groupCount == -1 && layerKind == 13) {
+       var layerKind = layer.kind();
+       $.writeln("开始","i=",i, " ",groupCount, "+", layerKind);
+      
 
-          BottomLayerIndex = after + 1;
-          isEnd = true;
-          break;
-        }
+       
+        findGroup(layerKind);
       }
     }
+    //for (j; j > 0; j--) {}
   };
   // ------- 实例方法 -------
   Layer.prototype.name = function () {
@@ -207,12 +151,12 @@ function jsx() {
     return descriptor.getInteger(stringIDToTypeID("layerKind"));
   };
 
-  if (curLayKind !== "LayerSet") {
-    Layer.loopLayerBinarySearch();
-  } else {
-    Layer.loopLayerFromGroup();
+  Layer.loopLayerFromGroup();
+
+  if (isBegin == false) {
+    isDontMove = true;
   }
-  $.writeln(TopLayerIndex, "--", BottomLayerIndex, "-", isDontMove);
+  $.writeln(TopLayerIndex, "--", BottomLayerIndex, "-", isDontMove, " ", isBegin);
   if (isDontMove == false) {
     if (isMoveToTop == true) move(TopLayerIndex);
     else move(BottomLayerIndex);
@@ -220,7 +164,5 @@ function jsx() {
 
   // move group
 }
-try{
+
 app.activeDocument.suspendHistory("moveTo", "jsx()");
-}catch(e){
-    }
