@@ -72,7 +72,7 @@ function jsx() {
   }
 
   Layer.loopLayerFromGroup = function () {
-    var groupCount = 1;
+    var groupCount = 0;
     var i = curLayIndex;
     var j = curLayIndex - 1;
     // 索引起始值，会受是否有背景图层影响，需要做一下处理
@@ -88,35 +88,46 @@ function jsx() {
     function findGroup(layerKind) {
      
       if (layerKind == 7) {
-        $.writeln("开始", groupCount, "+", layerKind);
+        
         groupCount += 1;
+        $.writeln("组开始 ", groupCount, "+", layerKind);
       }
 
       if (layerKind == 13) {
-        $.writeln("关闭", groupCount, "-", layerKind);
+        
         groupCount -= 1;
+        $.writeln("组结束 ", groupCount, "-", layerKind);
       }
+  
+    
     }
 
     for (i; i < layerCount + 1; i++) {
       // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
       if (i < TopLayerIndex) {
-          
         try {
         var layer = new Layer(LyrId(i));
-
       } catch (e) {  
          break
       }
        var layerKind = layer.kind();
-       $.writeln("开始","i=",i, " ",groupCount, "+", layerKind);
-      
-
-       
+       var layerName = layer.name()
+       $.writeln("向上 ","i=",i, " ",groupCount, "+", layerKind,"+",layerName);
         findGroup(layerKind);
       }
     }
-    //for (j; j > 0; j--) {}
+    for (j; j > 0; j--) {
+        var layer = new Layer(LyrId(j));
+        var layerKind = layer.kind();
+        var layerName = layer.name()
+        $.writeln("向下 ","j=",j, " ",groupCount, "-", layerKind,"-",layerName);
+        
+        if(groupCount == 0 && layerKind == 13 ){
+           break
+        }else {
+             findGroup(layerKind);
+            }
+       }
   };
   // ------- 实例方法 -------
   Layer.prototype.name = function () {
