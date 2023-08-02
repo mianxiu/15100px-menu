@@ -24,7 +24,7 @@ function move(layerIndex) {
 
 function jsx() {
   var layerCount = 30000;
-  var isMoveToTop = true;
+  var isMoveToTop = false;
 
   var TopLayerIndex = 0;
   var BottomLayerIndex = 0;
@@ -80,6 +80,18 @@ function jsx() {
   var desc = executeActionGet(ref);
   var layerCount = desc.getInteger(charIDToTypeID("NmbL"));
 
+  //$.writeln("---SELECT------ curLayerIndex: ", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName, " parentIndex: ", parentIndex, " typename: ", curLayKind,"i=",i,"j=",j);
+  if (parentIndex != undefined) {
+    TopLayerIndex = parentIndex - 1;
+  } else {
+    TopLayerIndex = layerCount;
+  }
+
+  //
+  if (curLayIndex == TopLayerIndex) {
+    isDontMove = true;
+  }
+
   Layer.loopLayerFromGroup = function () {
     $.writeln("tu:", layerCount);
     //layerCount = 30000;
@@ -90,12 +102,6 @@ function jsx() {
     var j = curLayIndex - 1;
     // 索引起始值，会受是否有背景图层影响，需要做一下处理
 
-    //$.writeln("---SELECT------ curLayerIndex: ", curLay.itemIndex, " layername: ", curLay.name, " parentname: ", curLayParentName, " parentIndex: ", parentIndex, " typename: ", curLayKind,"i=",i,"j=",j);
-    if (parentIndex != undefined) {
-      TopLayerIndex = parentIndex - 1;
-    } else {
-      TopLayerIndex = layerCount;
-    }
     // 开始逐级遍历图层index，根据index来获取到图层实例
     // up find
     function findGroup(layerKind) {
@@ -110,21 +116,6 @@ function jsx() {
       }
     }
 
-    // for (i; i < TopLayerIndex  + 1; i++) {
-    //   // 不包含选中图层 forward = i  + firstLayerIndex， 包含选中图层 forward =  i - 1  + firstLayerIndex
-    //   if (i < TopLayerIndex) {
-    //     try {
-    //     var layer = new Layer(LyrId(i));
-    //   } catch (e) {
-    //      break
-    //   }
-    //    var layerKind = layer.kind();
-    //    var layerName = layer.name()
-    //    $.writeln("向上 ","i=",i, " ",groupCount, "+", layerKind,"+",layerName);
-    //     findGroup(layerKind);
-    //   }
-    // }
-
     for (j; j > 0; j--) {
       var layer = new Layer(LyrId(j));
       var layerKind = layer.kind();
@@ -133,6 +124,10 @@ function jsx() {
 
       if (groupCount == 0 && layerKind == 13) {
         BottomLayerIndex = j + 1;
+        if (curLayIndex == BottomLayerIndex) {
+          isDontMove = true;
+        }
+        $.writeln("最底 ", "j=", j, " ", groupCount, "-", layerKind, "-", layerName,"~~",curLayIndex ,"!!",BottomLayerIndex);
         break;
       } else {
         findGroup(layerKind);
@@ -172,37 +167,44 @@ function jsx() {
     return descriptor.getInteger(stringIDToTypeID("layerKind"));
   };
 
-  function runjsx() {
-    Layer.loopLayerFromGroup();
-
+  function runInGroup() {
     // if (isBegin == false) {
     //   isDontMove = true;
     // }
     $.writeln(TopLayerIndex, "--", BottomLayerIndex, "-", isDontMove, " ", isBegin);
     if (isDontMove == false) {
-      if (isMoveToTop == true) move(TopLayerIndex);
-      else move(BottomLayerIndex);
+      Layer.loopLayerFromGroup();
+      if (isMoveToTop == true) {
+        app.activeDocument.suspendHistory("moveToTop (in group)", "move(TopLayerIndex)");
+        //move(TopLayerIndex);
+      } else {
+        app.activeDocument.suspendHistory("moveToBottom(in group)", "move(BottomLayerIndex)");
+      }
     }
   }
 
-  function runjsxUp() {
-    Layer.loopLayerFromGroup();
-
-    if (isHasBackground == true) {
-      BottomLayerIndex = 1;
-    } else {
-      BottomLayerIndex = 0;
-    }
+  function runOutGroup() {
     if (isDontMove == false) {
-      if (isMoveToTop == true) move(TopLayerIndex);
-      else move(BottomLayerIndex);
+      Layer.loopLayerFromGroup();
+
+      if (isHasBackground == true) {
+        BottomLayerIndex = 1;
+      } else {
+        BottomLayerIndex = 0;
+      }
+      if (isMoveToTop == true) {
+        app.activeDocument.suspendHistory("moveToTop (out group)", "move(TopLayerIndex)");
+      } else {
+        app.activeDocument.suspendHistory("moveToBottom(out group)", "move(BottomLayerIndex)");
+      }
     }
   }
 
   if (parentIndex != undefined) {
-    app.activeDocument.suspendHistory("moveTo", "runjsx()");
+    runInGroup();
+    //app.activeDocument.suspendHistory("moveTo", "runjsx()");
   } else {
-    app.activeDocument.suspendHistory("moveToUp", "runjsxUp()");
+    runOutGroup();
   }
   // move group
 }
