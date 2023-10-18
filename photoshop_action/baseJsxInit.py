@@ -1,7 +1,10 @@
 import glob
 import os
+import re
 
 
+# todo 2023 10 17 need add init file
+# test how insert the variable to string
 def baseJsxInitFiles():
     # 文件夹路径
     folder_path = "G:\Github/15100px-menu\extendScriptTest/finish jsx/"
@@ -27,6 +30,27 @@ def baseJsxInitFiles():
     return file_contents
 
 
-f = baseJsxInitFiles()
-print(f["move_to_top_or_bottom"])
-print(f["select_all_layer_in_group"])
+# f = baseJsxInitFiles()
+
+
+def replaceJsxFilesStr(jsxString: str, replaceStr: str):
+    reg = r"=.*\/\*%Bool%\*\/"
+    return re.sub(reg, r"= " + replaceStr, jsxString)
+
+    # print(f["move_to_top_or_bottom"])
+
+
+def jsxFilesBooleanStr(jsxString: str, isTrue=True):
+    reg = r"=.*\/\*%Bool%\*\/"
+    if isTrue:
+        return re.sub(reg, r"= true", jsxString)
+    else:
+        return re.sub(reg, r"= false", jsxString)
+
+    # print(f["move_to_top_or_bottom"])
+
+
+# print(jsxFilesBooleanStr(f["move_to_top_or_bottom"], isTrue=False))
+
+# print(jsxFilesBooleanStr(f["move_to_top_or_bottom"], isTrue=True))
+# print(f["select_all_layer_in_group"])

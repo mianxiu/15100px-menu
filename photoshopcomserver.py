@@ -31,12 +31,25 @@ def runjsx(jsx):
 
 import photoshop_action.group as group
 import photoshop_action.layer as layer
+import photoshop_action.baseJsxInit as baseJsxInit
 
+initJsxDict = baseJsxInit.baseJsxInitFiles()
+
+JSXSTR_MOVE_TO_TOP = baseJsxInit.jsxFilesBooleanStr(
+    initJsxDict["move_to_top_or_bottom"], isTrue=True
+)
+JSXSTR_MOVE_TO_BOTTOM = baseJsxInit.jsxFilesBooleanStr(
+    initJsxDict["move_to_top_or_bottom"], isTrue=False
+)
+
+
+# print(JSXSTR_MOVE_TO_TOP)
+print(JSXSTR_MOVE_TO_BOTTOM)
 ACTION = {
     "select": group.select_all_layer_in_group(),
     "color": group.alert(),
-    "moveToTop": layer.moveLayerToTopOrBottom(True),
-    "moveToBottom": layer.moveLayerToTopOrBottom(False),
+    "moveToTop": JSXSTR_MOVE_TO_TOP,
+    "moveToBottom": JSXSTR_MOVE_TO_BOTTOM,
 }
 
 
