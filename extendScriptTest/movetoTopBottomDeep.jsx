@@ -96,10 +96,10 @@ function move(layerIndex) {
     return descriptor.getInteger(stringIDToTypeID("layerKind"));
   };
 
-  
-  function jsx() {
-  
+
+//
   var firstLayerIndex = 0;
+  function getBackgroundInfo() {
   try {
     activeDocument.backgroundLayer;
     isHasBackground = true;
@@ -111,10 +111,14 @@ function move(layerIndex) {
   var ref = new ActionReference();
   
   // 当前文档的图层数量属性key
+  // 图层数量不包含背景
   ref.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("NmbL"));
   ref.putEnumerated(charIDToTypeID("Dcmn"), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
   var desc = executeActionGet(ref);
-  var layerCount = desc.getInteger(charIDToTypeID("NmbL"));
+  layerCount = desc.getInteger(charIDToTypeID("NmbL"));
+  if(isHasBackground == true){
+  layerCount += firstLayerIndex
+  }
 }
 
 
@@ -124,7 +128,8 @@ function move(layerIndex) {
 // loopGround
 
 function loopLayer(){
-    for(var i=1;i<layerCount+1;i++){
+    getBackgroundInfo()
+    for(var i= firstLayerIndex;i<=layerCount;i++){
         var layer = new Layer(LyrId(i));
         $.writeln(layer.name())
         }
