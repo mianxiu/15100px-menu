@@ -24,7 +24,7 @@ function move(layerIndex) {
 
 function jsx() {
   var layerCount = 30000;
-  var isMoveToTop = false;
+  var isMoveToTop = true;
 
   var TopLayerIndex = 0;
   var BottomLayerIndex = 0;
