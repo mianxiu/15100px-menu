@@ -1,5 +1,289 @@
-python -m venv .
-./Scripts/Activate.ps1/bat
-pip install -r requirements.txt
+# Photoshop Menu
 
-install pywin32 maybe restart vscode
+Photoshop 原生浮动菜单与独立后台管理工具。
+
+v0.4.32：环绕菜单颜色标签边长放大50%，从14×14调整为21×21；容器98×56，两排四列无间距、无颜色文字，命中范围同步放大。
+
+v0.4.31：鼠标必须进入实际按钮或色块才可松键执行；中心、按钮间空白、菜单外、60ms展开动画未完成时松键均取消。结束选择后立即禁止后续命中，取消不可转为脚本提交。
+
+v0.4.30：修复v0.4.29中菜单始终透明的回归。实际入口通过 `SetWindowPos(SWP_SHOWWINDOW)` 显示窗口，淡入条件现在直接读取 `IsWindowVisible`，不再依赖 `WM_SHOWWINDOW` 消息缓存。新增真实窗口显示、淡入至不透明、固定模式松键保持、关闭后不重新变亮及反复重开测试。
+
+v0.4.29：处理旧帧双闪的初版，用户实机发现菜单不显示，不能视为完成验收；根因及后续修复见v0.4.30。准备时透明、松键或隐藏后立即透明的规则继续保留。
+
+v0.4.28：以响应速度和稳定性优先，保留资源预热与三档字体缓存。DXGI帧队列限制为一帧，绘制前通过可响应窗口消息的等待获取空位；松键、取消及准备消息可在等待期间处理。布局、面板、输入保护和会话号一次提交，避免三次同步往返；相同尺寸不重复重建交换链缓冲。按住／双击／取消、PS配色及60ms展开规则保留。
+
+v0.4.27：透明菜单改为DirectComposition预乘Alpha合成，移除色键挖空。文字、圆角及中心环的半透明边缘与桌面背景正确合成；PNG预览由预乘BGRA转换为直通RGBA，保留真实边缘透明度。普通菜单仍绘制不透明底色，展开淡入由合成效果控制。保留字体缓存和操作逻辑，不是切换UI框架。
+
+v0.4.26：修正屏幕边缘移位后原始按键起点的取消区可能覆盖色块的问题。未移动直接松键仍取消；鼠标离开起点12单位后解除起点保护，八个色块按实际边界选择。双击固定模式不使用起点取消区。菜单中心、空白及外部取消继续保留。
+
+v0.4.25：去掉中心标题与状态文字的第二层偏移阴影，使用与按钮一致的正文对比度，避免浅色主题的浮雕重影。标题、按钮文字、数字及展开平移对齐物理像素，减少动画中半像素采样发虚。保留原字体、PS字号及按需字形缓存。
+
+v0.4.24：字体图集仅预备菜单源码中出现的字符及基础西文，不再烘焙整套中文。小／中／大三档字形共同缓存，切换PS字号直接选缓存，不重建、不缩放位图。文档名、任务名、错误信息或搜索中出现新字符时，帧开始前补充所需字符并批量更新小图集；同一字符不重复添加。屏幕DPI变化仍需要按新像素密度重建。当前旧版ImGui采用按需字符集合的批量图集更新，并非Blender式单字纹理增量上传。构建脚本自动生成静态字符清单，避免新增中文菜单漏字。
+
+v0.4.23：PS字号更新后，在菜单隐藏期间预先构建字体，避免将整套中文字库的构建延迟到第一次按CapsLock。保留完整中文覆盖及字体／GPU异常保护；隐藏期间仍休眠，不持续绘制。日志记录字体构建与弹出各阶段耗时，便于区分字体准备、面板识别和窗口显示延迟。
+
+v0.4.22：修复字号重建路径未检查DX11资源创建结果的问题。先显式构建并验证CPU字体图集，再创建GPU资源；失败时重建渲染设备，成功后才进入新帧。检测显卡设备失效并恢复，同时重建主视口的平台数据及隐藏显示保护。断言输出改写日志，避免阻塞式CRT弹窗；断言本身保留。保留PS字号同步，不通过关闭断言掩盖错误。新增运行中连续字号切换及GPU资源创建失败注入测试；实际PS重启场景仍需实机验收。
+
+v0.4.21：菜单文字读取 Photoshop 的界面字号小／中／大，替代固定的 Blender 11pt；映射为11／12／13逻辑像素的em，再乘当前显示器DPI一次。当前PS只读返回 `FontSize.LARGE`，菜单因此使用13单位。英文／中文保持同一em基准；忙碌、断开或未知字号保留上次值。字体纹理在下一帧开始前重建，布局按新文字宽度计算；色块不放大也不恢复文字。此为字号档位对齐，仍使用打包的Inter／Noto字体，不能保证与PS不同字体逐像素一致。PS界面字号修改可能需重启PS生效，见[Adobe字号说明](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/classes/preferences/preferencesinterface/)。
+
+v0.4.20：颜色标签只显示色块，移除标题、悬停色名和颜色文字提示。环绕标签卡片收紧为70×42 UI单位，色块仍为14×14、两排四列无间距，上下留白一致；点击与松键执行保持不变。
+
+当前统一入口已运行 v0.4.32，菜单与热键组件哈希核验一致；本次76项回归及隔离热键的最终EXE烟雾通过。v0.4.28独立菜单180次消息响应P95由3.935ms降至0.089ms；30次重开的可观测CPU渲染进度中位数为3.057ms（旧版2.648ms），不能据此宣称首帧显示更快。基准脚本为 `tools/benchmark-menu-response.py`，没有测量物理按键到屏幕显示的完整延迟。实体键鼠、动画及真实屏幕清晰度尚未完成实机验收。
+
+v0.4.19：按用户确认继续跟随 PS 配色，环绕标题／状态改为无底板阴影文字，取消常驻操作教程横条；固定和不可执行状态保留简短说明。中心环使用40段、内外双描边，高亮弧随鼠标实际角度移动。按钮提示改为 Blender 方向数字：4选择、8置顶、2置底，支持主键盘和数字小键盘，仅菜单打开且该项可执行时有效，松开 CapsLock 不重复执行；原 CapsLock+A/C/W/S 保留。右侧仍必须指定色块，不把数字6映射为默认颜色。数字提示按实际字宽右对齐。现有60ms展开、字体／尺寸与PS主题延续。当前仍使用整窗淡入，和Blender只对按钮淡入不同；抗锯齿、项目特有状态／标签和边缘避让也未做到逐像素等同，不宣称完全复刻。
+
+v0.4.18：CapsLock快速双击固定环绕菜单（第一次按住不超过220ms，松开后300ms内再次按下）。固定后松开键不执行、不自动关闭，点击按钮／色块执行，右键或Esc取消；切换到其他应用仍会关闭。单次按住继续滑动选择、松开执行。右键取消仅在自定义菜单显示且处于PS／菜单作用域时消费该次点击，菜单未显示时PS原生右键不受影响。旧菜单的延迟关闭事件带会话编号，不能关闭双击后新打开的菜单。
+
+v0.4.17：环绕菜单的标签区域由100×70缩为70×50 UI单位，面积减半；每个色块由20×20缩为14×14，仍是两排四列无间距排列。标题简化为“标签颜色”，悬停显示对应色名，字体大小和其他菜单按钮保持原尺寸。
+
+v0.4.16 按本机 Blender 5.2.1 LTS 默认值重做环绕菜单：60ms 线性中心展开与淡入、100 UI 单位半径、20 单位控件基准／30 单位单行按钮、0.4 圆角系数（8 单位）、12–19 单位中心方向圆环、11pt Inter 与 Noto Sans CJK 字体。字体随程序打包，按字体 em 校准当前渲染器，字号随显示器 DPI 缩放。菜单标题放在中心上方，操作与按键提示同行；中文按钮按内容计算宽度。边距以 5 单位文字留白／20 单位图标槽对齐。字体授权位于 `native/fonts`。
+
+按下 CapsLock 后从中心滑出，鼠标命中须等60ms动画完成；色块在60ms动画完成后接受点击或松开选择，避免运动中的重叠色块误选。中心12单位内取消，屏幕边缘仍保留初始唤出点取消区。配色按先前要求继续跟随 PS；无间距标签色块、任务状态属于本菜单扩展，不能视为 Blender 原生菜单的逐像素复制。现有 ImGui／DX11 与 Blender 字体抗锯齿仍可能有细微差别。
+
+实现参数对照 [Blender 5.2 动画处理](https://github.com/blender/blender/blob/blender-v5.2-release/source/blender/editors/interface/interface_handlers.cc)、[径向布局](https://github.com/blender/blender/blob/blender-v5.2-release/source/blender/editors/interface/interface_layout.cc)、[控件绘制](https://github.com/blender/blender/blob/blender-v5.2-release/source/blender/editors/interface/interface_widgets.cc)。可用 `--preview-animation-ms 0|30|60` 固定预览展开阶段；预览PNG体现位置，窗口淡入由Windows透明层执行。
+
+v0.4.15：CapsLock 配置为菜单键或组合键前缀时，在 Photoshop／本菜单作用域内即使同时按着 Ctrl、Shift、Alt 或 Win，也会拦截 CapsLock，未匹配的组合不执行动作。菜单刚隐藏但尚未交还焦点的短暂阶段仍保持拦截。同一次按键的自动重复与松开沿用首次按下的处理，不因切换焦点或修改设置而漏出半次按键。其他应用、禁用菜单或完全取消 CapsLock 绑定时保留原行为；不模拟按键强制改动用户原来的大写状态。
+
+v0.4.14 同时修复 v0.4.12–0.4.13 隐藏竞态导致的 `Forgot to call UpdatePlatformWindows()` 断言：每个已结束的帧都完成 ImGui 平台窗口更新，主窗口隐藏时禁止显示附属窗口并清理残留。不能通过“忽略”断言作为正常使用方式。
+
+v0.4.14：八个标签色块按两排四列无间距拼接，去除各色块圆角与常驻边框，悬停时使用色块内部高亮边框。色块之间不再有取消空隙；移出色块区域、回到环绕中心或移出菜单仍可取消。
+
+v0.4.13：菜单显示“空闲／执行中”，执行时显示操作名称和已等待秒数，并禁用重复执行。关闭后重新按住 CapsLock 可查看仍在运行的任务；菜单保留最近完成／失败的简要结果，详细错误见后台日志。这里监测的是本菜单提交的 Photoshop 操作，不代表 PS 内部所有后台任务或整个系统进程的状态；秒数是等待时长，不是完成百分比。状态直接使用现有任务事件，不额外轮询进程。
+
+v0.4.12：环绕菜单悬停色块时只在菜单内显示颜色名称，不再弹出独立的“灰色”等提示小窗。关闭菜单时防止渲染中的旧帧重建浮动窗口。移除旧的“参考颜色”选择器（只预览颜色、不执行图层标色）；图层标签仍通过八个固定色块直接执行。
+
+功能交付、真实 Photoshop 验收及后续 UXP / 任务队列 / 长任务规划见 [TODO.md](TODO.md)。
+
+v0.4.11 使用透明背景的环绕饼菜单 + JSX 脚本：按住 CapsLock 在鼠标附近呼出，滑到实际按钮或色块高亮，松开执行；回到中心、对角空隙或菜单外松开则取消。保留 CapsLock+A/C/W/S 组合键。Photoshop 内右键始终使用 PS 原生菜单，不再接管，也不再提供接管开关。
+
+菜单自动跟随 Photoshop“首选项 → 界面 → 颜色主题”的四档亮度（浅色、浅灰、深灰、深色）。背景、文字、边框、快捷键提示和悬停状态统一使用对应配色，图层标签色块保留原来的颜色。后台约每 3 秒只读查询一次 PS 界面设置；关闭首选项后等待一次刷新即可，无需重启。PS 忙碌、未连接或读取暂时失败时保留最近的主题，首次未读取到时使用深色。环绕菜单保留透明背景，v0.4.25起悬浮文字无阴影、无独立底板。此设置影响原生操作菜单，网页管理页配色不变。
+
+主题读取参考 [Photoshop 界面设置查询示例](https://github.com/boogalooper/UIColors/blob/master/UIcolors.jsx)，控件色值参考本机 PS 2023 的 `Required/UIColors.txt`。预览可用 `native/MenuHost.exe --preview-output .runtime/theme.png --preview-kind hold --preview-theme light-gray`；四个参数值为 `light`、`light-gray`、`dark-gray`、`dark`。
+
+v0.4.10 修复关闭时可能短暂露出矩形背景的问题：隐藏窗口期间保留透明样式，不在 Windows 完成隐藏之前撤掉透明层。下次打开菜单时再根据目标模式设置样式。关闭后命中区域立即失效，避免残留选择。
+
+悬停在画布时显示“画布操作”，提供选择组内图层和标签色块；悬停在图层面板时显示“图层操作”，额外提供上方移到顶部、下方移到底部。未知区域显示“通用操作”。不需要先点击面板；按下 CapsLock 时确定区域，菜单打开期间保持不变。输入框仍有焦点时暂停文档操作。修复了 v0.4.7–0.4.8 中识别结果正确、但环绕布局忽略识别结果而总显示相同内容的问题。
+
+图层标签颜色已针对当前 Photoshop 24.0.1 验证：无颜色（清除）、红、橙、黄、绿、蓝、紫、灰。点击图标立即应用到当前选中的一个或多个图层，无需确认；按住 CapsLock 时也可滑到具体色块上松开执行。停在色块区域外或只滑向右侧但未选中色块不会执行默认颜色；点击执行后再松开 CapsLock 不会重复执行。CapsLock+C 继续兼容原橙色快捷操作。
+
+“无颜色”会清除所选图层自身的标签，并逐一读回核验。父组仍有颜色时，PS 图层面板可能继续显示父组色；这不代表清除命令没有执行。清除图标提示和后台执行结果会说明这一点，不会擅自清除父组及影响其余图层。实机验证已覆盖“已有颜色 → 无颜色”和带橙色父组的子图层，而不只是对初始无色图层执行清除。
+
+颜色清单参考 [Adobe LabelColors 文档](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/modules/constants/#labelcolors)。当前覆盖 Photoshop 24.x 的原生标签；更新 Photoshop 后需重新核实新增颜色，不能将这份清单视为所有后续版本的完整清单。颜色命令内置于应用，不改变既有三个 JSX 文件的升级包格式。
+
+实机命令验证：`./Scripts/python.exe tools/verify-layer-labels.py` 在独立临时文档测试全部颜色、清除、单选、多选及未选图层不变，完成后关闭临时文档并恢复原文档。此验证不等于实体键鼠手势验收。
+
+- **C++ Dear ImGui 操作层**：按住 CapsLock 在鼠标附近显示按面板分流的环绕菜单，保留 PS 焦点限制与原生右键。
+- **Python + Tornado 后台**：管理 Photoshop COM 工作线程、配置、版本、升级包与生命周期。
+- **Web 后台管理**：查看状态、调整菜单及快捷键、安装升级与回滚脚本包、检查更新、查看日志。网页不执行图层操作。
+- **Windows 托盘**：打开后台管理、退出服务，统一应用图标。
+- **独立 Windows 热键进程**：C++ / Win32 键鼠钩子在独立进程中即时决定吞键，通过异步管道通知 Python；PS COM 与网页后台不参与实时拦截。
+
+v0.3.0 重做 PS 内的操作界面：灰色紧凑菜单、蓝色高亮、行图标、右侧快捷键、搜索及上下键/Enter 选择。Tab 唤出快速操作菜单；PS 内右键唤出上下文菜单，包含颜色标签、图层排序等子菜单。菜单内右键可打开上下文菜单；上下文菜单内再次右键关闭。
+
+v0.3.1 修复真实唤出时只显示原生标题条的问题：窗口以正常状态创建后隐藏，唤出时显式恢复可能的最小化状态。打包版验证了最小化恢复及连续隐藏/显示后的实际渲染；烟雾测试也检查隐藏窗口不得处于最小化状态。
+
+上述早期版本曾提供 Photoshop 右键接管；v0.4.9 已移除。旧设置中的 `right_click_open` 会强制归一为关闭，不能重新启用接管。早期默认 420×360 的菜单调整为 360×300，自定义尺寸保留。
+
+## EXE 版本
+
+`dist/PhotoshopMenu.exe` 是 Windows x64 单文件应用，已内置 Python 后台、C++ Dear ImGui 菜单、后台服务、管理网页、图标及内置 JSX。使用时无需安装 Python 或 Node.js，也无需复制源码文件夹。
+
+双击 EXE 后默认驻留托盘；双击托盘打开后台管理。在 Photoshop 前台且鼠标位于 PS 窗口内按住 CapsLock 唤出操作菜单。同版本再次启动会复用已有服务并打开管理窗口；v0.4.6 起，版本不同则明确报错，不复用旧服务。通过托盘或管理页的“退出服务”退出。
+
+应用升级流程：等待图层操作完成 → 从托盘或管理页退出服务 → 等待菜单、热键和主进程退出 → 替换统一入口 `dist/PhotoshopMenu.exe` 及其 SHA256 文件 → 重新打开该 EXE。管理页“当前运行版本”显示实际服务版本与程序路径。构建时旧 EXE 仍被占用，可先用 `./build-exe.ps1 -OutputDirectory dist/0.4.6` 暂存，完成退出后再复制到统一入口；暂存构建成功不代表运行版本已切换。设置和脚本包保留在原数据目录。
+
+设置、脚本升级包、日志与管理窗口配置保存在 `%LOCALAPPDATA%\PhotoshopMenu`，不会写入 EXE 的临时解压目录；替换 EXE 可保留这些数据。开发版仍使用项目 `.runtime`。可用 `--data-dir` 指定其他数据目录：
+
+```powershell
+.\dist\PhotoshopMenu.exe --headless
+.\dist\PhotoshopMenu.exe --port 15152 --data-dir D:\PhotoshopMenuData
+```
+
+管理窗口使用系统 Edge，找不到 Edge 时使用默认浏览器。Photoshop COM / ExtendScript 兼容条件与开发版一致。`dist/PhotoshopMenu.exe.sha256` 提供构建文件校验值。
+
+## 构建 EXE
+
+```powershell
+.\Scripts\python.exe -m pip install -r requirements-build.txt
+.\build-exe.ps1
+# 前端已构建时，可使用 .\build-exe.ps1 -SkipFrontend
+.\Scripts\python.exe tools/smoke-exe.py dist/PhotoshopMenu.exe
+```
+
+构建脚本优先使用 `.venv`，兼容工作区原来的 `Scripts` 环境。`PhotoshopMenu.spec` 固定单文件、无控制台、应用图标及 Windows 版本信息，并打入所需网页和 JSX 资源；未打入个人设置、日志或升级包。冻结模式的子进程和资源定位依据 [PyInstaller 运行时文档](https://pyinstaller.org/en/stable/runtime-information.html)。
+
+构建 EXE 时会先调用 `tools/build-hotkey-host.ps1` 编译 `native/HotkeyHost.cpp`，并将热键组件打入 EXE；开发启动脚本也会在组件缺失时编译。构建需要 PATH 中的 MinGW-w64 `g++.exe`（C++17）；热键 EXE 静态链接，运行时不需要 .NET 或编译器。原生菜单渲染可单独导出供视觉核验：
+
+```powershell
+.\Scripts\python.exe -m backend.overlay --preview-output .runtime\blender-menu-preview.png
+.\Scripts\python.exe -m backend.overlay --preview-output .runtime\blender-context-preview.png --preview-kind context
+```
+
+预览使用示例状态，不连接或操作 Photoshop 文档。热键组件的自测覆盖各 10000 组 CapsLock 和 Tab 按下/抬起、重复、修饰键、作用域切换与组合键；另外验证了真实钩子注册、配置管道及退出。快速实体按键仍需要在目标 PS 环境复测。
+
+烟雾测试将 EXE 复制到独立中文目录，验证 HTTP 与网页资源、原生菜单和托盘、设置保存与重启、脚本安装回滚、重复启动及退出清理；不执行 Photoshop 文档操作。
+
+## 从源码开始使用
+
+要求：Windows 10/11、Python 3.11、Node.js 18+、Microsoft Edge（管理窗口），以及支持 COM / ExtendScript 的 Photoshop。具体 Photoshop 版本兼容性需实机验证。
+
+首次准备（PowerShell，项目根目录）：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+cd frontend
+npm install
+npm run build
+cd ..
+.\start.ps1
+```
+
+`start.ps1` 优先使用 `.venv`，也兼容本工作区原来的 `Scripts/python.exe` 环境。当前工作区已安装依赖并完成前端构建。
+
+**默认启动只驻留托盘，Dear ImGui 菜单保持隐藏。** 双击托盘或选择“打开后台管理”可随时打开管理窗口；管理页面也可直接访问 http://127.0.0.1:15151 。设置中可启用“启动时打开后台管理窗口”。重复启动同一端口会复用后台并打开管理窗口。
+
+```powershell
+.\start.ps1 -Headless          # 后台运行，不自动打开管理窗口
+.\start.ps1 -Port 15152        # 更换端口
+.\Scripts\python.exe main.py --headless --no-desktop  # 仅运行后台管理服务
+```
+
+`app.py` 和 `photoshopcomserver.py` 保留为启动入口。`photoshopcomclient.sendSome(action)` 保留兼容接口，受后台焦点规则约束。
+
+## Photoshop 操作菜单
+
+先启动 Photoshop 并打开文档，使其主窗口处于前台，把鼠标放在画布或图层面板上，再按住 CapsLock 唤出对应环绕菜单。向可用方向滑动高亮选项，松开执行；颜色需要选中具体色块。中心、对角空隙、不可用方向、超出选择范围或窗口外均取消；滑过选项后回到中心也会取消。靠近屏幕边缘时菜单会整体避让，原始按下位置仍保留取消区，避免原地松开误执行。Photoshop 右键菜单保持原样。
+
+| 默认快捷键 | 动作 |
+| --- | --- |
+| CapsLock | 按住唤出，移动鼠标选择，松开执行；未选中则关闭 |
+| CapsLock+A（按住 CapsLock） | 选择组内图层 |
+| CapsLock+C | 设置橙色图层标签 |
+| CapsLock+W | 移到当前组或文档顶部 |
+| CapsLock+S | 移到当前组或文档底部 |
+| Esc | 收起菜单 |
+
+菜单中的按钮调用后台的同一组动作。成功执行后自动收起；左键或中键点击菜单外部取消，并消费这一组按下/抬起，避免误点 PSD。外部右键关闭菜单并保留原生右键行为。切换其他应用时不会截获该应用的点击或抢回焦点。
+
+CapsLock 的按下、重复及抬起由原生键盘钩子消费。首次按下立即显示菜单，重复按下不会重新打开；松开时按当前鼠标位置决定执行或取消，未渲染出选项时也只取消。默认子脚本使用 CapsLock+A/C/W/S，组合键执行后松开 CapsLock 不会再执行鼠标选项。Tab 恢复 PS 原生行为；旧版整套默认 Tab 组合会迁移，自定义绑定保留。实体按键及不同 PS 权限环境仍需复测。
+
+- 新唤出必须满足 PS 主窗口前台和鼠标在窗口内，接口或托盘也不能绕过。
+- 菜单取得焦点后允许继续交互；隐藏菜单会尝试恢复 PS 焦点。
+- 切换其他应用，或 PS 最小化、关闭后，菜单自动收起。
+- 显示位置限制在 PS 窗口与显示器工作区的交集内，按 DPI 缩放。
+- 管理页面始终独立，不需要 PS 焦点；图层操作则需 PS 或由它唤出的原生菜单取得焦点。
+- 可配置菜单尺寸、菜单唤出/收起快捷键、菜单内右键收起、启用开关。图层子脚本快捷键位于插件管理。保存后立即生效，并在重启后保留。
+
+COM 调用只在一个专用线程内串行执行。失败显示错误；断线与超时不会自动重试。超时不代表 Photoshop 停止执行，实际调用完成后才接受新的动作。升级或回滚期间禁止并发图层操作。
+
+## 插件管理
+
+本版本管理 **COM 执行的 JSX 脚本包**，不修改 Photoshop 安装目录，不安装 UXP / CEP 扩展。
+
+后台的“插件管理”支持：
+
+1. ZIP 上传预览：校验插件 ID、API 版本、文件清单、SHA256 与版本。
+2. 安装升级包：必须高于当前版本，切换后立即生效。
+3. 回滚上一版本；卸载升级包并恢复内置版本。
+4. 导出当前脚本包。
+5. 配置 HTTPS 更新清单后，检查更新、下载并预览，再安装。
+
+包结构必须恰好包含以下四个文件（文件直接放在 ZIP 根目录，最大 5 MiB）：
+
+```text
+manifest.json
+select_all_layer_in_group.jsx
+color_orange.jsx
+move_to_top_or_bottom.jsx
+```
+
+manifest 使用 `id: "photoshop-menu-actions"`、`api_version: 1`、三段数字版本和每个脚本的 SHA256。移动脚本需保留唯一的 `/*%Bool%*/` 参数标记。
+
+打包工具会自动生成清单与校验值，不修改当前安装：
+
+```powershell
+.\Scripts\python.exe tools/build-script-package.py --version 1.1.0
+# 自定义脚本目录
+.\Scripts\python.exe tools/build-script-package.py --version 1.2.0 --scripts D:\MyScripts --output .runtime\actions-1.2.0.zip
+```
+
+更新清单示例：
+
+```json
+{
+  "id": "photoshop-menu-actions",
+  "version": "1.1.0",
+  "url": "https://your-host.example/actions-1.1.0.zip",
+  "sha256": "完整ZIP的64位小写SHA256"
+}
+```
+
+当前没有预设或已托管的官方更新源，需要填写你自己的 HTTPS 清单地址；不配置更新源时仍可完整使用 ZIP 升级与回滚。这里升级的是图层脚本包，应用 Python / 前端版本升级仍需更新源码并重新安装依赖、构建。
+
+## 结构与开发
+
+```text
+main.py / app.py          启动入口
+backend/main.py          HTTP / WebSocket、后台管理与统一退出
+backend/desktop.py       PS 焦点、快捷键、窗口边界、托盘
+native/MenuHost.cpp      独立 C++ Dear ImGui / Win32 / DirectX 11 菜单
+backend/overlay.py       原生菜单预览导出兼容入口
+backend/control_window.py 独立后台管理窗口
+backend/photoshop_bridge.py 单线程 COM / JSX
+backend/settings.py      校验并原子保存设置
+backend/plugins.py       脚本包校验、版本切换、回滚、更新源
+frontend/                后台管理 WebUI（SolidJS + Vite）
+jsx/                     内置脚本包与 manifest
+.runtime/                设置、日志、升级包、管理浏览器配置（不提交）
+extendScriptTest/        原有实验代码与 PSD 样例
+```
+
+日志：`.runtime/service.log`（轮转保存）和 `.runtime/overlay.log`（原生菜单进程）。已安装脚本及回滚历史位于 `.runtime/plugins`。
+
+```powershell
+# 终端一：先完成一次前端构建，再启动后端
+.\.venv\Scripts\python.exe main.py --headless
+# 终端二：开发管理页面
+cd frontend
+npm run dev
+```
+
+开发地址 http://127.0.0.1:3001 代理后端 15151；更改后端端口时同步修改 Vite 配置。生产模式由后端提供 `frontend/dist`，无需额外启动前端进程。
+
+## 验证
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+cd frontend
+npm test
+npm run build
+```
+
+自动测试覆盖焦点作用域、PS 与屏幕边界、自定义快捷键、设置持久化、ZIP 上传及校验、升级回滚与重启恢复、在线下载校验、并发保护、HTTP / WebSocket、COM 线程和原生图标。
+
+测试使用模拟 Photoshop，不修改实际文档。实际 Photoshop 中仍需验证空组、嵌套组、背景层、锁定层和多选。组内选择沿用原算法，嵌套组边界可能只选中部分图层；跨显示器 DPI 和焦点恢复需要实机确认。
+
+图标源在 `frontend/public`。`tools/generate-icons.ps1` 可重新生成九种尺寸的 ICO 与 PNG。独立 EXE 的构建与验证方式见上文。
+
+
+v0.3.2 默认唤出键改为 CapsLock（大写键），热键核心改为独立 C++/Win32 EXE。回调使用固定大小按键状态和无锁单生产者/单消费者队列，无堆分配、JSON 解析或管道写入；管道线程解析配置后由消息队列交给 hook 线程应用，避免跨线程修改按键状态。单击松开唤出/收起，按住 CapsLock+A 执行选择脚本而不唤出；PS 作用域内消费按下、重复和抬起，不切换大写锁定，其他应用保留原键行为。已有自定义设置保留，可在后台更改。热键子进程异常退出后自动重启并重发当前配置；这不能检测 Windows 静默移除钩子的情况。自动测试覆盖真实注册/配置确认/退出和禁用作用域下终止进程后恢复，不操作 PS 文档。
+
+
+v0.4.0 将 PS 操作层迁移到独立 C++ Dear ImGui / Win32 / DirectX 11 进程，移除 Dear PyGui 依赖。通过本地 stdin/stdout 管道同步状态、菜单模式和动作，Python 只负责后台和 COM。隐藏菜单阻塞等待 Windows 消息，不刷新 GPU；启动时预热字体和 DX11 资源。搜索、上下键/Enter、鼠标点击、右键上下文、颜色选择器、浮动子菜单、DPI 字体重建和原生图标均保留。浮动子菜单同进程 HWND 纳入焦点/点击判断。`tools/build-menu-host.ps1` 使用 MinGW-w64 g++ 编译原生菜单；官方源码固定在 `native/vendor`，包含许可证及版本/SHA256 清单。
+
+
+v0.4.1 统一鼠标 hook 和 Dear ImGui 的 per-monitor 物理坐标，修复高 DPI 下菜单内点击被当成外部点击吞掉。后台 Edge 窗口按专用 user-data-dir 对应进程查找，拒绝关闭其他实例的同名窗口；正常烟雾测试不再显示临时管理窗口，显式 `--show-control-window` 才打开。增加跨进程 DPI 边界、同名窗口隔离、带空格的配置路径和默认 CapsLock 前缀迁移测试。图层脚本请求和结果写入 service.log。
+
+
+v0.4.2 增加 Photoshop 面板上下文菜单。原生鼠标 hook 只将点击 HWND 和根窗口写入固定队列；后台线程使用 GetGUIThreadInfo、父窗口链与可见控件特征识别画布（OWL.Document）和图层面板（填充/锁定/不透明度）。没有用鼠标悬停代替焦点；PS 保留画布键盘焦点时，以最后点击的面板为准。可识别的键盘焦点变化覆盖点击缓存，菜单打开后保持唤出时的上下文。
+
+画布菜单显示选择/标色与参考颜色，右键展开完整图层操作；图层菜单直接显示全部四个脚本。输入控件焦点下暂停脚本快捷键并拒绝脚本执行。其他面板、未识别的 PS 版本或控件退回通用菜单。这里使用窗口结构探测，不修改 Photoshop 进程或文档。后台“运行状态”显示当前识别面板；唤出上下文写入 service.log。
+
+只读检查当前 PS 控件：`./Scripts/python.exe tools/inspect-panels.py`。渲染预览可使用 `--preview-panel canvas|layers|text|generic`。实际复测：点击画布后按 CapsLock，关闭菜单，再点击图层面板空白区域后按 CapsLock，检查标题和内容切换；输入框焦点下应出现暂停提示。
+
+
+v0.4.3 按鼠标悬停区域优先选择面板上下文。后台每 100ms 采样一次，唤出时重新采样；使用 per-monitor 物理坐标及真实 WindowFromPoint 命中窗口，重叠的其他应用窗口不算 PS。菜单打开后保持上下文，鼠标进入菜单不引起跳变。悬停在未识别面板时退回通用菜单；鼠标不在 PS 内时，诊断状态才退回焦点/最后点击。输入框仍有键盘焦点时，悬停菜单可切换布局，但脚本动作保持暂停。复测时只需把鼠标移到画布/图层区域后按 CapsLock，不需要先点击。
+
+
+v0.4.4 修复操作完成后重新唤出菜单的竞态。触发菜单在 COM 执行前关闭并交还 PS 焦点；完成时不再关闭后来重新打开的菜单。隐藏前记录焦点归属，支持 ImGui 浮动子菜单；窗口显示、隐藏和监控判断使用同一把可重入锁。前台菜单只授权自己的后台恢复焦点。忙碌时保留最近的 PS 连接及文档状态，执行结束后立即恢复菜单可用性。增加 100 次执行期间快速重开、子菜单焦点恢复及忙碌状态回归测试。

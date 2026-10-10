@@ -1,0 +1,11 @@
+{
+  "id": "photoshop-menu-actions",
+  "version": "1.0.0",
+  "api_version": 1,
+  "name": "Photoshop Menu 图层操作",
+  "sha256": {
+    "select_all_layer_in_group.jsx": "da5964f882e53c1cfe8e7d9b35ae5fe110c7a7871a405e03e2ead7a5e24e41a6",
+    "color_orange.jsx": "08f23db54a438c2f7537fe42692dc42f9fe00d25fd9dd2ad172f8ad00c161b47",
+    "move_to_top_or_bottom.jsx": "be3883478a31ded75925f07dad919652f062db676080324faffb00791ad2dcd8"
+  }
+}

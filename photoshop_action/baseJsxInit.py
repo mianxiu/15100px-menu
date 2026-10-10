@@ -1,13 +1,14 @@
 import glob
 import os
 import re
+from pathlib import Path
 
 
 # todo 2023 10 17 need add init file
 # test how insert the variable to string
 def baseJsxInitFiles():
     # 文件夹路径
-    folder_path = "G:\Github/15100px-menu\extendScriptTest/finish jsx/"
+    folder_path = str(Path(__file__).resolve().parents[1] / "jsx")
 
     # 获取文件夹内所有的txt文件路径
     txt_files = glob.glob(folder_path + "/*.jsx")

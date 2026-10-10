@@ -1,0 +1,25 @@
+# Build one windowed executable, including its native-menu worker mode.
+from pathlib import Path
+
+root = Path(SPECPATH)
+a = Analysis(
+    [str(root / 'main.py')], pathex=[str(root)], binaries=[],
+    datas=[(str(root / 'frontend/dist'), 'frontend/dist'),
+                      (str(root / 'frontend/public/icon.ico'), 'frontend/public'),
+                      (str(root / 'native/HotkeyHost.exe'), 'native'),
+                      (str(root / 'native/MenuHost.exe'), 'native'),
+                      (str(root / 'native/fonts'), 'native/fonts'),
+                      (str(root / 'native/vendor/imgui/LICENSE.txt'), 'native/licenses/imgui'),
+                      (str(root / 'native/vendor/json/LICENSE.MIT'), 'native/licenses/json'),
+                      (str(root / 'native/vendor/manifest.json'), 'native/licenses'),
+                      (str(root / 'jsx'), 'jsx')],
+    hiddenimports=['win32timezone', 'backend.overlay'],
+    hookspath=[], runtime_hooks=[], excludes=['tkinter', 'matplotlib', 'dearpygui'], noarchive=False,
+)
+pyz = PYZ(a.pure)
+exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name='PhotoshopMenu',
+          debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
+          console=False, disable_windowed_traceback=False,
+          icon=str(root / 'frontend/public/icon.ico'),
+          version=str(root / 'tools/windows-version.txt'),
+          uac_admin=False)

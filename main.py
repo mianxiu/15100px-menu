@@ -1,0 +1,10 @@
+"""Start the Photoshop Menu local application."""
+import sys
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--overlay":
+        sys.argv.pop(1)
+        from backend.overlay import cli
+    else:
+        from backend.main import cli
+    cli()
