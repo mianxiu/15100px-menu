@@ -3,6 +3,7 @@ import ctypes
 from ctypes import wintypes as W
 import threading
 import logging
+from .photoshop_windows import workspace_root
 
 LABELS = {'generic': '通用操作', 'canvas': '画布', 'layers': '图层',
           'text': '输入控件'}
@@ -41,11 +42,12 @@ class PanelContext:
         # A click is the active editor in Photoshop even when OWL keeps the
         # keyboard focus on its document view. Never use mouse hover as focus.
         with self.lock:
-            self.clicked = (hwnd, root)
+            self.clicked = (hwnd, workspace_root(self.gui, root) or root)
             self.previous_focus = None
 
     def describe(self, hwnd, root):
         gui = self.gui
+        root = workspace_root(gui, root) or root
         if not hwnd or not gui.IsWindow(hwnd):
             return 'generic'
         chain, palette, seen = [], None, set()
@@ -90,7 +92,7 @@ class PanelContext:
         try:
             hwnd = self.gui.WindowFromPoint(win32api.GetCursorPos())
             # Do not treat another application's overlapping window as PS.
-            return hwnd if hwnd and self.gui.GetAncestor(hwnd, 2) == root else 0
+            return hwnd if hwnd and workspace_root(self.gui, hwnd) == (workspace_root(self.gui, root) or root) else 0
         finally:
             if previous:
                 user.SetThreadDpiAwarenessContext(previous)
@@ -107,6 +109,7 @@ class PanelContext:
                 return dict(self.current)
 
     def _snapshot_locked(self, root):
+        root = workspace_root(self.gui, root) or root
         clicked = self.clicked
         focus = self.focus_window(root)
         focused = self.describe(focus, root)

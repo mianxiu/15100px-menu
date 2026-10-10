@@ -136,6 +136,7 @@ class Desktop:
         self.visible = False
         self.hold_active = False
         self.menu_epoch = 0
+        self.document_caption = None
         self.stop = threading.Event()
         self.icons = None
         self.process = None
@@ -232,8 +233,10 @@ class Desktop:
                     if self.panel_context:
                         self.panel_context.record_click(event['hwnd'], event['root'])
                 elif event.get("type") == "action":
-                    logging.info('Native hook action: %s', event['action'])
-                    self.notify(event["action"])
+                    logging.info('Native hook action: %s cursor=%s', event['action'], event.get('cursor'))
+                    self.notify({'action':event['action'],'cursor':event['cursor']} if 'cursor' in event else event['action'])
+                elif event.get('type') == 'caps.trace':
+                    logging.info('CapsLock hook decision: %s', event)
                 elif event.get("type") == "configured":
                     logging.debug("Native hotkey settings acknowledged")
                 else:
@@ -267,6 +270,8 @@ class Desktop:
                 elif event.get('type') == 'action':
                     logging.info('Dear ImGui menu action: %s', event['action'])
                     self.notify({'action':event['action'], 'menu_epoch':event.get('session',self.menu_epoch)})
+                elif event.get('type') == 'selection':
+                    logging.info('Menu release decision: %s', event)
         except Exception:
             logging.exception('Dear ImGui menu event stream failed')
         finally:
@@ -275,7 +280,7 @@ class Desktop:
                 self.menu_ready.clear()
 
     def event(self, event):
-        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare'):
+        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document'):
             return
         with self.menu_lock:
             if self.process and self.process.poll() is None:
@@ -300,8 +305,8 @@ class Desktop:
         self._native_config()
 
     def _is_photoshop(self, hwnd):
-        return bool(hwnd and self.gui.IsWindow(hwnd) and not self.gui.IsIconic(hwnd)
-                    and self.gui.GetClassName(hwnd) == "Photoshop")
+        from .photoshop_windows import workspace_root
+        return bool(workspace_root(self.gui, hwnd))
 
     @window_transition
     def _scope(self):
@@ -352,6 +357,8 @@ class Desktop:
             try:
                 with self.window_lock:
                     scoped = self._scope()
+                    if scoped:
+                        self._refresh_document_name()
                     if not self.visible and self.panel_context and self._is_photoshop(self.gui.GetForegroundWindow()):
                         self.panel_context.snapshot(self.target)
                     if self.hwnd and not self.gui.IsWindow(self.hwnd):
@@ -382,6 +389,21 @@ class Desktop:
             if previous:
                 u.SetThreadDpiAwarenessContext(previous)
 
+    def _refresh_document_name(self):
+        from .document_caption import document_name
+        from .photoshop_windows import workspace_root
+        try:
+            root = workspace_root(self.gui, self.target)
+            if not root:
+                return
+            source = self.target if self.gui.GetClassName(self.target) == 'OWL.DocumentWindow' else root
+            name = document_name(self.gui.GetWindowText(source))
+            if name and name != self.document_caption:
+                self.document_caption = name
+                self.event({'type':'document', 'name':name})
+        except Exception:
+            logging.debug('Document caption unavailable', exc_info=True)
+
     @window_transition
     def _open(self, context=False, hold=False):
         open_started = time.perf_counter()
@@ -390,10 +412,19 @@ class Desktop:
         hwnd = self.gui.GetForegroundWindow()
         if not self.settings["enabled"] or not self._is_photoshop(hwnd):
             raise RuntimeError("请先让 Photoshop 主窗口获得焦点，再唤出操作菜单")
-        cursor, rect = win32api.GetCursorPos(), self.gui.GetWindowRect(hwnd)
+        from .photoshop_windows import workspace_root
+        cursor = win32api.GetCursorPos()
+        root = workspace_root(self.gui, hwnd)
+        rect = self.gui.GetWindowRect(root)
+        hovered = self.gui.WindowFromPoint(cursor)
+        if workspace_root(self.gui, hovered) == root:
+            floating = self.gui.GetWindowRect(self.gui.GetAncestor(hovered, 2))
+            rect = (min(rect[0], floating[0]), min(rect[1], floating[1]),
+                    max(rect[2], floating[2]), max(rect[3], floating[3]))
         if not (rect[0] <= cursor[0] < rect[2] and rect[1] <= cursor[1] < rect[3]):
             raise RuntimeError("鼠标需要位于 Photoshop 窗口内")
         self.target = hwnd
+        self._refresh_document_name()
         if not self.hwnd or not self.gui.IsWindow(self.hwnd):
             self._launch_overlay()
             raise RuntimeError("操作菜单正在初始化，请稍后再试")
@@ -442,7 +473,7 @@ class Desktop:
         return result
 
     @window_transition
-    def hold_release(self):
+    def hold_release(self, cursor=None):
         if not self.hold_active or not self.visible:
             return {"message": "操作菜单已收起"}
         self.hold_active = False
@@ -450,7 +481,12 @@ class Desktop:
             return self.hide(restore=False)
         # Resolve the physical cursor against rendered row rectangles in the
         # menu process; keyboard selection and stale hover never execute.
-        self.gui.SendMessage(self.hwnd, 0x800e, 0, 0)
+        if cursor is None:
+            # Compatibility callers still resolve in the renderer; production
+            # hook releases provide a frozen physical-key-up position.
+            self.gui.SendMessage(self.hwnd, 0x800e, 0, 0)
+        else:
+            self.gui.SendMessage(self.hwnd, 0x8015, cursor[0], cursor[1])
         return {"message": "已结束菜单选择"}
 
     @window_transition

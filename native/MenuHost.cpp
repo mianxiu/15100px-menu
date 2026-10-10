@@ -46,13 +46,15 @@ static ID3D11RenderTargetView* target;
 static bool running=true,opened=false,contextMode=false,focusSearch=false;
 static bool allowed=false,capable=false,rightHide=false;
 static std::string document="连接中…",notice;
-static bool taskBusy=false,taskFailed=false;
+static int renderedHit=-1,pendingHit=-1;
+static bool taskBusy=false,taskFailed=false,taskHasResult=false;
 static ULONGLONG taskStarted=0;
 static std::string taskName;
 static std::string taskStatus() {
     if (taskBusy) return "执行中："+(taskName.empty()?std::string("Photoshop 操作"):taskName)+
         " · "+std::to_string((GetTickCount64()-taskStarted)/1000)+" 秒";
-    if (!notice.empty()) return taskFailed?"最近操作失败 · 请查看后台日志":"空闲 · 最近操作已完成";
+    if (taskHasResult) return std::string(taskFailed?"空闲 · 上次失败：":"空闲 · 上次已完成：")+
+        (taskName.empty()?std::string("Photoshop 操作"):taskName);
     return "空闲 · 无菜单任务运行";
 }
 static void updateBusy(bool busy) {
@@ -236,6 +238,7 @@ static bool recoverRenderer() {
     return ImGui_ImplDX11_CreateDeviceObjects();
 }
 static void resetMenu() {
+    renderedHit=pendingHit=-1;
     search[0]=0;selection=0;focusSearch=!contextMode;
     holdRows={};
     labelRows={};
@@ -275,7 +278,9 @@ static std::string shortcut(const std::string& raw) {
 }
 static void accept(const Json& event) {
     std::string type=event.value("type","");
-    if (type=="status") {
+    if (type=="document") {
+        if (event.contains("name") && event["name"].is_string()) document=event["name"].get<std::string>();
+    } else if (type=="status") {
         const auto& data=event.at("data"); const auto& ps=data.at("photoshop");
         const std::string nextTheme=ps.value("ui_theme",uiTheme);
         if (knownTheme(nextTheme) && nextTheme!=uiTheme) {uiTheme=nextTheme;theme();}
@@ -293,12 +298,17 @@ static void accept(const Json& event) {
         if (event.value("busy",false) && event.contains("action")) {
             std::string action=event.value("action","");taskName=action;
             for (int i=0;i<4;++i) if (action==actions[i]) taskName=labels[i];
-            for (const auto& label:labelColors) if (action==std::string("label.")+label.id) taskName=label.name;
-            notice.clear();taskFailed=false;
+            for (const auto& label:labelColors) if (action==std::string("label.")+label.id) taskName=std::string(label.name)+"标签";
+            notice.clear();taskFailed=false;taskHasResult=false;
         }
         updateBusy(event.value("busy",false));
     }
-    else if (type=="notice") {notice=event.value("message","");taskFailed=!event.value("ok",true);}
+    else if (type=="notice") {
+        notice=event.value("message","");
+        if (event.value("scope","")=="operation") {
+            taskFailed=!event.value("ok",true);taskHasResult=true;
+        }
+    }
     else if (type=="popup.prepare") { contextMode=event.value("mode","quick")=="context";resetMenu(); }
 }
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LPARAM);
@@ -326,15 +336,34 @@ static void setHoldMode(bool enabled) {
     setOpacity(enabled?0.f:1.f);
     if (enabled) GetCursorPos(&holdOrigin);
 }
-static void finishHold(POINT point) {
+static void finishHold(POINT point,bool requireHighlight=false,const POINT* currentOverride=nullptr) {
     if (!holdMode || holdFinished || pinned) return;
     int chosen=holdActionAt(point);
+    const int frozenHit=chosen;
+    if (requireHighlight && chosen!=renderedHit) chosen=-1;
+    POINT current=point;int currentHit=-1;
+    if (requireHighlight) {
+        bool sampled=currentOverride!=nullptr;
+        if (sampled) current=*currentOverride;
+        else sampled=GetCursorPos(&current)!=0;
+        if (sampled) currentHit=holdActionAt(current);
+        // A late position may veto a frozen release, never select a new item.
+        // Moving out while the release travels through IPC cancels immediately.
+        if (!sampled || currentHit!=chosen) chosen=-1;
+    }
+    if (requireHighlight && !selfTest) std::cout<<Json({{"type","selection"},{"session",menuEpoch},
+        {"cursor",{point.x,point.y}},{"frozen_hit",frozenHit},{"current_cursor",{current.x,current.y}},
+        {"current_hit",currentHit},{"highlight",renderedHit},{"chosen",chosen}}).dump()<<std::endl;
     holdFinished=true;pieReady=false;
     setOpacity(0.f);
     if (chosen>=4) send((std::string("label.")+labelColors[chosen-4].id).c_str());
     else send(chosen<0?"hide":actions[chosen]);
 }
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    if (msg==WM_APP+21) {
+        if (IsWindowVisible(hwnd)) finishHold({static_cast<LONG>(wp),static_cast<LONG>(lp)},true);
+        return 0;
+    }
     if (msg==WM_APP+11) return renderedFrames;
     // Read-only diagnostic used by the real SetWindowPos lifecycle regression.
     if (msg==WM_APP+18) return static_cast<LRESULT>(std::lround(compositionOpacity*1000));
@@ -549,6 +578,7 @@ static void drawPie() {
     }
     pieReady=!holdFinished;
     POINT cursor{};GetCursorPos(&cursor);int selected=holdActionAt(cursor);
+    pendingHit=selected;
     auto caption=[&](const char* text,float y) {
         auto extent=ImGui::CalcTextSize(text);
         ImVec2 at={roundf(pieCenter.x-extent.x*.5f),roundf(y)};
@@ -597,10 +627,28 @@ static void drawPie() {
             draw->VtxBuffer[v].pos.y+=roundf(offsets[i].y*(fac-1));
         }
     }
-    caption(taskStatus().c_str(),pieCenter.y+45*scale);
     // Only show exceptional state; the normal pie has no tutorial banner.
     const char* hint=pinned?"已固定 · 右键 / Esc 关闭":panelKind==3 || inputFocused?"输入框编辑中":!canExecute()?"当前不可执行":nullptr;
     if (hint) caption(hint,pieCenter.y+65*scale);
+    // Reuse the prewarmed small font; document captions never affect hit areas.
+    ImFont* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    std::string name=document;
+    const float maxWidth=240*scale;
+    auto width=[&](const std::string& text){return font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text.c_str()).x;};
+    if (width(name)>maxWidth) {
+        do {
+            size_t last=name.size()-1;
+            while (last && (static_cast<unsigned char>(name[last])&0xc0)==0x80) --last;
+            name.resize(last);
+        } while (!name.empty() && width(name+"…")>maxWidth);
+        name+="…";
+    }
+    draw->AddText(font,font->FontSize,{roundf(pieCenter.x-width(name)*.5f),roundf(pieCenter.y+120*scale)},
+                  tint(ImGuiCol_TextDisabled),name.c_str());
+    const std::string status=taskStatus();
+    draw->AddText(font,font->FontSize,
+                  {roundf(pieCenter.x-width(status)*.5f),roundf(pieCenter.y+120*scale+font->FontSize+5*scale)},
+                  tint(ImGuiCol_TextDisabled),status.c_str());
 }
 static void drawMenu() {
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->Pos);
@@ -868,18 +916,30 @@ int main() {
             accept({{"type","status"},{"data",{{"photoshop",{{"busy",true}}},{"settings",settings}}}});
             if (canExecute() || taskStarted!=started || taskStatus().find("选择组内图层")==std::string::npos)
                 throw std::runtime_error("Running task status lost on reopen/status refresh");
-            accept({{"type","notice"},{"ok",false},{"message","Operation timed out"}});
+            accept({{"type","notice"},{"scope","operation"},{"ok",false},{"message","Operation timed out"}});
             if (taskStatus().find("执行中")==std::string::npos)
                 throw std::runtime_error("Timeout must not imply COM task stopped");
             accept({{"type","operation"},{"busy",false}});resetMenu();
             if (taskStatus().find("失败")==std::string::npos || notice.empty())
                 throw std::runtime_error("Failure status lost after reopening");
             accept({{"type","operation"},{"busy",true},{"action","select"}});
-            accept({{"type","notice"},{"ok",true},{"message","Completed"}});
+            accept({{"type","notice"},{"scope","operation"},{"ok",true},{"message","Completed"}});
             accept({{"type","operation"},{"busy",false}});resetMenu();
             if (!canExecute() || taskStatus().find("已完成")==std::string::npos)
                 throw std::runtime_error("Completion state failed");
-            notice.clear();taskFailed=false;
+            notice.clear();taskFailed=false;taskHasResult=false;
+            accept({{"type","notice"},{"scope","interaction"},{"ok",false},{"message","Focus changed"}});
+            if (taskStatus().find("失败")!=std::string::npos || taskHasResult)
+                throw std::runtime_error("Menu interaction error must not become a task failure");
+            accept({{"type","operation"},{"busy",true},{"action","label.gray"}});
+            accept({{"type","notice"},{"scope","operation"},{"ok",false},{"message","Verification failed"}});
+            accept({{"type","operation"},{"busy",false}});resetMenu();
+            if (taskStatus().find("上次失败：灰色标签")==std::string::npos)
+                throw std::runtime_error("Historical failure must identify its action");
+            auto previousResult=taskStatus();
+            accept({{"type","notice"},{"scope","interaction"},{"ok",false},{"message","Menu cancelled"}});
+            if (taskStatus()!=previousResult) throw std::runtime_error("Interaction overwrote task result");
+            notice.clear();taskFailed=false;taskHasResult=false;
             panelKind=1;if (!rowVisible(0) || rowVisible(2)) throw std::runtime_error("Canvas panel routing failed");
             panelKind=3;if (rowVisible(0)) throw std::runtime_error("Text panel routing failed");
             panelKind=2;if (!rowVisible(3)) throw std::runtime_error("Layer panel routing failed");
@@ -1059,6 +1119,38 @@ int main() {
                     holdFinished=false;pieReady=true;before=testedActions.size();commitLabel(i);finishHold(middle);
                     if (testedActions.size()!=before+1) throw std::runtime_error("Click plus release dispatched twice");
                 }
+                auto swatch=labelRows[1];POINT swatchPoint={(swatch.left+swatch.right)/2,(swatch.top+swatch.bottom)/2};
+                // Production releases use a frozen key-up point and require
+                // the same candidate to have appeared in a submitted frame.
+                holdFinished=false;pieReady=true;renderedHit=5;
+                auto blankPoint=point(0,0);
+                finishHold(blankPoint,true,&blankPoint);
+                if (testedActions.back()!="hide") throw std::runtime_error("Blank release selected a later swatch");
+                holdFinished=false;pieReady=true;renderedHit=-1;
+                finishHold(swatchPoint,true,&swatchPoint);
+                if (testedActions.back()!="hide") throw std::runtime_error("Unhighlighted release executed");
+                holdFinished=false;pieReady=true;renderedHit=4;
+                finishHold(swatchPoint,true,&swatchPoint);
+                if (testedActions.back()!="hide") throw std::runtime_error("Different highlighted swatch executed");
+                holdFinished=false;pieReady=true;renderedHit=5;
+                finishHold(swatchPoint,true,&swatchPoint);
+                if (testedActions.back()!="label.red") throw std::runtime_error("Highlighted frozen swatch failed");
+                for (int i=0;i<8;++i) {
+                    auto cell=labelRows[i];POINT from={(cell.left+cell.right)/2,(cell.top+cell.bottom)/2};
+                    auto next=labelRows[(i+1)%8];POINT other={(next.left+next.right)/2,(next.top+next.bottom)/2};
+                    for (POINT now:{blankPoint,other}) {
+                        holdFinished=false;pieReady=true;renderedHit=4+i;
+                        finishHold(from,true,&now);
+                        if (testedActions.back()!="hide") throw std::runtime_error("Fast swatch exit committed");
+                    }
+                    holdFinished=false;pieReady=true;renderedHit=4+i;
+                    finishHold(blankPoint,true,&from);
+                    if (testedActions.back()!="hide") throw std::runtime_error("Late cursor selected a new swatch");
+                    holdFinished=false;pieReady=true;renderedHit=4+i;
+                    finishHold(from,true,&from);auto before=testedActions.size();finishHold(from,true,&from);
+                    if (testedActions.back()!=std::string("label.")+labelColors[i].id || testedActions.size()!=before)
+                        throw std::runtime_error("Stable release did not commit exactly once");
+                }
                 labelTestActionCount=testedActions.size();holdFinished=false;pieReady=true;
             }
             if (selfTest && frames==25) {
@@ -1102,7 +1194,7 @@ int main() {
                 std::cout<<"Dear ImGui self-test passed: search, keyboard selection, Enter and mouse click dispatch; radial directions, centre cancellation, edge origin, single release, immediate swatch click; 100 hidden platform frames\n";break;
             }
             if (!preview.empty() && frames==20) {screenshot(preview);if (!previewLive) break;}
-            swapChain->Present(1,0);
+            if (SUCCEEDED(swapChain->Present(1,0))) renderedHit=holdFinished?-1:pendingHit;
             finishPlatformFrame();
         }
     } catch (const std::exception& error) {std::cerr<<error.what()<<"\n";return 1;}

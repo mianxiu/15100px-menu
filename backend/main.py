@@ -14,6 +14,7 @@ from tornado import web, websocket
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from .photoshop_bridge import ACTIONS, COMMANDS, PhotoshopBridge, load_scripts
 from .layer_labels import LABEL_COLORS
+from .commands import command_contracts, validate_command
 from .desktop import Desktop, Tray
 from .control_window import ControlWindow
 from .settings import Settings
@@ -21,7 +22,7 @@ from .plugins import Plugins, MAX_PACKAGE
 from .paths import ROOT, runtime_dir
 
 APP_ID = "photoshop-menu"
-APP_VERSION = "0.4.35"
+APP_VERSION = "0.4.49"
 
 
 def service_identity():
@@ -159,8 +160,11 @@ class Application(web.Application):
                 self.clients.discard(client)
 
     async def dispatch(self, action, args):
+        if action == "commands.list":
+            return {"commands": command_contracts()}
         if action == "status":
             return {"photoshop": await self.bridge.status(), "actions": ACTIONS,
+                    "commands": command_contracts(),
                     "label_colors": LABEL_COLORS,
                     "version": APP_VERSION, "settings": self.preferences.get(), "plugin": self.plugins.status(),
                     "data_dir": str(self.runtime),
@@ -177,8 +181,7 @@ class Application(web.Application):
                     "tray_error": self.tray.error if self.tray else ""}
         if action == "action.execute":
             name = args.get("name")
-            if not isinstance(name, str) or name not in COMMANDS:
-                raise ValueError("未知的图层操作")
+            validate_command(name, args.get("params"))
             logging.info("Script action requested: %s", name)
             if not self.desktop:
                 raise RuntimeError("无桌面模式不提供图层操作")
@@ -187,17 +190,19 @@ class Application(web.Application):
                 raise RuntimeError("操作进行中，请稍后再试")
             try:
                 async with self.operation_lock:
-                    await self.broadcast({"type": "operation", "busy": True, "action": name})
                     # Close the triggering menu before COM. A new CapsLock menu
                     # opened during execution must survive this action's finish.
                     async with self.panel_lock:
+                        if 'menu_epoch' in args and args['menu_epoch'] != self.desktop.menu_epoch:
+                            return {"message":"已忽略旧菜单操作"}
+                        await self.broadcast({"type": "operation", "busy": True, "action": name})
                         await asyncio.to_thread(self.desktop.hide)
                     result = await self.bridge.execute(name)
                 logging.info("Script action completed: %s", name)
-                await self.broadcast({"type": "notice", "ok": True, "message": result["message"]})
+                await self.broadcast({"type": "notice", "scope": "operation", "action": name, "ok": True, "message": result["message"]})
                 return result
             except Exception as exc:
-                await self.broadcast({"type": "notice", "ok": False, "message": str(exc)})
+                await self.broadcast({"type": "notice", "scope": "operation", "action": name, "ok": False, "message": str(exc)})
                 raise
             finally:
                 await self.broadcast({"type": "operation", "busy": self.bridge.busy})
@@ -209,6 +214,11 @@ class Application(web.Application):
                     return {"message":"已忽略旧菜单事件"}
                 if action in ("panel.open","panel.context") or action=="panel.toggle" and not self.desktop.visible:
                     await self.broadcast({"type":"popup.prepare","mode":"context" if action=="panel.context" else "quick"})
+                if action=="panel.hold_release" and 'cursor' in args:
+                    cursor=args['cursor']
+                    if not isinstance(cursor,list) or len(cursor)!=2 or any(type(v) is not int or not -2147483648<=v<=2147483647 for v in cursor):
+                        raise ValueError('无效的松键鼠标坐标')
+                    return await asyncio.to_thread(self.desktop.hold_release,cursor=cursor)
                 return await asyncio.to_thread(getattr(self.desktop, action.split(".")[1]))
         if action == "overlay.ready":
             if not self.desktop:
@@ -294,16 +304,16 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         try:
             event_args = {}
             if isinstance(action, dict):
-                event_args = {'menu_epoch':action['menu_epoch']}
+                event_args = {key:action[key] for key in ('menu_epoch','cursor') if key in action}
                 action = action['action']
-                if not app.desktop or event_args['menu_epoch'] != app.desktop.menu_epoch:
+                if 'menu_epoch' in event_args and (not app.desktop or event_args['menu_epoch'] != app.desktop.menu_epoch):
                     return
             mapping = {"toggle": "panel.toggle", "context": "panel.context", "open": "panel.open", "hide": "panel.hide", "dismiss": "panel.dismiss", "hold_begin": "panel.hold_begin", "hold_release": "panel.hold_release", "hold_cancel": "panel.hold_cancel", "control": "control.open", "quit": "service.quit"}
             mapping['hold_pin'] = 'panel.hold_pin'
             await app.dispatch(mapping.get(action, "action.execute"), event_args if action in mapping else {**event_args,"name": action})
         except Exception as exc:
             logging.exception("Desktop action failed")
-            await app.broadcast({"type": "notice", "ok": False, "message": str(exc)})
+            await app.broadcast({"type": "notice", "scope": "interaction", "ok": False, "message": str(exc)})
     def notify(action):
         loop.call_soon_threadsafe(lambda: asyncio.create_task(notification(action)))
     async def poll_status():

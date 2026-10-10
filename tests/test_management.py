@@ -43,7 +43,7 @@ class ManagementTests(unittest.TestCase):
         desktop=Desktop('http://localhost',lambda action:None,copy.deepcopy(DEFAULTS))
         desktop.hwnd,desktop.target,desktop.visible=20,10,True
         desktop.gui=SimpleNamespace(GetForegroundWindow=lambda:21,IsWindow=lambda hwnd:True,
-            IsIconic=lambda hwnd:False,GetClassName=lambda hwnd:'Photoshop' if hwnd==10 else 'ImGui')
+            IsIconic=lambda hwnd:False,GetAncestor=lambda hwnd,mode:hwnd,IsWindowVisible=lambda hwnd:True,IsWindowEnabled=lambda hwnd:True,GetClassName=lambda hwnd:'Photoshop' if hwnd==10 else 'ImGui')
         with patch('win32process.GetWindowThreadProcessId',side_effect=lambda hwnd:(0,300 if hwnd in (20,21) else 400)):
             self.assertTrue(desktop._scope())
             self.assertFalse(desktop._is_menu_window(22))
@@ -160,7 +160,7 @@ class ManagementTests(unittest.TestCase):
         desktop = Desktop('http://localhost',lambda action:None,copy.deepcopy(DEFAULTS))
         desktop.hwnd = 2
         desktop.gui = SimpleNamespace(GetForegroundWindow=lambda:1, IsWindow=lambda hwnd:True,
-            IsIconic=lambda hwnd:False, GetClassName=lambda hwnd:'Photoshop' if hwnd==1 else 'Other',
+            IsIconic=lambda hwnd:False, GetAncestor=lambda hwnd,mode:hwnd,IsWindowVisible=lambda hwnd:True,IsWindowEnabled=lambda hwnd:True,WindowFromPoint=lambda point:1, GetClassName=lambda hwnd:'Photoshop' if hwnd==1 else 'Other',
             GetWindowRect=lambda hwnd:(100,100,900,900),SetWindowLong=Mock(),SetWindowPos=Mock(),SetForegroundWindow=Mock(),SendMessage=Mock())
         with patch('win32api.GetCursorPos',return_value=(50,50)):
             with self.assertRaisesRegex(RuntimeError,'鼠标'):
@@ -184,6 +184,9 @@ class ManagementTests(unittest.TestCase):
             def GetForegroundWindow(self): return self.foreground
             def IsWindow(self,hwnd): return hwnd in (1,2,3)
             def IsIconic(self,hwnd): return self.minimized and hwnd==1
+            def GetAncestor(self,hwnd,mode): return hwnd
+            def IsWindowVisible(self,hwnd): return True
+            def IsWindowEnabled(self,hwnd): return True
             def GetClassName(self,hwnd): return 'Photoshop' if hwnd==1 else 'Other'
         desktop.gui = Gui()
         desktop.hwnd = 2
@@ -205,6 +208,7 @@ class ManagementTests(unittest.TestCase):
         desktop._is_menu_window = lambda hwnd: hwnd == 2
         desktop.gui = SimpleNamespace(GetWindowRect=lambda hwnd:(100,100,500,500),
             GetForegroundWindow=lambda:2, IsWindow=lambda hwnd:True, IsIconic=lambda hwnd:False,
+            GetAncestor=lambda hwnd,mode:hwnd,IsWindowVisible=lambda hwnd:True,IsWindowEnabled=lambda hwnd:True,
             GetClassName=lambda hwnd:'Photoshop' if hwnd==1 else 'Other')
         self.assertFalse(desktop.outside_click((200,200)))
         self.assertTrue(desktop.visible)
@@ -222,7 +226,7 @@ class ManagementTests(unittest.TestCase):
         desktop.hwnd, desktop.target, desktop.visible = 2, 1, True
         desktop._is_menu_window = lambda hwnd: hwnd == 2
         desktop.gui = SimpleNamespace(GetForegroundWindow=lambda:3, IsWindow=lambda hwnd:True,
-            IsIconic=lambda hwnd:False, GetClassName=lambda hwnd:'Photoshop',
+            IsIconic=lambda hwnd:False, GetAncestor=lambda hwnd,mode:hwnd,IsWindowVisible=lambda hwnd:True,IsWindowEnabled=lambda hwnd:True,WindowFromPoint=lambda point:1, GetClassName=lambda hwnd:'Photoshop',
             ShowWindow=Mock(),SetForegroundWindow=Mock())
         desktop.hide()
         desktop.gui.SetForegroundWindow.assert_not_called()

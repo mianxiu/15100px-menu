@@ -1,4 +1,6 @@
 import asyncio
+import io
+import json
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -9,6 +11,16 @@ from backend.photoshop_bridge import PhotoshopBridge
 
 
 class MenuFocusTests(unittest.TestCase):
+    def test_capslock_decision_is_logged_without_submitting_an_action(self):
+        notify = Mock()
+        desktop = Desktop('http://localhost', notify)
+        event = {'type':'caps.trace','message':256,'process_scope':True,'blocked':True}
+        desktop.native = SimpleNamespace(stdout=io.StringIO(json.dumps(event)+'\n'))
+        with self.assertLogs(level='INFO') as logs:
+            desktop._read_native_events()
+        self.assertTrue(any('CapsLock hook decision' in item for item in logs.output))
+        notify.assert_not_called()
+
     def test_pie_is_centered_on_invocation_and_clamped_to_work_area(self):
         self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(960,520),1), (650,300,620,440))
         self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(1910,1030),1), (1300,600,620,440))
@@ -51,6 +63,16 @@ class MenuFocusTests(unittest.TestCase):
         desktop.hold_release()
         self.assertEqual(desktop.gui.SendMessage.call_count, 1)
 
+    def test_release_uses_frozen_keyup_coordinates_including_negative_monitor(self):
+        desktop = Desktop('http://localhost', lambda action:None)
+        desktop.hwnd, desktop.visible, desktop.hold_active = 2, True, True
+        desktop._scope = lambda:True
+        desktop.gui = SimpleNamespace(SendMessage=Mock())
+        desktop.hold_release(cursor=[-250, 730])
+        desktop.gui.SendMessage.assert_called_once_with(2, 0x8015, -250, 730)
+        desktop.hold_release(cursor=[-100, 900])
+        self.assertEqual(desktop.gui.SendMessage.call_count, 1)
+
     def test_hold_release_after_focus_change_cancels_without_execution(self):
         desktop = Desktop('http://localhost', lambda action:None)
         desktop.hwnd, desktop.visible, desktop.hold_active = 2, True, True
@@ -85,8 +107,59 @@ class MenuFocusTests(unittest.TestCase):
             self.assertEqual(foreground[0], 1)
             self.assertFalse(desktop.visible)
 
+    def test_right_close_route_restores_focus_and_allows_fresh_hold(self):
+        desktop = Desktop('http://localhost', lambda action:None)
+        desktop.hwnd, desktop.target = 2, 1
+        desktop.visible = desktop.hold_active = True
+        foreground = [2]
+        desktop._is_menu_window = lambda hwnd: hwnd == 2
+        desktop._is_photoshop = lambda hwnd: hwnd == 1
+        desktop.gui = SimpleNamespace(
+            GetForegroundWindow=lambda:foreground[0], IsWindow=lambda hwnd:True,
+            ShowWindow=lambda *args:foreground.__setitem__(0, 3),
+            SetForegroundWindow=lambda hwnd:foreground.__setitem__(0, hwnd))
+        # Native right cancellation now sends Hide, not focus-neutral Dismiss.
+        desktop.hide()
+        self.assertEqual(foreground[0], 1)
+        self.assertFalse(desktop.hold_active)
+        def reopen(**kwargs):
+            self.assertEqual(foreground[0], desktop.target)
+            desktop.visible = True
+            return {'message':'opened'}
+        desktop.open = Mock(side_effect=reopen)
+        desktop.hold_begin()
+        self.assertTrue(desktop.visible and desktop.hold_active)
+        desktop.open.assert_called_once_with(hold=True)
+
+    def test_close_never_restores_over_another_application(self):
+        desktop = Desktop('http://localhost', lambda action:None)
+        desktop.hwnd, desktop.target, desktop.visible = 2, 1, True
+        desktop._is_menu_window = lambda hwnd: hwnd == 2
+        desktop._is_photoshop = lambda hwnd: hwnd == 1
+        desktop.gui = SimpleNamespace(GetForegroundWindow=lambda:3,
+            IsWindow=lambda hwnd:True, ShowWindow=Mock(), SetForegroundWindow=Mock())
+        desktop.hide()
+        desktop.gui.SetForegroundWindow.assert_not_called()
+
 
 class MenuReopenTests(unittest.IsolatedAsyncioTestCase):
+    async def test_old_action_waiting_on_panel_lock_cannot_execute_after_reopen(self):
+        with tempfile.TemporaryDirectory() as folder:
+            bridge=SimpleNamespace(busy=False,execute=Mock())
+            app=Application(15190,bridge=bridge,runtime=folder)
+            app.desktop=SimpleNamespace(menu_epoch=1,require_action_focus=lambda:None,hide=Mock())
+            async def broadcast(event):pass
+            app.broadcast=broadcast
+            await app.panel_lock.acquire()
+            old=asyncio.create_task(app.dispatch('action.execute',{'name':'select','menu_epoch':1}))
+            await asyncio.sleep(0)
+            app.desktop.menu_epoch=2
+            app.panel_lock.release()
+            result=await old
+            self.assertIn('旧菜单操作',result['message'])
+            bridge.execute.assert_not_called()
+            app.desktop.hide.assert_not_called()
+
     async def test_old_hide_waiting_on_panel_lock_does_not_close_new_pin(self):
         with tempfile.TemporaryDirectory() as folder:
             app = Application(15190, bridge=SimpleNamespace(busy=False), runtime=folder)

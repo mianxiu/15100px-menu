@@ -1,6 +1,7 @@
 // Win32 hooks: no allocation, pipe I/O or application calls in callbacks.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <tlhelp32.h>
 #include <array>
 #include <atomic>
 #include <string>
@@ -10,7 +11,7 @@
 #include <memory>
 #include <stdexcept>
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin };
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace };
 static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
 struct Config { bool enabled=false, textInput=false; HWND overlay=nullptr; std::array<Binding,6> bindings{}; };
@@ -24,6 +25,7 @@ struct KeyMachine {
     std::array<bool,256> physical{}, held{}, consumed{};
     int pending=-1; bool used=false;
     ULONGLONG pressTime=0;
+    void cancelGesture() { pending=-1; used=true; }
     void seed(int raw) { physical[raw]=held[alias(raw)]=true; }
     bool modified() const { return held[16] || held[17] || held[18] || held[91] || held[92]; }
     bool event(int raw,bool down,bool scope,const Config& cfg,bool visible,Action& action,ULONGLONG now=0,bool reserveOnly=false) {
@@ -38,10 +40,17 @@ struct KeyMachine {
         if (!down && consumed[key]) {
             consumed[key]=false;
             if (key==pending) {
-                action=scope && !used?(now && now-pressTime<=220?HoldPin:HoldRelease):HoldCancel;
+                action=scope && !reserveOnly && !used?(now && now-pressTime<=220?HoldPin:HoldRelease):HoldCancel;
                 pending=-1;
             }
             return true;
+        }
+        // A duplicate/orphan CapsLock up is not an outside-owned press. Never
+        // leak it in reserved PS scope or let it submit a gesture. A known
+        // outside down still owns its matching up (repeated=true) unchanged.
+        if (!down && !repeated && scope && key==VK_CAPITAL) {
+            for (const auto& b:cfg.bindings) for (int i=0;i<b.count;++i)
+                if (b.keys[i]==VK_CAPITAL) return true;
         }
         // A physical press owns its whole repeat/release sequence. Never
         // reinterpret it after focus, modifiers or configuration changes.
@@ -91,6 +100,29 @@ struct KeyMachine {
         return consumed[key];
     }
 };
+struct WinRightMachine {
+    bool physical=false,mapped=false;
+    bool event(bool down,bool scoped,DWORD& mouse) {
+        mouse=0;
+        if (down) {
+            if (physical) return mapped;
+            physical=true;mapped=scoped;
+            if (mapped) mouse=MOUSEEVENTF_RIGHTDOWN;
+            return mapped;
+        }
+        physical=false;
+        bool consumed=mapped;mapped=false;
+        if (consumed) mouse=MOUSEEVENTF_RIGHTUP;
+        return consumed;
+    }
+};
+static WinRightMachine winRight;
+static bool rightInjected=false;
+static constexpr UINT winRightMessage=WM_APP+20;
+static bool injectRight(DWORD flags) {
+    INPUT input{};input.type=INPUT_MOUSE;input.mi.dwFlags=flags;
+    return SendInput(1,&input,sizeof(input))==1;
+}
 static Config config;
 static KeyMachine keys;
 static HWND target=nullptr;
@@ -100,35 +132,80 @@ static std::atomic<bool> closing{false};
 static DWORD hookThread;
 static HANDLE available;
 // Single producer (hook thread), single consumer (pipe writer).
-struct HookEvent { Action action=None; HWND hwnd=nullptr,root=nullptr; };
+struct HookEvent {
+    Action action=None; HWND hwnd=nullptr,root=nullptr; POINT cursor{};
+    DWORD pid=0,flags=0,time=0;UINT message=0;
+    bool command=false,process=false,enabled=false,repeat=false,owned=false,blocked=false;
+    wchar_t windowClass[64]{};
+};
 static std::array<HookEvent,1024> queue{};
 static std::atomic<unsigned> head{0}, tail{0};
 static void emit(Action action,HWND hwnd=nullptr,HWND root=nullptr) {
     if (action==None) return;
     unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
     if (next==tail.load(std::memory_order_acquire)) return;
-    queue[head.load(std::memory_order_relaxed)]={action,hwnd,root};
+    POINT cursor{};
+    if (action==HoldRelease && !GetCursorPos(&cursor)) action=HoldCancel;
+    queue[head.load(std::memory_order_relaxed)]={action,hwnd,root,cursor};
     head.store(next,std::memory_order_release); SetEvent(available);
 }
 static bool photoshop(HWND hwnd) {
     if (!hwnd || !IsWindow(hwnd) || IsIconic(hwnd) || !IsWindowVisible(hwnd)) return false;
     wchar_t name[64]{}; GetClassNameW(hwnd,name,64);
-    return wcscmp(name,L"Photoshop")==0;
+    bool main=wcscmp(name,L"Photoshop")==0;
+    if (!main && wcscmp(name,L"OWL.DocumentWindow")!=0 && wcscmp(name,L"OWL.Dock")!=0) return false;
+    HWND root=main?hwnd:GetAncestor(hwnd,GA_ROOTOWNER);
+    wchar_t rootName[64]{};GetClassNameW(root,rootName,64);
+    if (wcscmp(rootName,L"Photoshop")!=0 || IsIconic(root) || !IsWindowVisible(root) ||
+        !IsWindowEnabled(root) || !IsWindowEnabled(hwnd)) return false;
+    DWORD pid=0,owner=0;GetWindowThreadProcessId(hwnd,&pid);GetWindowThreadProcessId(root,&owner);
+    return pid && pid==owner;
 }
 static bool menuWindow(HWND hwnd);
-static bool reserveDialogCaps() {
+static bool scope(HWND foreground=GetForegroundWindow()) {
     if (!config.enabled) return false;
-    HWND foreground=GetForegroundWindow();
-    return !photoshop(foreground) && !menuWindow(foreground) &&
-        photoshop(GetAncestor(foreground,GA_ROOTOWNER));
-}
-static bool scope() {
-    if (!config.enabled) return false;
-    HWND foreground=GetForegroundWindow();
     if (photoshop(foreground)) { target=foreground; return true; }
     // Hide and foreground restoration are separate operations. A just-hidden
     // menu may still own foreground; it remains part of this PS key scope.
     return menuWindow(foreground) && photoshop(target);
+}
+struct ProcessIdentity { DWORD pid=0;HANDLE handle=nullptr; };
+static std::array<ProcessIdentity,32> photoshopProcesses{};
+static void refreshPhotoshopProcesses() {
+    // Only the hook thread's message loop changes this cache. Never enumerate
+    // processes or resolve executable paths inside a low-level hook callback.
+    for (auto& p:photoshopProcesses) if (p.handle && WaitForSingleObject(p.handle,0)!=WAIT_TIMEOUT) {
+        CloseHandle(p.handle);p={};
+    }
+    HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+    if (snapshot==INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W entry{};entry.dwSize=sizeof(entry);
+    if (Process32FirstW(snapshot,&entry)) do {
+        if (_wcsicmp(entry.szExeFile,L"Photoshop.exe")!=0) continue;
+        bool cached=false;for (const auto& p:photoshopProcesses) if (p.pid==entry.th32ProcessID) cached=true;
+        if (cached) continue;
+        HANDLE handle=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,entry.th32ProcessID);
+        if (!handle) continue;
+        wchar_t path[32768]{};DWORD length=32768;
+        bool valid=QueryFullProcessImageNameW(handle,0,path,&length)!=0;
+        const wchar_t* name=wcsrchr(path,L'\\');name=name?name+1:path;
+        valid=valid && _wcsicmp(name,L"Photoshop.exe")==0 && WaitForSingleObject(handle,0)==WAIT_TIMEOUT;
+        bool stored=false;
+        if (valid) for (auto& p:photoshopProcesses) if (!p.handle) {p={entry.th32ProcessID,handle};stored=true;break;}
+        if (!stored) CloseHandle(handle);
+    } while (Process32NextW(snapshot,&entry));
+    CloseHandle(snapshot);
+}
+static bool photoshopProcessWindow(HWND hwnd) {
+    DWORD pid=0;GetWindowThreadProcessId(hwnd,&pid);
+    for (const auto& p:photoshopProcesses)
+        if (pid && pid==p.pid && p.handle && WaitForSingleObject(p.handle,0)==WAIT_TIMEOUT) return true;
+    return false;
+}
+static bool photoshopKeyScope(HWND foreground=GetForegroundWindow()) {
+    if (!config.enabled) return false;
+    return photoshopProcessWindow(foreground) ||
+        (menuWindow(foreground) && photoshopProcessWindow(target));
 }
 static bool inside(HWND hwnd,POINT point) {
     RECT rect{}; return GetWindowRect(hwnd,&rect) && PtInRect(&rect,point);
@@ -139,13 +216,46 @@ static bool menuWindow(HWND hwnd) {
     GetWindowThreadProcessId(hwnd,&pid);GetWindowThreadProcessId(config.overlay,&owner);
     return pid && pid==owner;
 }
+static bool routeKey(KeyMachine& state,int raw,bool down,bool commandScope,bool processScope,
+                     const Config& cfg,bool visible,Action& action,ULONGLONG now) {
+    // Reserve only CapsLock in PS-owned non-workspace windows. Other keys keep
+    // their normal dialog/navigation behavior, and cannot launch scripts here.
+    bool reserve=raw==VK_CAPITAL && processScope && !commandScope;
+    return state.event(raw,down,commandScope || reserve,cfg,visible,action,now,reserve);
+}
 static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
     if (code>=0) {
         const auto& input=*reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
         Action action;
-        bool commandScope=scope(),dialogScope=!commandScope && reserveDialogCaps();
-        if (keys.event(input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
-                       commandScope || dialogScope,config,IsWindowVisible(config.overlay),action,GetTickCount64(),dialogScope)) {
+        HWND foreground=GetForegroundWindow();
+        bool commandScope=scope(foreground),processScope=photoshopKeyScope(foreground);
+        bool repeat=input.vkCode==VK_CAPITAL && keys.physical[VK_CAPITAL];
+        bool owned=input.vkCode==VK_CAPITAL && keys.consumed[VK_CAPITAL];
+        if (input.vkCode==VK_LWIN && !(input.flags&LLKHF_INJECTED)) {
+            DWORD mouse=0;
+            if (winRight.event(message==WM_KEYDOWN || message==WM_SYSKEYDOWN,processScope,mouse)) {
+                // Inject from the message loop, never recursively in a hook.
+                if (mouse && !PostThreadMessageW(hookThread,winRightMessage,mouse,
+                    reinterpret_cast<LPARAM>(GetForegroundWindow()))) emit(Error);
+                return 1;
+            }
+        }
+        bool blocked=routeKey(keys,input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
+                     commandScope,processScope,config,IsWindowVisible(config.overlay),action,GetTickCount64());
+        if (input.vkCode==VK_CAPITAL) {
+            unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
+            if (next!=tail.load(std::memory_order_acquire)) {
+                HookEvent event{};event.action=CapsTrace;event.hwnd=foreground;
+                GetWindowThreadProcessId(foreground,&event.pid);
+                GetClassNameW(foreground,event.windowClass,64);
+                event.flags=input.flags;event.time=input.time;event.message=static_cast<UINT>(message);
+                event.command=commandScope;event.process=processScope;event.enabled=config.enabled;
+                event.repeat=repeat;event.owned=owned;event.blocked=blocked;
+                queue[head.load(std::memory_order_relaxed)]=event;
+                head.store(next,std::memory_order_release);SetEvent(available);
+            }
+        }
+        if (blocked) {
             emit(action); return 1;
         }
     }
@@ -165,7 +275,10 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
             POINT point=reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->pt;
             bool visible=IsWindowVisible(config.overlay);
             if (visible && index==1 && scope()) {
-                emit(Dismiss);mouseConsumed[index]=true;return 1;
+                // Explicit right-click cancellation owns the click, so return
+                // focus through Hide rather than outside-click Dismiss.
+                keys.cancelGesture();
+                emit(Hide);mouseConsumed[index]=true;return 1;
             }
             if (!visible && config.enabled) {
                 HWND child=WindowFromPoint(point),root=GetAncestor(child,GA_ROOT);
@@ -230,8 +343,29 @@ static void writeActions() {
             auto event=queue[cursor];Action action=event.action; cursor=(cursor+1)%queue.size(); tail.store(cursor,std::memory_order_release);
             const char* type=action==Ready?"ready":action==Error?"error":action==Configured?"configured":"action";
             std::string line;
+            if (action==CapsTrace) {
+                std::string windowClass;
+                for (wchar_t c:event.windowClass) {
+                    if (!c) break;
+                    if (c==L'"' || c==L'\\') windowClass+='\\';
+                    windowClass+=c>=32 && c<=126?static_cast<char>(c):'?';
+                }
+                line="{\"type\":\"caps.trace\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
+                    ",\"pid\":"+std::to_string(event.pid)+",\"window_class\":\""+windowClass+"\",\"message\":"+std::to_string(event.message)+
+                    ",\"flags\":"+std::to_string(event.flags)+",\"key_time_ms\":"+std::to_string(event.time)+
+                    ",\"command_scope\":"+(event.command?"true":"false")+",\"process_scope\":"+(event.process?"true":"false")+
+                    ",\"enabled\":"+(event.enabled?"true":"false")+",\"repeat\":"+(event.repeat?"true":"false")+
+                    ",\"owned_before\":"+(event.owned?"true":"false")+",\"blocked\":"+(event.blocked?"true":"false")+"}\n";
+                DWORD written=0;
+                if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) {stop();return;}
+                continue;
+            }
             if (action==PanelClick) line="{\"type\":\"panel.click\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+"}\n";
-            else line=std::string("{\"type\":\"")+type+"\",\"action\":\""+names[action]+"\"}\n";
+            else {
+                line=std::string("{\"type\":\"")+type+"\",\"action\":\""+names[action]+"\"";
+                if (action==HoldRelease) line+=",\"cursor\":["+std::to_string(event.cursor.x)+","+std::to_string(event.cursor.y)+"]";
+                line+="}\n";
+            }
             DWORD written=0;
             if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) { stop(); return; }
         }
@@ -242,11 +376,52 @@ static void check(bool value) { if (!value) throw std::runtime_error("Native hoo
 static int selfTest() {
     Config cfg; cfg.bindings[0]={Toggle,{20},1}; cfg.bindings[1]={Select,{20,65},2};
     KeyMachine state; Action action;
+    WinRightMachine remap;DWORD mouse=0;
+    for (int i=0;i<10000;++i) {
+        check(remap.event(true,true,mouse) && mouse==MOUSEEVENTF_RIGHTDOWN);
+        check(remap.event(true,false,mouse) && mouse==0);
+        check(remap.event(false,false,mouse) && mouse==MOUSEEVENTF_RIGHTUP);
+    }
+    check(!remap.event(true,false,mouse) && mouse==0);
+    check(!remap.event(true,true,mouse) && mouse==0);
+    check(!remap.event(false,true,mouse) && mouse==0);
+    remap.physical=true; // Startup while already held: do not capture mid-press.
+    check(!remap.event(true,true,mouse) && mouse==0);
+    check(!remap.event(false,true,mouse) && mouse==0);
     KeyMachine dialog;
     check(dialog.event(20,true,true,cfg,false,action,1000,true) && action==None);
     check(dialog.event(20,true,true,cfg,false,action,1010,true) && action==None);
     check(!dialog.event(9,true,true,cfg,false,action,1020,true) && action==None);
     check(dialog.event(20,false,false,cfg,false,action,1030,true) && action==None);
+    KeyMachine processCaps;
+    check(routeKey(processCaps,20,false,true,true,cfg,false,action,900) && action==None);
+    check(routeKey(processCaps,20,false,false,true,cfg,false,action,901) && action==None);
+    check(!routeKey(processCaps,20,false,false,false,cfg,false,action,902) && action==None);
+    Config noCaps;noCaps.bindings[0]={Toggle,{9},1};
+    check(!routeKey(processCaps,20,false,true,true,noCaps,false,action,903));
+    for (int i=0;i<10000;++i) {
+        check(routeKey(processCaps,20,true,false,true,cfg,false,action,1000) && action==None);
+        check(routeKey(processCaps,20,true,false,true,cfg,false,action,1010) && action==None);
+        check(!routeKey(processCaps,65,true,false,true,cfg,false,action,1020) && action==None);
+        check(!routeKey(processCaps,65,false,false,true,cfg,false,action,1025) && action==None);
+        check(routeKey(processCaps,20,false,false,false,cfg,false,action,1030) && action==None);
+    }
+    check(routeKey(processCaps,20,true,true,true,cfg,false,action,1000) && action==HoldBegin);
+    check(routeKey(processCaps,20,false,false,true,cfg,true,action,1050) && action==HoldCancel);
+    check(!routeKey(processCaps,20,true,false,false,cfg,false,action,1100));
+    check(!routeKey(processCaps,20,true,true,true,cfg,false,action,1120));
+    check(!routeKey(processCaps,20,false,true,true,cfg,false,action,1130));
+    check(routeKey(processCaps,20,true,true,true,cfg,false,action,1200) && action==HoldBegin);
+    check(routeKey(processCaps,20,false,true,true,cfg,true,action,1250) && action==HoldPin);
+    check(routeKey(processCaps,20,false,true,true,cfg,true,action,1260) && action==None);
+    check(!routeKey(processCaps,20,true,false,false,cfg,false,action,1300));
+    check(!routeKey(processCaps,20,false,true,true,cfg,false,action,1310) && action==None);
+    KeyMachine cancelled;
+    check(cancelled.event(20,true,true,cfg,false,action,1000) && action==HoldBegin);
+    cancelled.cancelGesture();
+    check(cancelled.event(20,false,true,cfg,false,action,1050) && action==None);
+    check(cancelled.event(20,true,true,cfg,false,action,1200) && action==HoldBegin);
+    check(cancelled.event(20,false,true,cfg,true,action,1250) && action==HoldPin);
     KeyMachine taps;
     check(taps.event(20,true,true,cfg,false,action,1000) && action==HoldBegin);
     check(taps.event(20,false,true,cfg,false,action,1050) && action==HoldPin);
@@ -341,7 +516,40 @@ int main(int argc,char** argv) {
         if (!GetWindowRect(hwnd,&rect)) return 1;
         std::cout<<"["<<rect.left<<","<<rect.top<<","<<rect.right<<","<<rect.bottom<<"]\n";return 0;
     }
+    if (argc==3 && std::string(argv[1])=="--inspect-workspace") {
+        HWND hwnd=reinterpret_cast<HWND>(std::stoull(argv[2]));
+        std::cout<<(photoshop(hwnd)?"true":"false")<<"\n";return 0;
+    }
+    if (argc==3 && std::string(argv[1])=="--inspect-win-scope") {
+        HWND hwnd=reinterpret_cast<HWND>(std::stoull(argv[2]));
+        refreshPhotoshopProcesses();
+        std::cout<<(photoshopProcessWindow(hwnd)?"true":"false")<<"\n";return 0;
+    }
     if (argc==2 && std::string(argv[1])=="--self-test") return selfTest();
+    if (argc==3 && std::string(argv[1])=="--self-test-process-scope") {
+        bool expected=std::string(argv[2])=="true";
+        refreshPhotoshopProcesses();
+        for (const wchar_t* name:{L"Photoshop",L"PSFloatC",L"FutureUnknownPSPopup"}) {
+            WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=name;
+            check(RegisterClassW(&wc)!=0);
+            HWND hwnd=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,name,L"Isolated process scope test",
+                WS_POPUP,-10000,-10000,10,10,nullptr,nullptr,wc.hInstance,nullptr);
+            check(hwnd!=nullptr);
+            check(photoshopProcessWindow(hwnd)==expected);
+            EnableWindow(hwnd,FALSE);check(photoshopProcessWindow(hwnd)==expected);
+            auto previous=photoshopProcesses;
+            for (auto& p:photoshopProcesses) p={};
+            HANDLE ended=CreateEventW(nullptr,TRUE,TRUE,nullptr);
+            photoshopProcesses[0]={GetCurrentProcessId(),ended};
+            check(!photoshopProcessWindow(hwnd));
+            CloseHandle(ended);photoshopProcesses=previous;
+            DestroyWindow(hwnd);check(!photoshopProcessWindow(hwnd));
+            UnregisterClassW(name,wc.hInstance);
+        }
+        check(!photoshopProcessWindow(nullptr));
+        for (auto& p:photoshopProcesses) if (p.handle) CloseHandle(p.handle);
+        std::cout<<"Process scope self-test passed: classes, disabled windows, executable identity, stale PID\n";return 0;
+    }
     if (argc==2 && std::string(argv[1])=="--self-test-hooks") {
         HHOOK key=nullptr,mouse=nullptr;
         Config cfg;cfg.bindings[0]={Toggle,{20},1};Action action;
@@ -362,7 +570,9 @@ int main(int argc,char** argv) {
     available=CreateEventW(nullptr,FALSE,FALSE,nullptr);
     if (!available) return 1;
     for (int vk:{160,161,162,163,164,165,91,92}) if (GetAsyncKeyState(vk)&0x8000) keys.seed(vk);
+    winRight.physical=(GetAsyncKeyState(VK_LWIN)&0x8000)!=0;
     SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_ABOVE_NORMAL);
+    refreshPhotoshopProcesses();
     HHOOK keyHook=SetWindowsHookExW(WH_KEYBOARD_LL,keyboard,GetModuleHandleW(nullptr),0);
     HHOOK mouseHook=SetWindowsHookExW(WH_MOUSE_LL,pointer,GetModuleHandleW(nullptr),0);
     std::thread writer(writeActions);
@@ -383,7 +593,20 @@ int main(int argc,char** argv) {
     if (!renewal) {stop();}
     unsigned renewalFailures=0;
     while (GetMessageW(&message,nullptr,0,0)>0) {
-        if (message.message==WM_TIMER && message.wParam==renewal) {
+        if (message.message==winRightMessage) {
+            if (message.wParam==MOUSEEVENTF_RIGHTDOWN) {
+                // Do not send a new click to a window that gained foreground
+                // after the physical down. Ups still complete any sent down.
+                if (!rightInjected && GetForegroundWindow()==reinterpret_cast<HWND>(message.lParam) && photoshopKeyScope()) {
+                    rightInjected=injectRight(MOUSEEVENTF_RIGHTDOWN);
+                    if (!rightInjected) emit(Error);
+                }
+            } else if (message.wParam==MOUSEEVENTF_RIGHTUP && rightInjected) {
+                if (injectRight(MOUSEEVENTF_RIGHTUP)) rightInjected=false;
+                else emit(Error);
+            }
+        } else if (message.message==WM_TIMER && message.wParam==renewal) {
+            refreshPhotoshopProcesses();
             if (renewHooks(keyHook,mouseHook)) renewalFailures=0;
             else {emit(Error);if (++renewalFailures>=3) stop();}
         } else if (message.message==WM_APP) {
@@ -395,6 +618,8 @@ int main(int argc,char** argv) {
     }
     if (renewal) KillTimer(nullptr,renewal);
     UnhookWindowsHookEx(keyHook); UnhookWindowsHookEx(mouseHook);
+    if (rightInjected) injectRight(MOUSEEVENTF_RIGHTUP);
+    for (auto& p:photoshopProcesses) if (p.handle) CloseHandle(p.handle);
     closing.store(true); SetEvent(available); writer.join();
     // Detached pipe/parent threads are terminated with this process.
     return 0;

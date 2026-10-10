@@ -6,14 +6,7 @@ from pathlib import Path
 from .paths import ROOT
 from .layer_labels import LABEL_ACTIONS, label_script
 from .photoshop_theme import read_theme, read_font_size
-
-ACTIONS = {
-    "select": {"label": "选择组内图层", "shortcut": "CapsLock+A"},
-    "color": {"label": "橙色图层标签", "shortcut": "CapsLock+C"},
-    "moveToTop": {"label": "移到顶部", "shortcut": "CapsLock+W"},
-    "moveToBottom": {"label": "移到底部", "shortcut": "CapsLock+S"},
-}
-COMMANDS = {**ACTIONS, **LABEL_ACTIONS}
+from .commands import ACTIONS, COMMANDS, validate_command
 
 
 def load_scripts(folder=None):
@@ -73,8 +66,7 @@ class PhotoshopBridge:
         return app.DoJavaScript(script)
 
     async def execute(self, action):
-        if action not in COMMANDS:
-            raise ValueError("未知的图层操作")
+        command = validate_command(action)
         if self.closed:
             raise RuntimeError("服务正在退出")
         if self.busy:
@@ -88,7 +80,7 @@ class PhotoshopBridge:
         future.add_done_callback(finished)
         try:
             result = await asyncio.wait_for(asyncio.shield(future), 45)
-            message = COMMANDS[action]["label"] + "已完成"
+            message = command.label + "已完成"
             if action == 'label.none':
                 details = json.loads(result)
                 message = f"已清除 {details['count']} 个图层的标签，并核验为无颜色"
