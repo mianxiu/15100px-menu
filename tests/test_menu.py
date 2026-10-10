@@ -12,6 +12,13 @@ from backend.paths import ROOT
 
 
 class MenuTests(unittest.TestCase):
+    @unittest.skipUnless(os.name=='nt' and (ROOT/'native/HotkeyHost.exe').is_file(),'Windows native hook')
+    def test_hook_renewal_recovers_removal_and_preserves_held_press(self):
+        result=subprocess.run([str(ROOT/'native/HotkeyHost.exe'),'--self-test-hooks'],
+            capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('30 silent-removal cycles',result.stdout)
+
     @unittest.skipUnless(os.name=='nt' and (ROOT/'native/MenuHost.exe').is_file(),'Windows native menu')
     def test_real_setwindowpos_pie_becomes_opaque_and_closes(self):
         import queue

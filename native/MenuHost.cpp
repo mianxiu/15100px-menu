@@ -76,6 +76,12 @@ static bool pinned=false;
 static LPARAM menuEpoch=0;
 static ULONGLONG pieStarted=0;
 static bool pieAnimating=false;
+static float ringAngle=0;
+static bool ringAngleReady=false;
+static float followAngle(float current,float desired,float seconds) {
+    constexpr float tau=6.28318530718f;
+    return current+std::remainder(desired-current,tau)*(1.f-std::exp(-std::max(0.f,seconds)/.032f));
+}
 static float previewAnimationMs=-1;
 static float pieAnimation(float elapsedMs,bool reduced=false) {
     return reduced?1.f:std::clamp(elapsedMs/60.f,0.f,1.f);
@@ -314,6 +320,7 @@ static int holdActionAt(POINT point) {
 static void setHoldMode(bool enabled) {
     holdMode=enabled;holdFinished=false;pinned=false;holdMoved=false;resetMenu();focusSearch=false;
     pieStarted=0;pieAnimating=enabled;
+    ringAngleReady=false;
     // The compositor retains the last presented surface while hidden. Never
     // expose that old, fully expanded pie before the new zero-alpha frame.
     setOpacity(enabled?0.f:1.f);
@@ -528,7 +535,7 @@ static void drawPie() {
         if (!rowVisible(i)) continue;
         float width=i==1?98*scale:ImGui::CalcTextSize(labels[i]).x+60*scale;
         float height=i==1?56*scale:rowHeight;
-        float radius=100*scale;
+        float radius=65*scale;
         if (i<2) radius=std::min(radius,std::max(20*scale,size.x*.5f-width-8*scale));
         offsets[i]=i==0?ImVec2(-radius-width*.5f,0):i==1?ImVec2(radius+width*.5f,0):
             i==2?ImVec2(0,-radius-height*.5f):ImVec2(0,radius+height*.5f);
@@ -552,10 +559,13 @@ static void drawPie() {
     caption(panelTitle(),pieCenter.y-40*scale);
     // Blender's centre is a 12..19-unit annulus with a direction segment.
     draw->AddCircle(pieCenter,15.5f*scale,tint(ImGuiCol_WindowBg),40,7*scale);
-    if (selected>=0) {
-        float angle=atan2f(float(cursor.y)-pieCenter.y,float(cursor.x)-pieCenter.x);
-        draw->PathArcTo(pieCenter,15.5f*scale,angle-.785398f,angle+.785398f,10);
-        draw->PathStroke(tint(ImGuiCol_CheckMark),0,7*scale);
+    float cursorX=float(cursor.x)-pieCenter.x,cursorY=float(cursor.y)-pieCenter.y;
+    if (cursorX*cursorX+cursorY*cursorY>=12*12*scale*scale && !holdFinished) {
+        float desired=atan2f(cursorY,cursorX);
+        ringAngle=ringAngleReady?followAngle(ringAngle,desired,ImGui::GetIO().DeltaTime):desired;
+        ringAngleReady=true;
+        draw->PathArcTo(pieCenter,15.5f*scale,ringAngle-.785398f,ringAngle+.785398f,10);
+        draw->PathStroke(tint(selected>=0?ImGuiCol_CheckMark:ImGuiCol_PlotLines),0,7*scale);
     }
     draw->AddCircle(pieCenter,12*scale,tint(ImGuiCol_Border),40,scale);
     draw->AddCircle(pieCenter,19*scale,tint(ImGuiCol_Border),40,scale);
@@ -975,27 +985,27 @@ int main() {
             if (selfTest && frames==21) {
                 holdOrigin={static_cast<LONG>(pieCenter.x),static_cast<LONG>(pieCenter.y)};
                 auto point=[&](float x,float y){return POINT{static_cast<LONG>(pieCenter.x+x*scale),static_cast<LONG>(pieCenter.y+y*scale)};};
-                for (const auto& entry:std::array<std::pair<POINT,int>,8>{{{point(-150,0),0},{point(80,0),-1},{point(0,-120),2},{point(0,120),3},{point(0,0),-1},{point(20,10),-1},{point(70,70),-1},{{-100,-100},-1}}})
+                for (const auto& entry:std::array<std::pair<POINT,int>,8>{{{point(-110,0),0},{point(68,0),-1},{point(0,-80),2},{point(0,80),3},{point(0,0),-1},{point(20,10),-1},{point(150,150),-1},{{-100,-100},-1}}})
                     if (holdActionAt(entry.first)!=entry.second) throw std::runtime_error("Pie direction/dead-zone hit test failed");
                 for (int i=0;i<4;++i) {
                     if (i==1) continue; // The palette commits only an explicit swatch.
                     POINT middle={(holdRows[i].left+holdRows[i].right)/2,(holdRows[i].top+holdRows[i].bottom)/2};
                     if (holdActionAt(middle)!=i) throw std::runtime_error("Pie card hit test failed");
                 }
-                holdOrigin=point(-150,0);holdMoved=false;
+                holdOrigin=point(-110,0);holdMoved=false;
                 if (holdActionAt(holdOrigin)!=-1) throw std::runtime_error("Clamped invocation must cancel");
                 holdOrigin=point(0,0);
                 if (holdActionAt(point(0,11))!=-1 || holdActionAt(point(0,20))!=-1)
                     throw std::runtime_error("Blender 12-unit centre threshold failed");
                 panelKind=1;
                 if (std::string(panelTitle())!="画布操作" || !rowVisible(0) || !rowVisible(1) || rowVisible(2) || rowVisible(3) ||
-                    holdActionAt(point(0,-120))!=-1 || holdActionAt(point(0,120))!=-1)
+                    holdActionAt(point(0,-80))!=-1 || holdActionAt(point(0,80))!=-1)
                     throw std::runtime_error("Canvas pie leaked hidden layer-sort actions");
                 panelKind=2;
-                if (std::string(panelTitle())!="图层操作" || holdActionAt(point(0,-120))!=2 || holdActionAt(point(0,120))!=3)
+                if (std::string(panelTitle())!="图层操作" || holdActionAt(point(0,-80))!=2 || holdActionAt(point(0,80))!=3)
                     throw std::runtime_error("Layer pie lost sorting actions");
                 panelKind=3;
-                if (rowVisible(0) || rowVisible(1) || holdActionAt(point(-150,0))!=-1)
+                if (rowVisible(0) || rowVisible(1) || holdActionAt(point(-110,0))!=-1)
                     throw std::runtime_error("Input context exposed pie actions");
                 panelKind=0;
                 for (int i=0;i<8;++i) {
@@ -1021,7 +1031,7 @@ int main() {
                     pinned=false;
                 }
                 holdOrigin=point(0,0);holdMoved=false;
-                POINT rowPoint=point(0,120);
+                POINT rowPoint=point(0,80);
                 pinned=true;auto beforePin=testedActions.size();finishHold(rowPoint);
                 if (testedActions.size()!=beforePin || holdFinished)
                     throw std::runtime_error("Pinned menu must ignore key release");
@@ -1029,7 +1039,7 @@ int main() {
                 pieAnimating=true;
                 auto animLabel=labelRows[1];
                 if (holdActionAt({(animLabel.left+animLabel.right)/2,(animLabel.top+animLabel.bottom)/2})!=-1 ||
-                    holdActionAt(point(-150,0))!=-1)
+                    holdActionAt(point(-110,0))!=-1)
                     throw std::runtime_error("Animation must cancel card and palette releases");
                 pieAnimating=false;
                 allowed=false;

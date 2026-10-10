@@ -27,7 +27,7 @@ struct KeyMachine {
     bool pinPress=false;
     void seed(int raw) { physical[raw]=held[alias(raw)]=true; }
     bool modified() const { return held[16] || held[17] || held[18] || held[91] || held[92]; }
-    bool event(int raw,bool down,bool scope,const Config& cfg,bool visible,Action& action,ULONGLONG now=0) {
+    bool event(int raw,bool down,bool scope,const Config& cfg,bool visible,Action& action,ULONGLONG now=0,bool reserveOnly=false) {
         action=None; if (raw<0 || raw>=256) return false;
         if (!scope || (down && raw!=VK_CAPITAL)) lastTap=0;
         int key=alias(raw); bool repeated=physical[raw]; physical[raw]=down;
@@ -50,6 +50,13 @@ struct KeyMachine {
         // reinterpret it after focus, modifiers or configuration changes.
         if (down && repeated) return consumed[key];
         if (!scope || !down) return down && consumed[key];
+        // PS-owned dialogs reserve CapsLock without launching commands or
+        // interfering with Tab/navigation/input in the dialog.
+        if (reserveOnly) {
+            if (key==VK_CAPITAL) for (const auto& b:cfg.bindings) for (int i=0;i<b.count;++i)
+                if (b.keys[i]==VK_CAPITAL) {consumed[key]=true;return true;}
+            return false;
+        }
         const Binding* match=nullptr;
         bool tabPrefix=false;
         for (const auto& b:cfg.bindings) {
@@ -112,6 +119,12 @@ static bool photoshop(HWND hwnd) {
     return wcscmp(name,L"Photoshop")==0;
 }
 static bool menuWindow(HWND hwnd);
+static bool reserveDialogCaps() {
+    if (!config.enabled) return false;
+    HWND foreground=GetForegroundWindow();
+    return !photoshop(foreground) && !menuWindow(foreground) &&
+        photoshop(GetAncestor(foreground,GA_ROOTOWNER));
+}
 static bool scope() {
     if (!config.enabled) return false;
     HWND foreground=GetForegroundWindow();
@@ -133,8 +146,9 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
     if (code>=0) {
         const auto& input=*reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
         Action action;
+        bool commandScope=scope(),dialogScope=!commandScope && reserveDialogCaps();
         if (keys.event(input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
-                       scope(),config,IsWindowVisible(config.overlay),action,GetTickCount64())) {
+                       commandScope || dialogScope,config,IsWindowVisible(config.overlay),action,GetTickCount64(),dialogScope)) {
             emit(action); return 1;
         }
     }
@@ -232,6 +246,11 @@ static void check(bool value) { if (!value) throw std::runtime_error("Native hoo
 static int selfTest() {
     Config cfg; cfg.bindings[0]={Toggle,{20},1}; cfg.bindings[1]={Select,{20,65},2};
     KeyMachine state; Action action;
+    KeyMachine dialog;
+    check(dialog.event(20,true,true,cfg,false,action,1000,true) && action==None);
+    check(dialog.event(20,true,true,cfg,false,action,1010,true) && action==None);
+    check(!dialog.event(9,true,true,cfg,false,action,1020,true) && action==None);
+    check(dialog.event(20,false,false,cfg,false,action,1030,true) && action==None);
     KeyMachine taps;
     check(taps.event(20,true,true,cfg,false,action,1000) && action==HoldBegin);
     check(taps.event(20,false,true,cfg,false,action,1050) && action==HoldRelease);
@@ -300,6 +319,20 @@ static int selfTest() {
     std::cout<<"Native hotkey self-test passed: 10000 CapsLock and Tab pairs, repeat, scope, modifiers, combinations\n";
     return 0;
 }
+static bool renewHooks(HHOOK& keyHook,HHOOK& mouseHook) {
+    // Install replacements first. Preserve KeyMachine and mouseConsumed so a
+    // held press keeps its original suppression decision through renewal.
+    HHOOK nextKey=SetWindowsHookExW(WH_KEYBOARD_LL,keyboard,GetModuleHandleW(nullptr),0);
+    HHOOK nextMouse=SetWindowsHookExW(WH_MOUSE_LL,pointer,GetModuleHandleW(nullptr),0);
+    if (!nextKey || !nextMouse) {
+        if (nextKey) UnhookWindowsHookEx(nextKey);
+        if (nextMouse) UnhookWindowsHookEx(nextMouse);
+        return false;
+    }
+    if (keyHook) UnhookWindowsHookEx(keyHook);
+    if (mouseHook) UnhookWindowsHookEx(mouseHook);
+    keyHook=nextKey;mouseHook=nextMouse;return true;
+}
 int main(int argc,char** argv) {
     // MSLLHOOKSTRUCT uses physical per-monitor coordinates. GetWindowRect and
     // WindowFromPoint must use the same coordinate space at 125/150/200% DPI.
@@ -311,6 +344,21 @@ int main(int argc,char** argv) {
         std::cout<<"["<<rect.left<<","<<rect.top<<","<<rect.right<<","<<rect.bottom<<"]\n";return 0;
     }
     if (argc==2 && std::string(argv[1])=="--self-test") return selfTest();
+    if (argc==2 && std::string(argv[1])=="--self-test-hooks") {
+        HHOOK key=nullptr,mouse=nullptr;
+        Config cfg;cfg.bindings[0]={Toggle,{20},1};Action action;
+        check(keys.event(20,true,true,cfg,false,action) && action==HoldBegin);
+        for (int i=0;i<30;++i) {
+            if (!renewHooks(key,mouse)) return 1;
+            check(keys.event(20,true,true,cfg,false,action) && action==None);
+            // Simulate Windows removing hooks without ending the host process.
+            UnhookWindowsHookEx(key);UnhookWindowsHookEx(mouse);
+        }
+        if (!renewHooks(key,mouse)) return 1;
+        check(keys.event(20,false,false,cfg,false,action) && action==HoldCancel);
+        UnhookWindowsHookEx(key);UnhookWindowsHookEx(mouse);
+        std::cout<<"Hook renewal passed: 30 silent-removal cycles, no input injection\n";return 0;
+    }
     DWORD parent=argc==3 && std::string(argv[1])=="--parent"?std::stoul(argv[2]):0;
     hookThread=GetCurrentThreadId(); MSG message; PeekMessageW(&message,nullptr,0,0,PM_NOREMOVE);
     available=CreateEventW(nullptr,FALSE,FALSE,nullptr);
@@ -333,14 +381,21 @@ int main(int argc,char** argv) {
         stop();
     }).detach();
     emit(Ready);
+    UINT_PTR renewal=SetTimer(nullptr,0,1000,nullptr);
+    if (!renewal) {stop();}
+    unsigned renewalFailures=0;
     while (GetMessageW(&message,nullptr,0,0)>0) {
-        if (message.message==WM_APP) {
+        if (message.message==WM_TIMER && message.wParam==renewal) {
+            if (renewHooks(keyHook,mouseHook)) renewalFailures=0;
+            else {emit(Error);if (++renewalFailures>=3) stop();}
+        } else if (message.message==WM_APP) {
             std::unique_ptr<Config> next(reinterpret_cast<Config*>(message.lParam)); config=*next;
             if (!IsWindowVisible(config.overlay)) dismissPending=false;
             emit(Configured);
         } else if (message.message==WM_APP+1) emit(Error);
         else { TranslateMessage(&message); DispatchMessageW(&message); }
     }
+    if (renewal) KillTimer(nullptr,renewal);
     UnhookWindowsHookEx(keyHook); UnhookWindowsHookEx(mouseHook);
     closing.store(true); SetEvent(available); writer.join();
     // Detached pipe/parent threads are terminated with this process.

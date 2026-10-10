@@ -21,7 +21,7 @@ from .plugins import Plugins, MAX_PACKAGE
 from .paths import ROOT, runtime_dir
 
 APP_ID = "photoshop-menu"
-APP_VERSION = "0.4.32"
+APP_VERSION = "0.4.34"
 
 
 def service_identity():
