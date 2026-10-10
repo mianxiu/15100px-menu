@@ -455,12 +455,13 @@ class Desktop:
 
     @window_transition
     def hold_pin(self):
-        if self.visible:
-            self.hide()
-        result = self.open(hold=True)
+        if not self.visible or not self.hold_active:
+            return {"message": "操作菜单已收起"}
+        if not self._scope():
+            return self.hide(restore=False)
         self.hold_active = False
         self.gui.SendMessage(self.hwnd, 0x8010, 1, 0)
-        return result
+        return {"message": "操作菜单已固定"}
 
     @window_transition
     def hold_cancel(self):

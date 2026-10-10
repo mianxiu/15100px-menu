@@ -23,13 +23,11 @@ static int alias(int key) {
 struct KeyMachine {
     std::array<bool,256> physical{}, held{}, consumed{};
     int pending=-1; bool used=false;
-    ULONGLONG pressTime=0,lastTap=0;
-    bool pinPress=false;
+    ULONGLONG pressTime=0;
     void seed(int raw) { physical[raw]=held[alias(raw)]=true; }
     bool modified() const { return held[16] || held[17] || held[18] || held[91] || held[92]; }
     bool event(int raw,bool down,bool scope,const Config& cfg,bool visible,Action& action,ULONGLONG now=0,bool reserveOnly=false) {
         action=None; if (raw<0 || raw>=256) return false;
-        if (!scope || (down && raw!=VK_CAPITAL)) lastTap=0;
         int key=alias(raw); bool repeated=physical[raw]; physical[raw]=down;
         held[key]=false;
         // At most two physical keys share an alias; bounded, stack-only work.
@@ -40,9 +38,8 @@ struct KeyMachine {
         if (!down && consumed[key]) {
             consumed[key]=false;
             if (key==pending) {
-                action=scope && !used?(pinPress?None:HoldRelease):HoldCancel;
-                lastTap=key==VK_CAPITAL && scope && !used && !pinPress && now && now-pressTime<=220?now:0;
-                pending=-1;pinPress=false;
+                action=scope && !used?(now && now-pressTime<=220?HoldPin:HoldRelease):HoldCancel;
+                pending=-1;
             }
             return true;
         }
@@ -76,8 +73,8 @@ struct KeyMachine {
         if (match) {
             consumed[key]=true;
             if (match->action==Toggle) { if (!repeated) {
-                pinPress=key==VK_CAPITAL && now && lastTap && now-lastTap<=300;
-                pending=key;used=false;pressTime=now;lastTap=0;action=pinPress?HoldPin:HoldBegin;
+                if (visible) {pending=-1;action=Hide;}
+                else {pending=key;used=false;pressTime=now;action=HoldBegin;}
             } }
             else { if (pending!=-1) used=true; if (!repeated) action=match->action; }
             return true;
@@ -165,7 +162,6 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
             return 1;
         }
         if (index>=0 && !up) {
-            keys.lastTap=0;
             POINT point=reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->pt;
             bool visible=IsWindowVisible(config.overlay);
             if (visible && index==1 && scope()) {
@@ -253,12 +249,14 @@ static int selfTest() {
     check(dialog.event(20,false,false,cfg,false,action,1030,true) && action==None);
     KeyMachine taps;
     check(taps.event(20,true,true,cfg,false,action,1000) && action==HoldBegin);
-    check(taps.event(20,false,true,cfg,false,action,1050) && action==HoldRelease);
-    check(taps.event(20,true,true,cfg,false,action,1200) && action==HoldPin);
+    check(taps.event(20,false,true,cfg,false,action,1050) && action==HoldPin);
+    check(taps.event(20,true,true,cfg,false,action,1200) && action==HoldBegin);
     check(taps.event(20,true,true,cfg,true,action,1220) && action==None);
-    check(taps.event(20,false,true,cfg,true,action,1250) && action==None);
-    check(taps.event(20,true,true,cfg,true,action,1600) && action==HoldBegin);
+    check(taps.event(20,false,true,cfg,true,action,1250) && action==HoldPin);
+    check(taps.event(20,true,true,cfg,false,action,1600) && action==HoldBegin);
     check(taps.event(20,false,true,cfg,true,action,2000) && action==HoldRelease);
+    check(taps.event(20,true,true,cfg,true,action,2010) && action==Hide);
+    check(taps.event(20,false,true,cfg,false,action,2050) && action==None);
     check(taps.event(20,true,true,cfg,false,action,2100) && action==HoldBegin);
     check(taps.event(20,false,false,cfg,false,action,2150) && action==HoldCancel);
     check(taps.event(20,true,true,cfg,false,action,2200) && action==HoldBegin);

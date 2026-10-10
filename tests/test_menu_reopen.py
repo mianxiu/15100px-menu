@@ -35,16 +35,17 @@ class MenuFocusTests(unittest.TestCase):
         desktop.hold_release()
         desktop.gui.SendMessage.assert_not_called()
 
-    def test_double_tap_pin_ignores_key_release(self):
+    def test_short_tap_pins_in_place_and_ignores_later_release(self):
         desktop = Desktop('http://localhost', lambda action:None)
-        desktop.hwnd, desktop.visible = 2, False
+        desktop.hwnd, desktop.visible, desktop.hold_active = 2, True, True
+        desktop._scope = lambda:True
         def opened(**kwargs):
             desktop.visible = True
             return {'message':'opened'}
         desktop.open = Mock(side_effect=opened)
         desktop.gui = SimpleNamespace(SendMessage=Mock())
         desktop.hold_pin()
-        desktop.open.assert_called_once_with(hold=True)
+        desktop.open.assert_not_called()
         self.assertFalse(desktop.hold_active)
         desktop.gui.SendMessage.assert_called_once_with(2, 0x8010, 1, 0)
         desktop.hold_release()
