@@ -11,10 +11,11 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(REGISTRY), set(COMMANDS))
         self.assertEqual(len(REGISTRY), 12)
         for contract in command_contracts():
-            self.assertEqual(contract['version'], 1)
+            self.assertEqual(contract['version'], 2)
             self.assertEqual(contract['channel'], 'com-jsx')
             self.assertIn('not-busy', contract['conditions'])
             self.assertTrue(contract['recovery'])
+            self.assertIn('captured-id', contract['target_document'])
         self.assertIn('read-back', REGISTRY['label.none'].expected_result)
         self.assertIn('not-verified', REGISTRY['select'].expected_result)
 

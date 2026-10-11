@@ -35,6 +35,14 @@ async def exercise(executable, workspace, port, show_control=False):
         settings['enabled'] = False
         data.mkdir()
         (data/'settings.json').write_text(json.dumps(settings),encoding='utf-8')
+        history_id = 'smoke-history-success'
+        (data/'task-history.json').write_text(json.dumps({'protocol_version':1,'items':[
+            {'id':history_id,'action':'label.red','label':'历史测试','channel':'com-jsx',
+             'state':'succeeded','elapsed_ms':123,'target':{'document_id':1,'layer_ids':[2]},
+             'created_at':'2026-10-11T00:00:00+00:00','updated_at':'2026-10-11T00:00:01+00:00'},
+            {'id':'smoke-history-interrupted','action':'label.none','label':'中断测试','channel':'com-jsx',
+             'state':'running','elapsed_ms':456,'created_at':'2026-10-11T00:00:00+00:00',
+             'updated_at':'2026-10-11T00:00:01+00:00'}]}),encoding='utf-8')
         env = {key:value for key,value in os.environ.items()
                if key not in ('PYTHONHOME','PYTHONPATH','VIRTUAL_ENV')}
         async def session(restarted=False):
@@ -61,6 +69,13 @@ async def exercise(executable, workspace, port, show_control=False):
                 health=json.loads((await client.fetch(url+'/api/health')).body)
                 assert health['version']==status['version']==status['service']['version']
                 assert Path(status['service']['executable']).resolve()==copy.resolve()
+                history=json.loads((await client.fetch(url+'/api/tasks')).body)
+                assert history['persistent'] and not history['persistence_error']
+                saved={item['id']:item for item in history['items']}
+                assert saved[history_id]['state']=='succeeded' and saved[history_id]['restored']
+                assert saved['smoke-history-interrupted']['state']=='result-unknown'
+                assert saved['smoke-history-interrupted']['previous_state']=='running'
+                assert saved['smoke-history-interrupted']['elapsed_ms']==456
                 import win32api,win32con
                 for worker_pid in (status['menu']['pid'],status['menu']['hotkey_pid']):
                     handle=win32api.OpenProcess(win32con.PROCESS_QUERY_INFORMATION|win32con.PROCESS_VM_READ,False,worker_pid)

@@ -135,8 +135,10 @@ class Desktop:
         self.target = self.hwnd = None
         self.visible = False
         self.hold_active = False
+        self.restore_pending = False
         self.menu_epoch = 0
         self.document_caption = None
+        self.caption_window = 0
         self.stop = threading.Event()
         self.icons = None
         self.process = None
@@ -237,6 +239,12 @@ class Desktop:
                     self.notify({'action':event['action'],'cursor':event['cursor']} if 'cursor' in event else event['action'])
                 elif event.get('type') == 'caps.trace':
                     logging.info('CapsLock hook decision: %s', event)
+                elif event.get('type') == 'hook.health':
+                    logging.info('Native hook health: %s', event)
+                elif event.get('type') == 'caps.state':
+                    logging.info('CapsLock system state: %s', event)
+                elif event.get('type') == 'activation.trace':
+                    logging.info('Photoshop activation click: %s', event)
                 elif event.get("type") == "configured":
                     logging.debug("Native hotkey settings acknowledged")
                 else:
@@ -304,9 +312,12 @@ class Desktop:
         self.icons.apply(hwnd)
         self._native_config()
 
-    def _is_photoshop(self, hwnd):
+    def _workspace_root(self, hwnd):
         from .photoshop_windows import workspace_root
-        return bool(workspace_root(self.gui, hwnd))
+        return workspace_root(self.gui, hwnd)
+
+    def _is_photoshop(self, hwnd):
+        return bool(self._workspace_root(hwnd))
 
     @window_transition
     def _scope(self):
@@ -314,9 +325,17 @@ class Desktop:
             return False
         hwnd = self.gui.GetForegroundWindow()
         if self._is_photoshop(hwnd):
-            self.target = hwnd
+            # Floating document windows can be hidden/replaced when PS changes
+            # active documents. Keep popup ownership on the stable workspace.
+            self.target = self._workspace_root(hwnd)
+            self.caption_window = hwnd
             return True
-        return bool(self.visible and self._is_menu_window(hwnd) and self._is_photoshop(self.target))
+        # Windows can retain our hidden popup as foreground while restoring
+        # focus. It still belongs to this PS session, unlike a foreign app.
+        owned = self._is_menu_window(hwnd)
+        if not owned:
+            self.restore_pending = False
+        return bool((self.visible or self.restore_pending) and owned and self._is_photoshop(self.target))
 
     def _is_menu_window(self, hwnd):
         if not hwnd or not self.hwnd or not self.gui.IsWindow(hwnd):
@@ -367,6 +386,8 @@ class Desktop:
                         self.icons.apply(self.hwnd)
                         next_icon_refresh = time.monotonic() + 2
                     if self.visible and (not scoped or not self._is_photoshop(self.target)):
+                        logging.info('Menu auto-hide: scoped=%s foreground=%s target=%s target_valid=%s',
+                                     scoped, self.gui.GetForegroundWindow(), self.target, self._is_photoshop(self.target))
                         self.hide(restore=False)
                     self._native_config()
             except Exception:
@@ -396,7 +417,9 @@ class Desktop:
             root = workspace_root(self.gui, self.target)
             if not root:
                 return
-            source = self.target if self.gui.GetClassName(self.target) == 'OWL.DocumentWindow' else root
+            source = self.caption_window if (self.caption_window and
+                workspace_root(self.gui, self.caption_window) == root and
+                self.gui.GetClassName(self.caption_window) == 'OWL.DocumentWindow') else root
             name = document_name(self.gui.GetWindowText(source))
             if name and name != self.document_caption:
                 self.document_caption = name
@@ -410,6 +433,9 @@ class Desktop:
         import win32api
         import win32con as c
         hwnd = self.gui.GetForegroundWindow()
+        foreground = hwnd
+        if self.restore_pending and self._is_menu_window(hwnd) and self._is_photoshop(self.target):
+            hwnd = self.target
         if not self.settings["enabled"] or not self._is_photoshop(hwnd):
             raise RuntimeError("请先让 Photoshop 主窗口获得焦点，再唤出操作菜单")
         from .photoshop_windows import workspace_root
@@ -423,7 +449,8 @@ class Desktop:
                     max(rect[2], floating[2]), max(rect[3], floating[3]))
         if not (rect[0] <= cursor[0] < rect[2] and rect[1] <= cursor[1] < rect[3]):
             raise RuntimeError("鼠标需要位于 Photoshop 窗口内")
-        self.target = hwnd
+        self.target = root
+        self.caption_window = hwnd
         self._refresh_document_name()
         if not self.hwnd or not self.gui.IsWindow(self.hwnd):
             self._launch_overlay()
@@ -438,9 +465,10 @@ class Desktop:
         if hold:
             bounds = pie_bounds(rect, work, cursor, scale)
         # Recheck after setup: focus can change while a hotkey request is queued.
-        if self.gui.GetForegroundWindow() != hwnd or not self._is_photoshop(hwnd):
+        if self.gui.GetForegroundWindow() != foreground or not self._is_photoshop(hwnd):
             raise RuntimeError("Photoshop 焦点已改变，已取消唤出")
         self.visible = True
+        self.restore_pending = False
         panel = self.panel_context.snapshot(hwnd) if self.panel_context else {'kind': 'generic'}
         context_ready = time.perf_counter()
         logging.info('Menu panel context: %s', panel)
@@ -449,7 +477,7 @@ class Desktop:
         self.menu_epoch += 1
         flags = PANEL_IDS[panel['kind']] | (int(bool(panel.get('input_focused'))) << 2) | (int(context) << 3) | (int(hold) << 4)
         self.gui.SendMessage(self.hwnd, 0x8011, flags, self.menu_epoch)
-        show_popup(self.gui, self.hwnd, hwnd, bounds)
+        show_popup(self.gui, self.hwnd, root, bounds)
         try:
             self.gui.SetForegroundWindow(self.hwnd)
         except Exception:
@@ -511,6 +539,10 @@ class Desktop:
         # Capture ownership before ShowWindow, including ImGui submenus.
         foreground = self.gui.GetForegroundWindow()
         owned_foreground = self._is_menu_window(foreground)
+        # A focus-neutral close must not strand our own hidden foreground.
+        # Preserve session ownership until an actual foreign foreground is
+        # observed; restore controls focus movement, not session validity.
+        self.restore_pending = bool(owned_foreground and self.target)
         self.visible = False
         self.hold_active = False
         if self.hwnd and self.gui.IsWindow(self.hwnd):

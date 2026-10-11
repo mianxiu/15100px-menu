@@ -182,7 +182,12 @@ class MenuTests(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=1) as worker:
                 message=json.loads(worker.submit(process.stdout.readline).result(timeout=5))
             self.assertEqual(message['type'],'ready')
-            self.assertEqual(json.loads(process.stdout.readline())['type'],'configured')
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                for _ in range(5):
+                    event=json.loads(worker.submit(process.stdout.readline).result(timeout=5))
+                    if event['type']=='configured':break
+                    self.assertIn(event['type'],('caps.state','hook.health'))
+                else:self.fail('Native host did not acknowledge configuration')
             process.stdin.close()
             self.assertEqual(process.wait(5),0)
         finally:

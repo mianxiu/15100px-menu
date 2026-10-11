@@ -3,11 +3,13 @@ from unittest.mock import Mock
 
 from backend.layer_labels import LABEL_COLORS, LABEL_ACTIONS, label_script
 from backend.photoshop_bridge import PhotoshopBridge
+from backend.operation_target import CAPTURE_SCRIPT, guarded_script
 
 
 class LabelTests(unittest.IsolatedAsyncioTestCase):
     async def test_clear_reports_parent_color_instead_of_generic_success(self):
         bridge = PhotoshopBridge()
+        bridge._capture_target = lambda: {'document_id':1,'active_layer_id':2,'layer_ids':[2]}
         bridge._execute = lambda action: '{"verified":true,"count":2,"inherited":1}'
         try:
             result = await bridge.execute('label.none')
@@ -20,7 +22,8 @@ class LabelTests(unittest.IsolatedAsyncioTestCase):
         bridge = PhotoshopBridge()
         app = Mock()
         app.Documents.Count = 2
-        app.DoJavaScript.return_value = '{"verified":true,"count":2,"inherited":0}'
+        target={'document_id':1,'active_layer_id':2,'layer_ids':[2]}
+        app.DoJavaScript.side_effect = lambda script: (__import__('json').dumps(target) if script==CAPTURE_SCRIPT else '{"verified":true,"count":2,"inherited":0}')
         bridge._application = lambda: app
         bridge.replace_scripts({'color': 'custom orange script'})
         try:
@@ -28,8 +31,8 @@ class LabelTests(unittest.IsolatedAsyncioTestCase):
                 name = 'label.' + color['id']
                 result = await bridge.execute(name)
                 self.assertIn('无颜色' if color['id']=='none' else color['label'], result['message'])
-                app.DoJavaScript.assert_called_with(label_script(name))
-            self.assertEqual(app.DoJavaScript.call_count, 8)
+                app.DoJavaScript.assert_called_with(guarded_script(label_script(name),target))
+            self.assertEqual(app.DoJavaScript.call_count, 16)
         finally:
             await bridge.close()
 

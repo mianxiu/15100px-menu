@@ -2,6 +2,7 @@ import {render} from 'solid-js/web';
 import {createSignal, onMount, onCleanup, For, Show} from 'solid-js';
 import {Client} from './client.mjs';
 import './style.css';
+import './tasks.css';
 
 const pages = [['overview','运行状态'],['settings','菜单与快捷键'],['plugins','插件管理'],['logs','运行日志']];
 const keyLabels = {toggle:'按住唤出 / 松开执行', hide:'收起菜单', select:'选择组内图层', color:'橙色图层标签', moveToTop:'移到顶部', moveToBottom:'移到底部'};
@@ -26,6 +27,7 @@ function App() {
   }, event => {
     if(event.type==='status') accept(event.data);
     if(event.type==='notice') setNotice(event);
+    if(event.type==='tasks') setState(previous=>({...previous,tasks:event.data}));
   });
   async function call(action,args={}) {
     setWorking(true);
@@ -60,6 +62,7 @@ function App() {
       <div classList={{notice:true,error:!notice().ok}} role="status">{notice().message}</div>
       <Show when={page()==='overview'}><div class="cards"><section><h2>Photoshop 连接</h2><strong class="status-value">{state().photoshop.message || '检查中…'}</strong><p>{state().photoshop.document || '当前没有可用文档'}</p><p>{state().photoshop.busy?'正在执行图层操作':'执行线程空闲'}</p></section><section><h2>原生操作菜单</h2><strong class="status-value">{state().settings.enabled?'已启用':'已暂停'}</strong><p>{state().desktop}</p><p>当前面板：{state().menu?.panel_context?.label || '通用操作'}（优先按鼠标悬停区域识别）</p><p>{state().menu?.ready?'C++ Dear ImGui 菜单已就绪（默认隐藏）':'原生菜单正在初始化或未启用桌面功能'}</p><p>打开 Photoshop 主窗口，把鼠标移入窗口，按 {state().settings.shortcuts?.toggle || 'CapsLock'}。</p></section></div>
         <section><h2>操作菜单与后台各自独立</h2><p>后台管理可以随时打开。图层选择、标色和排序在 Dear ImGui 菜单内完成，保留鼠标附近的唤出方式。</p><p>菜单打开后可取得焦点；切换到其他应用、关闭或最小化 Photoshop 会自动收起。后台页面不执行图层动作。</p><Show when={state().tray_error}><p class="error">托盘：{state().tray_error}</p></Show><div class="buttons"><button disabled={disabled()} onClick={()=>perform('status').then(()=>{})}>刷新连接状态</button><button class="danger" disabled={disabled() || state().photoshop.busy} onClick={()=>perform('service.quit')}>退出后台服务</button></div></section>
+        <section><h2>最近任务</h2><p>保留最近 64 次操作，重启后仍可查看。超时表示结果尚未确定；后台收到最终结果后会更新同一任务。重启时未结束的历史任务不会自动重跑。</p><Show when={state().tasks?.persistence_error}><p class="error">{state().tasks.persistence_error}</p></Show><Show when={state().tasks?.items?.length} fallback={<p>尚无任务记录。</p>}><For each={state().tasks?.items?.slice(0,12)}>{task=><details class="task-record"><summary>{task.label} · {task.state_label} · {(task.elapsed_ms/1000).toFixed(2)} 秒 <small>#{task.id.slice(0,8)}</small></summary><p>任务 ID：{task.id}</p><Show when={task.restored}><p>上次服务的历史记录 · 只读，不自动重跑</p></Show><Show when={task.target}><p>目标文档 ID：{task.target.document_id} · 选中 {task.target.layer_ids?.length} 个图层</p></Show><Show when={task.message}><p>{task.message}</p></Show><Show when={task.error}><p class="error">{task.error}</p></Show><Show when={task.wait_error && task.state!=='result-unknown'}><p>曾停止等待：{task.wait_error}</p></Show></details>}</For></Show></section>
         <section><h2>当前运行版本</h2><p>{state().version ? `v${state().version}` : '待确认'}{connection()==='connected'?' · 服务在线':' · 等待重新连接确认'}</p><p>程序：{state().service?.executable || '此服务未提供程序路径'}</p><p>升级应用：先退出后台服务，等待退出完成，再替换并打开 PhotoshopMenu.exe。设置与脚本包会保留。</p></section>
       </Show>
       <Show when={page()==='settings' && form()}><section><h2>菜单行为</h2><div class="checks"><label><input type="checkbox" checked={form().enabled} onChange={e=>edit('enabled',e.target.checked)}/>启用 Photoshop 操作菜单与快捷键</label><label><input type="checkbox" checked={form().right_click_hide} onChange={e=>edit('right_click_hide',e.target.checked)}/>在菜单内右键收起</label><label><input type="checkbox" checked={form().open_control_on_start} onChange={e=>edit('open_control_on_start',e.target.checked)}/>启动时打开后台管理窗口</label></div><div class="fields"><label>菜单宽度<input type="number" min="300" max="1200" value={form().menu_width} onInput={e=>edit('menu_width',Number(e.target.value))}/></label><label>菜单高度<input type="number" min="240" max="1000" value={form().menu_height} onInput={e=>edit('menu_height',Number(e.target.value))}/></label></div><p>尺寸按屏幕 DPI 缩放，显示位置限制在 Photoshop 窗口与屏幕工作区内。</p></section>

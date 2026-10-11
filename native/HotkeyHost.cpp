@@ -10,8 +10,9 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace };
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace };
 static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
 struct Config { bool enabled=false, textInput=false; HWND overlay=nullptr; std::array<Binding,6> bindings{}; };
@@ -131,11 +132,75 @@ static std::array<bool,3> mouseConsumed{};
 static std::atomic<bool> closing{false};
 static DWORD hookThread;
 static HANDLE available;
+static ULONGLONG lastInputTick=0,lastScanUs=0;
+struct ActivationGate {
+    bool active=false,allowed=false,switching=false,taskbarSwitching=false,directSwitching=false;
+    ULONGLONG clicked=0;
+    void observe(bool scoped,ULONGLONG now) {
+        if (!scoped) {active=false;allowed=false;return;}
+        if (!active) {allowed=clicked && now-clicked<=2000;active=true;clicked=0;}
+    }
+    void observeForeground(bool scoped,bool sameOrigin,bool taskbar,ULONGLONG now) {
+        if (!scoped && !switching && !taskbarSwitching && !directSwitching && clicked && !sameOrigin && !taskbar)
+            clicked=0;
+        observe(scoped,now);
+    }
+    void click(bool photoshop,ULONGLONG now) {
+        if (photoshop) {clicked=active?0:now;if (active) allowed=true;}
+        else {clicked=0;allowed=false;}
+    }
+    void switchIntent(ULONGLONG now) {clicked=now;}
+    void beginSwitch(ULONGLONG now) {switching=true;switchIntent(now);}
+    void beginTaskbar(ULONGLONG now) {taskbarSwitching=true;switchIntent(now);}
+    void beginDirect(ULONGLONG now) {directSwitching=true;click(true,now);switchIntent(now);}
+    void clickTarget(bool photoshop,bool ownedMenu,ULONGLONG now) {
+        if (photoshop) beginDirect(now);
+        // Clicking our own menu belongs to the existing PS session. It must
+        // neither revoke that session nor grant a new one from outside PS.
+        else if (!ownedMenu) click(false,now);
+    }
+    void finishDirect(bool scoped,ULONGLONG now) {
+        directSwitching=false;
+        if (scoped) {active=true;allowed=true;clicked=0;}
+        else switchIntent(now);
+    }
+    void finishTaskbar(bool scoped,ULONGLONG now) {
+        taskbarSwitching=false;
+        if (scoped) {active=true;allowed=true;clicked=0;}
+        else switchIntent(now);
+    }
+    void finishSwitch(bool scoped,ULONGLONG now) {
+        switching=false;
+        if (scoped) {active=true;allowed=true;clicked=0;}
+        else switchIntent(now);
+    }
+};
+static ActivationGate activation;
+static HWND activationOrigin=nullptr;
+static LONGLONG counterFrequency=1;
+static std::atomic<ULONGLONG> droppedEvents{0},callbackPeakUs{0};
+static ULONGLONG microseconds() {
+    LARGE_INTEGER value{};QueryPerformanceCounter(&value);
+    return static_cast<ULONGLONG>((value.QuadPart/counterFrequency)*1000000+
+        (value.QuadPart%counterFrequency)*1000000/counterFrequency);
+}
+struct CallbackTiming {
+    ULONGLONG start=microseconds();
+    ~CallbackTiming() {
+        auto elapsed=microseconds()-start;
+        if (elapsed>callbackPeakUs.load(std::memory_order_relaxed)) callbackPeakUs.store(elapsed,std::memory_order_relaxed);
+    }
+};
 // Single producer (hook thread), single consumer (pipe writer).
 struct HookEvent {
     Action action=None; HWND hwnd=nullptr,root=nullptr; POINT cursor{};
     DWORD pid=0,flags=0,time=0;UINT message=0;
     bool command=false,process=false,enabled=false,repeat=false,owned=false,blocked=false;
+    ULONGLONG decisionUs=0,scanUs=0,renewUs=0,gapMs=0,peakUs=0,dropped=0;
+    DWORD ageMs=0;
+    bool attempted=false,toggleOn=false,previousToggle=false;
+    bool activationAllowed=false,activationActive=false,taskbarSwitching=false,directSwitching=false;
+    ULONGLONG activationIntent=0;
     wchar_t windowClass[64]{};
 };
 static std::array<HookEvent,1024> queue{};
@@ -143,7 +208,7 @@ static std::atomic<unsigned> head{0}, tail{0};
 static void emit(Action action,HWND hwnd=nullptr,HWND root=nullptr) {
     if (action==None) return;
     unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
-    if (next==tail.load(std::memory_order_acquire)) return;
+    if (next==tail.load(std::memory_order_acquire)) {droppedEvents.fetch_add(1,std::memory_order_relaxed);return;}
     POINT cursor{};
     if (action==HoldRelease && !GetCursorPos(&cursor)) action=HoldCancel;
     queue[head.load(std::memory_order_relaxed)]={action,hwnd,root,cursor};
@@ -171,19 +236,19 @@ static bool scope(HWND foreground=GetForegroundWindow()) {
 }
 struct ProcessIdentity { DWORD pid=0;HANDLE handle=nullptr; };
 static std::array<ProcessIdentity,32> photoshopProcesses{};
-static void refreshPhotoshopProcesses() {
-    // Only the hook thread's message loop changes this cache. Never enumerate
-    // processes or resolve executable paths inside a low-level hook callback.
-    for (auto& p:photoshopProcesses) if (p.handle && WaitForSingleObject(p.handle,0)!=WAIT_TIMEOUT) {
-        CloseHandle(p.handle);p={};
-    }
+struct ProcessSnapshot {
+    std::array<ProcessIdentity,32> entries{};
+    ULONGLONG scanUs=0;
+    ~ProcessSnapshot() {for (auto& p:entries) if (p.handle) CloseHandle(p.handle);}
+};
+static std::unique_ptr<ProcessSnapshot> scanPhotoshopProcesses() {
+    auto result=std::make_unique<ProcessSnapshot>();
+    auto started=microseconds();
     HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
-    if (snapshot==INVALID_HANDLE_VALUE) return;
+    if (snapshot==INVALID_HANDLE_VALUE) return nullptr;
     PROCESSENTRY32W entry{};entry.dwSize=sizeof(entry);
     if (Process32FirstW(snapshot,&entry)) do {
         if (_wcsicmp(entry.szExeFile,L"Photoshop.exe")!=0) continue;
-        bool cached=false;for (const auto& p:photoshopProcesses) if (p.pid==entry.th32ProcessID) cached=true;
-        if (cached) continue;
         HANDLE handle=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,entry.th32ProcessID);
         if (!handle) continue;
         wchar_t path[32768]{};DWORD length=32768;
@@ -191,10 +256,23 @@ static void refreshPhotoshopProcesses() {
         const wchar_t* name=wcsrchr(path,L'\\');name=name?name+1:path;
         valid=valid && _wcsicmp(name,L"Photoshop.exe")==0 && WaitForSingleObject(handle,0)==WAIT_TIMEOUT;
         bool stored=false;
-        if (valid) for (auto& p:photoshopProcesses) if (!p.handle) {p={entry.th32ProcessID,handle};stored=true;break;}
+        if (valid) for (auto& p:result->entries) if (!p.handle) {p={entry.th32ProcessID,handle};stored=true;break;}
         if (!stored) CloseHandle(handle);
     } while (Process32NextW(snapshot,&entry));
     CloseHandle(snapshot);
+    result->scanUs=microseconds()-started;
+    return result;
+}
+static void applyProcesses(ProcessSnapshot& snapshot) {
+    // Only this bounded handle exchange runs on the input thread. Worker
+    // snapshots own their handles until the message thread takes ownership.
+    for (auto& p:photoshopProcesses) if (p.handle) CloseHandle(p.handle);
+    for (size_t i=0;i<photoshopProcesses.size();++i) photoshopProcesses[i]=std::exchange(snapshot.entries[i],{});
+    lastScanUs=snapshot.scanUs;
+}
+static void refreshPhotoshopProcesses() {
+    auto snapshot=scanPhotoshopProcesses();
+    if (snapshot) applyProcesses(*snapshot);
 }
 static bool photoshopProcessWindow(HWND hwnd) {
     DWORD pid=0;GetWindowThreadProcessId(hwnd,&pid);
@@ -206,6 +284,17 @@ static bool photoshopKeyScope(HWND foreground=GetForegroundWindow()) {
     if (!config.enabled) return false;
     return photoshopProcessWindow(foreground) ||
         (menuWindow(foreground) && photoshopProcessWindow(target));
+}
+static bool taskbarWindow(HWND hwnd) {
+    if (!hwnd) return false;
+    wchar_t name[64]{};GetClassNameW(GetAncestor(hwnd,GA_ROOT),name,64);
+    return wcscmp(name,L"Shell_TrayWnd")==0 || wcscmp(name,L"Shell_SecondaryTrayWnd")==0 ||
+           wcscmp(name,L"TaskListThumbnailWnd")==0;
+}
+static void observeActivation(HWND foreground,bool scoped,ULONGLONG now) {
+    // If a taskbar/Alt+Tab intent activates some other application, consume
+    // it there; a subsequent hover into PS must not inherit that intent.
+    activation.observeForeground(scoped,foreground==activationOrigin,taskbarWindow(foreground),now);
 }
 static bool inside(HWND hwnd,POINT point) {
     RECT rect{}; return GetWindowRect(hwnd,&rect) && PtInRect(&rect,point);
@@ -224,11 +313,24 @@ static bool routeKey(KeyMachine& state,int raw,bool down,bool commandScope,bool 
     return state.event(raw,down,commandScope || reserve,cfg,visible,action,now,reserve);
 }
 static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
+    CallbackTiming timing;
     if (code>=0) {
+        lastInputTick=GetTickCount64();
         const auto& input=*reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
         Action action;
         HWND foreground=GetForegroundWindow();
-        bool commandScope=scope(foreground),processScope=photoshopKeyScope(foreground);
+        bool processScope=photoshopKeyScope(foreground);
+        observeActivation(foreground,processScope,lastInputTick);
+        // An explicit task switch is activation intent, unlike mouse hover.
+        if (!(input.flags&LLKHF_INJECTED) && (message==WM_KEYDOWN || message==WM_SYSKEYDOWN) &&
+            input.vkCode==VK_TAB && (keys.held[VK_MENU] || (input.flags&LLKHF_ALTDOWN))) {
+            activationOrigin=foreground;activation.beginSwitch(lastInputTick);
+        }
+        if (!(input.flags&LLKHF_INJECTED) && alias(input.vkCode)==VK_MENU &&
+            (message==WM_KEYUP || message==WM_SYSKEYUP) && activation.switching) {
+            activationOrigin=foreground;activation.finishSwitch(processScope,lastInputTick);
+        }
+        bool commandScope=scope(foreground) && activation.allowed;
         bool repeat=input.vkCode==VK_CAPITAL && keys.physical[VK_CAPITAL];
         bool owned=input.vkCode==VK_CAPITAL && keys.consumed[VK_CAPITAL];
         if (input.vkCode==VK_LWIN && !(input.flags&LLKHF_INJECTED)) {
@@ -251,9 +353,14 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
                 event.flags=input.flags;event.time=input.time;event.message=static_cast<UINT>(message);
                 event.command=commandScope;event.process=processScope;event.enabled=config.enabled;
                 event.repeat=repeat;event.owned=owned;event.blocked=blocked;
+                event.activationAllowed=activation.allowed;event.activationActive=activation.active;
+                event.taskbarSwitching=activation.taskbarSwitching;event.activationIntent=activation.clicked;
+                event.decisionUs=microseconds()-timing.start;
+                event.ageMs=GetTickCount()-input.time;
+                event.dropped=droppedEvents.load(std::memory_order_relaxed);
                 queue[head.load(std::memory_order_relaxed)]=event;
                 head.store(next,std::memory_order_release);SetEvent(available);
-            }
+            } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
         }
         if (blocked) {
             emit(action); return 1;
@@ -262,17 +369,40 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
     return CallNextHookEx(nullptr,code,message,data);
 }
 static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
+    CallbackTiming timing;
     if (code>=0) {
+        lastInputTick=GetTickCount64();
+        HWND foreground=GetForegroundWindow();
+        observeActivation(foreground,photoshopKeyScope(foreground),lastInputTick);
         int index=message==WM_LBUTTONUP || message==WM_LBUTTONDOWN?0:
                   message==WM_RBUTTONUP || message==WM_RBUTTONDOWN?1:
                   message==WM_MBUTTONUP || message==WM_MBUTTONDOWN?2:-1;
         bool up=message==WM_LBUTTONUP || message==WM_RBUTTONUP || message==WM_MBUTTONUP;
+        // Complete the physical taskbar click before cancellation can consume
+        // its up. Win11 can change foreground between down and up; observing
+        // only the down loses intent, or never grants an already-active PS.
+        if (message==WM_LBUTTONUP && activation.taskbarSwitching &&
+            !(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->flags&LLMHF_INJECTED)) {
+            activation.finishTaskbar(photoshopKeyScope(foreground),lastInputTick);
+            observeActivation(foreground,photoshopKeyScope(foreground),lastInputTick);
+        }
+        if (message==WM_LBUTTONUP && activation.directSwitching &&
+            !(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->flags&LLMHF_INJECTED)) {
+            activation.finishDirect(photoshopKeyScope(foreground),lastInputTick);
+        }
         if (index>=0 && up && mouseConsumed[index]) {
             mouseConsumed[index]=false;
             return 1;
         }
         if (index>=0 && !up) {
             POINT point=reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->pt;
+            if (index==0 && !(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->flags&LLMHF_INJECTED)) {
+                HWND clicked=WindowFromPoint(point);
+                activationOrigin=foreground;
+                if (taskbarWindow(clicked)) activation.beginTaskbar(lastInputTick);
+                else activation.clickTarget(photoshopProcessWindow(clicked),
+                    menuWindow(clicked) && photoshopProcessWindow(target),lastInputTick);
+            }
             bool visible=IsWindowVisible(config.overlay);
             if (visible && index==1 && scope()) {
                 // Explicit right-click cancellation owns the click, so return
@@ -289,6 +419,21 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
                 if (!dismissPending) { dismissPending=true; emit(Dismiss); }
                 if (scoped && index!=1) { mouseConsumed[index]=true; return 1; }
             }
+        }
+        if ((message==WM_LBUTTONDOWN || message==WM_LBUTTONUP) &&
+            !(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->flags&LLMHF_INJECTED)) {
+            unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
+            if (next!=tail.load(std::memory_order_acquire)) {
+                HookEvent event{};event.action=ActivationTrace;event.hwnd=foreground;
+                event.root=WindowFromPoint(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->pt);
+                event.message=static_cast<UINT>(message);event.time=GetTickCount();
+                event.process=photoshopProcessWindow(event.root);
+                event.activationAllowed=activation.allowed;event.activationActive=activation.active;
+                event.directSwitching=activation.directSwitching;event.taskbarSwitching=activation.taskbarSwitching;
+                event.activationIntent=activation.clicked;
+                queue[head.load(std::memory_order_relaxed)]=event;
+                head.store(next,std::memory_order_release);SetEvent(available);
+            } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
         }
     }
     return CallNextHookEx(nullptr,code,message,data);
@@ -343,6 +488,39 @@ static void writeActions() {
             auto event=queue[cursor];Action action=event.action; cursor=(cursor+1)%queue.size(); tail.store(cursor,std::memory_order_release);
             const char* type=action==Ready?"ready":action==Error?"error":action==Configured?"configured":"action";
             std::string line;
+            if (action==ActivationTrace) {
+                line="{\"type\":\"activation.trace\",\"foreground\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
+                    ",\"clicked\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+",\"message\":"+std::to_string(event.message)+
+                    ",\"tick_ms\":"+std::to_string(event.time)+",\"clicked_ps\":"+(event.process?"true":"false")+
+                    ",\"allowed\":"+(event.activationAllowed?"true":"false")+",\"active\":"+(event.activationActive?"true":"false")+
+                    ",\"direct_switching\":"+(event.directSwitching?"true":"false")+
+                    ",\"taskbar_switching\":"+(event.taskbarSwitching?"true":"false")+
+                    ",\"intent_tick\":"+std::to_string(event.activationIntent)+"}\n";
+                DWORD written=0;
+                if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) {stop();return;}
+                continue;
+            }
+            if (action==CapsState) {
+                line="{\"type\":\"caps.state\",\"tick_ms\":"+std::to_string(event.gapMs)+
+                    ",\"toggle_on\":"+(event.toggleOn?"true":"false")+",\"previous\":"+(event.previousToggle?"true":"false")+
+                    ",\"baseline\":"+(event.enabled?"true":"false")+",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
+                    ",\"pid\":"+std::to_string(event.pid)+",\"process_scope\":"+(event.process?"true":"false")+
+                    ",\"tracked_down\":"+(event.repeat?"true":"false")+",\"owned\":"+(event.owned?"true":"false")+
+                    ",\"dropped_total\":"+std::to_string(event.dropped)+",\"source\":\"GetKeyState; hook message queue\"}\n";
+                DWORD written=0;
+                if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) {stop();return;}
+                continue;
+            }
+            if (action==HookHealth) {
+                line="{\"type\":\"hook.health\",\"scan_us\":"+std::to_string(event.scanUs)+
+                    ",\"renew_us\":"+std::to_string(event.renewUs)+",\"timer_gap_ms\":"+std::to_string(event.gapMs)+
+                    ",\"callback_peak_us\":"+std::to_string(event.peakUs)+",\"dropped_total\":"+std::to_string(event.dropped)+
+                    ",\"renew_ok\":"+(event.blocked?"true":"false")+",\"renew_attempted\":"+(event.attempted?"true":"false")+
+                    ",\"scan_on_worker\":true}\n";
+                DWORD written=0;
+                if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) {stop();return;}
+                continue;
+            }
             if (action==CapsTrace) {
                 std::string windowClass;
                 for (wchar_t c:event.windowClass) {
@@ -355,7 +533,13 @@ static void writeActions() {
                     ",\"flags\":"+std::to_string(event.flags)+",\"key_time_ms\":"+std::to_string(event.time)+
                     ",\"command_scope\":"+(event.command?"true":"false")+",\"process_scope\":"+(event.process?"true":"false")+
                     ",\"enabled\":"+(event.enabled?"true":"false")+",\"repeat\":"+(event.repeat?"true":"false")+
-                    ",\"owned_before\":"+(event.owned?"true":"false")+",\"blocked\":"+(event.blocked?"true":"false")+"}\n";
+                    ",\"owned_before\":"+(event.owned?"true":"false")+",\"blocked\":"+(event.blocked?"true":"false")+
+                    ",\"activation_allowed\":"+(event.activationAllowed?"true":"false")+
+                    ",\"activation_active\":"+(event.activationActive?"true":"false")+
+                    ",\"taskbar_switching\":"+(event.taskbarSwitching?"true":"false")+
+                    ",\"activation_intent_tick\":"+std::to_string(event.activationIntent)+
+                    ",\"decision_us\":"+std::to_string(event.decisionUs)+",\"delivery_age_ms\":"+std::to_string(event.ageMs)+
+                    ",\"dropped_total\":"+std::to_string(event.dropped)+"}\n";
                 DWORD written=0;
                 if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) {stop();return;}
                 continue;
@@ -373,7 +557,91 @@ static void writeActions() {
     }
 }
 static void check(bool value) { if (!value) throw std::runtime_error("Native hook self-test failed"); }
+static bool renewalAllowed(ULONGLONG now,ULONGLONG last,bool capsHeld,bool winHeld,bool mouseHeld) {
+    return !capsHeld && !winHeld && !mouseHeld && now-last>=250;
+}
+static void sampleCapsState(bool force=false) {
+    static bool sampled=false,previous=false;
+    // The low bit is the toggle bit. GetAsyncKeyState's low bit is NOT a
+    // toggle state. Sample only from the pumping message thread, not a hook.
+    bool current=(GetKeyState(VK_CAPITAL)&1)!=0;
+    if (sampled && current==previous && !force) return;
+    unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
+    if (next!=tail.load(std::memory_order_acquire)) {
+        HookEvent event{};event.action=CapsState;event.hwnd=GetForegroundWindow();
+        GetWindowThreadProcessId(event.hwnd,&event.pid);
+        event.toggleOn=current;event.previousToggle=previous;event.enabled=!sampled || force;
+        event.process=photoshopKeyScope(event.hwnd);event.repeat=keys.physical[VK_CAPITAL];event.owned=keys.consumed[VK_CAPITAL];
+        event.gapMs=GetTickCount64();event.dropped=droppedEvents.load(std::memory_order_relaxed);
+        queue[head.load(std::memory_order_relaxed)]=event;
+        head.store(next,std::memory_order_release);SetEvent(available);
+        sampled=true;previous=current;
+    } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
+}
 static int selfTest() {
+    ActivationGate gate;
+    gate.observe(false,100);gate.observe(true,200);check(!gate.allowed);
+    gate.click(true,201);check(gate.allowed);
+    gate.observe(true,1000);check(gate.allowed);
+    gate.observe(false,1100);check(!gate.allowed);
+    gate.observe(true,1200);check(!gate.allowed);
+    gate.observe(false,1300);gate.click(true,1400);gate.observe(true,1401);check(gate.allowed);
+    gate.observe(false,1500);gate.click(true,1600);gate.observe(true,2200);check(gate.allowed);
+    gate.observe(false,2300);gate.click(true,2400);gate.observe(true,4500);check(!gate.allowed);
+    gate.switchIntent(4600);gate.observe(false,4601);gate.observe(true,4700);check(gate.allowed);
+    gate.observe(false,4800);gate.beginSwitch(4900);
+    gate.observe(false,5000);check(gate.switching && !gate.allowed);
+    gate.observe(true,10000);check(!gate.allowed);
+    gate.finishSwitch(true,10100);check(gate.allowed && !gate.switching && !gate.clicked);
+    gate.observe(false,10200);gate.observe(true,10300);check(!gate.allowed);
+    gate.observe(false,10400);gate.beginSwitch(10500);gate.finishSwitch(false,10600);
+    gate.observe(true,10601);check(gate.allowed);
+    // Taskbar clicking an already-foreground, unqualified PS must qualify it.
+    gate.observe(false,11000);gate.observe(true,11001);check(!gate.allowed);
+    gate.beginTaskbar(11002);gate.observe(true,11003);check(gate.taskbarSwitching);
+    gate.finishTaskbar(true,11004);check(gate.allowed && !gate.taskbarSwitching);
+    // Temporary taskbar foreground does not end the click gesture.
+    gate.observe(false,11100);gate.beginTaskbar(11101);gate.observe(false,11102);
+    check(gate.taskbarSwitching);gate.finishTaskbar(true,11103);check(gate.allowed);
+    // Delayed final PS activation remains bounded; ordinary hover cannot reuse it.
+    gate.observe(false,11200);gate.beginTaskbar(11201);gate.finishTaskbar(false,11202);
+    gate.observe(true,11203);check(gate.allowed);
+    gate.observe(false,11204);gate.observe(true,11205);check(!gate.allowed);
+    gate.beginTaskbar(11300);gate.finishTaskbar(false,11301);
+    gate.observe(true,14000);check(!gate.allowed);
+    gate.observe(false,14100);gate.beginTaskbar(14101);
+    gate.observeForeground(false,false,false,14102);check(gate.clicked && gate.taskbarSwitching);
+    gate.finishTaskbar(true,14103);check(gate.allowed);
+    gate.observe(false,14200);gate.beginTaskbar(14201);gate.finishTaskbar(false,14202);
+    gate.observeForeground(false,false,false,14203);check(!gate.clicked);
+    gate.observe(true,14204);check(!gate.allowed); // Other app won; hover must not inherit.
+    // A PS click can pass through an intermediate foreground before its up.
+    gate.observe(false,15000);gate.beginDirect(15001);
+    gate.observeForeground(false,false,false,15002);
+    check(gate.directSwitching && gate.clicked);
+    gate.finishDirect(true,15003);check(gate.allowed && !gate.directSwitching);
+    gate.observe(false,15004);gate.observe(true,15005);check(!gate.allowed);
+    // Also restore an already-foreground PS whose earlier qualification was lost.
+    gate.beginDirect(15100);gate.finishDirect(true,15101);check(gate.allowed);
+    gate.observe(false,15200);gate.beginDirect(15201);gate.finishDirect(false,15202);
+    gate.observeForeground(false,false,false,15203);check(!gate.clicked);
+    gate.observe(true,15204);check(!gate.allowed);
+    gate.clickTarget(true,false,15300);gate.finishDirect(true,15301);check(gate.allowed);
+    for (int i=0;i<10000;++i) {
+        gate.clickTarget(false,true,15302+i); // Own menu click then return to PS.
+        gate.observe(true,15303+i);check(gate.allowed);
+    }
+    gate.clickTarget(false,false,26000);check(!gate.allowed);
+    gate.observe(false,26001);gate.clickTarget(false,true,26002);
+    gate.observe(true,26003);check(!gate.allowed); // Own menu never grants new scope.
+    for (int i=0;i<10000;++i) {
+        ULONGLONG last=1000+i*20;
+        check(!renewalAllowed(last+20,last,false,false,false));
+        check(!renewalAllowed(last+600,last,true,false,false));
+        check(!renewalAllowed(last+600,last,false,true,false));
+        check(!renewalAllowed(last+600,last,false,false,true));
+        check(renewalAllowed(last+250,last,false,false,false));
+    }
     Config cfg; cfg.bindings[0]={Toggle,{20},1}; cfg.bindings[1]={Select,{20,65},2};
     KeyMachine state; Action action;
     WinRightMachine remap;DWORD mouse=0;
@@ -507,6 +775,7 @@ static bool renewHooks(HHOOK& keyHook,HHOOK& mouseHook) {
     keyHook=nextKey;mouseHook=nextMouse;return true;
 }
 int main(int argc,char** argv) {
+    LARGE_INTEGER frequency{};QueryPerformanceFrequency(&frequency);counterFrequency=frequency.QuadPart;
     // MSLLHOOKSTRUCT uses physical per-monitor coordinates. GetWindowRect and
     // WindowFromPoint must use the same coordinate space at 125/150/200% DPI.
     auto dpi=reinterpret_cast<BOOL(WINAPI*)(HANDLE)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetProcessDpiAwarenessContext"));
@@ -589,11 +858,29 @@ int main(int argc,char** argv) {
         stop();
     }).detach();
     emit(Ready);
+    std::thread processScanner([]{
+        while (!closing.load()) {
+            for (int i=0;i<20 && !closing.load();++i) Sleep(50);
+            if (closing.load()) break;
+            auto snapshot=scanPhotoshopProcesses();
+            if (snapshot && PostThreadMessageW(hookThread,WM_APP+22,0,reinterpret_cast<LPARAM>(snapshot.get()))) snapshot.release();
+        }
+    });
+    sampleCapsState(true);
+    UINT_PTR capsTimer=SetTimer(nullptr,0,16,nullptr);
     UINT_PTR renewal=SetTimer(nullptr,0,1000,nullptr);
-    if (!renewal) {stop();}
+    if (!renewal || !capsTimer) {stop();}
     unsigned renewalFailures=0;
+    ULONGLONG previousMaintenance=GetTickCount64();
     while (GetMessageW(&message,nullptr,0,0)>0) {
-        if (message.message==winRightMessage) {
+        if (message.message==WM_APP+22) {
+            std::unique_ptr<ProcessSnapshot> snapshot(reinterpret_cast<ProcessSnapshot*>(message.lParam));
+            applyProcesses(*snapshot);
+        } else if (message.message==WM_TIMER && message.wParam==capsTimer) {
+            HWND foreground=GetForegroundWindow();
+            observeActivation(foreground,photoshopKeyScope(foreground),GetTickCount64());
+            sampleCapsState();
+        } else if (message.message==winRightMessage) {
             if (message.wParam==MOUSEEVENTF_RIGHTDOWN) {
                 // Do not send a new click to a window that gained foreground
                 // after the physical down. Ups still complete any sent down.
@@ -606,9 +893,25 @@ int main(int argc,char** argv) {
                 else emit(Error);
             }
         } else if (message.message==WM_TIMER && message.wParam==renewal) {
-            refreshPhotoshopProcesses();
-            if (renewHooks(keyHook,mouseHook)) renewalFailures=0;
+            auto now=GetTickCount64(),started=microseconds();
+            bool mouseHeld=false;for (bool held:mouseConsumed) mouseHeld=mouseHeld || held;
+            bool attempted=renewalAllowed(now,lastInputTick,keys.physical[VK_CAPITAL],winRight.physical,mouseHeld);
+            // Unhooking while Windows has pending hook calls can lose an
+            // event. Keep the same hook throughout holds and rapid input.
+            bool renewed=!attempted || renewHooks(keyHook,mouseHook);
+            auto finished=microseconds();
+            if (renewed) renewalFailures=0;
             else {emit(Error);if (++renewalFailures>=3) stop();}
+            unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
+            if (next!=tail.load(std::memory_order_acquire)) {
+                HookEvent event{};event.action=HookHealth;event.scanUs=lastScanUs;event.renewUs=finished-started;event.attempted=attempted;
+                event.gapMs=now-previousMaintenance;event.peakUs=callbackPeakUs.exchange(0,std::memory_order_relaxed);
+                event.dropped=droppedEvents.load(std::memory_order_relaxed);event.blocked=renewed;
+                queue[head.load(std::memory_order_relaxed)]=event;
+                head.store(next,std::memory_order_release);SetEvent(available);
+            } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
+            previousMaintenance=now;
+            sampleCapsState(true);
         } else if (message.message==WM_APP) {
             std::unique_ptr<Config> next(reinterpret_cast<Config*>(message.lParam)); config=*next;
             if (!IsWindowVisible(config.overlay)) dismissPending=false;
@@ -617,6 +920,11 @@ int main(int argc,char** argv) {
         else { TranslateMessage(&message); DispatchMessageW(&message); }
     }
     if (renewal) KillTimer(nullptr,renewal);
+    if (capsTimer) KillTimer(nullptr,capsTimer);
+    closing.store(true);processScanner.join();
+    while (PeekMessageW(&message,nullptr,WM_APP+22,WM_APP+22,PM_REMOVE)) {
+        std::unique_ptr<ProcessSnapshot> snapshot(reinterpret_cast<ProcessSnapshot*>(message.lParam));
+    }
     UnhookWindowsHookEx(keyHook); UnhookWindowsHookEx(mouseHook);
     if (rightInjected) injectRight(MOUSEEVENTF_RIGHTUP);
     for (auto& p:photoshopProcesses) if (p.handle) CloseHandle(p.handle);

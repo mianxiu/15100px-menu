@@ -20,9 +20,10 @@ from .control_window import ControlWindow
 from .settings import Settings
 from .plugins import Plugins, MAX_PACKAGE
 from .paths import ROOT, runtime_dir
+from .tasks import TaskStore, TaskCancelled
 
 APP_ID = "photoshop-menu"
-APP_VERSION = "0.4.49"
+APP_VERSION = "0.4.62"
 
 
 def service_identity():
@@ -55,6 +56,11 @@ class HealthHandler(LocalHandler):
 class StatusHandler(LocalHandler):
     async def get(self):
         self.write(await self.application.dispatch("status", {}))
+
+
+class TasksHandler(LocalHandler):
+    def get(self):
+        self.write(self.application.tasks.snapshot())
 
 
 class ServiceHandler(LocalHandler):
@@ -97,7 +103,7 @@ class WSHandler(websocket.WebSocketHandler):
             if not isinstance(exc, (ValueError, RuntimeError)):
                 logging.exception("Request failed")
             if self.ws_connection:
-                await self.write_message({"type": "response", "id": request_id, "ok": False, "error": str(exc) or "操作失败"})
+                await self.write_message({"type": "response", "id": request_id, "ok": False, "error": str(exc) or "操作失败", 'task_id':getattr(exc,'task_id',None)})
 
     def on_close(self):
         self.application.clients.discard(self)
@@ -131,8 +137,10 @@ class PluginExportHandler(LocalHandler):
 class Application(web.Application):
     def __init__(self, port, bridge=None, runtime=None):
         self.port = port
-        self.bridge = bridge or PhotoshopBridge()
         self.runtime = Path(runtime) if runtime else runtime_dir()
+        self.bridge = bridge or PhotoshopBridge(task_history=self.runtime / 'task-history.json')
+        self.tasks = getattr(self.bridge, 'tasks', None) or TaskStore()
+        self.tasks.on_change = self.task_changed
         self.preferences = Settings(self.runtime / "settings.json")
         self.plugins = Plugins(self.runtime / "plugins", ROOT / "jsx")
         if bridge is None:
@@ -146,6 +154,7 @@ class Application(web.Application):
         super().__init__([
             (r"/websocket", WSHandler), (r"/api/health", HealthHandler),
             (r"/api/status", StatusHandler), (r"/api/service", ServiceHandler),
+            (r"/api/tasks", TasksHandler),
             (r"/api/plugins/preview", PluginPreviewHandler), (r"/api/plugins/export", PluginExportHandler),
             (r"/(.*)", StaticHandler, {"path": str(ROOT / "frontend/dist"), "default_filename": "index.html"}),
         ], websocket_max_message_size=65536, websocket_ping_interval=20, websocket_ping_timeout=20)
@@ -159,12 +168,28 @@ class Application(web.Application):
             except websocket.WebSocketClosedError:
                 self.clients.discard(client)
 
+    def task_changed(self, task):
+        # COM completion callbacks run on the asyncio thread. The read-only
+        # task feed does not query Photoshop or wait on menu/window locks.
+        try:loop=asyncio.get_running_loop()
+        except RuntimeError:return
+        async def publish():
+            await self.broadcast({'type':'tasks', 'data':self.tasks.snapshot()})
+            await self.broadcast({'type':'operation', 'busy':self.bridge.busy,
+                                  'task_id':task['id'], 'state':task['state']})
+        loop.create_task(publish())
+
     async def dispatch(self, action, args):
         if action == "commands.list":
             return {"commands": command_contracts()}
+        if action == 'tasks.list':
+            return self.tasks.snapshot()
+        if action == 'tasks.get':
+            return self.tasks.get(args.get('id'))
         if action == "status":
             return {"photoshop": await self.bridge.status(), "actions": ACTIONS,
                     "commands": command_contracts(),
+                    'tasks':self.tasks.snapshot(),
                     "label_colors": LABEL_COLORS,
                     "version": APP_VERSION, "settings": self.preferences.get(), "plugin": self.plugins.status(),
                     "data_dir": str(self.runtime),
@@ -185,19 +210,25 @@ class Application(web.Application):
             logging.info("Script action requested: %s", name)
             if not self.desktop:
                 raise RuntimeError("无桌面模式不提供图层操作")
-            self.desktop.require_action_focus()
+            await asyncio.to_thread(self.desktop.require_action_focus)
             if self.operation_lock.locked() or self.bridge.busy:
                 raise RuntimeError("操作进行中，请稍后再试")
             try:
                 async with self.operation_lock:
-                    # Close the triggering menu before COM. A new CapsLock menu
-                    # opened during execution must survive this action's finish.
                     async with self.panel_lock:
                         if 'menu_epoch' in args and args['menu_epoch'] != self.desktop.menu_epoch:
                             return {"message":"已忽略旧菜单操作"}
-                        await self.broadcast({"type": "operation", "busy": True, "action": name})
-                        await asyncio.to_thread(self.desktop.hide)
-                    result = await self.bridge.execute(name)
+                    # Target reads can also wait for Photoshop; show busy
+                    # feedback before entering COM, not just before writing.
+                    await self.broadcast({"type": "operation", "busy": True, "action": name})
+                    async def before_dispatch(target):
+                        async with self.panel_lock:
+                            if 'menu_epoch' in args and args['menu_epoch'] != self.desktop.menu_epoch:
+                                raise TaskCancelled('菜单已重新打开，已取消旧操作')
+                            await asyncio.to_thread(self.desktop.hide)
+                    # Capture before hiding; the PS-side check and write
+                    # share one JSX call on the original COM connection.
+                    result = await self.bridge.execute(name, before_dispatch=before_dispatch)
                 logging.info("Script action completed: %s", name)
                 await self.broadcast({"type": "notice", "scope": "operation", "action": name, "ok": True, "message": result["message"]})
                 return result

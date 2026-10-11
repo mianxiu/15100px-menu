@@ -72,6 +72,14 @@ class ApiTests(AsyncHTTPTestCase):
         self.assertFalse(json.loads(self.fetch('/api/status').body)['photoshop']['connected'])
         self.assertEqual(self.fetch('/').code, 200)
 
+    def test_task_feed_is_local_bounded_and_independent_of_photoshop_status(self):
+        task_id=self._app.tasks.create('color','标色')
+        self._app.bridge.busy=True
+        data=json.loads(self.fetch('/api/tasks').body)
+        self.assertEqual(data['items'][0]['id'],task_id)
+        self.assertFalse(data['persistent'])
+        self.assertEqual(self.fetch('/api/tasks',headers={'Origin':'https://example.com'}).code,403)
+
     def test_foreign_origin_and_host_rejected(self):
         self.assertEqual(self.fetch('/api/health', headers={'Origin': 'https://example.com'}).code, 403)
         self.assertEqual(self.fetch('/api/health', headers={'Host': 'example.com'}).code, 403)
@@ -158,6 +166,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             ActiveDocument = Document()
             def DoJavaScript(inner, script):
                 self.threads.append(threading.get_ident())
+                from backend.operation_target import CAPTURE_SCRIPT
+                if script == CAPTURE_SCRIPT:
+                    return '{"document_id":1,"active_layer_id":2,"layer_ids":[2]}'
                 return 'done'
         self.app = App()
         self.app.Documents = Documents()

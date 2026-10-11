@@ -4,13 +4,68 @@ import json
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from backend.main import Application
 from backend.desktop import Desktop, pie_bounds
 from backend.photoshop_bridge import PhotoshopBridge
 
 
 class MenuFocusTests(unittest.TestCase):
+    def test_floating_document_popup_uses_main_owner_and_survives_document_hide(self):
+        desktop = Desktop('http://localhost', lambda action:None)
+        desktop.hwnd = 2
+        foreground, visible, enabled = [4], {1,2,3,4}, {1,2,3,4}
+        names = {1:'Photoshop',2:'PhotoshopMenuImGui',3:'OtherApp',4:'OWL.DocumentWindow'}
+        desktop.gui = SimpleNamespace(
+            GetForegroundWindow=lambda:foreground[0], IsWindow=lambda h:h in names,
+            IsIconic=lambda h:False, IsWindowVisible=lambda h:h in visible,
+            IsWindowEnabled=lambda h:h in enabled, GetClassName=lambda h:names[h],
+            GetAncestor=lambda h,mode:1 if h==4 and mode==3 else h,
+            GetWindowText=lambda h:'Untitled-1 @ 100%',
+            GetWindowRect=lambda h:(0,0,1000,1000), WindowFromPoint=lambda p:4,
+            SetWindowLong=Mock(), SetWindowPos=Mock(), SendMessage=Mock(),
+            SetForegroundWindow=lambda h:foreground.__setitem__(0,h), ShowWindow=Mock())
+        with patch('win32process.GetWindowThreadProcessId',side_effect=lambda h:(1,20 if h==2 else 10)), \
+             patch('win32api.GetCursorPos',return_value=(500,500)), \
+             patch('win32api.GetMonitorInfo',return_value={'Work':(0,0,1000,1000)}), \
+             patch('win32api.MonitorFromPoint',return_value=1):
+            desktop._open(hold=True)
+            self.assertEqual(desktop.target,1)
+            self.assertEqual(desktop.gui.SetWindowLong.call_args.args[2],1)
+            visible.remove(4)  # PS hides/replaces the original floating editor.
+            self.assertTrue(desktop._scope())
+            desktop.hide(restore=False)
+            self.assertTrue(desktop._scope(), 'A neutral hide cannot strand an owned foreground')
+            foreground[0]=1
+            self.assertTrue(desktop._scope())
+            foreground[0]=2  # PS/COM foreground can bounce back to hidden menu.
+            self.assertTrue(desktop._scope())
+            enabled.remove(1)
+            desktop.hide(restore=False)
+            self.assertFalse(desktop._scope(), 'Disabled PS still blocks actions')
+            enabled.add(1)
+            self.assertTrue(desktop._scope(), 'PS becoming ready restores the existing owned session')
+            foreground[0]=3
+            self.assertFalse(desktop._scope())
+            foreground[0]=2
+            self.assertFalse(desktop._scope(), 'Foreign app revokes the hidden session')
+
+    def test_hidden_owned_foreground_is_scoped_but_foreign_window_is_not(self):
+        desktop = Desktop('http://localhost', lambda action:None)
+        desktop.hwnd, desktop.target, desktop.visible = 2, 1, False
+        desktop.restore_pending = True  # An owned hide requested PS restoration.
+        foreground = [2]
+        desktop.gui = SimpleNamespace(GetForegroundWindow=lambda:foreground[0])
+        desktop._is_menu_window = lambda hwnd:hwnd == 2
+        desktop._is_photoshop = lambda hwnd:hwnd == 1
+        desktop.require_action_focus()
+        foreground[0] = 3
+        with self.assertRaisesRegex(RuntimeError, '仅在 Photoshop'):
+            desktop.require_action_focus()
+        desktop.target = 0
+        foreground[0] = 2
+        self.assertFalse(desktop._scope())
+
     def test_capslock_decision_is_logged_without_submitting_an_action(self):
         notify = Mock()
         desktop = Desktop('http://localhost', notify)
@@ -19,6 +74,36 @@ class MenuFocusTests(unittest.TestCase):
         with self.assertLogs(level='INFO') as logs:
             desktop._read_native_events()
         self.assertTrue(any('CapsLock hook decision' in item for item in logs.output))
+        notify.assert_not_called()
+
+    def test_hook_health_is_logged_without_submitting_an_action(self):
+        notify = Mock()
+        desktop = Desktop('http://localhost', notify)
+        event = {'type':'hook.health','scan_us':12000,'renew_ok':True,'dropped_total':3}
+        desktop.native = SimpleNamespace(stdout=io.StringIO(json.dumps(event)+'\n'))
+        with self.assertLogs(level='INFO') as logs:
+            desktop._read_native_events()
+        self.assertTrue(any('Native hook health' in item and 'dropped_total' in item for item in logs.output))
+        notify.assert_not_called()
+
+    def test_activation_click_is_logged_without_submitting_an_action(self):
+        notify = Mock()
+        desktop = Desktop('http://localhost', notify)
+        event = {'type':'activation.trace','message':513,'clicked_ps':True,'direct_switching':True}
+        desktop.native = SimpleNamespace(stdout=io.StringIO(json.dumps(event)+'\n'))
+        with self.assertLogs(level='INFO') as logs:
+            desktop._read_native_events()
+        self.assertTrue(any('Photoshop activation click' in item for item in logs.output))
+        notify.assert_not_called()
+
+    def test_caps_state_is_logged_without_submitting_an_action(self):
+        notify = Mock()
+        desktop = Desktop('http://localhost', notify)
+        event = {'type':'caps.state','toggle_on':True,'previous':False,'tick_ms':123}
+        desktop.native = SimpleNamespace(stdout=io.StringIO(json.dumps(event)+'\n'))
+        with self.assertLogs(level='INFO') as logs:
+            desktop._read_native_events()
+        self.assertTrue(any('CapsLock system state' in item and 'toggle_on' in item for item in logs.output))
         notify.assert_not_called()
 
     def test_pie_is_centered_on_invocation_and_clamped_to_work_area(self):
@@ -143,6 +228,43 @@ class MenuFocusTests(unittest.TestCase):
 
 
 class MenuReopenTests(unittest.IsolatedAsyncioTestCase):
+    async def test_busy_feedback_precedes_target_read_and_menu_can_reopen(self):
+        with tempfile.TemporaryDirectory() as folder:
+            started, release = asyncio.Event(), asyncio.Event()
+            events = []
+            class Bridge:
+                busy = False
+                async def execute(self, name, before_dispatch=None):
+                    self.busy = True
+                    self.event_seen = any(e.get('busy') and e.get('action') == name for e in events)
+                    started.set()
+                    await release.wait()
+                    try:
+                        await before_dispatch({})
+                    finally:
+                        self.busy = False
+            bridge = Bridge()
+            app = Application(15190, bridge=bridge, runtime=folder)
+            desktop = SimpleNamespace(menu_epoch=1, visible=False, require_action_focus=lambda:None, hide=Mock())
+            def reopen():
+                desktop.menu_epoch += 1
+                desktop.visible = True
+            desktop.hold_begin = reopen
+            app.desktop = desktop
+            async def broadcast(event):events.append(event)
+            app.broadcast = broadcast
+            operation = asyncio.create_task(app.dispatch('action.execute', {'name':'label.red', 'menu_epoch':1}))
+            await asyncio.wait_for(started.wait(), 2)
+            self.assertTrue(bridge.event_seen)
+            await asyncio.wait_for(app.dispatch('panel.hold_begin', {}), 1)
+            self.assertTrue(desktop.visible)
+            release.set()
+            with self.assertRaisesRegex(RuntimeError, '重新打开'):
+                await operation
+            desktop.hide.assert_not_called()
+            self.assertEqual(events[-1], {'type':'operation','busy':False})
+            app.control.close()
+
     async def test_old_action_waiting_on_panel_lock_cannot_execute_after_reopen(self):
         with tempfile.TemporaryDirectory() as folder:
             bridge=SimpleNamespace(busy=False,execute=Mock())
@@ -177,8 +299,10 @@ class MenuReopenTests(unittest.IsolatedAsyncioTestCase):
             started, release = asyncio.Event(), asyncio.Event()
             class Bridge:
                 busy = False
-                async def execute(self, name):
+                async def execute(self, name, before_dispatch=None):
                     self.busy = True
+                    if before_dispatch:
+                        await before_dispatch({'document_id':1,'active_layer_id':2,'layer_ids':[2]})
                     started.set()
                     await release.wait()
                     self.busy = False

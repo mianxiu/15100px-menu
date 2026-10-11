@@ -19,11 +19,11 @@ class Command:
     id: str
     label: str
     expected_result: str
-    version: int = 1
+    version: int = 2
     channel: str = "com-jsx"
     conditions: tuple = ("photoshop-connected", "document-open", "action-focus", "not-busy")
-    target_document: str = "active-at-execution"
-    target_layers: str = "selection-at-execution"
+    target_document: str = "captured-id; same-COM-instance; cancel-if-active-document-changed"
+    target_layers: str = "captured-selection-ids-and-active-layer; cancel-if-changed"
     cancellation: str = "before-dispatch-only; running COM cannot be interrupted"
     recovery: str = "no-auto-retry; inspect Photoshop after timeout or failure"
     parameters: tuple = ()
