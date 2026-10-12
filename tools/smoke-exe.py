@@ -98,6 +98,11 @@ async def exercise(executable, workspace, port, show_control=False):
                             if not message.get('ok'): raise RuntimeError(message)
                             return message.get('data')
                 assert not status['tray_error'],status['tray_error']
+                for task_id in (history_id,'missing-task'):
+                    try:await request('tasks.cancel',{'id':task_id})
+                    except RuntimeError as exc:
+                        assert '历史任务只读' in str(exc) if task_id==history_id else '未找到' in str(exc)
+                    else:raise AssertionError('Historical or missing task cancellation was accepted')
                 assert status['menu']['renderer']=='Dear ImGui / C++ / DirectX 11'
                 assert win32gui.GetClassName(hwnd)=='PhotoshopMenuImGui'
                 frame_count=win32gui.SendMessage(hwnd,0x800b,0,0)
@@ -141,9 +146,15 @@ async def exercise(executable, workspace, port, show_control=False):
                     payload=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="test.zip"\r\nContent-Type: application/zip\r\n\r\n'.encode()+stream.getvalue()+f'\r\n--{boundary}--\r\n'.encode())
                     preview=json.loads((await client.fetch(HTTPRequest(url+'/api/plugins/preview',method='POST',body=payload,
                         headers={'Origin':url,'Content-Type':f'multipart/form-data; boundary={boundary}'}))).body)['data']
-                    await request('plugin.install',{'token':preview['token']})
-                    assert (await request('status'))['plugin']['active']['version']=='9.0.0'
-                    await request('plugin.rollback')
+                    if status['photoshop'].get('execution_backend')=='uxp-local-files':
+                        for action in ('plugin.install','plugin.rollback'):
+                            try:await request(action,{'token':preview['token']})
+                            except RuntimeError as exc:assert 'UXP' in str(exc)
+                            else:raise AssertionError('Legacy JSX mutation accepted by UXP service')
+                    else:
+                        await request('plugin.install',{'token':preview['token']})
+                        assert (await request('status'))['plugin']['active']['version']=='9.0.0'
+                        await request('plugin.rollback')
                     assert (await request('status'))['plugin']['active']['version']=='1.0.0'
                     result=await request('logs.read'); assert isinstance(result['text'],str)
                     if show_control:

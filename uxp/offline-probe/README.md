@@ -1,0 +1,30 @@
+# Photoshop 快捷菜单 v0.3.2 — UXP
+
+Plugin 0.3.0 is the production write endpoint for PhotoshopMenu 0.4.72. It loads at Photoshop startup and handles all menu labels, clear, selection and sorting through authenticated local PluginData files, executeAsModal, target checks and result readback. COM remains read-only for theme/font/connection status. There is no network permission or automatic COM write fallback.
+
+The main PhotoshopMenu.exe embeds manifest/main/labels and its backend Plugin Management page installs, enables/disables execution, imports/exports offline updates, rolls back and uninstalls UXP. Build the unified EXE ZIP with tools/build-backend-package.py; the separate OfflineSetup is historical deployment only. It includes the main EXE and manifest/main/labels only, generating or reusing the user's token locally. Never distribute probe-config.js or user uxp-config.json. See OFFLINE-INSTALL.md for install/update/rollback/uninstall and the physical validation limits, and PERFORMANCE.md for the actual COM/UXP comparison. Minimum Photoshop is 24.0.1, enforced by installer metadata, plugin manifest and runtime heartbeat checks, with no upper bound. The physical validation scope remains 24.0.1 / UXP 6.3.3; later-version installation eligibility is not compatibility acceptance. The original plugin ID/name is retained for installation identity.
+
+The sections below are historical experiment notes, not current production status. Experimental clients must not run concurrently with the production transport.
+
+## Commands and safeguards
+
+The token-authenticated plugin-data transport supports inspect, capture, and set_label only; no network, arbitrary JavaScript, or Adobe installer is used. Capture returns the plugin session, document ID, active layer ID and selected layer IDs. Label execution rechecks these within executeAsModal, validates expiry/cancellation, suspends history, sets the selected layers, reads back each color, and rolls back the history transaction on failure. Allowed colors match the existing eight Photoshop 24 labels including none. Requests are consumed before execution to prevent automatic replay within a session; old-session targets are rejected after restart.
+
+The experimental Python client rejects concurrent calls within the same client and stops after an unknown result. It does not provide production-wide coordination with the existing COM executor. Do not run multiple clients, the old observer, or production operations concurrently during a write test. Production busy feedback, cross-process admission, cancel UI, inherited group-color explanations and full menu integration remain outstanding.
+
+Run node tools/test-uxp-file-probe.cjs and node tools/test-uxp-labels.cjs for simulation. Run Scripts/python.exe tools/verify-uxp-labels.py only with Photoshop ready and the production service idle. It creates its own scratch document, executes eight label writes through UXP, independently reads them through COM, tests changed-target rejection, then closes its own scratch document and restores the previous active document. Never interpret simulated results as physical acceptance.
+
+Deployment is an experimental local copy to %APPDATA%/Adobe/UXP/Plugins/External/com.15100px.menu.offline-probe_PS. Deployed manifest/main/labels/token hashes were checked. The old version is backed up in .runtime/uxp-0.1.3-before-labels. Token files and local archives must never be published. Official CCX installation has not been validated.
+
+Automated Start-Process, Shell.Application, and Explorer launches failed to load the new UXP session with the CCD issue unresolved. Previously, direct user launch succeeded. Do not keep repeating the failed automatic launch, alter firewall rules, Adobe binaries, account data, or user preferences. The five-minute offline observer has been stopped at the user's request; whole-machine disconnection is not required.
+
+Physical update: 0.2.0 has now passed real single-layer eight-color/clear, two-layer blue/clear, three target rejection cases, and expired-request rejection followed by a successful inspect. All scratch documents were cleaned up; original document restored. Evidence: .runtime/uxp-labels-physical-verification.json. Production integration and automatic startup remain incomplete.
+
+
+Production update: plugin 0.3.0 is now used by PhotoshopMenu v0.4.69 for all menu writes. Production transport is backend/uxp_bridge.py and stores the local token in the user PhotoshopMenu/uxp-config.json. The legacy experimental client must not run alongside production requests. Label, group selection and root/group sorting passed real bridge tests; actual EXE action.execute label/clear passed. Theme/font/connection reads still use COM. No automatic COM write fallback. Unknown results keep the service busy. Whole-machine disconnection is not required under the user's existing outbound block.
+
+0.3.1: managed Chinese/English display names, stable plugin and command IDs, runtime manifest metadata in the heartbeat. Backend controls the language when installing or applying the name while Photoshop is closed; no network permission added. Production backend v0.4.74.
+
+Backend v0.4.83 displays the manifest version in the Chinese and English plugin names. Name application changes only the manifest while Photoshop is closed and preserves IDs, code, credentials and enable state.
+
+UXP 0.3.6: blank-layer creation uses the native make command without an explicit name. Placement is verified immediately above the frozen active layer in the same parent, corrected only when necessary, and committed as one undoable history entry. A selected group receives a sibling above itself; a selected group child receives a sibling within that group. tools/verify-blank-layer.py validates eight disposable real Photoshop cases against native naming plus stale-target rejection.

@@ -35,7 +35,10 @@ class MenuTests(unittest.TestCase):
             def message(code, wp=0, lp=0):
                 return win32gui.SendMessageTimeout(hwnd, code, wp, lp, c.SMTO_ABORTIFHUNG, 1000)[1]
             for cycle in range(10):
-                message(0x8011, 16|1, cycle+1)  # Canvas pie, distinct session.
+                # Production prepare flags include type eligibility; all slots
+                # must stay visible even for Background/unknown selection.
+                mask,kind=((1,1),(15,4),(0,0),(2,8),(3,3))[cycle%5]
+                message(0x8011,16|1|64|(mask<<8)|(kind<<12),cycle+1)
                 self.assertEqual(message(0x8012), 0, 'Preparing must not expose the stale surface')
                 # Same display API as desktop.show_popup; avoid taking user focus.
                 win32gui.SetWindowPos(hwnd, c.HWND_TOP, 100,100,620,440, c.SWP_SHOWWINDOW|c.SWP_NOACTIVATE)
@@ -186,7 +189,7 @@ class MenuTests(unittest.TestCase):
                 for _ in range(5):
                     event=json.loads(worker.submit(process.stdout.readline).result(timeout=5))
                     if event['type']=='configured':break
-                    self.assertIn(event['type'],('caps.state','hook.health'))
+                    self.assertIn(event['type'],('caps.state','hook.health','activation.foreground'))
                 else:self.fail('Native host did not acknowledge configuration')
             process.stdin.close()
             self.assertEqual(process.wait(5),0)

@@ -7,6 +7,17 @@ from backend.paths import ROOT, resource_root, runtime_dir, overlay_command
 
 
 class PackagingTests(unittest.TestCase):
+    def test_uxp_resources_are_whitelisted_without_credentials(self):
+        spec=(ROOT/'PhotoshopMenu.spec').read_text('utf-8')
+        for name in ('manifest.json','main.js','labels.js'):
+            self.assertIn('uxp/offline-probe/'+name,spec)
+        self.assertNotIn('probe-config.js',spec)
+        self.assertNotIn('uxp-config.json',spec)
+    def test_installed_entry_uses_its_own_data_root(self):
+        with tempfile.TemporaryDirectory() as folder:
+            installed=Path(folder)/'redirected/PhotoshopMenu/app/PhotoshopMenu.exe'
+            with patch.object(sys,'frozen',True,create=True),patch.object(sys,'executable',str(installed)),patch.dict('os.environ',{'LOCALAPPDATA':str(Path(folder)/'different-user-location')}):
+                self.assertEqual(runtime_dir(),installed.resolve().parent.parent)
     def test_development_resources_and_data_are_in_project(self):
         with patch.object(sys, 'frozen', False, create=True):
             self.assertEqual(resource_root(), ROOT)

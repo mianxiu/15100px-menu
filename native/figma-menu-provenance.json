@@ -1,0 +1,146 @@
+{
+  "source": "151500PX.figma-export.zip",
+  "source_sha256": "7b12376bd721ab395bbc30b6def52e802aac001565c6d7e4307d0d3dbfdbd776",
+  "design_sha256": "0b87c2e876a316f8653d37615f150ddaae319a5f5e6bb9bec37732dc1d323e21",
+  "geometry_coverage": {
+    "nodesWithGeometry": 1471,
+    "drawableSvgs": 123,
+    "vectorsWithoutRawGeometry": []
+  },
+  "icons": [
+    {
+      "node_id": "809:619",
+      "name": "quick_icon-layer-same-level-select",
+      "root_size": [
+        18,
+        24
+      ],
+      "content_bounds": [
+        5,
+        7,
+        9,
+        9
+      ],
+      "child_ids": [
+        "808:649",
+        "808:653",
+        "808:654",
+        "809:617",
+        "809:618",
+        "808:655"
+      ],
+      "rectangles": 6
+    },
+    {
+      "node_id": "346:6",
+      "name": "quick_icon-h/s",
+      "root_size": [
+        18,
+        24
+      ],
+      "content_bounds": [
+        5,
+        7,
+        9,
+        9
+      ],
+      "child_ids": [
+        "346:7",
+        "346:19",
+        "346:21",
+        "346:20",
+        "346:18"
+      ],
+      "rectangles": 5
+    },
+    {
+      "node_id": "324:0",
+      "name": "icon_layer-up2parent-top",
+      "root_size": [
+        18,
+        24
+      ],
+      "content_bounds": [
+        5,
+        8,
+        8,
+        9
+      ],
+      "normalized_square": [
+        4.5,
+        8,
+        9,
+        9
+      ],
+      "child_ids": [
+        "324:5",
+        "343:38"
+      ],
+      "commands": 32,
+      "svg_sha256": "6506c2faad096f11e2b994a55af3348395e1b48f583d4597fc116b2b56a53a11",
+      "geometry": "Original fillGeometry/strokeGeometry with relativeTransform; cubic curves preserved"
+    },
+    {
+      "node_id": "326:461",
+      "name": "icon_layer-down2parent-bottom",
+      "root_size": [
+        18,
+        24
+      ],
+      "content_bounds": [
+        5,
+        7,
+        8,
+        9
+      ],
+      "normalized_square": [
+        4.5,
+        7,
+        9,
+        9
+      ],
+      "child_ids": [
+        "343:43",
+        "343:44"
+      ],
+      "commands": 32,
+      "svg_sha256": "a34e7cd0b9c949584c8fe141c6573e7a0240fb20bd34588bce4eca04fe945454",
+      "geometry": "Original fillGeometry/strokeGeometry with relativeTransform; cubic curves preserved"
+    }
+  ],
+  "unmatched_operations": [
+    "layer.new",
+    "layer.solid",
+    "layer.group",
+    "adjustment.curves",
+    "adjustment.colorBalance",
+    "adjustment.blackAndWhite"
+  ],
+  "unmatched_reason": "No component with corresponding operation semantics; existing native glyphs retained. Full export contains vector paths.",
+  "ui_reference": {
+    "node_ids": [
+      "326:514",
+      "223:20"
+    ],
+    "metrics": {
+      "corner_radius": 4,
+      "widget_height": 24,
+      "icon_width": 18,
+      "icon_size": 9,
+      "padding": 6,
+      "gap": 6,
+      "border": 1
+    },
+    "display_icon_size": 16,
+    "display_icon_button": [
+      24,
+      30
+    ],
+    "item_spacing": 0,
+    "icon_root": [
+      18,
+      24
+    ]
+  },
+  "adaptation": "Source rounding, metrics, exact primitive and outlined vector geometry compiled into native menu. Source 9-unit glyphs display at 16 units per user feedback. Existing PS palette, blue hover, font settings, near-centre radial anchors, preset dimensions, swatch size and hit bounds retained."
+}

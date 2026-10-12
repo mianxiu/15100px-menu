@@ -9,7 +9,7 @@ def cli():
     parser=argparse.ArgumentParser()
     parser.add_argument('--preview-output',type=Path,required=True)
     parser.add_argument('--preview-kind',choices=('menu','context','hold'),default='menu')
-    parser.add_argument('--preview-panel',choices=('generic','canvas','layers','text'),default='generic')
+    parser.add_argument('--preview-panel',choices=('generic','canvas','layers','text','home'),default='generic')
     parser.add_argument('--preview-lifecycle',action='store_true')
     parser.add_argument('--data-dir',type=Path)
     args=parser.parse_args()

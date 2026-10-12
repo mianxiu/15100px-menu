@@ -13,7 +13,7 @@ from functools import wraps
 from .window_icons import WindowIcons
 from .settings import DEFAULTS, chord, ALIASES, MODIFIERS
 from .paths import ROOT, runtime_dir, overlay_command
-from .panel_context import PanelContext, PANEL_IDS
+from .panel_context import PanelContext, panel_flags
 
 TITLE = "Photoshop Menu - Actions"
 
@@ -112,10 +112,10 @@ def panel_bounds(ps_rect, work_rect, cursor, width, height):
     return max(left, min(cursor[0], right-width)), max(top, min(cursor[1], bottom-height)), width, height
 
 
-def pie_bounds(ps_rect, work_rect, cursor, scale):
-    width, height = round(620*scale), round(440*scale)
+def pie_bounds(ps_rect, work_rect, cursor, scale, home=False):
+    width, height = round((820 if home else 620)*scale), round(440*scale)
     return panel_bounds(ps_rect, work_rect,
-                        (cursor[0]-width//2, cursor[1]-height//2), width, height)
+                        (cursor[0]-(round(270*scale) if home else width//2), cursor[1]-height//2), width, height)
 
 
 def show_popup(gui, hwnd, owner, bounds):
@@ -152,6 +152,10 @@ class Desktop:
         self.menu_ready = threading.Event()
         self.window_lock = threading.RLock()
         self.panel_context = None
+        self.layer_context_provider=None
+        self.layer_monitor=None
+        self.layer_context={}
+        self.menu_layer_context=None
 
     def start(self):
         import win32gui
@@ -170,6 +174,9 @@ class Desktop:
             raise RuntimeError("Windows 热键组件未能启动，请查看服务日志")
         self.monitor = threading.Thread(target=self._monitor, name="photoshop-window", daemon=True)
         self.monitor.start()
+        if self.layer_context_provider:
+            self.layer_monitor=threading.Thread(target=self._monitor_layer_context,name='photoshop-layer-cache',daemon=True)
+            self.layer_monitor.start()
         self._launch_overlay()
 
     def _spawn_native(self):
@@ -245,6 +252,8 @@ class Desktop:
                     logging.info('CapsLock system state: %s', event)
                 elif event.get('type') == 'activation.trace':
                     logging.info('Photoshop activation click: %s', event)
+                elif event.get('type') == 'activation.foreground':
+                    logging.info('Photoshop activation foreground: %s', event)
                 elif event.get("type") == "configured":
                     logging.debug("Native hotkey settings acknowledged")
                 else:
@@ -350,13 +359,15 @@ class Desktop:
             return False
 
     @window_transition
-    def require_action_focus(self):
+    def require_action_focus(self, allow_home=False):
         if not self._scope():
             raise RuntimeError("图层操作仅在 Photoshop 或由其唤出的操作菜单中可用")
         if self.panel_context:
             panel = self.panel_context.current if self.visible else self.panel_context.snapshot(self.target)
             if panel['kind'] == 'text' or panel.get('input_focused'):
                 raise RuntimeError('正在编辑输入框，请先退出输入再执行图层操作')
+            if panel['kind'] == 'home' and not allow_home:
+                raise RuntimeError('当前为 Photoshop 首页，请进入文档后执行图层操作')
 
     @window_transition
     def outside_click(self, point):
@@ -369,6 +380,17 @@ class Desktop:
         self.visible = False
         self.notify("dismiss")
         return scoped
+
+    def _monitor_layer_context(self):
+        # Independent of UIA/focus inspection and the window lock. A slow panel
+        # lookup must not leave the next menu with old selection eligibility.
+        from .layer_context import unavailable
+        while not self.stop.is_set():
+            try:self.layer_context=self.layer_context_provider()
+            except Exception:
+                self.layer_context=unavailable()
+                logging.exception('Layer cache monitor failed')
+            if self.stop.wait(.04):break
 
     def _monitor(self):
         next_icon_refresh = 0
@@ -459,23 +481,28 @@ class Desktop:
         u.GetDpiForWindow.argtypes, u.GetDpiForWindow.restype = [W.HWND], W.UINT
         scale = (u.GetDpiForWindow(hwnd) or 96) / 96
         work = win32api.GetMonitorInfo(win32api.MonitorFromPoint(cursor, c.MONITOR_DEFAULTTONEAREST))["Work"]
+        panel = self.panel_context.snapshot(hwnd) if self.panel_context else {'kind': 'generic'}
         width = min(self.settings["menu_width"],260) if context else self.settings["menu_width"]
         height = min(self.settings["menu_height"],240) if context else self.settings["menu_height"]
         bounds = panel_bounds(rect, work, cursor, round(width*scale), round(height*scale))
         if hold:
-            bounds = pie_bounds(rect, work, cursor, scale)
+            bounds = pie_bounds(rect, work, cursor, scale, home=panel.get('kind')=='home')
         # Recheck after setup: focus can change while a hotkey request is queued.
         if self.gui.GetForegroundWindow() != foreground or not self._is_photoshop(hwnd):
             raise RuntimeError("Photoshop 焦点已改变，已取消唤出")
         self.visible = True
         self.restore_pending = False
-        panel = self.panel_context.snapshot(hwnd) if self.panel_context else {'kind': 'generic'}
         context_ready = time.perf_counter()
         logging.info('Menu panel context: %s', panel)
         # Apply context, input protection, layout and session together before
         # showing. Avoid three synchronous renderer-thread round trips.
         self.menu_epoch += 1
-        flags = PANEL_IDS[panel['kind']] | (int(bool(panel.get('input_focused'))) << 2) | (int(context) << 3) | (int(hold) << 4)
+        flags = panel_flags(panel, context, hold)
+        self.menu_layer_context=None
+        if self.layer_context_provider and panel.get('kind')!='home':
+            from .layer_context import flags as layer_flags,fresh,unavailable
+            self.menu_layer_context=dict(self.layer_context) if fresh(self.layer_context) else unavailable()
+            flags |= layer_flags(self.menu_layer_context)
         self.gui.SendMessage(self.hwnd, 0x8011, flags, self.menu_epoch)
         show_popup(self.gui, self.hwnd, root, bounds)
         try:
@@ -487,10 +514,31 @@ class Desktop:
         logging.info('Menu open timing: setup/context=%.1fms show=%.1fms total=%.1fms',
                      (context_ready-open_started)*1000, (time.perf_counter()-context_ready)*1000,
                      (time.perf_counter()-open_started)*1000)
-        return {"message": "操作菜单已打开", "panel_context": panel}
+        return {"message": "操作菜单已打开", "panel_context": panel,'layer_context':self.menu_layer_context}
+
+    def require_menu_layer_target(self,name,target):
+        if self.layer_context_provider:
+            from .layer_context import require_menu_target
+            require_menu_target(self.menu_layer_context,name,target)
 
     def context(self):
         return self.open(context=True)
+
+    @window_transition
+    def require_home(self):
+        self.require_action_focus(allow_home=True)
+        from .photoshop_windows import workspace_root
+        root = workspace_root(self.gui, self.target or self.gui.GetForegroundWindow())
+        if not root or not self.panel_context or not self.panel_context.home_visible(root):
+            raise RuntimeError('Photoshop 已离开首页，请重新打开菜单选择操作')
+        return root
+
+    @window_transition
+    def new_document(self):
+        root = self.require_home()
+        self.hide()
+        from .native_commands import open_new_dialog
+        return open_new_dialog(self.gui, root)
 
     @window_transition
     def hold_begin(self):
@@ -579,7 +627,7 @@ class Desktop:
                 self.native.terminate()
                 self.native.wait(3)
             self.native.stdout.close()
-        for name in ("thread", "monitor"):
+        for name in ("thread", "monitor", "layer_monitor"):
             if getattr(self, name, None):
                 getattr(self, name).join(2)
         if self.process and self.process.poll() is None:

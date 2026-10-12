@@ -17,6 +17,7 @@ STATES = {
     'failed':'失败', 'cancelled':'已取消', 'result-unknown':'结果未知',
 }
 TRANSITIONS = {
+    'queued':{'capturing','cancelled','failed'},
     'capturing':{'running','cancel-requested','failed','cancelled'},
     'running':{'result-unknown','succeeded','failed','cancelled'},
     'cancel-requested':{'cancelled','failed'},
@@ -92,13 +93,16 @@ class TaskStore:
         finally:
             if self.writer:self.writer.shutdown(wait=False)
 
-    def create(self, action, label):
+    def create(self, action, label, state='capturing', **details):
         task_id = uuid.uuid4().hex
         self.records[task_id] = {
-            'id':task_id, 'action':action, 'label':label, 'channel':'com-jsx',
-            'state':'capturing', 'created_at':datetime.now(timezone.utc).isoformat(),
+            'id':task_id, 'action':action, 'label':label, 'channel':getattr(self,'channel','com-jsx'),
+            'state':state, 'created_at':datetime.now(timezone.utc).isoformat(),
             '_started':time.monotonic(), 'elapsed_ms':0,
+            **deepcopy(details),
         }
+        self.records[task_id]['timeline'] = [{'state':state, 'started_at':self.records[task_id]['created_at'],
+                                               'start_elapsed_ms':0, 'duration_ms':0}]
         while len(self.records)>self.limit:self.records.popitem(last=False)
         self._changed(task_id)
         return task_id
@@ -109,9 +113,15 @@ class TaskStore:
         old = record['state']
         if state != old and state not in TRANSITIONS.get(old, set()):
             raise ValueError(f'Invalid task transition: {old} -> {state}')
+        elapsed = round((time.monotonic()-record['_started'])*1000)
+        if state != old:
+            timeline = record['timeline']
+            timeline[-1]['duration_ms'] = max(0, elapsed-timeline[-1]['start_elapsed_ms'])
+            timeline.append({'state':state, 'started_at':datetime.now(timezone.utc).isoformat(),
+                             'start_elapsed_ms':elapsed, 'duration_ms':0})
         record.update(deepcopy(details))
         record['state'] = state
-        record['elapsed_ms'] = round((time.monotonic()-record['_started'])*1000)
+        record['elapsed_ms'] = elapsed
         self._changed(task_id)
 
     def _changed(self, task_id):
@@ -132,6 +142,11 @@ class TaskStore:
         if started is not None and record['state'] in TRANSITIONS:
             record['elapsed_ms']=round((time.monotonic()-started)*1000)
         record['state_label']=STATES[record['state']]
+        for index, phase in enumerate(record.get('timeline', [])):
+            phase['state_label'] = STATES[phase['state']]
+            phase['active'] = started is not None and record['state'] in TRANSITIONS and index == len(record['timeline'])-1
+            if phase['active']:
+                phase['duration_ms'] = max(0, record['elapsed_ms']-phase['start_elapsed_ms'])
         return record
 
     def snapshot(self):

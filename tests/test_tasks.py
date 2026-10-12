@@ -1,7 +1,9 @@
 import asyncio
 import threading
+import tempfile
+from pathlib import Path
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from backend.photoshop_bridge import PhotoshopBridge
 from backend.tasks import TaskStore, TaskCancelled
 
@@ -39,6 +41,8 @@ class TaskTests(unittest.IsolatedAsyncioTestCase):
             record=self.bridge.tasks.get(task_id)
             self.assertEqual(record['state'],'succeeded');self.assertFalse(record['error'])
             self.assertTrue(record['wait_error']);self.bridge._execute.assert_called_once()
+            self.assertEqual([phase['state'] for phase in record['timeline']],
+                             ['capturing','running','result-unknown','succeeded'])
         finally:release.set()
     async def test_capture_timeout_never_writes_and_settles_cancelled(self):
         release=threading.Event();self.bridge.operation_timeout=.02
@@ -74,6 +78,42 @@ class TaskTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TaskCancelled) as error:await self.bridge.execute('color',before_dispatch=handoff)
         self.assertEqual(self.bridge.tasks.get(error.exception.task_id)['state'],'cancelled')
         self.bridge._execute.assert_not_called()
+
+    async def test_user_cancel_during_target_read_never_dispatches(self):
+        release=threading.Event();started=threading.Event()
+        def capture():
+            started.set();release.wait(3)
+            return {'document_id':1,'active_layer_id':2,'layer_ids':[2]}
+        self.bridge._capture_target=capture;self.bridge._execute=Mock()
+        pending=asyncio.create_task(self.bridge.execute('color'))
+        try:
+            while not started.is_set():await asyncio.sleep(.001)
+            task_id=self.bridge.tasks.snapshot()['items'][0]['id']
+            self.bridge.request_cancel(task_id)
+            self.bridge.request_cancel(task_id) # Idempotent; no retry or second task.
+            self.assertEqual(self.bridge.tasks.get(task_id)['state'],'cancel-requested')
+            self.assertTrue(self.bridge.busy)
+            release.set()
+            with self.assertRaises(TaskCancelled):await pending
+            record=self.bridge.tasks.get(task_id)
+            self.assertEqual(record['state'],'cancelled');self.assertFalse(record['error'])
+            self.bridge._execute.assert_not_called();self.assertFalse(self.bridge.busy)
+        finally:release.set();await asyncio.gather(pending,return_exceptions=True)
+
+    async def test_cancel_cannot_interrupt_dispatched_write(self):
+        release=threading.Event();started=threading.Event()
+        def execute(action):started.set();release.wait(3);return 'done'
+        self.bridge._execute=Mock(side_effect=execute)
+        pending=asyncio.create_task(self.bridge.execute('color'))
+        try:
+            while not started.is_set():await asyncio.sleep(.001)
+            task_id=self.bridge.tasks.snapshot()['items'][0]['id']
+            with self.assertRaisesRegex(ValueError,'不能强制中断'):self.bridge.request_cancel(task_id)
+            release.set();await pending
+            self.assertEqual(self.bridge.tasks.get(task_id)['state'],'succeeded')
+            self.bridge._execute.assert_called_once()
+            with self.assertRaises(ValueError):self.bridge.request_cancel(task_id)
+        finally:release.set();await asyncio.gather(pending,return_exceptions=True)
     def test_history_is_bounded_and_final_state_cannot_regress(self):
         store=TaskStore(limit=4);ids=[]
         for _ in range(10):
@@ -82,3 +122,41 @@ class TaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item['id'] for item in store.snapshot()['items']],ids[-4:][::-1])
         with self.assertRaises(ValueError):store.update(ids[-1],'result-unknown')
         with self.assertRaises(ValueError):store.get(ids[0])
+
+    def test_timeline_measures_states_without_duplicate_metadata_updates(self):
+        with patch('backend.tasks.time.monotonic', return_value=100) as clock:
+            store=TaskStore();task_id=store.create('color','标色')
+            clock.return_value=100.2
+            store.update(task_id,'capturing',target={'document_id':1})
+            clock.return_value=100.3
+            store.update(task_id,'running')
+            clock.return_value=100.8
+            snapshot=store.get(task_id)
+            self.assertEqual([phase['duration_ms'] for phase in snapshot['timeline']],[300,500])
+            self.assertTrue(snapshot['timeline'][-1]['active'])
+            snapshot['timeline'][0]['duration_ms']=99
+            clock.return_value=101
+            store.update(task_id,'succeeded')
+            clock.return_value=500
+            final=store.get(task_id)
+            self.assertEqual([phase['duration_ms'] for phase in final['timeline']],[300,700,0])
+            self.assertFalse(any(phase['active'] for phase in final['timeline']))
+            self.assertEqual(final['elapsed_ms'],1000)
+
+    async def test_timeline_restores_without_running_clock_or_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'history.json'
+            store=TaskStore(path=path)
+            task_id=store.create('color','标色')
+            store.update(task_id,'running')
+            await store.close()
+            restored=TaskStore(path=path)
+            try:
+                record=restored.get(task_id)
+                self.assertEqual(record['state'],'result-unknown')
+                self.assertEqual([phase['state'] for phase in record['timeline']],['capturing','running'])
+                self.assertFalse(any(phase['active'] for phase in record['timeline']))
+                await asyncio.sleep(.01)
+                self.assertEqual(record['timeline'],restored.get(task_id)['timeline'])
+                with self.assertRaises(ValueError):restored.update(task_id,'succeeded')
+            finally:await restored.close()

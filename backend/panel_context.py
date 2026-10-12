@@ -5,9 +5,14 @@ import threading
 import logging
 from .photoshop_windows import workspace_root
 
-LABELS = {'generic': '通用操作', 'canvas': '画布', 'layers': '图层',
+LABELS = {'generic': '通用操作', 'canvas': '画布', 'layers': '图层', 'home': 'Photoshop 首页',
           'text': '输入控件'}
-PANEL_IDS = {'generic': 0, 'canvas': 1, 'layers': 2, 'text': 3}
+PANEL_IDS = {'generic': 0, 'canvas': 1, 'layers': 2, 'text': 3, 'home': 4}
+
+
+def panel_flags(panel, context=False, hold=False):
+    # Reserve bit 5 for Home without changing the existing input/layout bits.
+    return (PANEL_IDS[panel['kind']] & 3) | (32 if panel['kind'] == 'home' else 0) | (int(bool(panel.get('input_focused'))) << 2) | (int(context) << 3) | (int(hold) << 4)
 
 
 def classify_chain(chain, layer_labels=()):
@@ -15,6 +20,8 @@ def classify_chain(chain, layer_labels=()):
     classes = [item[0] for item in chain]
     if classes and classes[0] in ('Edit', 'RichEdit20W', 'RichEdit50W', 'ComboBox'):
         return 'text'
+    if 'OWL.WelcomeScreenView' in classes:
+        return 'home'
     if 'OWL.Document' in classes:
         return 'canvas'
     labels = {text.strip().rstrip(':：').casefold() for text in layer_labels}
@@ -83,6 +90,16 @@ class PanelContext:
         thread = win32process.GetWindowThreadProcessId(root)[0]
         return info.hwndFocus if user.GetGUIThreadInfo(thread, ctypes.byref(info)) else 0
 
+    def home_visible(self, root):
+        found = False
+        def collect(hwnd, unused):
+            nonlocal found
+            if self.gui.GetClassName(hwnd) == 'OWL.WelcomeScreenView' and self.gui.IsWindowVisible(hwnd):
+                left, top, right, bottom = self.gui.GetWindowRect(hwnd)
+                found = found or (right > left and bottom > top)
+        self.gui.EnumChildWindows(root, collect, None)
+        return found
+
     def hover_window(self, root):
         import win32api
         user = ctypes.WinDLL('user32', use_last_error=True)
@@ -126,6 +143,10 @@ class PanelContext:
         hovered = self.hover_window(root)
         if hovered:
             kind, source, hwnd = self.describe(hovered, root), 'hover', hovered
+        # Home can be shown even with documents open, and floating palettes
+        # can remain above it. Visible Home wins over retained editor context.
+        if kind != 'text' and self.home_visible(root):
+            kind, source = 'home', 'visible-home'
         if kind == 'generic':
             source = 'fallback'
         self.current = self.result(kind, source, hwnd or 0)

@@ -172,3 +172,4 @@ frontend/dist/
 native/HotkeyHost.exe
 
 /native/MenuHost.exe
+uxp/offline-probe/probe-config.js

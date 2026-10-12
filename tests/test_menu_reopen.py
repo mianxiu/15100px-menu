@@ -111,6 +111,11 @@ class MenuFocusTests(unittest.TestCase):
         self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(1910,1030),1), (1300,600,620,440))
         self.assertEqual(pie_bounds((-1920,0,0,1080),(-1920,0,0,1040),(-960,520),1.5), (-1425,190,930,660))
 
+    def test_home_grid_uses_wider_popup_and_clamps_at_monitor_edge(self):
+        self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(960,520),1,home=True),(690,300,820,440))
+        self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(1910,1030),1,home=True),(1100,600,820,440))
+        self.assertEqual(pie_bounds((0,0,3840,2160),(0,0,3840,2080),(1920,1040),2,home=True),(1380,600,1640,880))
+
     def test_hold_begin_requests_radial_layout_before_opening(self):
         desktop = Desktop('http://localhost', lambda action:None)
         desktop.visible = False
@@ -259,8 +264,10 @@ class MenuReopenTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(app.dispatch('panel.hold_begin', {}), 1)
             self.assertTrue(desktop.visible)
             release.set()
-            with self.assertRaisesRegex(RuntimeError, '重新打开'):
-                await operation
+            result = await operation
+            self.assertTrue(result['cancelled'])
+            self.assertIn('重新打开', result['message'])
+            self.assertFalse(any(e.get('type')=='notice' and e.get('ok') is False for e in events))
             desktop.hide.assert_not_called()
             self.assertEqual(events[-1], {'type':'operation','busy':False})
             app.control.close()

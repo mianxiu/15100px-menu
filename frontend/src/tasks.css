@@ -2,3 +2,5 @@
 .task-record summary{cursor:pointer;line-height:1.8}
 .task-record summary small{color:#91a1bb;margin-left:8px}
 .task-record summary:focus-visible{outline:2px solid #83bbff;outline-offset:3px}
+.task-record table{border-collapse:collapse;margin:12px 0;min-width:320px}
+.task-record th,.task-record td{padding:6px 16px 6px 0;text-align:left;border-bottom:1px solid #303b50}

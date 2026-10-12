@@ -120,6 +120,27 @@ class ApiTests(AsyncHTTPTestCase):
         ws.close()
 
     @gen_test
+    async def test_cancel_api_is_independent_of_focus_and_rejects_missing_tasks(self):
+        bridge=PhotoshopBridge()
+        self._app.bridge=bridge
+        self._app.tasks=bridge.tasks
+        task_id=bridge.tasks.create('color','标色')
+        ws=await websocket_connect(HTTPRequest(self.get_url('/websocket').replace('http:','ws:'),
+                                              headers={'Origin':self.get_url('/').rstrip('/')}))
+        async def request(task):
+            await ws.write_message(json.dumps({'id':'cancel-check','action':'tasks.cancel','args':{'id':task}}))
+            while True:
+                result=json.loads(await ws.read_message())
+                if result.get('id')=='cancel-check':return result
+        try:
+            result=await request(task_id)
+            self.assertTrue(result['ok'])
+            self.assertEqual(bridge.tasks.get(task_id)['state'],'cancel-requested')
+            self.assertFalse((await request('missing'))['ok'])
+        finally:
+            ws.close();await bridge.close()
+
+    @gen_test
     async def test_management_settings_and_plugin_activation(self):
         from test_management import package
         ws = await websocket_connect(HTTPRequest(self.get_url('/websocket').replace('http:', 'ws:'), headers={'Origin':self.get_url('/').rstrip('/')}))

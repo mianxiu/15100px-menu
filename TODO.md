@@ -1,10 +1,141 @@
 # Photoshop Menu TODO
 
-更新日期：2026-10-11。
+更新日期：2026-10-12。
+
+## v0.4.109 tooltip上方定位与推送
+
+- [x] tooltip优先按钮／整组上方、必要时横向避让；上方空间不足才回退侧面／下方，保持黑色半透明底、浅色文字和无命中，布局不移动，AGENTS／README同步。
+- [x] 222项后台回归、5项前端测试及前端构建、UXP命令／类型／标色模拟、原生画布／图层／基本操作上方定位、避让、输入焦点、取消自测、四主题16份预览及最终EXE烟雾通过。正常更新实际入口v0.4.109，配置凭据和PS／UXP0.3.6保留；实际菜单／热键路径、父服务及组件／dist／收据哈希一致。备份dist/0.4.108-backup、.runtime/before-0.4.109-data。
+- [x] 真实PS生产API菜单显示可见，文档数量保持；证据.runtime/tip109-popup-live.json。其余证据.runtime/tests-0.4.109.log、.runtime/frontend-tests-0.4.109.log、.runtime/native-selftest-0.4.109.log、.runtime/tip109-*.png、.runtime/smoke-0.4.109.log、.runtime/installed-0.4.109-final-verification.json、.runtime/tip109-active-workers.json。
+- [ ] 上移后的新版tooltip实体外观、点击／中心取消／右键重开及完整输入焦点矩阵确认；用户确认的是v0.4.108配色显示。
+
+## v0.4.108 黑色半透明tooltip
+
+- [x] 悬停tooltip改为黑色alpha 218/255、浅色文字及弱边框，四主题共用；4圆角、6内边距、位置避让、无控件／无命中保留。底部信息区仍用主题色，AGENTS.md与README同步。
+- [x] 222项后台回归、原生画布／图层分流、输入／焦点／取消／tooltip自测、四主题16份预览及像素透明度／浅色文字核验、最终EXE烟雾通过。正常退出旧后台，更新实际入口v0.4.108，配置凭据、PS／UXP0.3.6保留；菜单／热键实际路径、父服务、构建／dist／收据哈希一致。备份dist/0.4.107-backup、.runtime/before-0.4.108-data。
+- [x] 真实PS生产API菜单可见、文档数量保持，无文档写入；证据.runtime/tip108-popup-live.json。其他证据.runtime/tests-0.4.108.log、.runtime/native-selftest-0.4.108.log、.runtime/tip108-*.png、.runtime/tip108-color-verification.json、.runtime/smoke-0.4.108.log、.runtime/installed-0.4.108-final-verification.json、.runtime/tip108-active-workers.json。
+- [x] 用户确认v0.4.108“tip显示正常”，黑色半透明配色外观验收；随后要求移到上方，v0.4.109实现。
+- [ ] 实体点击／中心取消／右键重开及完整输入焦点矩阵仍未单独验收。
+
+## v0.4.107 完整Figma导出与原始排序图标
+
+- [x] 使用完整ZIP，确认123份SVG、1471个带几何节点、无缺失矢量路径；新增同父组顶部／底部原始轮廓，与已有相邻层／色相饱和度共四枚直接复用。保留贝塞尔及变换，修正ImGui所需绕向，生成来源／源SVG哈希和六项无对应组件说明；构建编译，无运行时设计读取。右列位置、大小、命中、PS配色及蓝色hover保持。
+- [x] 222项后台回归、原生画布／图层分流、输入／焦点／取消／tooltip自测、四主题16份预览和最终EXE烟雾通过；正常退出旧后台、更新实际入口v0.4.107，保留配置凭据。入口／dist／收据和实际菜单／热键进程路径、父服务及组件哈希一致，PS／UXP0.3.6未重启。备份dist/0.4.106-backup、.runtime/before-0.4.107-data。
+- [x] 真实PS生产菜单API显示可见，文档数量保持，无文档写入；证据.runtime/figma107-popup-live.json。构建／运行证据.runtime/tests-0.4.107.log、.runtime/native-selftest-0.4.107.log、.runtime/figma107-*.png、.runtime/smoke-0.4.107.log、.runtime/installed-0.4.107-final-verification.json、.runtime/figma107-active-workers.json。
+- [ ] 实体新版图标外观／hover／点击、中心松键／右键重开与完整焦点矩阵验收；自动检查与API窗口显示不替代实体键鼠。
+
+## v0.4.106 空白图层位置／原生命名与恢复右列高度
+
+- [x] 空白层通过原生make自动命名，冻结活动层为锚点，读回后按需PLACEBEFORE；核验同父组、紧邻上方和原有顺序，单历史事务失败回滚，原文档／选择冻结保护保留。组内目标保留组、组本身目标在组外上方；多选按实际活动层创建。AGENTS记录。
+- [x] 用户指出v0.4.105图标上移过高，恢复v0.4.104靠近圆环的右侧两排：下排与环等高，上排紧邻，左对齐／4间隙；保留16图标、24×30命中、邻近tooltip、PS主题蓝色和其余环绕布局。
+- [x] 222项后台回归、原生双上下文高度／七图标命中／取消／tooltip避让与无命中／既有输入焦点分流、UXP创建／类型／标色模拟、四主题16份预览和最终EXE烟雾通过；正常退出旧服务并更新实际入口v0.4.106，正常重启PS加载UXP0.3.6。配置凭据、入口／dist／菜单／热键／收据、已部署插件代码一致，实际worker路径与父服务核验。备份dist/0.4.105-backup、.runtime/before-0.4.106-data；PS重启前恢复副本.runtime/uxp036-recovery-106已重新打开为工作副本，原文件未改动。
+- [x] 实机8种临时文档验证根层顶部／中间／底部、默认名计数、组内层、组本身、多选活动层、背景：紧邻上方、同父组、原层不变、默认名与原生命令一致（Layer 7→Layer 8），一次撤销恢复；冻结目标改变不创建。七创建／调整／打组、前景色及原层保留回归通过。证据.runtime/blank-layer-0.4.106-live.json、.runtime/quick-layers-0.4.106-live.json；测试脚本的异步guard和跨调用JS局部变量问题修正后完整实测通过。
+- [x] 生产菜单API窗口可见、文档数量保持；证据.runtime/blank106-popup-live.json。构建与运行证据.runtime/tests-0.4.106.log、.runtime/native-selftest-0.4.106.log、.runtime/blank106-*.png、.runtime/smoke-0.4.106.log、.runtime/installed-0.4.106-final-verification.json、.runtime/blank106-active-workers.json。
+- [ ] 实体菜单新建位置／命名、恢复布局与邻近tooltip、点击／中心松键／右键重开和完整输入／焦点矩阵验收。真实执行端／API及模拟不替代实体键鼠验收。
+
+## v0.4.105 基本操作内圈、图标外圈与邻近tooltip
+
+用户反馈图标整体上移过高，布局未获验收；v0.4.106已恢复原右列位置。以下为历史实现与测试记录。
+
+- [x] 文字选择／排序保留基本操作内圈，七个无名称图标放在基本操作上方外圈，右侧两排左对齐、间隙4、离基本操作上缘12单位；保留16图标、24×30命中、PS主题蓝色、色块和首页。绘制与命中同步、AGENTS偏好更新。
+- [x] 图标／文字基本操作／色块使用当前控件附近独立tooltip，优先下方；避让其他操作、中心标题、预设和状态区，动画／提交隐藏，纯绘制无控件／无命中，空白／中心取消保护保留。
+- [x] 222项后台回归、原生外圈层级／画布与图层分流／七图标点击与松键／禁用／空白取消／tooltip无命中和避让／既有输入与焦点保护、四主题16份预览及最终EXE烟雾通过。正常退出旧服务后解除短暂文件锁，更新实际入口v0.4.105；实际菜单／热键路径、父服务及组件／dist／收据哈希一致，配置凭据及PS／UXP0.3.5保留。备份dist/0.4.104-backup、.runtime/before-0.4.105-data；证据.runtime/tests-0.4.105.log、.runtime/native-selftest-0.4.105.log、.runtime/outer105-*.png、.runtime/smoke-0.4.105.log、.runtime/installed-0.4.105-final-verification.json、.runtime/outer105-active-workers.json。
+- [ ] 新版实机显示、外圈与tooltip外观、实体点击／中心松键／右键重开及完整输入／焦点矩阵。生产API被鼠标工作区保护拒绝，文档数量保持，未记为显示或键鼠通过；证据.runtime/outer105-popup-live.json。
+
+## v0.4.104 放大图标并收紧右列间距
+
+- [x] 七图标和相邻层图标内容12→16逻辑单位，图标按钮与命中18×24→24×30；右侧两排左边缘对齐，边缘间隙4，PS配色／蓝色强调／统一圆角及其余环绕布局保持，偏好写入AGENTS.md。
+- [x] 222项后台回归、原生七图标点击／松键／禁用／两排对齐／间隙和旧位置取消／提示无命中与避让／原有输入分流和焦点保护自测、四主题12份预览、最终EXE烟雾通过；正常退出旧服务后更新实际入口v0.4.104，配置凭据、PS文档与UXP0.3.5保留。菜单／热键进程路径、父服务及组件／dist／收据哈希一致。备份dist/0.4.103-backup、.runtime/before-0.4.104-data；证据.runtime/tests-0.4.104.log、.runtime/native-selftest-0.4.104.log、.runtime/large104-*.png、.runtime/smoke-0.4.104.log、.runtime/installed-0.4.104-final-verification.json、.runtime/large104-active-workers.json。
+- [x] 真实PS内生产菜单API显示可见，文档数量保持，无文档写入；证据.runtime/large104-popup-live.json，范围限窗口可见性，不替代实体键鼠验收。
+- [x] 用户确认v0.4.104“其他正常”，菜单操作确认；Figma图标来源问题已说明仅完整几何可直接复用，未声称全部替换。
+- [ ] 右键重开及完整输入／焦点矩阵未单独验收。
+
+## v0.4.103 创建图标组移到右侧
+
+- [x] 右侧上排空白／纯色／打组、下排四种调整，左边缘对齐、40逻辑单位行距；选择／颜色／排序／首页保持。提示在整列上方，避让排序且不盖另一排；主题蓝色、尺寸与分段样式保留。绘制与命中同步更新，旧左侧区域不执行，偏好写入AGENTS.md。
+- [x] 222项后台保护回归、原生新位置七图标命中／单次松键／点击／禁用／取消、两排对齐／旧位置失效／提示不遮控件及无命中、四主题12份预览、最终EXE烟雾通过；正常退出旧服务后更新实际入口v0.4.103，配置凭据、PS文档和UXP0.3.5保留。实际菜单／热键进程路径、父服务及组件／dist／收据哈希一致。备份dist/0.4.102-backup、.runtime/before-0.4.103-data；证据.runtime/tests-0.4.103.log、.runtime/native-selftest-0.4.103.log、.runtime/right103-*.png、.runtime/smoke-0.4.103.log、.runtime/installed-0.4.103-final-verification.json、.runtime/right103-active-workers.json。
+- [x] 用户实机确认v0.4.103右侧上下排对齐、提示、点击及中心松键取消正常；随后要求再次放大图标、收紧行间隙，见v0.4.104。
+- [ ] 右键重开及完整输入／焦点矩阵未单独验收。
+
+## v0.4.102 放大内容图标
+
+- [x] 按用户反馈将七个小图标和相邻层选择图标从9增至12逻辑单位，保持18×24分段尺寸、命中、提示位置及现有主题蓝色。原始9几何与12显示适配分别记录在来源文件，原生编译资源，不引入唤出加载。
+- [x] 222项后台回归、原生七图标点击／松键／提示空白取消及既有分流保护、四主题12份预览和最终EXE烟雾；实际入口v0.4.102正常替换并运行，dist／菜单／热键／收据核验一致，配置凭据及PS／UXP0.3.5保留。证据.runtime/tests-0.4.102.log、.runtime/native-selftest-0.4.102.log、.runtime/icon102-*.png、.runtime/smoke-0.4.102.log、.runtime/installed-0.4.102-final-verification.json；备份dist/0.4.101-backup、.runtime/before-0.4.102-data。
+- [ ] 放大后实体图标外观；右键重开／完整输入与焦点矩阵未单独验收。v0.4.101的布局、提示和点击／中心取消已由用户确认。
+
+## v0.4.101 导出控件样式与上方悬停提示
+
+- [x] 从源组件326:514、223:20生成样式常量，应用统一4圆角、24高主按钮、18×24图标分段／9内容图标、6提示／状态内边距及1边框。PS配色与字号保留，按钮与面板填充分层；预设／剪贴板／标签采用同一圆角，保留卡片／色块尺寸及环绕锚点，剪贴板与新建底色一致。已更新AGENTS.md。
+- [x] 悬停动作名移到所属图标组上方，避让排序，动画／离开／提交后隐藏；底部保留文档／类型／任务。提示无控件、无命中，图标命中同步可见尺寸；原生回归核验七图标、排序避让、提示空白不执行以及原有点击／松键／取消／输入分流。新增测试最初在帧外读取当前窗口导致异常，改用主视口后完整原生测试通过，失败构建未部署。
+- [x] 222项后台回归、四主题悬停及首页预览、最终EXE烟雾、正常退出旧服务并更新实际入口v0.4.101；入口／dist／原生菜单／热键／收据一致，配置凭据与PS／UXP0.3.5保留。备份dist/0.4.100-backup、.runtime/before-0.4.101-data；证据.runtime/tests-0.4.101.log、.runtime/native-selftest-0.4.101.log、.runtime/{tip101,style101}-*.png、.runtime/smoke-0.4.101.log、.runtime/installed-0.4.101-final-verification.json。
+- [ ] 右键关闭后重开及完整输入／焦点矩阵验收；生产API曾被PS激活资格保护拒绝，文档数量保持；随后样式、上方提示和点击／中心松键取消已由用户实机确认。记录.runtime/tip101-popup-live.json。
+- [x] 用户实机确认v0.4.101“正常”：控件样式、图标上方提示、hover／点击及中心松键取消通过；同时要求内容图标略大，强调色保持之前蓝色。右键重开和完整输入／焦点矩阵未单独确认，仍待验收。
+
+## v0.4.100 Figma导出图标与样式参考
+
+- [x] 从用户提供的151500PX.figma-export.json导入相邻图层选择、色相饱和度两枚完整矩形／渐变图标；构建时生成原生几何并记录节点及源文件哈希。保留PS主题色、蓝色hover、8逻辑单位统一圆角及现有环绕／分段布局，其余图标与卡片统一1逻辑单位线条。其余VECTOR没有路径，保留现有图形，不用整页预览替代运行界面。
+- [x] 222项后台保护回归、原生点击／松键／空白取消／禁用／输入分流自测、四主题12份预览和最终EXE烟雾通过；正常退出旧服务后原子替换实际入口v0.4.100，短暂文件锁已解除。入口／dist／菜单／热键／收据哈希一致，配置凭据及PS／UXP0.3.5会话保留。备份dist/0.4.99-backup、.runtime/before-0.4.100-data；证据.runtime/tests-0.4.100.log、.runtime/native-selftest-0.4.100.log、.runtime/smoke-0.4.100.log、.runtime/installed-0.4.100-final-verification.json。
+- [x] 真实PS临时文档七个创建／打组命令、纯色前景色读回和冻结选择拒绝通过，测试文档已清理；脚本最后生产菜单显示步骤被鼠标工作区保护拒绝，因此整体脚本未记为通过。证据.runtime/quick-layers-0.4.100-live.log、.runtime/quick-live-tasks.json。
+- [ ] 新版实际菜单显示、实体图标外观／hover／点击、中心松键／右键关闭后重开，以及完整画布／图层分流、输入／焦点矩阵验收。生产API被工作区保护拒绝的记录为.runtime/figma100-popup-live.json；自动回归及预览不替代实机验收。
+
+## v0.4.99 统一菜单圆角
+
+- [x] 主按钮、预设／剪贴板卡片、预设外框、标签、分段图标组与底部提示共用FrameRounding=8逻辑单位、按DPI缩放；填充／边框／hover一致，保留布局、尺寸、配色和命中区域，偏好已写入AGENTS.md。
+- [x] 222项后台保护回归、原生点击／单次松键／取消及输入／分流自测、四主题12份首页／hover／图层预览、最终EXE烟雾、实际入口v0.4.99及组件／收据／配置核验通过。旧进程完全退出后解除暂时文件锁并原子替换，PS文档和UXP0.3.5会话保留；真实PS生产API菜单可见且文档数量不变。证据.runtime/tests-0.4.99.log、.runtime/native-selftest-0.4.99.log、.runtime/round99-*.png、.runtime/smoke-0.4.99.log、.runtime/round99-popup-live.json、.runtime/installed-0.4.99-final-verification.json；备份dist/0.4.98-backup、.runtime/before-0.4.99-data。
+- [ ] 用户实体统一圆角外观／hover／点击／长按取消及完整输入／焦点矩阵验收；预览及API验证不替代此项。
+
+## v0.4.98 分段图标与七个图层创建操作
+
+- [x] 左侧三个空白／纯色／打组图标、右侧四个曲线／色相饱和度／色彩平衡／黑白图标；图标组及排序共用圆角外框与内部直线分隔，沿用PS主题／蓝色hover。动作名称在底部显示，保留原环绕、下方色块、首页、输入／焦点保护和取消行为；布局偏好已写入AGENTS.md。
+- [x] 离线UXP0.3.5固定命令、当前前景色纯色、默认调整、准确所选层打组、文档／选择目标保护、模式／位深及父组锁定资格。填充／调整使用历史事务内临时空白层避免PS复用原有空白层，仅新增一个最终图层，失败回滚；忙碌拒绝，不排队，不重发。
+- [x] 222项后台回归、七命令及临时层消耗／保留两种行为模拟、原有UXP协议／类型／标签／最近预设测试、原生七图标点击／单次松键／禁用／移回空白取消与已有分流保护、四主题12份预览、最终EXE烟雾通过。证据.runtime/tests-0.4.98.log、.runtime/native-selftest-0.4.98.log、.runtime/quick98-*.png、.runtime/smoke-0.4.98.log。
+- [x] 实际后台v0.4.98及插件0.3.5已部署、正常桌面COM重启／新会话就绪；真实PS24.0.1七个命令及独立类型／数量／前景色／组成员读回、冻结选择取消、生产菜单API创建、灰度与锁定父组禁用、39项原有图层操作回归通过。入口／dist／原生组件／收据及内置插件一致、设置凭据保留，恢复副本.runtime/uxp035-recovery。证据.runtime/quick-layers-0.4.98-live.json、.runtime/quick-boundaries-0.4.98-live.json、.runtime/layer-context-0.4.98-live.json、.runtime/installed-0.4.98-final-verification.json；旧入口备份dist/0.4.97-backup及dist/0.4.98-first-build-backup。
+- [ ] 用户实体七图标hover／点击／长按松键、快速划过返回空白、右键关闭后重开及画布／图层、输入框／跨应用焦点完整矩阵验收；真实命令及API显示验证不冒充实体键鼠验收。
+
+## v0.4.97 颜色标签下移及上方排序
+
+- [x] 颜色面板在圆环下方；置顶／置底在上方左右并排，各自命中，中缝取消。保留8色、无色清除、无间距4×2排列和原大小／主题，信息底板位于色块下方。画布不露出排序、首页布局不变。
+- [x] 原生新布局／上方两按钮对齐／分隔取消／全部色块命中／单次释放／划过后空白取消／动画取消／下方信息无命中及既有输入／分流回归、221项后台测试、四主题预览、最终EXE烟雾、实际入口及配置／组件核验与生产API可见性；PS文档未改动。证据.runtime/tests-0.4.97.log、.runtime/native-selftest-0.4.97.log、.runtime/smoke-0.4.97.log、.runtime/installed-0.4.97-final-verification.json、.runtime/footer97-popup-live.json。
+- [ ] 实机新位置点击／长按选色与排序、中心松键／右键关闭后重开及完整hover／输入／焦点保护矩阵验收。
+
+## v0.4.96 隐藏按键提示
+
+- [x] 移除环绕菜单数字、普通／上下文菜单快捷键和右键／Esc等引导；保留快捷键功能、取消行为、底部状态与原布局／命中范围。
+- [x] 221项回归、原生自测、浅深主题预览、最终EXE烟雾和实际入口替换；组件／dist／收据哈希与配置核验、真实PS生产API显示且不改文档。证据.runtime/tests-0.4.96.log、.runtime/native-selftest-0.4.96.log、.runtime/smoke-0.4.96.log、.runtime/installed-0.4.96-final-verification.json、.runtime/footer96-popup-live.json。
+- [ ] 用户实机确认按键提示已隐藏，中心松键／右键取消及重新打开正常；实体hover／输入／跨应用焦点矩阵仍待验收。
+
+## v0.4.95 底部信息区
+
+- [x] 图层类型／锁定／跨组限制、文档名、输入及固定提示、运行／结果集中放在菜单下方；主题色半透明圆角底板和正常文字对比度。失败显示原因，忙碌反馈沿用相同样式，首页避让预设；绘制不新增命中范围。
+- [x] 221项后台回归（画布／图层hover分流、输入／焦点保护及取消等）、原生下方操作无重叠／信息区不可命中／首页避让及既有松键取消回归、四主题12份预览、最终EXE烟雾；v0.4.95已构建并正常替换实际入口，旧版与配置已备份，未重启PS／UXP。实际入口／dist／原生组件／安装收据哈希一致、配置凭据保留，生产API在真实PS打开菜单可见／不透明且文档未变；此项仅验证显示，不冒充键鼠验收。证据.runtime/footer95-popup-live.json、.runtime/installed-0.4.95-final-verification.json、.runtime/tests-0.4.95.log、.runtime/native-selftest-0.4.95.log、.runtime/smoke-0.4.95.log、.runtime/footer95-*.png。
+- [ ] 实体各主题可读性、真实键鼠hover／输入框／跨应用焦点／中心松键与右键取消验收；自动测试及生产API可见性不替代用户实机确认。
+
+## v0.4.93 图层类型菜单
+
+- [x] 代码及真实识别完成：UXP后台读取背景／像素／组／文字／智能对象／形状填充／调整及混合类型，缓存选择ID、位置锁、父组及排序边界；后台独立40ms读文件线程不被UIA查询／窗口锁拖住，唤出只用内存快照，复用单次原生准备消息。菜单四方向／色块位置不变，不适用操作置灰。多选仅开放共同可用操作，不替换为单层选择；组选择原有子图层，非组选择原有连续相邻图层。
+- [x] 自动验证：221项后台回归、UXP类型及协议模拟、原生禁用／取消自测、生产SetWindowPos显示／关闭回归、最终EXE构建与烟雾通过；缓存打开不读取提供器、半写文件／会话变更、UI窗口锁占用时独立缓存仍更新均通过。浅深主题预览已检查。证据.runtime/tests-0.4.93.log、.runtime/native-selftest-0.4.93.log、.runtime/type-menu-visible-test.log、.runtime/smoke-0.4.93.log。
+- [x] 实际安装入口及UXP0.3.4更新、真实PS类型／已有操作验证与配置核验：用户授权以后自动允许丢弃未保存文档并重启，已记录AGENTS.md；本次正常关闭Untitled-1，经后台管理更新并桌面COM助手重启，新心跳／名称正确。PS24.0.1临时文档39项类型、标签、选择／排序、空组／位置锁／父组锁／跨组／混合背景拒绝及冻结目标保护通过；生产菜单可见内容及标色成功、打开后改选择取消均通过，任务不写入、不增加历史。入口／dist／组件／收据哈希一致、设置凭据保留。证据.runtime/layer-context-0.4.93-live.json、.runtime/type-production-{api,cancel}-0.4.93.json、.runtime/installed-0.4.93-final-verification.json；备份dist/0.4.92-backup、dist/0.4.93-first-build-backup及.runtime/before-0.4.93-data。
+- [x] 用户实机确认v0.4.93“类型、布局和操作正常”：像素／文字／组／背景类型标题及置灰项、原环绕布局、中心松键取消和右键关闭后重开通过。
+- [ ] 完整实体画布／图层hover、输入框／跨应用焦点保护及极快连续按键矩阵；本次问题没有逐项要求或确认这些边界，保留自动回归，不冒充完整矩阵通过。
+
+## v0.4.94 首页预设垂直位置
+
+- [x] 代码：右侧第一排预设与中心环／左侧新建按钮等高，按固定间距向下展开，取消整块垂直居中；保留2列×4行、顶部剪贴板、尺寸／标签／配色和命中逻辑。首页底部提示向左避让下移后的预设区，图层菜单不变。
+- [x] 原生首排对齐、全部入口可见／命中／取消与边界回归、221项后台回归、四主题有／无剪贴板预览、最终EXE构建／烟雾及实际入口更新；入口／dist／组件／收据哈希一致，配置凭据保留。旧EXE退出后的短暂锁阻挡首次拷贝，确认进程退出后原子替换并启动成功，未关闭PS／用户文档。UXP0.3.4同会话保留；生产API画布弹窗可见且不透明，当前PS不是首页，未执行新首页预设任务。证据.runtime/tests-0.4.94.log、.runtime/native-selftest-0.4.94.log、.runtime/smoke-0.4.94.log、.runtime/home94-popup-live.json、.runtime/installed-0.4.94-final-verification.json。后续优先首排靠近中心／按固定间距下展开的偏好已记录AGENTS.md。
+- [ ] 新版实体垂直位置／hover／点击及取消验收。
 
 - v0.4.51：10:38:05.168捕获菜单内toggle关→开，附近重复DOWN出现62ms间隔（平时约31ms），同时发生钩子维护，队列丢失0，证据 `.runtime/capslock-state-103805/`。已将PS扫描移到后台并以消息交接句柄；按键按住及输入后250ms内保留现有钩子，不增加菜单等待。原生系统toggle变化／基线与实际维护标记已进入持续日志，独立只读状态记录器持续轮转。原生10000轮状态／维护门禁与30轮钩子自测、98项回归、最终EXE烟雾／重启通过。空闲旧服务正常退出，备份dist/0.4.50-backup及.runtime/settings-before-0.4.51.json，统一入口v0.4.51和组件哈希已核验，证据 `.runtime/release-0.4.51-verification.json`。实体长按／快速连按已由用户确认无误切换、菜单正常；外部Caps正常行为本轮未单独验收，长期稳定性继续观察。
 
 目标：原生悬浮菜单配合 Photoshop 内执行端，支持不断扩展的脚本、复杂连续操作和长任务；后台长期运行，PS 忙碌时等待，不主动抢焦点。
+
+## 当前执行顺序（2026-10-11用户调整）
+
+1. 优先主要功能：菜单唤出／取消、图层与画布分流、选色／清除／排序、文档与选择目标保护；针对实际复现故障修复，不将长期验收清单当成全部功能未实现。
+2. 完善执行确定性：忙碌不接受新交互任务，目标变化拒绝写入；处理超时／断线后的结果确认与反馈，不自动重发，不因请求超时判定脚本已停止。不重复扩展已完成的诊断功能来替代主功能修复。
+3. UXP主菜单迁移已在v0.4.69完成；v0.4.72将UXP资源和安装／禁用／更新管理整合到主程序后台；独立OfflineSetup只保留为历史部署方式。离线仍为硬条件，不依赖Adobe账号、Marketplace、云服务或额外Adobe工具；当前使用本地文件认证通信，无插件网络权限。继续验证跨用户／PS版本的离线分发兼容性，不恢复未知结果自动重发或COM写入回退。
+4. 长期驻留／资源增长、多DPI完整矩阵及广泛长期稳定性优化后置。相关未验收记录保留，但不阻塞前述主要功能工作。
+
+迁移前初步调查（历史）：官方常规ccx安装使用Creative Cloud Desktop或UPIA，开发加载使用UDT；离线使用支持不等于无Adobe工具依赖。本机标准UPIA路径不存在。当时继续v0.4.68 COM；后续本地部署与生产迁移结果见文末v0.4.69／v0.4.70。
 
 ## P0：CapsLock 按住菜单交付与真实验收
 
@@ -45,28 +176,31 @@
 ## P1：统一任务协议与调度
 
 - [x] 建立命令注册表：12项已有命令已纳入版本化契约，包含参数校验、适用条件、当前文档／选择目标策略、COM通道、预期结果、取消和恢复限制；已接入API与实际执行校验。84项回归及最终EXE烟雾／重启通过，已切换v0.4.36并核验实际注册表查询与参数拒绝接口。当前目标策略不等于持久化文档／图层ID，后者见下项。
-- [ ] 为每次任务生成唯一 ID，定义排队、等待 PS、执行中、取消请求中、成功、失败、已取消、结果未知等状态：v0.4.59 已实现接受的 COM 操作唯一 ID，以及目标读取、执行、取消等待、已取消、成功、失败、结果未知和迟到结果更新；提供最近任务列表、状态查询与有界历史。排队／等待 PS 状态仅定义协议值，尚未实现调度；用户取消按钮及 UXP 通道仍待后续；v0.4.60已增加最近64条任务持久恢复（见下项），并非自动恢复执行。实际服务只读任务API与轮转日志已核对：8次实体菜单标色／清除的ID全部不同，最终均成功；后台页面视觉呈现仍未验收。
+- [ ] 为每次任务生成唯一 ID，定义排队、等待 PS、执行中、取消请求中、成功、失败、已取消、结果未知等状态：v0.4.59 已实现接受的 COM 操作唯一 ID，以及目标读取、执行、取消等待、已取消、成功、失败、结果未知和迟到结果更新；提供最近任务列表、状态查询与有界历史。v0.4.65交互排队在v0.4.66按用户确定性要求停用，当前忙碌直接拒绝新交互请求；等待用户模态及UXP调度仍未实现；v0.4.63已接入读取目标阶段的取消按钮／接口（仍待实体按钮验收），运行任务取消及 UXP 通道仍待后续；v0.4.60已增加最近64条任务持久恢复（见下项），并非自动恢复执行。实际服务只读任务API与轮转日志已核对：8次实体菜单标色／清除的ID全部不同，最终均成功；后台页面视觉呈现仍未验收。
 - [ ] v0.4.59 本轮任务记录交付验收：代码、113项后台／3项前端测试、前端及EXE构建、真实PS临时文档标色／清除和任务ID／状态顺序／目标关联已验证，实际统一入口已切换并核验v0.4.59及原生组件。只读任务API与实际前端资源哈希通过；证据 .runtime/task-lifecycle-photoshop-verification.json、.runtime/task-api-0.4.59-verification.json、.runtime/release-0.4.59-verification.json。旧程序和配置备份dist/0.4.58-backup、.runtime/settings-before-0.4.59.json。页面检查工具两次初始化失败0x80070020，未冒充视觉验收；2026-10-11 12:47日志核验：实际服务8次标色／清除均为不同ID且成功，耗时156～234ms；前7次完成后均有菜单重开记录，最后一次没有后续打开动作，不能据此判断失败。证据 .runtime/task-0.4.59-live-log-verification.json。任务数据与菜单重开记录已验证，后台页面视觉呈现仍待验收。列表仅内存保留最近64条（页面最新12条），日志不支持恢复或自动重放；排队、UXP和取消按钮不属于本次完成范围。
-- [ ] 同一个 PS 实例的修改任务统一串行调度；COM 和 UXP 共用队列，不并发修改文档。
-- [ ] 区分排队期限、通讯超时、执行期限；长任务不再仅靠固定请求超时判定失败。
+- [ ] 同一个 PS 实例的修改任务统一串行调度：现有COM单线程执行；v0.4.66交互请求忙碌直接拒绝，不自动排队。未来明确启动的工作流步骤需要COM／UXP统一执行协调，不应恢复交互请求自动排队；跨通道工作流协调尚未实现。
+- [ ] 区分工作流等待期限、通讯超时、执行期限；长任务不再仅靠固定请求超时判定失败。v0.4.65内部队列原型有30秒期限，但v0.4.66交互入口不再使用排队；COM读取／执行仍沿用45秒等待，通信与实际执行期限尚未分离。
 - [ ] 超时或断线后核对任务结果，禁止自动重发结果未知的修改命令，也禁止自动改用 COM 重跑。
 - [ ] 文档／图层目标保护：v0.4.55代码、103项回归、真实PS临时文档6组验证、构建和实际入口切换已完成；现有12命令捕获文档／选择／活动图层ID并在写入前校验，变化时取消，不重连或重试。新版实体菜单正常操作仍待用户验收，证据见文末。
 - [ ] 持久化任务日志、步骤结果与必要的恢复信息；重启后核对未完成任务，不盲目继续或重放。v0.4.60已实现最近64条任务的ID／目标／耗时／最终结果持久快照及重启只读恢复；中断记录统一标为结果未知，保留先前状态，不重放。独立写盘线程、修改前持久屏障、等待后的菜单会话检查、损坏记录保留和写盘失败拒绝修改已验证。实际入口v0.4.60恢复旧版13条真实任务，证据.runtime/task-history-0.4.60-live-verification.json。长期审计日志、步骤结果／检查点与实际PS未完成结果核对仍未实现，因此总项不勾选。
 
 ## P1：PS 内 UXP 执行端
 
-- [ ] 确定支持的 Photoshop 版本范围并建立能力检测；验证目标版本的 UXP、模态等待和取消行为。
-- [ ] 实现 UXP 插件主动连接本机后台的 WebSocket 通道，包含本机地址限制、连接认证、协议版本和会话标识。
+- [ ] 离线分发跨环境实机验收：本机无额外Adobe工具的用户目录部署、自动加载和本地文件通信已通过；v0.4.70的独立安装器是历史部署；v0.4.72已内置UXP资源到主EXE并由后台管理，真实用户目录安装／同版本ZIP更新／禁用／启用／卸载／回退通过，用户直接启动后重载UXP、独立桥标色／清除读回通过；既有桌面Explorer打开原快捷方式已单次自动启动成功，重复启动稳定性仍待验收。没有插件网络权限或安装下载依赖。全新Windows用户环境的首次安装、真实卸载回退及其他PS版本仍待验证；不将本机更新和隔离文件系统测试视为这些验收，也不宣称官方CCX注册安装或整机断网测试完成。用户此前明确采用现有PS出站屏蔽环境，不要求再次整机断网。
+
+
+- [ ] 建立 Photoshop 版本兼容与能力检测矩阵；v0.4.70已移除PHSP/24硬编码，自动发现新鲜插件目录，多实例拒绝而不选择错误目标。v0.4.71按用户要求限制安装／manifest／执行端最低24.0.1，不设上限；实机仅24.0.1／UXP6.3.3，更高版本、模态及取消完整矩阵仍待验收。
+- [x] 实现用户要求的纯本地认证通信：采用PluginData文件代替WebSocket，包含本机凭据、协议／插件版本、会话、请求ID、期限、同会话去重与跨进程文件锁。v0.4.69生产接入；v0.4.70补充Windows读取句柄导致的提交前原子替换等待，不重发已提交任务。
 - [ ] 原生菜单负责交互，本机后台负责调度，UXP 负责 PS 状态读取与 DOM／batchPlay 执行。
 - [ ] 修改 PS 状态时使用 executeAsModal；处理已有模态操作、等待期限和失败结果。PS 25.10 起支持的 timeOut 仅作为一部分等待机制。
 - [ ] 验证插件首次加载、面板隐藏、关闭、重新加载、PS 重启及长时间驻留的生命周期，不假设插件始终存活。
 - [ ] 实现心跳、退避重连、会话重建与重连后的任务核对；区分通讯可达与 PS 可执行。
-- [ ] 逐步将现有四个 JSX 命令迁移为 UXP 命令；保留 COM 作为明确选择的旧脚本兼容通道。
+- [x] 将现有四类JSX菜单操作及八种标签／清除迁移UXP；v0.4.69生产执行桥与实际EXE已实机读回。菜单不使用COM写入回退，旧JSX包不能更换UXP操作；只读COM依赖另行处理。
 
 ## P1：忙碌等待、状态读取与焦点
 
-- [ ] PS 忙碌或用户正在进行模态操作时排队等待，不强制激活窗口、不抢焦点、不持续高频重试。
-- [ ] 建立带时间戳的状态缓存，展示连接状态、状态新鲜度、任务进度与等待原因；读取不可用时标记等待更新，菜单保持响应。
+- [ ] 已明确启动的工作流内部遇到PS忙碌／模态操作时有界等待，不强制激活、不抢焦点、不高频重试。菜单／快捷键提交的新交互请求按v0.4.66规则忙碌拒绝，不属于自动排队需求。
+- [ ] 建立带时间戳的状态缓存，展示连接状态、状态新鲜度、任务进度与等待原因；读取不可用时标记等待更新，菜单保持响应。v0.4.64已实现后台状态时间戳／年龄／新鲜度／等待原因，150ms有界返回、1秒缓存、并发读合并和手动刷新，busy不读取PS、失败保留旧状态。实际服务API与前端资源已核验，完整模态忙碌下实体菜单及状态卡视觉待验收；阶段进度／PS事件机制仍未实现。
 - [ ] 结合可用事件与有节制的状态补读；事件可能缺失或被模态执行抑制，执行前及执行后重新校验关键状态。
 - [ ] 将实时键鼠响应与 PS 通讯完全解耦，防止 COM 阻塞、UXP 等待或长任务拖住原生热键与菜单。
 - [ ] 明确不抢焦点与独占文档修改的区别；长时间修改期间不能承诺用户可同时编辑同一文档。
@@ -79,7 +213,9 @@
 - [ ] 报告阶段、进度、耗时与取消状态；支持取消排队任务及运行任务的协作式取消，不宣称单个长命令一定可立即中断。
 - [ ] 使用历史状态管理组织可撤销操作；区分文档历史回退与文件、网络等外部副作用，不能视为通用事务回滚。
 - [ ] 仅对经过设计的安全检查点提供恢复；恢复前校验文档、会话和已完成步骤。
-- [ ] 提供任务列表、等待原因、错误详情和诊断日志，便于管理长时间运行任务。
+- [ ] 提供任务列表、等待原因、错误详情和诊断日志，便于管理长时间运行任务。v0.4.68后台已展示全部最近64条，新增新任务阶段表及JSON诊断导出；真实PS命令／阶段持久化及实际资源已验证，页面视觉与点击导出仍待验收，复杂工作流步骤日志仍未实现。
+- [x] v0.4.68 COM任务后台阶段记录：状态切换计时、同状态目标更新不重复创建阶段、结果未知后迟到结果保持同一ID、持久恢复只读且不继续计时；真实PS临时文档和138项回归通过，实际入口及原生组件已核验。旧任务不补造时间线。
+- [ ] v0.4.68阶段表和诊断导出实体页面验收：实际前端资源已核验，新任务可查看阶段和导出JSON；视觉／下载交互未验收。52条旧任务保留，证据 `.runtime/task-diagnostics-0.4.68-live-verification.json`、`.runtime/task-diagnostics-photoshop-verification.json`、`.runtime/release-0.4.68-verification.json`。
 
 ## P2：扩展与稳定性验收
 
@@ -234,3 +370,313 @@ v0.4.58 本轮实机验收（2026-10-11）：用户回复“正常，选色后�
 - [ ] v0.4.62 菜单点击误撤销PS激活资格复测：v0.4.61用户回复“第一次正常，后面无法触发，再点击一下才可以”，未通过。新增点击日志确认13:28:26自定义菜单点击被归类为外部应用并撤销allowed，后续PS内CapsLock全部屏蔽但不打开；再次PS点击恢复，证据.runtime/hook-switch-061-incident.json。仅本次菜单进程且PS目标有效的菜单点击保留已有资格，不授予新的资格，外部点击／纯hover限制不变。原生10000轮新增回归、维护自测、菜单／进程12项及最终EXE启动／重启通过，实际统一入口v0.4.62与两个组件哈希核验通过（.runtime/release-0.4.62-verification.json）；备份dist/0.4.61-backup和.runtime/settings-before-0.4.62.json、.runtime/tasks-before-0.4.62.json。待实体点击色块后连续唤出、取消、任务栏／Alt+Tab与输入保护复测；长期大写状态异常仍持续记录。
 
 - [x] v0.4.62 持续唤出本轮实机确认（限定范围）：用户回复“可以持续唤出”；日志确认连续打开14次，PS／菜单内246条CapsLock均屏蔽且资格有效，多次选色后可重开。证据.runtime/hook-switch-0.4.62-acceptance.json。本轮未采集到菜单内物理点击事件，主要覆盖长按选色与连续重开，不据此将上一条完整物理点击／其他焦点路径验收全项勾选；长期稳定性继续记录。
+
+- [ ] v0.4.63 读取目标阶段取消任务实机按钮验收：已实现后台列表取消按钮、tasks.cancel接口、重复取消幂等、读取完成前不释放busy及完成后禁止提交，取消不显示为失败；拒绝已执行／完成／历史任务。122项后台／3项前端测试、最终EXE启动／重启通过，真实PS临时文档读取时取消蓝色标签后红色保持不变、取消记录可恢复且后续清除正常（独立执行桥实机测试）。实际入口v0.4.63与组件哈希核验通过，运行接口拒绝历史／未知取消、前端资源及24条历史保留已核验。证据.runtime/task-cancel-0.4.63-live-verification.json、.runtime/task-lifecycle-photoshop-verification.json、.runtime/release-0.4.63-verification.json。备份dist/0.4.62-backup、.runtime/settings-before-0.4.63.json、.runtime/tasks-before-0.4.63.json。仍待后台按钮视觉和实体点击取消验收；运行命令不可强制中断，排队／UXP不属于本次实现范围。
+
+- [ ] v0.4.64 状态缓存实机界面验收：125项后台／3项前端测试、最终EXE启动／重启通过。真实PS独立只读验证600ms延迟下20请求约156ms返回缓存、仅1次COM读取，完成后恢复新鲜；不将接口测量当作按键显示延迟。实际入口v0.4.64、两个原生组件哈希、状态API20次并发、WebSocket手动刷新、实际前端资源及24条历史保留已核验。证据.runtime/status-cache-photoshop-verification.json、.runtime/status-cache-0.4.64-live-verification.json、.runtime/release-0.4.64-verification.json；备份dist/0.4.63-backup、.runtime/settings-before-0.4.64.json、.runtime/tasks-before-0.4.64.json。仍需后台状态卡视觉、PS真实模态忙碌时菜单输入／取消和完整hover／输入／焦点限制复测；未改变命令目标校验，不声称全部COM已解耦。
+
+
+- 历史方案v0.4.65（v0.4.66按用户确定性要求停用，不再作为交互排队验收TODO）：实现8项FIFO／30秒排队期限、同一固定文档与选择及原COM引用、排队取消、执行前目标／焦点／菜单会话复核。前项失败／曾超时／等待中断后取消后续，不自动重试；目标未固定或当前结果未知拒绝追加。135项后台／3项前端测试、最终原生菜单自测、最终EXE启动／重启通过。真实PS独立执行桥在自建临时文档读回FIFO颜色、确认取消／目标变化／排队期限均阻止修改，原文档恢复；证据.runtime/task-queue-photoshop-verification.json。实际入口v0.4.65、两个组件路径／哈希、队列状态字段、真实前端资源和取消接口保护核验通过，24条旧历史保留，证据.runtime/task-queue-0.4.65-live-verification.json和.runtime/release-0.4.65-verification.json。备份dist/0.4.64-backup、.runtime/settings-before-0.4.65.json和.runtime/tasks-before-0.4.65.json。实体菜单排队／取消、后台视觉及完整hover／输入／焦点保护仍待验收；用户模态等待和UXP未实现，因此总项不勾选。
+
+- [ ] v0.4.66 忙碌拒绝新交互任务实体验收：菜单和action.execute生产入口不排队，连续请求不创建额外任务，完成后不补执行；原子接收锁覆盖同时到达，结果未知仍保持busy。原生菜单忽略旧queue_ready并禁用忙碌选择，允许原有唤出与取消，后台显示完成后重新选择。136项后台／3项前端测试、最终原生自测和EXE启动／重启通过；真实PS独立执行桥验证红色执行期间10次蓝色拒绝、无延后执行、完成后重新主动选蓝色正常，原文档恢复。实际入口v0.4.66、执行策略、两组件哈希及前端资源核验通过，38条旧历史保留，证据.runtime/busy-reject-photoshop-verification.json、.runtime/busy-reject-0.4.66-live-verification.json和.runtime/release-0.4.66-verification.json。备份dist/0.4.65-backup及.runtime/settings-before-0.4.66.json、.runtime/tasks-before-0.4.66.json。仍待实体busy菜单开关／选择禁止及完整hover／输入／焦点／取消、后台视觉验收。
+
+- [ ] v0.4.67 忙碌仅中心圆环实体验收：运行中打开仅圆环＋文档名／操作耗时，无按钮或色块；旋转为不定进度，不显示虚构百分比。清空命中与高亮，完成后保持紧凑，明确关闭重开后才恢复菜单；不改忙碌拒绝。136项后台回归、最终原生自测和最终EXE启动／重启通过。原生生产SWP_SHOWWINDOW有实际绘制、紧凑命中／数字拒绝／完成不展开／重开恢复回归通过，原生透明PNG不同圆弧阶段检查和人工预览通过；不据此冒充PS实体交互。实际入口v0.4.67、PS连接、两组件哈希与原生诊断核验，38条历史保持。证据.runtime/busy-circle-native-verification.json、.runtime/busy-circle-native-test.log、.runtime/busy-circle-0.4.67-live-verification.json、.runtime/release-0.4.67-verification.json。备份dist/0.4.66-backup及.runtime/settings-before-0.4.67.json、.runtime/tasks-before-0.4.67.json。仍待忙碌期间实体唤出／关闭／完成重开、多DPI及完整hover／输入／焦点保护复测。
+
+UXP手动部署后识别核验（2026-10-11）：用户截图显示 Plugins → Photoshop Menu Offline Probe → Run offline probe，PS新进程PID28976，说明本机24.0.1重新扫描后识别了用户目录的插件。本地接收器目前0条启动／心跳记录，不能将菜单入口识别等同于执行成功或完整离线验收。待点击命令核验脚本运行；网络记录仍有Ethernet／Local Area Connection为Up，不能仅凭Wi-Fi断开认定全机断网。证据 `.runtime/uxp-offline-install-verification.json`。
+
+UXP探针执行修订：PS显示安装提示且命令入口可见；用户点击0.1.0反馈无反应，接收器也无记录，执行验收未通过。测试插件已修订为0.1.1纯JS命令入口，加上plugin-data内probe-last.json本地证据，版本信息缺失不会阻止通信。模拟验证通过，部署文件一致，等待用户断网重启并点击命令；根因尚未由真实错误日志证实，不将入口修改误报为实机修复。主程序仍v0.4.68。
+
+UXP实验后续状态（2026-10-11）：0.1.1自动加载和持续heartbeat已由真实PluginData/probe-last.json证实（UXP6.3.3、读取文档数量正常）；本机fetch因Manifest entry not found被拒绝，网络通道未通过。0.1.2限定回环权限修订尚未加载验证。用户报告PS启动后自行退出并显示无法通信CCD；探针已移出到.runtime/uxp-probe-disabled-0.1.2备份，无测试插件时仍退出，按现有快捷方式工作目录启动也未恢复。未发现对应系统崩溃记录；停止重复启动，等待用户正常启动方式对照。没有重置PS偏好、修改Adobe程序或安装CCD，不能宣称完整离线安装及宿主恢复已通过。证据.runtime/uxp-offline-install-verification.json。
+
+PS启动恢复对照（2026-10-11）：用户确认停用探针后，手动启动也仍提示无法通信Creative Cloud Desktop并退出。按Adobe首选项排障步骤备份并临时隔离完整Settings目录后启动一次，25秒后进程已退出；立即恢复原目录，34个文件SHA256全部一致（0差异）。备份及结果：.runtime/ps-startup-recovery-20261011-152019。失败启动仍未生成新UXP日志；这不能证明根因，也不能判定需要迁移或不能离线。探针保持停用，实际主服务仍v0.4.68；未修改Adobe程序、账号或授权数据。宿主尚未恢复，不继续反复启动或宣称修复。下一步需用户保存其他应用后重启Windows，再以原快捷方式对照启动；尚未安装CCD。
+
+PS恢复更新（2026-10-11 15:22）：用户直接点击后成功启动；实际PID40732、入口仍为C:/Program Files/Adobe/Adobe Photoshop 2023/Photoshop.exe，与此前自动启动路径相同。产生15:21:59的新UXP会话日志；实际v0.4.68主服务已重新连接PS，状态新鲜、无任务运行、无打开文档。说明当前宿主已恢复，但之前CCD退出与本次成功的原因未定位，不能宣称已永久修复或重启Windows是必要步骤。探针保持停用，不再次重启、不改偏好。UXP离线通信与完整离线安装验收仍未通过。
+
+UXP纯本地通信探针0.1.3（2026-10-11）：新增插件自身PluginData文件请求／回应通道，取消网络权限和fetch；只读inspect，带本机令牌、请求ID、30秒内期限及重复保护。Node协议模拟通过（不调用网络、元数据缺失容错、令牌／期限／操作／重复拦截）；Python验证脚本语法检查通过。用户明确允许丢弃Untitled-1后，核对无执行任务、仅该文档，正常关闭文档退出PS。3个部署文件核对哈希一致，生成本地0.1.3归档，旧版备份保留。按原快捷方式自动启动再次出现CCD错误，未产生新UXP会话；10秒真实请求测试超时，旧0.1.1心跳不算新版验收。已请求用户直接点击启动。主入口仍v0.4.68 COM；0.1.3实机请求回应、断网启动／重启恢复及完全离线安装尚未通过。证据.runtime/uxp-file-probe-deployment.json，工具tools/verify-uxp-file-probe.py。
+
+UXP0.1.3实机通信通过（2026-10-11 15:31）：用户直接启动后PID51276，新心跳版本0.1.3、PS24.0.1、UXP6.3.3、phase=ready。后台提交全新请求9677ed7f17f8abcbcf9dcffe2a7a8880，收到同ID的只读inspect回应，往返126.85ms；非旧缓存、非COM模拟、无文档写入。生产v0.4.68仍COM且连接恢复。尚未证明断网安装／启动；新增5分钟本地观察器，仅在所有枚举网卡非Up且PS退出时重复制自有插件文件并校验，记录断网状态、进程及新请求回应；不改变网卡、不自动关闭PS或启动Adobe安装器。离线总项仍不勾选，证据.runtime/uxp-file-probe-verification.jsonl。
+
+断网观察器补充：本机Xbox无线外设网卡可保持Up且无互联网出口，不能要求关闭该外设作为离线条件。观察器现分别记录网卡、活动默认／半默认出口路由与PS进程；在无活动出口路由且PS退出时重复制自有探针。路由缺失不能绝对排除局域网代理等路径，因此最终离线判定仍结合用户断网确认及同期新请求回应；不把网卡Up或单次路由状态单独当成联网／断网结论。代码tools/observe-uxp-file-offline.py，记录.runtime/uxp-file-offline-observation.jsonl。实际断网步骤待用户完成。
+
+离线验收范围更新（用户要求，2026-10-11）：用户明确不再做整机断网，PS原已屏蔽联网。只读核验ActiveStore：Photoshop.exe出站Block已启用，Any配置文件／远端地址／协议／本地与远端端口；Domain、Private、Public防火墙均启用，没有更改规则。结合用户确认此屏蔽配置原已存在，以及此前PID51276直接启动后的0.1.3真实心跳与匹配请求回应，本机纯文件探针在现有PS联网屏蔽环境下可用。手动本地复制部署未使用Adobe安装器；不能据此宣称官方CCX安装、整机断网或所有PS版本兼容已通过。断网观察器已停止，不要求用户关闭Xbox外设等无关网卡。此后PS已退出，新请求因此超时；桌面Shell正常启动另尝试一次，仍无新UXP日志／回应且退出，停止自动启动尝试。现阶段重载使用用户直接点击启动；自动启动CCD问题仍未修复。主入口v0.4.68、执行端COM不变，UXP写操作／目标保护／取消与忙碌策略迁移尚未实现。证据.runtime/photoshop-network-block-rules.json、.runtime/photoshop-network-block-ports.json、.runtime/uxp-offline-install-verification.json及.runtime/uxp-file-probe-verification.jsonl。
+
+UXP标签执行实验0.2.0（未切换生产）：已实现八种标签／清除、独占操作区内文档／活动图层／多选集合及插件会话复核、期限与PS取消检查、结果逐层读回、历史事务失败回滚，以及同会话请求去重。新增实验Python客户端与只操作自建临时文档的实机检查脚本。最终Node协议和标签保护模拟通过，Python语法检查通过；实际部署四个文件哈希一致，旧版备份.runtime/uxp-0.1.3-before-labels。用户要求自动启动后，通过Explorer再尝试一次，仍未加载新版UXP，请求超时；CCD问题未修复，等待直接点击启动后实测。八种颜色真实写入、多选、清除继承提示、与COM协调的全局忙碌拒绝／取消、菜单接入和生产切换尚未通过／实现，不勾选UXP迁移。主服务仍v0.4.68 COM，禁止将实验客户端并发运行或与菜单写操作混用。工具tools/verify-uxp-labels.py、tools/uxp_label_client.py。
+
+UXP0.2.0标签执行实机验证通过（2026-10-11）：用户直接启动新版后，真实临时文档依次完成八种颜色含none；两层多选蓝色／清除亦逐层通过独立COM读回。更改文档ID、插件会话、选择集合的三类目标请求均被拒绝；过期红色请求没有执行，随后inspect仍回应。测试只对自建临时文档写入，finally关闭临时文档并恢复此前文档。第一次多选测试因COM全选图层命令不可用中止并清理，改用明确图层ID加入多选后完整复测通过。证据.runtime/uxp-labels-physical-verification.json。生产主入口仍v0.4.68 COM；未勾选整体迁移，下一步是生产跨进程单任务协调、取消／未知结果处理与标签菜单接入，再构建切换并实机回归。自动启动CCD问题未修复，不将此次用户直接启动误报为自动启动成功。
+
+## v0.4.69：主菜单操作迁移至 UXP
+
+实际运行入口 dist/PhotoshopMenu.exe 已切换 v0.4.69，插件0.3.0。主菜单与快捷键提交的八种标签／清除、橙色快捷操作、组内选择、顶部／底部排序全部经UXP插件执行，无COM写入回退。Photoshop主题、字体及连接状态仍保留COM只读查询；此版本不是完全移除COM依赖。插件未就绪时明确拒绝。任务通道及命令契约显示uxp-local-files；后台脚本页改为UXP状态，旧JSX包不能替换菜单操作。
+
+执行保留前台／输入／菜单会话限制，UXP会话与文档／活动图层／多选集合在独占操作区内复核。单任务忙碌拒绝、不自动排队；跨进程文件锁保护请求通道。提交前仍可取消，提交后等待结果，不声称可强制中断。45秒等待超时保留结果未知和busy；传输最终超时也保持阻止，不自动重试或回退COM；检查PS后可重启服务。标签逐层读回、清除继承提示、排序／选择读回和失败历史事务回滚均在UXP内完成。
+
+141项后台回归、3项前端回归、最终EXE启动／重启及原生组件检查通过。真实PS生产执行桥验证标签／清除、根级与组内排序和组内选择；最终运行EXE的action.execute端点实际执行红色／清除，独立读回正确、任务为UXP succeeded。临时文档已清理，原文档恢复。本次自动重载已观察到新的0.3.0心跳，不能据此认定之前CCD启动问题永久解决。实体CapsLock短／长按、完整hover／输入／焦点／取消行为未重新做人工逐项验收；代码回归和原生组件哈希检查不冒充这项验收。
+
+旧EXE备份dist/0.4.68-backup；用户配置和历史备份.runtime/before-0.4.69-settings.json、.runtime/before-0.4.69-task-history.json；旧插件.runtime/uxp-0.2.0-before-production。证据.runtime/release-0.4.69-verification.json、.runtime/uxp-production-physical.json、.runtime/uxp-live-0.4.69.json、.runtime/tests-0.4.69.log、.runtime/smoke-0.4.69.log。UXP凭据保存在当前用户PhotoshopMenu/uxp-config.json，不打入EXE或提交Git；本机安装已配置，其他电脑仍需要单独部署插件与凭据，不承诺独立复制EXE即可运行UXP。
+
+- [x] 本机主菜单执行链迁移 UXP（v0.4.69，所有主菜单操作已切换，生产执行桥与实际EXE端点实机验证通过）。
+- [ ] v0.4.69 实体热键／hover／输入／焦点／取消完整复测；移除只读COM依赖另行实现。通用离线安装器已由v0.4.70实现，本项不再将它列为未实现。
+
+## v0.4.70：离线分发包与迁移性能
+
+- [x] 构建可分发单文件离线安装器与ZIP：`dist/PhotoshopMenu-OfflineSetup-0.4.70.exe`、`dist/PhotoshopMenu-Offline-0.4.70.zip`，附SHA256、说明、许可证与性能原始样本。内嵌程序／manifest/main/labels白名单及哈希核验通过；未打包本机凭据／设置／文档／日志，首次安装生成独立令牌。无需Python、网络或额外Adobe工具。
+- [x] 实现用户安装、更新快照、失败恢复、卸载及最近安装回退，保留用户设置／任务历史／备份。运行服务时拒绝更新／维护；PS运行且插件变化时拒绝，插件相同时核验并保留文件不动。安装目录与快捷方式绑定实际文件／数据路径，处理Windows宿主AppData重定向。16项安装器／UXP专项回归通过；新用户凭据、回退／卸载与故障恢复通过隔离文件系统验证。
+- [x] 本机实际安装更新与运行切换：最终离线安装EXE执行成功，Windows开始菜单启动的实际服务为v0.4.70；运行安装EXE与统一`dist/PhotoshopMenu.exe`哈希相同，原生热键／菜单组件与本次构建一致。真实EXE红色／清除逐次独立读回正确，任务通道UXP且成功，临时文档清理并恢复原文档。155项后台、3项前端、最终EXE启动／重启通过。真实安装版维护入口在服务运行时拒绝，未删除文件。
+- [x] 最终分发完整性：ZIP CRC及外部SHA256通过，实际安装的维护EXE与最终分发安装器哈希一致；内嵌payload仅五项白名单（含SHA256清单），不含凭据。证据`.runtime/offline-package-0.4.70-verification.json`。
+- [x] 真实PS迁移性能测试：COM／UXP生产执行桥，单层与八层场景各30次／路径，三次预热、交错顺序；120次计时操作全部独立读回正确。单层中位数160.66→78.52ms，P95 188.07→95.15ms；八层中位数177.70→92.10ms，P95 207.86→123.64ms。包含目标读取／保护／执行／核验／任务持久记录，不是实体按键到屏幕延迟。首轮暴露提交前文件锁冲突，修复后完整复测无失败；不能据此宣称长期稳定性或所有功能更快。说明见PERFORMANCE.md。
+- [ ] 全新Windows用户环境完整离线安装／启动／卸载回退实机验收；其他PS版本、完整实体热键／hover／输入／焦点／取消、按键到首帧与大文档性能另行验证。
+
+实际服务位于安装目录，当前由Windows宿主重定向到LocalCache/Local/PhotoshopMenu/app，开始菜单已绑定实际路径和数据目录；这不是另一份未启用的暂存构建。原v0.4.69统一入口备份`dist/0.4.69-backup`，设置／任务历史备份`.runtime/before-0.4.70-settings.json`和`.runtime/before-0.4.70-task-history.json`；安装快照位于当前数据目录install-backups，不对外分发。证据`.runtime/offline-install-final-0.4.70.json`、`.runtime/release-0.4.70-verification.json`、`.runtime/offline-maintenance-guard-0.4.70.json`、`.runtime/execution-performance-0.4.70.json`、`.runtime/tests-0.4.70.log`、`.runtime/smoke-0.4.70.log`。主菜单写入UXP，COM只读状态仍保留。
+
+
+## v0.4.71：Photoshop 最低版本限制
+
+安装要求固定为 Photoshop ≥24.0.1，不设上限。安装器读取本机EXE文件版本，比较前三段；24.0.1.112符合要求，24.0.0及以下拒绝，未检测到支持版本或不能确认版本也拒绝。多版本共存时允许安装到支持环境，但任何正在运行的低版本PS都会阻止安装；自定义位置可指定--photoshop-exe。插件manifest及新鲜UXP心跳使用相同门槛。仅manifest最低版本变化且代码／凭据一致的更新可在符合要求的PS运行时原子完成，不关闭用户文档。
+
+实际安装并通过开始菜单启动v0.4.71，统一dist入口与安装程序哈希一致，原生菜单／热键组件哈希一致。PS24.0.1临时文档红色／清除独立读回通过，任务为UXP成功；清理临时文档并恢复用户Untitled-1。162项后台回归、23项版本／安装／UXP专项验证及最终EXE隔离启动／重启通过。最终冻结安装器对低版本元数据拒绝写入；该负例不等于安装真实旧版PS验收。ZIP CRC／SHA256、内嵌五项白名单及实际安装manifest最低24.0.1均通过。旧EXE备份dist/0.4.70-backup，配置／历史备份.runtime/before-0.4.71-*。
+
+证据：.runtime/offline-install-final-0.4.71.json、.runtime/version-floor-rejected-0.4.71.json、.runtime/offline-package-0.4.71-verification.json、.runtime/release-0.4.71-verification.json、.runtime/tests-0.4.71.log、.runtime/version-floor-tests-0.4.71.log、.runtime/smoke-0.4.71.log。更高PS版本允许安装不表示兼容性已经验收；全新Windows用户环境、真实低版本PS拒绝安装及完整实体键鼠矩阵仍待验证。性能数据仍是v0.4.70的已测样本，本次未改执行算法。
+
+- [x] 用户指定最低 Photoshop 24.0.1：代码／边界测试／冻结安装器检测／构建／实际安装和运行切换完成。
+- [ ] 真实低版本PS安装拒绝、更高版本兼容和全新Windows用户环境实机验收。
+
+
+## v0.4.72：UXP 管理统一到主程序后台
+
+- [x] 主EXE白名单内置manifest/main/labels三份资源，首次缺插件／凭据异常自动打开管理页。用户在后台安装内置版、禁用／启用执行、导入／导出离线UXP ZIP、更新、回退和卸载；独立OfflineSetup不再是当前交付入口。统一包dist/PhotoshopMenu-Backend-0.4.72.zip及可导入插件包已构建，主EXE/ZIP/SHA256和原生资源一致性核验通过。
+- [x] 忙碌及结果未知时拒绝管理，不排队、不强制结束任务。禁用持久化且在创建任务／读取目标前拒绝菜单和快捷键操作；保留驻留插件文件，彻底移除要正常关闭PS后卸载。安装／更新／回退／卸载要求PS已关闭，后台保持运行。最低PS24.0.1，本地版本检测，自定义目录输入。更新包兼容0.3.x、固定最低宿主与启动模式、限制本地文件权限、文件白名单／SHA256、拒绝降级和外部修改覆盖。ZIP导出不带凭据。
+- [x] 实际安装目录与生产后台生命周期：关闭PS后真实安装、同版本ZIP导入更新、禁用／启用、回退、卸载及恢复通过，插件四份文件恢复且凭据不变。浏览器真实管理页安装、禁用与启用按钮及状态提示通过，截图.runtime/uxp-management-ui-0.4.72.jpg。实测发现原凭据格式重写，已修复为完整保留文件及额外字段；新增回退保留当前主应用安装收据保护。前述实机生命周期先于最后收据保护补丁，该补丁有专项回归，未再关闭PS重复正向回退。
+- [x] 用户明确允许丢弃Untitled-1，已正常关闭并执行真实生命周期。自动启动仍遇到历史CCD通信错误；用户直接启动后新UXP会话就绪，真实临时文档经独立生产执行桥标色／清除、独立COM读回通过，并清理临时文档。最终主EXE实际运行v0.4.72，PS/UXP已连接，原生菜单／热键与构建哈希一致，dist和安装运行EXE一致。旧EXE/config/history备份dist/0.4.71-backup与.runtime/before-0.4.72-*。
+- [x] 179项后台、3项前端、最终EXE隔离启动／重启通过，包含真实HTTP/WebSocket UXP管理API（隔离目录）、更新失败恢复、忙碌／禁用门禁、资源白名单、凭据格式保留及插件回退不回滚主应用收据。
+- [ ] 历史记录（v0.4.72）：原自动启动方式的CCD根因未定位；后续通过既有桌面Explorer打开原快捷方式已单次成功，重复启动稳定性当时待验收；v0.4.73正常桌面COM助手的本机功能交付见文末，具体CCD环境变量及跨机长期稳定性仍待定位；新插件版本／全新Windows环境／其他PS版本矩阵另行验收。当前PS重载正向执行为独立桥；生产EXE action.execute因Chrome前台正确拒绝，等待PS前台50秒未满足，未创建操作任务。实体热键／hover／输入／焦点／取消完整正向复测未完成，不以源码测试代替。
+
+证据：.runtime/uxp-management-live-0.4.72.json、.runtime/uxp-management-running-guard-0.4.72.json、.runtime/uxp-reloaded-0.4.72-verification.json、.runtime/backend-package-0.4.72-verification.json、.runtime/release-0.4.72-focus-wait.log、.runtime/tests-0.4.72.log、.runtime/smoke-0.4.72.log。性能数字仍沿用v0.4.70真实样本，未因本次管理集成重新标注为新测量。
+
+
+## 桌面快捷方式自动启动对照（2026-10-11）
+
+已改用现有桌面 Explorer 的 `Document.Application.ShellExecute` 打开原 `Adobe Photoshop 2023.lnk`，而非仅创建 Shell.Application 后直接打开 EXE。本次无需用户点击，Photoshop PID47176 的父进程确认为原 Explorer PID7672；约33秒后实际 v0.4.72 后台连接、UXP新会话 `1791710834710-f308362615ca4` 就绪，独立只读COM确认PS24.0.1可访问、0份文档，新心跳约699ms。没有关闭或修改文档、没有改Adobe文件或CCD配置。这证明本机此启动路径单次成功，不能据此确定旧错误根因或保证长期稳定。
+
+保留工具 `tools/launch-photoshop-from-desktop.py`，指定原快捷方式后只启动一次、有界等待；PS已运行时安全跳过，不自动关闭或重启。实际验证已运行跳过分支及语法检查。示例：
+
+```powershell
+.\Scripts\python.exe tools/launch-photoshop-from-desktop.py --shortcut "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Adobe Photoshop 2023.lnk"
+```
+
+证据 `.runtime/photoshop-desktop-launch-verification.json`、`.runtime/photoshop-desktop-launch-ready.json`。工具供仓库后续自动重载使用，尚未加入主EXE／后台启动按钮；实际主程序仍v0.4.72，本次没有改动菜单或热键组件。
+
+- [x] 本机既有桌面Explorer打开原PS快捷方式，单次自动启动及新UXP就绪实机通过。
+- [ ] 多次冷启动／重启和其他Windows环境稳定性；按需将验证后的启动路径集成后台。
+
+
+## COM 冷启动实测（2026-10-11）
+
+用户要求测试 COM 启动。启动前进程枚举确认无 Photoshop，后台无运行任务；执行一次 `win32com.client.Dispatch("Photoshop.Application")`，等待后返回 `0x80080005`（服务器运行失败），未得到 Application 对象，PS 未保持运行，UXP 未进入新会话。与之前 PS 已运行时的 COM 连接成功不同，本次是真正冷启动失败。不能仅凭该 HRESULT 断言 CCD 是根因，不修改注册表、Adobe配置或授权文件，也不重复同一失败启动。
+
+证据 `.runtime/photoshop-com-launch-verification.json`。暂不将 COM 作为生产自动启动默认方案，保留已成功的既有桌面Explorer打开原快捷方式路径；冷启动 COM 兼容问题仍待定位。
+
+失败后用既有桌面Explorer原快捷方式恢复启动成功：PS PID33584／父进程7672，约35秒后v0.4.72后台连接和全新UXP会话 `1791711847742-ff6d7604b5cbd` 就绪，最终只读心跳年龄约230ms。证据 `.runtime/photoshop-desktop-after-com-verification.json`。该桌面路径本机已有两次成功记录，仍不等于跨环境或长期稳定性验收。
+
+
+COM失败层级补充（2026-10-11）：系统17:43:20记录DistributedCOM事件10010，CLSID与Photoshop.Application注册类完全一致，消息为“没有在要求的超时时间内向DCOM注册”。注册启动命令为 `Photoshop.exe /Automation`；正常桌面启动实际命令不含此参数，父进程为既有Explorer。Windows文档说明COM本地服务器启动还会追加 `-Embedding` 并等待类注册，本次未捕获短暂失败PS的实际命令行，因此追加参数属于系统机制说明而非进程抓取证据。已运行PS的COM连接可用；可确认是冷启动未达到COM就绪，尚不能确定是自动化参数、启动环境或Adobe初始化的哪一项导致。其他CLSID的10016权限日志不归因为PS故障，不修改DCOM权限。证据 `.runtime/photoshop-com-startup-system-evidence.json`；系统机制参考 https://learn.microsoft.com/en-us/windows/win32/com/localserver32 。
+
+
+## openFile.dist 启动方式与正常桌面环境对照（2026-10-11）
+
+用户指定 `G:/Github/151500px-py/openFile.dist`。只读源码和同期Nuitka编译目录确认：通过 photoshop_python_api 0.22.1 的 `ps.Application()`，底层 comtypes先GetActiveObject，失败则CreateObject(dynamic=True)。默认先尝试未注册的 `.0`，再查Adobe版本注册表回退本机 `.170`。`.170`与无版本Photoshop.Application解析同一CLSID／同一Photoshop.exe /Automation；openFile.exe为asInvoker，实际进程由Directory Opus启动，普通用户中等完整性，与当前命令Python权限相同。未执行旧工具“测试运行”按钮，其辅助脚本包含taskkill和文档写入，不用于本轮对照。
+
+最小原库对照：同一旧Python3.11／库在当前命令环境下因platform.machine()为空，误选32位注册表而无法检测PS；显式64位读取可见170.0。让既有桌面Explorer启动同一最小原库调用时machine/PROCESSOR_ARCHITECTURE为AMD64，CreateObject(Photoshop.Application.170, dynamic=True)真正冷启动成功，实际PS命令行 /Automation -Embedding，后台／UXP就绪，未写文档或偏好。
+
+为区分库与环境，再正常关闭本轮测试刚启动的0文档／无任务PS，让既有桌面Explorer启动原pywin32 Dispatch冷启动代码：约31秒返回COM对象，PS24.0.1，0文档，v0.4.72后台连接及新UXP会话 `1791712600324-1b0b9fc35bb5` 就绪，实际PS PID35252，父进程1740（COM服务）。因此不是COM本身或/Automation参数必然失效，pywin32也无需改成comtypes；可工作的关键是通过正常桌面环境运行启动调用。尚未逐一分离出CCD依赖的具体环境变量，不能将PROCESSOR_ARCHITECTURE单项误判为CCD根因，也不修改注册表或DCOM权限。
+
+证据 `.runtime/openFile-com-inspection.json`、`.runtime/openFile-original-api-context.json`、`.runtime/openFile-original-api-start-verification.json`、`.runtime/openFile-original-api-desktop-verification.json`、`.runtime/photoshop-pywin32-desktop-verification.json`。最后对照脚本报告名曾覆盖原冷启动失败文件，成功结果已独立保存，原失败记录依据先前已捕获的输出恢复并注明来源。实际运行主程序仍v0.4.72；本次为启动诊断，未新增后台启动按钮或更换菜单执行端。
+
+
+## v0.4.73 正常桌面 COM 启动助手（2026-10-11）
+
+- [x] 同一主EXE内置 --ps-launch-worker，既有桌面Explorer启动助手后调用 Photoshop.Application；后台不直接COM冷启动，不依赖外部Python／AHK／旧openFile工具，不修改Adobe、DCOM或联网配置。
+- [x] 后台启动按钮、默认开启且可持久关闭的自动启动：正常后台启动／插件安装更新后触发；PS已运行跳过，关闭PS后不循环重开。后台阶段／用时反馈，90秒有界观察，未知结果不重试，后台重启不重新派发。
+- [x] 忙碌拒绝、启动中重复请求拒绝、插件更换与新图层任务拒绝；每请求消费记录和文件租约，助手独立入口不启动第二后台。9项专项回归，188项后台及3项前端回归通过，最终冻结EXE烟雾／重启通过。
+- [x] 实际入口v0.4.73正常桌面COM冷启动和新UXP会话就绪；UI按钮冷启动约31.98秒、后台自动冷启动约31.85秒，均为真实冻结助手，PROCESSOR_ARCHITECTURE=AMD64、existing_instance=false；重复请求拒绝，后台状态接口持续响应。开关关闭后真实后台重启不启动PS，开启后自动启动通过。
+- [x] 实际入口生产 action.execute 临时文档红色／清除独立读回正确、UXP任务succeeded，原生菜单／热键与本次构建SHA256一致。测试仅关闭本轮启动的0文档／无任务PS，未强制结束或丢弃用户文档。
+- [ ] 跨Windows用户／多PS注册版本／Explorer不可用环境及长期冷启动稳定性另行验收；本轮没有重新逐项做实体CapsLock、hover、输入保护、焦点与取消矩阵，不以回归测试冒充。
+
+证据：.runtime/photoshop-start-0.4.73-live-verification.json、.runtime/photoshop-autostart-0.4.73-live-verification.json、.runtime/release-0.4.73-verification.json、.runtime/tests-0.4.73.log、.runtime/smoke-0.4.73.log。统一包包含同一主EXE与插件资源；安装后的实际入口不是暂存新版。
+
+- [x] 真实后台“安装／更新为内置版本”按钮部署插件后自动冷启动通过：冻结助手约32.16秒，新的UXP会话ready，重复启动拒绝。证据 .runtime/photoshop-install-autostart-0.4.73-live-verification.json。三条路径本轮均无CCD错误；不将未逐一分离的具体环境变量宣称为确定根因。
+
+
+## v0.4.74 安装检测与中英文后台／插件名称（2026-10-11）
+
+- [x] 自动读取当前用户本应用插件ID目录，区分缺失、不完整／文件被修改／凭据异常和安装校验通过，展示版本、实际名称、检测目录；安装与PS加载状态分开，启动中不展示可执行。
+- [x] 默认中文，后台即时中英文切换并独立持久化；PS插件名称按偏好在关闭PS后应用，运行中拒绝改名，首次安装／更新使用偏好语言。修改有快照／失败恢复，保留ID、启用状态、执行代码、凭据及任务记录，不改环绕菜单或热键逻辑。
+- [x] 内置0.3.1名称“Photoshop 快捷菜单”／“Photoshop Quick Menu”，入口“检查连接”／“Check connection”；心跳缓存并报告本轮加载manifest名称。194项后台、5项前端含静态词典覆盖，协议模拟及最终冻结EXE启动／重启通过。
+- [x] 实际入口v0.4.74管理页语言切换、英文后台重启持久化、PS运行时改名拒绝、正常关闭本轮0文档PS后英文改名代码／凭据不变；内置0.3.1加载后真实新UXP会话报告英文名称与入口一致。
+- [ ] 原生PS插件菜单项视觉文字与完整实体键鼠／hover／焦点／输入／取消矩阵本轮未直接捕获或人工验收；不同PS／Windows用户环境及长期兼容性另行验证。不以文件校验和模拟测试冒充实机加载。
+
+证据 .runtime/tests-0.4.74.log、.runtime/smoke-0.4.74.log、.runtime/i18n-0.4.74-english-name-verification.json、.runtime/i18n-0.4.74-english-live.json、.runtime/i18n-0.4.74-english.png。旧版备份dist/0.4.73-backup与.runtime/before-0.4.74-*。
+
+- [x] 切回默认中文后正常关闭0文档测试PS，真实管理页应用名称并启动，新UXP会话报告“Photoshop 快捷菜单”／“检查连接”，版本0.3.1；实际EXE临时文档红色／清除独立读回、UXP succeeded和原生组件构建哈希通过。最终实际程序等于dist，原设置／凭据不变，收据归属同步。证据 .runtime/i18n-0.4.74-chinese-live.json、.runtime/release-0.4.74-verification.json、.runtime/installed-0.4.74-final-verification.json。统一包dist/PhotoshopMenu-Backend-0.4.74.zip。
+
+最终补齐常见操作错误及结果译文后重新构建、烟雾／重启验证并切换实际入口。第一轮正向操作因后台页面占据前台被焦点保护正确拒绝，临时文档清理，没有图层任务提交；改由正常桌面环境运行同一COM测试后，最终实际EXE标色／清除读回成功，未绕过保护。证据 .runtime/final-0.4.74-desktop-check.log 和 .runtime/final-0.4.74-desktop-check.exit（0）。最终中文版页面 .runtime/i18n-0.4.74-chinese.png，语言／名称及配置／收据哈希核验见 .runtime/installed-0.4.74-final-verification.json。
+
+
+## v0.4.75 后台应用布局与标签切换（2026-10-11）
+
+- [x] 固定应用窗口，左侧五个主页面、页内标签，页面自身不随卡片／任务数量长滚动；启动、插件状态、离线更新、快捷键、版本信息分开显示，说明默认折叠。仅当前面板内部滚动。
+- [x] 最近64条任务独立列表／详情，点击选择；阶段、目标、错误、结果、历史只读、未提交取消入口和诊断导出保留。运行状态更新不重置已展开详情说明。
+- [x] 设置底部固定保存／放弃，切换页内标签及主页面保留未保存表单，放弃恢复原配置；方向键、Home／End导航，中英文切换保持详情状态。
+- [x] 194项后台回归、5项前端检查、最终EXE烟雾／重启通过。实际安装入口v0.4.75，主EXE等于dist、收据哈希同步；原生组件构建哈希一致，UXP0.3.1就绪，原设置及凭据未变。旧版备份dist/0.4.74-backup和.runtime/before-0.4.75-data。
+- [x] 实际管理页1120×760五主页面及插件子标签、560×700任务／设置区域无外层滚动；保存栏在视口内，任务选择和跨页编辑／放弃通过。最终内置index-ByaysUET.js中文截图及详情在英文状态刷新后仍展开已核验。
+- [ ] 本轮未重新人工验收完整实体CapsLock、画布／图层hover、输入保护、焦点和取消矩阵。v0.4.75第一构建临时文档实际UXP标色／清除读回成功；最终仅详情UI修正后复测时其他应用在前台，被已有焦点保护正确拒绝、未提交任务，临时文档已清理，不将其标为最终构建正向操作通过。
+
+证据：.runtime/tests-0.4.75.log、.runtime/smoke-0.4.75.log、.runtime/backend-tabs-0.4.75-ui-verification.json、.runtime/backend-tabs-0.4.75-ui.png、.runtime/installed-0.4.75-final-verification.json。第一构建正向记录.runtime/release-0.4.75-verification.json；最终复测焦点拒绝记录.runtime/final-0.4.75-desktop-check.log（exit 1），两者范围不混同。
+
+
+## v0.4.76 Photoshop 首页／新建文档（2026-10-11）
+
+- [x] 根据可见非零面积OWL.WelcomeScreenView识别首页，首页覆盖保留的画布／图层上下文；实际PS窗口只读检测为home。输入框焦点优先保护，不以无文档或文档标题猜测首页。
+- [x] 首页环绕菜单只显示“新建文档”，文档加号图标，菜单内数字4／点击／长按松键共用入口；中心／空白取消逻辑保留，隐藏标色和排序，首页暂停直接图层快捷键。
+- [x] 专用原生Ctrl+N新建窗口请求，执行前重验首页／焦点／输入／按住修饰键／忙碌／启动／菜单会话。原子按放序列、部分注入清理，不排队、不重试、不自动创建文档，不依赖更换UXP。
+- [ ] 实体键鼠验收：PS首页短按／长按呼出、点击／松键选择后正确打开原生新建窗口，中心／空白／右键取消，返回文档画布／图层hover分流和输入／焦点保护。已请求用户在实际运行版本验证；预览与自动回归不能替代。
+
+构建／运行版本v0.4.76，UXP0.3.1未变；运行入口与dist哈希、原生组件构建哈希、配置凭据保留证据.runtime/installed-0.4.76-final-verification.json。实际首页识别.runtime/home-menu-0.4.76-live-verification.json，布局预览.runtime/home-menu-0.4.76-preview.png。旧版备份dist/0.4.75-backup及.runtime/before-0.4.76-data；最终回归结果与实体反馈分别记录，不混同。
+
+
+## v0.4.77 首页取消后立即重开（2026-10-11）
+
+首页新建入口不再等待 COM 连接缓存刷新，仍要求原生首页／焦点／输入保护及忙碌检查。203 项回归、冻结 EXE 启动／重启和实际入口／dist／原生构建哈希核验通过。用户实机确认：取消原生新建窗口后可立即重新打开，原约 1 秒不可用已消失。证据 .runtime/tests-0.4.77.log、.runtime/smoke-0.4.77.log、.runtime/installed-0.4.77-final-verification.json。最近预设列表与 UXP 直接新建继续实现中。
+
+
+## v0.4.78 首页最近预设直接新建（2026-10-11）
+
+- [x] 只读匹配当前 UXP 宿主版本的本地 MRU 文件，mtime 缓存，最近使用排序、尺寸／单位／分辨率／名称；部分写入保留有效快照、版本变化不复用其他 PS 数据。
+- [x] UXP 0.3.2 扩展受限 new_document 指令，presetJSON 原参数，固定会话／文档集合／激活文档／过期／取消保护、单次创建、不重试；使用已有任务生命周期与忙碌拒绝策略。
+- [x] 实机 UXP 像素及 A4 参数独立读回、旧目标重复拒绝，本轮测试文档已关闭；正常关闭无文档 PS，经后台桌面 COM 助手重启并加载新插件，凭据保留、有回退备份。
+- [x] 207 项后台／原生回归、5 项前端、3 组协议模拟通过；冻结 EXE 启动／重启、切换实际 v0.4.78、主 EXE 等于 dist、原生与插件0.3.2哈希／归属及配置凭据保留核验通过。证据 .runtime/tests-0.4.78.log、.runtime/smoke-0.4.78.log、.runtime/installed-0.4.78-final-verification.json。
+- [ ] 预设实体点击、划出取消及画布／图层／输入／焦点矩阵仍待验收；用户已实测长按选预设新建。v0.4.79 按最新要求改为前 10 个按钮，旧列表滚动验收不再适用。
+
+证据 .runtime/recent-uxp-live-verification.json、.runtime/recent-uxp-upgrade.json、.runtime/recent-home-preview.png。
+
+
+- [x] v0.4.78 实际菜单运行记录：2026-10-11 19:36:57，用户滚动至列表末项后长按松键，高亮／冻结松键／当前鼠标均命中31，原生菜单发出 document.recent 请求；固定新UXP会话及空文档集合，任务以 uxp-local-files 渠道 succeeded。没有关闭用户新建文档。证据 .runtime/recent-production-user-verification.json；实体中心划出取消与完整旧功能矩阵仍待反馈，不以任务完成替代其验收。此前自动生产测试被鼠标在PS外的保护拒绝，未提交任务；后续真实用户操作通过。
+
+## v0.4.79 最近预设按钮排列（2026-10-11）
+
+- [x] 仅保留最近 10 项，按两列五行按钮显示，不滚动；长尺寸分行、字号／配色保留，沿用快照、直接新建与划出取消保护。
+- [x] 208 项回归、最终十按钮可见／命中／顺序及取消／单次释放原生自测通过；2× DPI 大字体预览核验，冻结启动／重启通过。
+- [x] 已切换实际 v0.4.79，核对 dist／原生组件／收据哈希，保留配置凭据，UXP0.3.2 ready，实际 API 返回十项及预览顺序一致。没有重启 PS 或修改用户文档。备份 dist/0.4.78-backup、.runtime/before-0.4.79-data；证据 .runtime/installed-0.4.79-final-verification.json、.runtime/recent-grid-79-runtime.json。
+- [ ] 新排列实体点击／长按选择／中心取消，以及完整画布／图层 hover、输入框、焦点和右键／Esc 回归验收；已向用户提出测试，不能以预览、自测或 v0.4.78 成功记录替代。
+
+## v0.4.80 任务栏切回修复（2026-10-11）
+
+- [x] 前台 HWND 空窗不再消耗已确认点击意图或撤销 PS 会话；真实其他前台撤销资格、意图过期及 hover 不授予规则保留；增加有界的前台／资格变化记录。
+- [x] 原生空窗／超时／真实外部前台回归、208 项最终回归和冻结启动／重启通过，实际 v0.4.80 及菜单／热键／UXP资源哈希、配置凭据保留核验通过。
+- [x] 用户实机确认任务栏切回可唤出；19:52:16 恢复资格、19:52:18 CapsLock 唤出并固定，证据 .runtime/taskbar-80-user-acceptance.json。旧日志不足以证明空窗为唯一根因，不标记为全场景永久稳定。
+- [ ] 完整 hover／跨应用／输入框／右键取消实体矩阵；v0.4.79 分行设计已由 v0.4.81 加宽单行设计替换。
+
+## v0.4.81 加宽预设与主题蓝色 hover（2026-10-11）
+
+- [x] 前 10 个按钮保留两列五行、无滚动，按钮加宽 50%，首页弹窗同步加宽；取消尺寸拆行，不改 PS 字号。
+- [x] 普通副文本对比度修正，统一预设与环绕按钮的蓝色 hover，按四档 PS 主题调整饱和度／亮度，hover 三行文字使用主题文字色；图层色块颜色不变。
+- [x] 209 项回归、十按钮可见／命中／排序／取消／单次执行与四主题至少4.5:1文字对比度自测、2×大字体预览通过。原生测试尺寸刷新失败记录保留，修复后通过；冻结 EXE 启动／重启通过。
+- [x] 实际 v0.4.81 入口／dist／菜单／热键／收据哈希一致，UXP0.3.2 ready，原配置凭据保留，无 PS 重启或用户文档操作。备份 dist/0.4.80-backup 与 .runtime/before-0.4.81-data；证据 .runtime/tests-0.4.81.log、.runtime/installed-0.4.81-final-verification.json。
+- [ ] 用户实体确认新布局悬停文字与直接新建，以及完整画布／图层／输入框／焦点／取消矩阵；尚未以预览和自动回归代替。
+
+
+## v0.4.82 两行预设与单位徽标（2026-10-11）
+
+- [x] v0.4.81 显示与点击实机反馈：用户确认“显示与点击都正常”；不代替新版及完整保护矩阵验收。
+- [x] 预设卡片改为两行：第一行尺寸＋单位徽标，px 蓝色、mm 绿色，随浅／深主题调整；第二行名称（自定／A4 等）＋分辨率＋颜色模式。仍为最近10个、两列五行、不滚动；卡片高度36逻辑像素。
+- [x] 新版四主题渲染、原生自动交互、209项回归及最终EXE启动／重启通过；已切换实际v0.4.82，安装入口／dist／菜单／热键／收据哈希一致，UXP0.3.2 ready，配置凭据保留。备份dist/0.4.81-backup与.runtime/before-0.4.82-data；证据.runtime/grid82-ui-verification.json、.runtime/installed-0.4.82-final-verification.json。
+- [x] v0.4.82 两行显示、hover、直接新建／取消：用户反馈“显示与操作都正常”。
+- [ ] 画布／图层分流、输入／焦点／右键关闭完整实体矩阵。
+
+## 界面独立控件检查（2026-10-11）
+
+- [x] 原生代码清点：环绕操作按钮、中心方向／忙碌圆环、标签色块、最近预设、搜索输入与列表、上下文菜单、通知文字。预设与环绕按钮使用同一主题 hover；标签色块和单位徽标保留语义色。四主题渲染与自动交互测试单独记录，不视为实体验收。
+- [x] 实际后台浏览器检查：五页导航、菜单行为／快捷键标签切换、禁用保存／放弃按钮、插件安装检测、更新包链接、任务阶段表、日志页均可显示。检查未执行安装／卸载／更新或修改用户设置；没有验证这些破坏性按钮的实际动作。
+- [ ] 后台“导入 UXP ZIP”使用 label＋隐藏 file input，当前缺少可通过 Tab 到达的上传入口（实际 DOM 已确认）；需改善键盘访问。
+- [ ] 原生搜索选中／按下态仍采用独立灰色，通知文字为固定橙色；需统一交互状态并检查浅色主题通知对比度。
+
+
+## v0.4.83 九宫格与插件版本名称（2026-10-11）
+
+- [x] 首页只提供最近9个预设，三列三行；比例图标按宽高矢量绘制，无图片加载。两行文字保留；第一行尺寸＋单位，第二行名称＋分辨率＋颜色模式整条蓝／绿底色。首页锚点与边界同步调整。
+- [x] 插件manifest名称加入真实插件版本，中英文均自动生成；安装／更新／名称语言应用沿用此规则，检测旧无版本名称为待应用。改名保留插件ID、入口ID、代码、凭据、启用状态，保持关闭PS后应用的保护及失败恢复。
+- [x] 最终211项回归、四主题原生渲染／交互及EXE烟雾通过；已切换实际v0.4.83，安装入口／dist／原生组件／收据哈希一致，配置凭据保留。PS无文档时正常退出，通过后台改名并由桌面COM助手重新启动，真实新UXP会话心跳确认名称“Photoshop 快捷菜单 v0.3.2”、入口“检查连接”、插件0.3.2。仅manifest名称改变，代码／凭据保留；未截图验收PS插件面板文字。证据.runtime/plugin-name-83-applied.json、.runtime/plugin-name-0.4.83-live.json、.runtime/installed-0.4.83-final-verification.json、.runtime/grid83-ui-verification.json。
+- [x] v0.4.83 用户实机反馈“布局、操作和版本名称都正常”：3×3、比例图标、第二行蓝／绿信息背景、点击创建、中心松键取消及Plugins面板版本名称已确认。
+- [ ] 完整画布／图层hover分流、输入保护、跨应用焦点及右键关闭实体矩阵仍待单独回归；本次反馈不代替该矩阵。
+
+
+## v0.4.84 预设 @ 格式（2026-10-11）
+
+- [x] 根据截图调整两行：第一行自定／A4等名称与颜色模式，第二行“536×228 px @ 72 ppi”，不再用圆点分隔。保留九宫格、比例图标和第二行单位语义底色；按钮小幅加宽，中心锚点同步保持在鼠标唤出点。
+- [x] 四主题预览最长样本完整、原生交互及211项回归、最终EXE烟雾通过；已切换实际v0.4.84，入口／dist／菜单／热键／收据哈希一致，UXP0.3.2 ready，配置凭据保留，无PS文档操作。证据.runtime/grid84-ui-verification.json、.runtime/installed-0.4.84-final-verification.json。
+- [ ] 新文本格式的实机显示／直接新建／中心取消；完整hover／输入／焦点／右键关闭矩阵仍需单独验收。
+
+
+## v0.4.85 剪贴板首项与行序（2026-10-11）
+
+- [x] 首页九宫格第一项固定为剪贴板，另8项为最近预设。只读Windows CF_DIB／CF_DIBV5图像头获取宽高，不读取完整像素、不改变剪贴板；按尺寸以72ppi、RGB、白底新建空白文档，不自动粘贴。无支持的图像格式时提示并禁止选择；剪贴板序号变化时拒绝旧入口，提交前再次检查。
+- [x] 按反馈互换行序：第一行“尺寸 单位 @ 分辨率”，第二行“名称 颜色模式”，深色蓝／绿背景包裹第二行；剪贴板卡片加深底色并带夹板轮廓图标。保持3×3、原有hover／取消／焦点保护。
+- [x] 原生组件四主题渲染、禁用首项／命中／取消及213项回归、最终EXE烟雾通过；实际v0.4.85入口／dist／原生组件／收据哈希一致，UXP0.3.2 ready，配置凭据保留。真实PS按当前354×385剪贴板尺寸新建、独立COM读回尺寸／72ppi／RGB正确，剪贴板保留、自建文档清理。证据.runtime/clipboard-85-live.json、.runtime/installed-0.4.85-final-verification.json；实体菜单入口仍需验收。
+- [ ] 新剪贴板入口与交换行序的实体菜单显示／点击／中心取消，以及完整保护矩阵。用户反馈“显示还需调整”，随后截图明确名称／模式应拆成独立标签，由v0.4.86落实；不视为v0.4.85整体验收通过。
+
+
+## v0.4.86 预设独立标签（2026-10-11）
+
+- [x] 预设第二行名称及颜色模式分别包裹为独立圆角标签，按文字收紧、小间距；去掉整行色带。保留第一行尺寸 @ 分辨率、3×3、剪贴板首格深底色、比例图标及主题hover。仅修改绘制，不增加标签独立动作，整张卡片仍为一个预设。
+- [x] 213项回归、原生命中／禁用／点击／中心取消及四主题预览、最终EXE烟雾通过；实际运行v0.4.86，安装入口／dist／原生组件／收据哈希一致，配置凭据保留，UXP0.3.2 ready。正常退出服务再更新，无PS文档操作；备份dist/0.4.85-backup、.runtime/before-0.4.86-data。证据.runtime/grid86-ui-verification.json、.runtime/installed-0.4.86-final-verification.json。
+- [x] 用户实机确认v0.4.86“显示与操作都正常”：独立标签、hover、预设点击和长按中心松键取消通过。
+- [ ] 完整画布／图层hover、输入保护、跨应用焦点及右键关闭实体矩阵仍待单独回归；该反馈不代替完整矩阵。
+
+
+## v0.4.87 尺寸与标签字号层级（2026-10-11）
+
+- [x] 第一行尺寸数字大于第二行标签，单位及分辨率保持小字号；字体全部取现有缓存。按钮与首页容器／Win32窗口／后台边界同步加宽，当前长尺寸样本完整单行，九宫格与中心锚点保留。
+- [x] 最终213项回归、原生菜单自测与四主题渲染、EXE烟雾通过，窗口边缘钳制测试同步新尺寸。已正常退出旧服务，实际运行v0.4.87，入口／dist／原生组件／收据哈希一致，配置凭据保留，UXP0.3.2 ready；无PS文档操作。证据.runtime/grid87-ui-verification.json、.runtime/installed-0.4.87-final-verification.json。
+- [x] 用户实机确认v0.4.87“显示与操作都正常”：尺寸大于标签、长尺寸单行、hover／点击及中心松键取消通过。
+- [ ] 完整画布／图层hover、输入保护、焦点及右键关闭实体矩阵仍待单独验收，不由此反馈替代。
+
+
+## v0.4.88 顶部剪贴板与4×2预设（2026-10-11）
+
+- [x] 有剪贴板图像时入口单独居中置于圆环上方；无图像则隐藏且无命中区域。右侧独立保留最近8个预设，按4列×2行排列。保留深底色、尺寸／标签字号、比例图标和主题hover，后台及原生真实窗口宽度同步更新。
+- [x] 213项回归、原生顶部位置／全部命中／隐藏后8项命中／中心取消／单次提交自测、有／无剪贴板四主题渲染及EXE烟雾通过；实际运行v0.4.88，安装入口／dist／原生组件／收据哈希一致，配置凭据保留、UXP0.3.2 ready。无PS文档操作。证据.runtime/grid88-ui-verification.json、.runtime/installed-0.4.88-final-verification.json。
+- [ ] 新位置与4×2实体显示、剪贴板与最近预设点击／长按中心取消；完整画布／图层hover、输入保护、跨应用焦点及右键关闭实体矩阵仍待单独回归，自动测试不替代此项。
+
+用户对v0.4.88反馈顶部剪贴板“有”，要求去掉其独立深底色，配色与左侧新建按钮一致；本反馈仅确认入口存在，不替代完整点击／取消验收，配色由v0.4.89调整。
+
+
+## v0.4.89 尺寸放大与剪贴板配色统一（2026-10-11）
+
+- [x] 尺寸数字进一步放大（13／14／15随PS字体设置），标签缩小到10；单位与分辨率保持紧凑。六种字号启动时缓存、原有PS字号不变；卡片与Win32／后台首页窗口同步加宽，当前长尺寸保持单行。
+- [x] 剪贴板取消独立深底色，普通／hover使用与左侧新建按钮完全相同的主题色；顶部位置、有图像才显示、4列×2行及原有目标保护保留。
+- [x] 213项回归、原生字体缓存／命中／隐藏／点击／取消自测、四主题渲染和最终EXE烟雾通过；实际v0.4.89入口／dist／菜单／热键／收据哈希一致、配置凭据保留、UXP0.3.2 ready，无PS文档操作。证据.runtime/grid89-ui-verification.json、.runtime/installed-0.4.89-final-verification.json。构建脚本仅在内容变化时写字形头文件，解决无变化文件映射占用时的编译阻塞。
+- [ ] 新字号与统一剪贴板配色实体显示／hover／点击／中心松键取消；完整画布／图层hover、输入保护、跨应用焦点及右键关闭实体矩阵仍待单独验收，自动检查不替代此项。
+
+
+## v0.4.90 纵向4行／横向2列与字号减半（2026-10-11）
+
+- [x] 按用户明确方向改为2列×4行；保留8个最近预设和独立顶部剪贴板，窗口宽度／命中／边缘钳制同步更新，顶部与右侧容器不重叠。
+- [x] 用户确认“字号直接缩小50%”：第一行数字及单位／分辨率使用v0.4.89的一半字号，第二行标签维持10；字形预先缓存，统一剪贴板主题色保留。
+- [x] 213项回归、原生8项加顶部入口命中／禁用隐藏／取消／缓存自测、有／无剪贴板四主题渲染及EXE烟雾通过。实际运行v0.4.90，入口／dist／原生组件／收据哈希一致，配置凭据保留、UXP0.3.2 ready，无PS文档操作。证据.runtime/grid90-ui-verification.json、.runtime/installed-0.4.90-final-verification.json。
+- [ ] 新2列4行和50%字号实体显示／hover／点击／中心松键取消；完整画布／图层hover、输入保护、跨应用焦点及右键关闭实体矩阵仍待单独验收，不由自动检查替代。
+
+
+## v0.4.91 恢复可读字号（2026-10-11）
+
+- [x] 用户截图已确认2列×4行，但反馈整行50%字号过小。本版恢复尺寸12／13／14、单位与分辨率11，标签保留10；保留布局、顶部条件剪贴板、统一配色和既有保护。
+- [x] 213项回归、原生字体缓存／命中／隐藏／点击／取消自测、四主题预览及EXE烟雾通过；实际v0.4.91入口／dist／菜单／热键／收据哈希一致，配置凭据保留、UXP0.3.2 ready，无PS文档操作。证据.runtime/grid91-ui-verification.json、.runtime/installed-0.4.91-final-verification.json。
+- [ ] 新恢复字号的实体显示／hover／点击／中心松键取消及完整画布／图层hover、输入保护、跨应用焦点、右键关闭矩阵；v0.4.90截图不视为新版或操作验收。
+
+
+## v0.4.92 背景标签与状态刷新（2026-10-11）
+
+- [x] PS24.0.1临时背景复现旧标签命令隐式转换／新ID／旧ID核验失败；新版UXP0.3.3在写入前明确拒绝锁定背景。单选及含背景的混合选择都不写入、不增加历史、不部分标色；手动解锁后可正常标色。真实已安装UXP协议、独立任务桥与COM读回通过，证据.runtime/background-labels-0.4.92-live.json。
+- [x] 新鲜缓存在后台刷新期间维持连接信息，不反复显示待更新；保留pending诊断，真正陈旧／失败／忙碌不伪报已更新。真实COM600ms读取20并发仅1次读取并维持有效缓存，12轮任务后状态空闲有效。
+- [x] 用户要求当前字号小1/4：第一行尺寸9／9.75／10.5与后缀8.25（v0.4.91的75%），标签10及其他PS菜单字号不变；2列×4行、条件剪贴板、配色与卡片命中保留。原生新增背景拒绝提示自测，既有hover分流／输入／焦点／取消自动回归保留。
+- [x] 214项后台、5项前端、UXP协议自测、原生自测、四主题预览、EXE烟雾通过；实际v0.4.92／UXP0.3.3及新心跳，入口／dist／组件／收据哈希一致，配置凭据保留。用户授权丢弃Untitled-1并自动重启，后台管理更新插件，历史版本可回退。
+- [x] 用户实机确认v0.4.92“提示和菜单都正常”：锁定背景明确提示先解锁，之后菜单可正常连续唤出，不再反复待更新。
+- [ ] 缩小25%字号／点击／中心取消及完整画布／图层hover、输入、跨应用焦点、右键关闭实体矩阵。用户本次回复未单独确认这些项目；隔离桥验证不代替完整生产键鼠验收。

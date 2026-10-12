@@ -11,7 +11,16 @@ ACTIONS = {
     "moveToTop": {"label": "移到顶部", "shortcut": "CapsLock+W"},
     "moveToBottom": {"label": "移到底部", "shortcut": "CapsLock+S"},
 }
-COMMANDS = {**ACTIONS, **LABEL_ACTIONS}
+QUICK_ACTIONS = {
+    'layer.new': {'label':'新建空白图层'},
+    'layer.solid': {'label':'新建纯色填充图层'},
+    'layer.group': {'label':'选中图层打组'},
+    'adjustment.curves': {'label':'新建曲线调整图层'},
+    'adjustment.hueSaturation': {'label':'新建色相饱和度调整图层'},
+    'adjustment.colorBalance': {'label':'新建色彩平衡调整图层'},
+    'adjustment.blackWhite': {'label':'新建黑白调整图层'},
+}
+COMMANDS = {**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS}
 
 
 @dataclass(frozen=True)
@@ -30,9 +39,16 @@ class Command:
 
 
 REGISTRY = MappingProxyType({
+    **{
     name: Command(name, info["label"],
                   "selected-layer-colors-read-back" if name in LABEL_ACTIONS else "script-returned; document-effect-not-verified")
-    for name, info in COMMANDS.items()
+    for name, info in COMMANDS.items() if name not in QUICK_ACTIONS
+    },
+    **{name:Command(name,info['label'],'created-layer-kind-and-group-members-read-back',
+        channel='uxp-local-files') for name,info in QUICK_ACTIONS.items()},
+    'document.recent': Command('document.recent','按最近预设新建文档','new-document-dimensions-returned',
+        channel='uxp-local-files', conditions=('uxp-ready','photoshop-home','action-focus','not-busy'),
+        target_document='captured-UXP-session-and-document-set; cancel-if-changed', target_layers='not-applicable'),
 })
 
 

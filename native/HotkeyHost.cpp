@@ -140,7 +140,11 @@ struct ActivationGate {
         if (!scoped) {active=false;allowed=false;return;}
         if (!active) {allowed=clicked && now-clicked<=2000;active=true;clicked=0;}
     }
-    void observeForeground(bool scoped,bool sameOrigin,bool taskbar,ULONGLONG now) {
+    void observeForeground(bool scoped,bool sameOrigin,bool taskbar,ULONGLONG now,bool transition=false) {
+        // GetForegroundWindow can temporarily return NULL during activation.
+        // That is no foreign application and must not consume a real click.
+        // Qualification still requires a scoped HWND and bounded click age.
+        if (transition) return;
         if (!scoped && !switching && !taskbarSwitching && !directSwitching && clicked && !sameOrigin && !taskbar)
             clicked=0;
         observe(scoped,now);
@@ -294,7 +298,25 @@ static bool taskbarWindow(HWND hwnd) {
 static void observeActivation(HWND foreground,bool scoped,ULONGLONG now) {
     // If a taskbar/Alt+Tab intent activates some other application, consume
     // it there; a subsequent hover into PS must not inherit that intent.
-    activation.observeForeground(scoped,foreground==activationOrigin,taskbarWindow(foreground),now);
+    bool taskbar=taskbarWindow(foreground);
+    ULONGLONG before=activation.clicked;
+    activation.observeForeground(scoped,foreground==activationOrigin,taskbar,now,!foreground);
+    static HWND previous=reinterpret_cast<HWND>(-1);
+    static bool previousAllowed=false,previousActive=false;
+    static ULONGLONG previousIntent=0;
+    if (foreground!=previous || activation.allowed!=previousAllowed || activation.active!=previousActive || activation.clicked!=previousIntent) {
+        unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
+        if (next!=tail.load(std::memory_order_acquire)) {
+            HookEvent event{};event.action=ActivationTrace;event.hwnd=foreground;event.root=activationOrigin;
+            event.time=static_cast<DWORD>(now);event.process=scoped;event.command=taskbar;event.gapMs=before;
+            GetWindowThreadProcessId(foreground,&event.pid);GetClassNameW(foreground,event.windowClass,64);
+            event.activationAllowed=activation.allowed;event.activationActive=activation.active;
+            event.taskbarSwitching=activation.taskbarSwitching;event.directSwitching=activation.directSwitching;
+            event.activationIntent=activation.clicked;
+            queue[head.load(std::memory_order_relaxed)]=event;head.store(next,std::memory_order_release);SetEvent(available);
+        } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
+        previous=foreground;previousAllowed=activation.allowed;previousActive=activation.active;previousIntent=activation.clicked;
+    }
 }
 static bool inside(HWND hwnd,POINT point) {
     RECT rect{}; return GetWindowRect(hwnd,&rect) && PtInRect(&rect,point);
@@ -489,8 +511,12 @@ static void writeActions() {
             const char* type=action==Ready?"ready":action==Error?"error":action==Configured?"configured":"action";
             std::string line;
             if (action==ActivationTrace) {
-                line="{\"type\":\"activation.trace\",\"foreground\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
+                std::wstring wideClass(event.windowClass);std::string windowClass(wideClass.begin(),wideClass.end());
+                windowClass=std::regex_replace(windowClass,std::regex("[^A-Za-z0-9_.# -]"),"_");
+                line=std::string("{\"type\":\"")+(event.message?"activation.trace":"activation.foreground")+"\",\"foreground\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
                     ",\"clicked\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+",\"message\":"+std::to_string(event.message)+
+                    ",\"pid\":"+std::to_string(event.pid)+",\"window_class\":\""+windowClass+"\",\"taskbar\":"+(event.command?"true":"false")+
+                    ",\"intent_before\":"+std::to_string(event.gapMs)+
                     ",\"tick_ms\":"+std::to_string(event.time)+",\"clicked_ps\":"+(event.process?"true":"false")+
                     ",\"allowed\":"+(event.activationAllowed?"true":"false")+",\"active\":"+(event.activationActive?"true":"false")+
                     ",\"direct_switching\":"+(event.directSwitching?"true":"false")+
@@ -615,6 +641,20 @@ static int selfTest() {
     gate.observe(false,14200);gate.beginTaskbar(14201);gate.finishTaskbar(false,14202);
     gate.observeForeground(false,false,false,14203);check(!gate.clicked);
     gate.observe(true,14204);check(!gate.allowed); // Other app won; hover must not inherit.
+    // Taskbar release -> NULL activation gap -> PS must retain the click.
+    gate.observe(false,14300);gate.beginTaskbar(14301);gate.finishTaskbar(false,14302);
+    gate.observeForeground(false,false,true,14303);
+    gate.observeForeground(false,false,false,14304,true);check(gate.clicked==14302);
+    gate.observeForeground(true,false,false,14305);check(gate.allowed);
+    // A later transient NULL must not revoke an already-qualified PS either.
+    gate.observeForeground(false,false,false,14306,true);check(gate.active && gate.allowed);
+    gate.observeForeground(true,false,false,14307);check(gate.allowed);
+    gate.observeForeground(false,false,false,14308);check(!gate.allowed);
+    gate.observeForeground(true,false,false,14309);check(!gate.allowed);
+    // NULL gaps cannot extend the original two-second activation intent.
+    gate.observe(false,14400);gate.beginTaskbar(14401);gate.finishTaskbar(false,14402);
+    gate.observeForeground(false,false,false,17000,true);
+    gate.observeForeground(true,false,false,17001);check(!gate.allowed);
     // A PS click can pass through an intermediate foreground before its up.
     gate.observe(false,15000);gate.beginDirect(15001);
     gate.observeForeground(false,false,false,15002);

@@ -17,6 +17,7 @@
 #include <cmath>
 #include <vector>
 #include <sstream>
+#include <fstream>
 #include <filesystem>
 #include "vendor/json/json.hpp"
 #include "imgui.h"
@@ -24,6 +25,7 @@
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx11.h"
 #include "MenuGlyphs.h"
+#include "FigmaMenuIcons.h"
 
 using Json=nlohmann::json;
 static HWND window;
@@ -48,18 +50,25 @@ static bool allowed=false,capable=false,rightHide=false;
 static std::string document="连接中…",notice;
 static int renderedHit=-1,pendingHit=-1;
 static bool taskBusy=false,taskFailed=false,taskHasResult=false;
+static bool busyFeedback=false;
+static ULONGLONG feedbackStarted=0;
 static ULONGLONG taskStarted=0;
-static std::string taskName;
+static std::string taskName,taskError;
+static int taskQueueCount=0;
 static std::string taskStatus() {
     if (taskBusy) return "执行中："+(taskName.empty()?std::string("Photoshop 操作"):taskName)+
-        " · "+std::to_string((GetTickCount64()-taskStarted)/1000)+" 秒";
+        " · "+std::to_string((GetTickCount64()-taskStarted)/1000)+" 秒"+
+        (taskQueueCount>0?" · 等待 "+std::to_string(taskQueueCount)+" 项":"");
+    if (taskHasResult && taskFailed && taskError.find("背景图层")!=std::string::npos)
+        return "空闲 · 背景图层请先解锁，再设置标签";
     if (taskHasResult) return std::string(taskFailed?"空闲 · 上次失败：":"空闲 · 上次已完成：")+
         (taskName.empty()?std::string("Photoshop 操作"):taskName);
     return "空闲 · 无菜单任务运行";
 }
-static void updateBusy(bool busy) {
+static void updateBusy(bool busy,bool queueReady=false,int queueCount=0) {
     if (busy && !taskBusy) taskStarted=GetTickCount64();
-    taskBusy=busy;allowed=capable&&!busy;
+    if (busy && window && IsWindowVisible(window)) busyFeedback=true;
+    taskBusy=busy;taskQueueCount=0;allowed=capable&&!busy;
 }
 static std::array<std::string,4> shortcuts={"CapsLock + A","CapsLock + C","CapsLock + W","CapsLock + S"};
 static const char* actions[]={"select","color","moveToTop","moveToBottom"};
@@ -95,22 +104,52 @@ static const std::array<LabelColor,8> labelColors={{{"none","无颜色 / 清除�
     {"blue","蓝色",IM_COL32(88,144,213,255)},{"violet","紫色",IM_COL32(169,125,207,255)},
     {"gray","灰色",IM_COL32(169,172,180,255)}}};
 static std::array<RECT,8> labelRows{};
+struct RecentPreset {std::string id,name,size,detail;bool available=true;};
+static std::vector<RecentPreset> recentPresets,shownPresets;
+static std::vector<RECT> recentRows;
+static std::string recentMessage="等待读取最近预设";
+static bool recentReady=false;
 
 // Backend resolves editor identity outside the hook and sends it synchronously
-// before showing the popup: 0 generic, 1 canvas, 2 layers, 3 text input.
+// before showing the popup: 0 generic, 1 canvas, 2 layers, 3 text input, 4 Home.
 static int panelKind=0;
+// Home is authorized by the fresh Win32 workspace/context check at popup
+// preparation. COM can reject status reads while New Document is closing;
+// that cached connection result must not disable the native Ctrl+N entry.
+static bool homepageCapable=true;
+static bool layerAware=false,layerBackground=false,layerLocked=false,layerCrossParents=false;
+static unsigned layerMask=15;
+static int layerKind=0,layerCount=0;
+static unsigned quickMask=0;
+static const std::array<const char*,7> quickActions={"layer.new","layer.solid","layer.group","adjustment.curves","adjustment.hueSaturation","adjustment.colorBalance","adjustment.blackWhite"};
+static const std::array<const char*,7> quickLabels={"新建空白图层","新建纯色填充图层","选中图层打组","新建曲线调整图层","新建色相饱和度调整图层","新建色彩平衡调整图层","新建黑白调整图层"};
+static std::array<RECT,7> quickRows{};
+static constexpr float quickGroupGap=4;
+static float quickGroupY(bool lower);
+static const char* rowAction(int i) {return panelKind==4?"document.new":actions[i];}
+static const char* rowLabel(int i) {return panelKind==4?"新建文档":i==0 && layerAware && layerKind!=3?"选择相邻图层":labels[i];}
+static const char* rowShortcut(int i) {return panelKind==4?"Ctrl + N":shortcuts[i].c_str();}
 static bool inputFocused=false;
-static bool canExecute() {return allowed && !inputFocused && panelKind!=3;}
-static const char* panelTitle() {
-    return panelKind==1?"画布操作":panelKind==2?"图层操作":panelKind==3?"输入控件":"通用操作";
+static bool canExecute() {return (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
+static bool rowEnabled(int i) {return canExecute() && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
+static bool quickEnabled(int i) {return layerAware && panelKind!=4 && canExecute() && (quickMask & (1u<<i));}
+static std::string layerTitle() {
+    const char* names[]={"图层识别待更新","背景图层","像素图层","图层组","文字图层","智能对象","形状／填充图层","调整图层","混合类型","其他图层"};
+    std::string name=names[std::clamp(layerKind,0,9)];
+    if(layerCount>1)name="多选 "+std::to_string(layerCount)+" · "+name;
+    if(layerLocked)name+="（位置锁定）";
+    return name;
 }
-static bool rowVisible(int i) {return panelKind!=3 && (panelKind!=1 || i<2);}
+static const char* panelTitle() {
+    return panelKind==4?"Photoshop 首页":panelKind==1?"画布操作":panelKind==2?"图层操作":panelKind==3?"输入控件":"通用操作";
+}
+static bool rowVisible(int i) {return panelKind==4?i==0:panelKind!=3 && (panelKind!=1 || i<2);}
 static float scale=1;
 static std::string uiTheme="dark";
 static std::string uiFontSize="small";
 static bool fontDirty=false;
 static ImFontGlyphRangesBuilder requiredGlyphs;
-static ImFont* menuFonts[3]{};
+static ImFont* menuFonts[8]{};
 static unsigned fontBuilds=0;
 static int fontIndex() {return uiFontSize=="large"?2:uiFontSize=="medium"?1:0;}
 static void requireText(const std::string& text) {
@@ -131,6 +170,8 @@ static bool knownTheme(const std::string& value) {
 static unsigned renderedFrames=0;
 static std::wstring preview;
 static std::string previewKind="menu";
+static int previewRecentHover=-1;
+static int previewQuickHover=-1,previewActionHover=-1;
 static bool previewLifecycle=false;
 static bool previewLive=false;
 static bool selfTest=false;
@@ -138,6 +179,12 @@ static std::vector<std::string> testedActions;
 static size_t labelTestActionCount=0;
 static ImVec2 bottomRow;
 static void send(const char* action) {
+    for(int i=0;i<7;++i)if(std::string(action)==quickActions[i] && !quickEnabled(i))return;
+    if(layerAware && panelKind!=4) {
+        int row=std::string(action).rfind("label.",0)==0?1:-1;
+        for(int i=0;i<4;++i)if(std::string(action)==actions[i])row=i;
+        if(row>=0 && !rowEnabled(row))return;
+    }
     if (selfTest) {testedActions.emplace_back(action);return;}
     // The foreground menu grants its own backend permission to return focus
     // to PS when it hides. Do not loosen foreground restrictions globally.
@@ -151,7 +198,7 @@ static std::string normalized(std::string value) {
     return result;
 }
 static bool matches(int i,const std::string& query) {
-    std::string haystack=normalized(std::string(labels[i])+" "+keywords[i]+" "+shortcuts[i]);
+    std::string haystack=normalized(std::string(rowLabel(i))+" "+(panelKind==4?"新建 文档 new document create":keywords[i])+" "+rowShortcut(i));
     std::istringstream words(query);std::string word;
     while (words>>word) if (haystack.find(normalized(word))==std::string::npos) return false;
     return true;
@@ -238,10 +285,14 @@ static bool recoverRenderer() {
     return ImGui_ImplDX11_CreateDeviceObjects();
 }
 static void resetMenu() {
+    busyFeedback=taskBusy;
+    feedbackStarted=0;
     renderedHit=pendingHit=-1;
     search[0]=0;selection=0;focusSearch=!contextMode;
     holdRows={};
     labelRows={};
+    quickRows={};
+    recentRows.clear();
     pieReady=false;
     if (ImGui::GetCurrentContext()) { ImGui::GetCurrentContext()->OpenPopupStack.clear(); }
 }
@@ -282,6 +333,16 @@ static void accept(const Json& event) {
         if (event.contains("name") && event["name"].is_string()) document=event["name"].get<std::string>();
     } else if (type=="status") {
         const auto& data=event.at("data"); const auto& ps=data.at("photoshop");
+        recentReady=ps.value("uxp_ready",false) && ps.value("uxp_version",std::string())!="0.3.1";
+        if (data.contains("recent_documents")) {
+            recentPresets.clear();const auto& recent=data["recent_documents"];
+            recentMessage=recent.value("message","");
+            for (const auto& item:recent.value("items",Json::array())) {
+                recentPresets.push_back({item.value("id",""),item.value("name",""),item.value("size",""),item.value("detail",""),item.value("available",true)});
+                requireText(recentPresets.back().name);requireText(recentPresets.back().size);requireText(recentPresets.back().detail);
+                if (recentPresets.size()>=9) break;
+            }
+        }
         const std::string nextTheme=ps.value("ui_theme",uiTheme);
         if (knownTheme(nextTheme) && nextTheme!=uiTheme) {uiTheme=nextTheme;theme();}
         const std::string nextFont=ps.value("ui_font_size",uiFontSize);
@@ -289,8 +350,9 @@ static void accept(const Json& event) {
             uiFontSize=nextFont;
         }
         capable=ps.value("connected",capable) && data.at("settings").value("enabled",true);
+        homepageCapable=data.at("settings").value("enabled",true);
         if (ps.contains("document")) capable=capable && ps["document"].is_string();
-        updateBusy(ps.value("busy",false));
+        updateBusy(ps.value("busy",false),ps.value("queue_ready",false),ps.value("queue_count",0));
         document=ps.contains("document") && ps["document"].is_string()?ps["document"].get<std::string>():ps.value("message","Photoshop 未连接");
         const auto& settings=data.at("settings");rightHide=settings.value("right_click_hide",false);
         for (int i=0;i<4;++i) shortcuts[i]=shortcut(settings.at("shortcuts").value(actions[i],""));
@@ -298,15 +360,18 @@ static void accept(const Json& event) {
         if (event.value("busy",false) && event.contains("action")) {
             std::string action=event.value("action","");taskName=action;
             for (int i=0;i<4;++i) if (action==actions[i]) taskName=labels[i];
+            if (action=="document.recent")taskName="按最近预设新建文档";
             for (const auto& label:labelColors) if (action==std::string("label.")+label.id) taskName=std::string(label.name)+"标签";
-            notice.clear();taskFailed=false;taskHasResult=false;
+            for(int i=0;i<7;++i)if(action==quickActions[i])taskName=quickLabels[i];
+            notice.clear();taskError.clear();taskFailed=false;taskHasResult=false;
         }
-        updateBusy(event.value("busy",false));
+        updateBusy(event.value("busy",false),event.value("queue_ready",false),event.value("queue_count",0));
     }
     else if (type=="notice") {
         notice=event.value("message","");
         if (event.value("scope","")=="operation") {
             taskFailed=!event.value("ok",true);taskHasResult=true;
+            taskError=taskFailed?notice:"";
         }
     }
     else if (type=="popup.prepare") { contextMode=event.value("mode","quick")=="context";resetMenu(); }
@@ -322,8 +387,17 @@ static int holdActionAt(POINT point) {
     if (dx*dx+dy*dy<12*12*scale*scale || (!pinned && !holdMoved)) return -1;
     RECT bounds{};GetWindowRect(window,&bounds);
     if (!PtInRect(&bounds,point)) return -1;
-    for (int i=0;i<8;++i) if (!pieAnimating && rowVisible(1) && PtInRect(&labelRows[i],point)) return 4+i;
-    for (int i=0;i<4;++i) if (rowVisible(i) && PtInRect(&holdRows[i],point)) return i==1?-1:i;
+    for(int i=0;i<7;++i)if(quickEnabled(i) && PtInRect(&quickRows[i],point)) {
+        if((i!=0 && i!=3 && point.x<quickRows[i].left+scale) || (i!=2 && i!=6 && point.x>=quickRows[i].right-scale))return -1;
+        return 32+i;
+    }
+    for (int i=0;i<8;++i) if (!pieAnimating && rowVisible(1) && rowEnabled(1) && PtInRect(&labelRows[i],point)) return 4+i;
+    if (panelKind==4 && recentReady && !pieAnimating) for (size_t i=0;i<recentRows.size();++i)
+        if(shownPresets[i].available && PtInRect(&recentRows[i],point))return 12+static_cast<int>(i);
+    for (int i=0;i<4;++i) if (rowVisible(i) && rowEnabled(i) && PtInRect(&holdRows[i],point)) {
+        if(i>=2 && std::abs(point.x-pieCenter.x)<scale)return -1;
+        return i==1?-1:i;
+    }
     // Only visible cards/swatches commit. Blank radial sectors are neutral.
     return -1;
 }
@@ -331,9 +405,10 @@ static void setHoldMode(bool enabled) {
     holdMode=enabled;holdFinished=false;pinned=false;holdMoved=false;resetMenu();focusSearch=false;
     pieStarted=0;pieAnimating=enabled;
     ringAngleReady=false;
+    shownPresets=recentPresets;
     // The compositor retains the last presented surface while hidden. Never
     // expose that old, fully expanded pie before the new zero-alpha frame.
-    setOpacity(enabled?0.f:1.f);
+    setOpacity(enabled || busyFeedback?0.f:1.f);
     if (enabled) GetCursorPos(&holdOrigin);
 }
 static void finishHold(POINT point,bool requireHighlight=false,const POINT* currentOverride=nullptr) {
@@ -356,8 +431,10 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
         {"current_hit",currentHit},{"highlight",renderedHit},{"chosen",chosen}}).dump()<<std::endl;
     holdFinished=true;pieReady=false;
     setOpacity(0.f);
-    if (chosen>=4) send((std::string("label.")+labelColors[chosen-4].id).c_str());
-    else send(chosen<0?"hide":actions[chosen]);
+    if (chosen>=32 && chosen<39)send(quickActions[chosen-32]);
+    else if (chosen>=12) send((std::string("document.recent.")+shownPresets.at(chosen-12).id).c_str());
+    else if (chosen>=4) send((std::string("label.")+labelColors[chosen-4].id).c_str());
+    else send(chosen<0?"hide":rowAction(chosen));
 }
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     if (msg==WM_APP+21) {
@@ -367,9 +444,14 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     if (msg==WM_APP+11) return renderedFrames;
     // Read-only diagnostic used by the real SetWindowPos lifecycle regression.
     if (msg==WM_APP+18) return static_cast<LRESULT>(std::lround(compositionOpacity*1000));
+    if (msg==WM_APP+19) return (busyFeedback?1:0)|(taskBusy?2:0);
     // One synchronous transition: no intermediate layout or repeated round trips.
     if (msg==WM_APP+17) {
-        panelKind=static_cast<int>(wp&3);inputFocused=(wp&4)!=0;
+        panelKind=(wp&32)?4:static_cast<int>(wp&3);inputFocused=(wp&4)!=0;
+        layerAware=(wp&64)!=0;layerMask=(wp>>8)&15;layerKind=(wp>>12)&15;
+        layerBackground=(wp&(1u<<16))!=0;layerCount=(wp>>17)&255;
+        layerLocked=(wp&(1u<<25))!=0;layerCrossParents=(wp&(1u<<26))!=0;
+        quickMask=static_cast<unsigned>((wp>>32)&127);
         contextMode=(wp&8)!=0;menuEpoch=lp;setHoldMode((wp&16)!=0);
         return 0;
     }
@@ -380,7 +462,7 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         if (IsWindowVisible(hwnd) && GetCursorPos(&point)) finishHold(point);
         return 0;
     }
-    if (msg==WM_APP+12) {panelKind=wp<=3?static_cast<int>(wp):0;inputFocused=lp!=0;resetMenu();return 0;}
+    if (msg==WM_APP+12) {panelKind=wp<=4?static_cast<int>(wp):0;inputFocused=lp!=0;resetMenu();return 0;}
     if (msg==WM_APP) {
         std::unique_ptr<Json> event(reinterpret_cast<Json*>(lp));
         try { accept(*event); } catch (const std::exception& error) { notice=error.what(); }
@@ -394,7 +476,7 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         } else {
             // Keep the composition surface attached while the HWND hides.
             // The next frame selects transparent pie or opaque regular mode.
-            holdFinished=true;pieReady=false;holdRows={};labelRows={};closePopups();
+            holdFinished=true;pieReady=false;holdRows={};labelRows={};quickRows={};closePopups();
             setOpacity(0.f);
         }
     }
@@ -431,37 +513,56 @@ static void theme() {
     const int background[]={240,184,83,50},fill[]={252,209,69,41},pressed[]={191,128,56,31};
     const int text[]={41,15,240,225},muted[]={84,56,214,173},disabled[]={168,128,135,115};
     const int border[]={204,148,102,71},divider[]={217,153,62,38};
+    // Less saturated blue on light themes; subdued blue on dark themes.
+    // Keep the theme's normal text readable on every hover surface.
+    const ImVec4 hover[]={ImVec4(220/255.f,238/255.f,1,1),ImVec4(168/255.f,199/255.f,226/255.f,1),
+        ImVec4(53/255.f,79/255.f,108/255.f,1),ImVec4(46/255.f,64/255.f,84/255.f,1)};
     auto& c=style.Colors;
     c[ImGuiCol_WindowBg]=c[ImGuiCol_PopupBg]=gray(background[i]);
     c[ImGuiCol_Text]=gray(text[i]);c[ImGuiCol_TextDisabled]=gray(disabled[i]);
     c[ImGuiCol_Border]=gray(border[i]);c[ImGuiCol_Separator]=gray(divider[i]);
     c[ImGuiCol_FrameBg]=c[ImGuiCol_Button]=gray(fill[i]);
-    c[ImGuiCol_FrameBgHovered]=c[ImGuiCol_ButtonHovered]=c[ImGuiCol_HeaderHovered]=gray(pressed[i]);
+    c[ImGuiCol_FrameBgHovered]=c[ImGuiCol_ButtonHovered]=c[ImGuiCol_HeaderHovered]=hover[i];
     c[ImGuiCol_FrameBgActive]=c[ImGuiCol_ButtonActive]=c[ImGuiCol_HeaderActive]=gray(pressed[i]);
     c[ImGuiCol_Header]=gray(pressed[i]);
     // Reuse PlotLines for secondary labels; all hand-drawn UI uses this palette.
     c[ImGuiCol_PlotLines]=gray(muted[i]);
     c[ImGuiCol_CheckMark]=c[ImGuiCol_NavHighlight]=i<2?ImVec4(.08f,.45f,.90f,1):ImVec4(.30f,.65f,1,1);
     c[ImGuiCol_SliderGrab]=c[ImGuiCol_SliderGrabActive]=c[ImGuiCol_CheckMark];
-    style.WindowPadding={10,10};style.FramePadding={7,5};style.ItemSpacing={6,5};
-    style.WindowRounding=5;style.PopupRounding=5;style.FrameRounding=3;style.WindowBorderSize=1;
+    style.WindowPadding={figmaPadding,figmaPadding};style.FramePadding={figmaPadding,figmaPadding};style.ItemSpacing={figmaGap,figmaGap};
+    style.WindowRounding=style.PopupRounding=style.ChildRounding=style.FrameRounding=
+        style.TabRounding=style.GrabRounding=style.ScrollbarRounding=figmaCornerRadius;
+    style.WindowBorderSize=1;
     style.ScaleAllSizes(scale);
 }
 
-static void icon(int index,ImVec2 pos) {
-    auto* draw=ImGui::GetWindowDrawList();ImU32 grey=tint(ImGuiCol_Text);
+static void icon(int index,ImVec2 pos,bool active=false) {
+    auto* draw=ImGui::GetWindowDrawList();ImU32 grey=tint(rowEnabled(index)?ImGuiCol_Text:ImGuiCol_TextDisabled);
+    // Content is centred in the existing icon slot; hit rectangles stay fixed.
+    if(index==0 && panelKind!=4 && (!layerAware || layerKind!=3)) {
+        drawFigmaMenuIcon(draw,0,{pos.x+(figmaIconWidth-figmaDisplayIconSize)*.5f*scale,pos.y+(28-figmaDisplayIconSize)*.5f*scale},figmaDisplayIconSize*scale,grey,tint(active?ImGuiCol_HeaderHovered:ImGuiCol_Button));
+        return;
+    }
+    if(index==2 || index==3) {
+        drawFigmaSortIcon(draw,index,{pos.x+(figmaIconWidth-figmaDisplayIconSize)*.5f*scale,pos.y+(28-figmaDisplayIconSize)*.5f*scale},figmaDisplayIconSize*scale,grey);
+        return;
+    }
     pos.y+=5*scale;
-    if (index==0) {
+    if (index==0 && panelKind==4) {
+        draw->AddRect({pos.x+3*scale,pos.y+2*scale},{pos.x+15*scale,pos.y+17*scale},grey,scale);
+        draw->AddLine({pos.x+6*scale,pos.y+9*scale},{pos.x+12*scale,pos.y+9*scale},grey,scale);
+        draw->AddLine({pos.x+9*scale,pos.y+6*scale},{pos.x+9*scale,pos.y+12*scale},grey,scale);
+    } else if (index==0) {
         draw->AddRect({pos.x+2*scale,pos.y+5*scale},{pos.x+13*scale,pos.y+16*scale},grey,scale);
         draw->AddRect({pos.x+5*scale,pos.y+2*scale},{pos.x+16*scale,pos.y+13*scale},grey,scale);
     } else if (index==1) {
         draw->AddRectFilled({pos.x+2*scale,pos.y+4*scale},{pos.x+15*scale,pos.y+14*scale},IM_COL32(220,141,54,255),2*scale);
     } else {
         float tip=pos.y+(index==2?3:16)*scale,tail=pos.y+(index==2?16:3)*scale;
-        draw->AddLine({pos.x+9*scale,tail},{pos.x+9*scale,tip},grey,1.5f*scale);
+        draw->AddLine({pos.x+9*scale,tail},{pos.x+9*scale,tip},grey,scale);
         float y=tip+(index==2?4:-4)*scale;
-        draw->AddLine({pos.x+9*scale,tip},{pos.x+5*scale,y},grey,1.5f*scale);
-        draw->AddLine({pos.x+9*scale,tip},{pos.x+13*scale,y},grey,1.5f*scale);
+        draw->AddLine({pos.x+9*scale,tip},{pos.x+5*scale,y},grey,scale);
+        draw->AddLine({pos.x+9*scale,tip},{pos.x+13*scale,y},grey,scale);
     }
 }
 static void layoutLabels(ImVec2 pos) {
@@ -472,7 +573,7 @@ static void layoutLabels(ImVec2 pos) {
     }
 }
 static void commitLabel(int index) {
-    if (!canExecute() || (holdMode && holdFinished)) return;
+    if (!rowEnabled(1) || (holdMode && holdFinished)) return;
     if (holdMode) {holdFinished=true;pieReady=false;}
     send((std::string("label.")+labelColors[index].id).c_str());
 }
@@ -480,14 +581,14 @@ static void drawLabels() {
     auto* draw=ImGui::GetWindowDrawList();POINT cursor{};GetCursorPos(&cursor);
     ImVec2 saved=ImGui::GetCursorScreenPos();
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav,true);
-    ImGui::BeginDisabled(!canExecute() || (holdMode && (holdFinished || pieAnimating)));
+    ImGui::BeginDisabled(!rowEnabled(1) || (holdMode && (holdFinished || pieAnimating)));
     for (int i=0;i<8;++i) {
         auto r=labelRows[i];ImVec2 a={static_cast<float>(r.left),static_cast<float>(r.top)},b={static_cast<float>(r.right),static_cast<float>(r.bottom)};
         ImGui::PushID(100+i);ImGui::SetCursorScreenPos(a);
-        bool active=canExecute() && (holdMode?holdActionAt(cursor)==4+i:PtInRect(&r,cursor));
+        bool active=rowEnabled(1) && (holdMode?holdActionAt(cursor)==4+i:PtInRect(&r,cursor));
         if (ImGui::InvisibleButton("##label",{b.x-a.x,b.y-a.y})) commitLabel(i);
         ImU32 color=labelColors[i].color;
-        if (!canExecute()) color=(color&0x00ffffff)|0x66000000;
+        if (!rowEnabled(1)) color=(color&0x00ffffff)|0x66000000;
         draw->AddRectFilled(a,b,color);
         if (active) draw->AddRect({a.x+scale,a.y+scale},{b.x-scale,b.y-scale},tint(ImGuiCol_CheckMark),0,0,2*scale);
         if (i==0) {
@@ -507,34 +608,333 @@ static void contextItems() {
     if (panelKind==3) {
         ImGui::TextWrapped("正在编辑输入框，请退出输入后执行操作。");
         if (ImGui::MenuItem("后台管理…")) send("control");
-        if (ImGui::MenuItem("关闭菜单","Esc")) send("hide");
+        if (ImGui::MenuItem("关闭菜单")) send("hide");
+        return;
+    }
+    if (panelKind==4) {
+        if (ImGui::MenuItem("新建文档",nullptr,false,canExecute())) send("document.new");
+        if (ImGui::MenuItem("关闭菜单")) send("hide");
         return;
     }
     if (panelKind==1) {
         colorGrid();ImGui::Separator();
         if (ImGui::BeginMenu("图层操作")) {
-            for (int i=0;i<4;++i) if (ImGui::MenuItem(labels[i],shortcuts[i].c_str(),false,canExecute())) send(actions[i]);
+            for (int i=0;i<4;++i) if (ImGui::MenuItem(rowLabel(i),nullptr,false,rowEnabled(i))) send(rowAction(i));
             ImGui::EndMenu();
         }
         ImGui::Separator();
         if (ImGui::MenuItem("后台管理…")) send("control");
-        if (ImGui::MenuItem("关闭菜单","Esc")) send("hide");
+        if (ImGui::MenuItem("关闭菜单")) send("hide");
         return;
     }
-    if (ImGui::MenuItem(labels[0],shortcuts[0].c_str(),false,canExecute())) send(actions[0]);
+    if (ImGui::MenuItem(rowLabel(0),nullptr,false,rowEnabled(0))) send(actions[0]);
     colorGrid();
     if (ImGui::BeginMenu("图层排序")) {
-        for (int i=2;i<4;++i) if (ImGui::MenuItem(labels[i],shortcuts[i].c_str(),false,canExecute())) send(actions[i]);
+        for (int i=2;i<4;++i) if (ImGui::MenuItem(rowLabel(i),nullptr,false,rowEnabled(i))) send(rowAction(i));
         ImGui::EndMenu();
     }
     ImGui::Separator();
     if (ImGui::MenuItem("后台管理…")) send("control");
-    if (ImGui::MenuItem("关闭菜单","Esc")) send("hide");
+    if (ImGui::MenuItem("关闭菜单")) send("hide");
+}
+static void drawRecentPresets() {
+    const size_t count=std::min(size_t(9),shownPresets.size());
+    recentRows.assign(count,{});
+    if(panelKind!=4)return;
+    const float width=484*scale,height=224*scale;
+    // Anchor the first card row to the ring/left action, then grow downward.
+    // Header (32) + half a card (21): the whole four-row panel is not centred.
+    const ImVec2 a={pieCenter.x+65*scale,pieCenter.y-53*scale};
+    const ImVec2 b={a.x+width,a.y+height};
+    auto* draw=ImGui::GetWindowDrawList();
+    draw->AddRectFilled(a,b,tint(ImGuiCol_WindowBg),ImGui::GetStyle().FrameRounding);
+    draw->AddRect(a,b,tint(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
+    draw->AddText({roundf(a.x+10*scale),roundf(a.y+8*scale)},tint(ImGuiCol_Text),"最近预设");
+    ImFont* small=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    ImFont* dimensionFont=menuFonts[fontIndex()+3]?menuFonts[fontIndex()+3]:ImGui::GetFont();
+    ImFont* badgeFont=menuFonts[6]?menuFonts[6]:small;
+    ImFont* suffixFont=menuFonts[7]?menuFonts[7]:small;
+    if(!count) {
+        ImGui::SetCursorScreenPos({a.x+8*scale,a.y+32*scale});
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX()+width-16*scale);
+        ImGui::TextWrapped("%s",recentMessage.c_str());ImGui::PopTextWrapPos();
+    }
+    POINT cursor{};GetCursorPos(&cursor);
+    const float rowWidth=232*scale,rowHeight=42*scale;
+    auto text=[&](ImFont* font,ImVec2 at,ImU32 color,std::string value,float maxWidth) {
+        auto extent=[&](const std::string& s){return font->CalcTextSizeA(font->FontSize,FLT_MAX,0,s.c_str()).x;};
+        if(extent(value)>maxWidth) {
+            do {
+                size_t last=value.size()-1;
+                while(last && (static_cast<unsigned char>(value[last])&0xc0)==0x80)--last;
+                value.resize(last);
+            } while(!value.empty() && extent(value+"…")>maxWidth);
+            value+="…";
+        }
+        draw->AddText(font,font->FontSize,{roundf(at.x),roundf(at.y)},color,value.c_str());
+        return extent(value);
+    };
+    size_t gridIndex=0;
+    for(size_t i=0;i<count;++i) {
+        const auto& item=shownPresets[i];
+        const bool clipboard=item.name=="剪贴板";
+        // Keep the unavailable clipboard out of both drawing and hit testing.
+        if(clipboard && !item.available)continue;
+        ImVec2 at;
+        if(clipboard)at={pieCenter.x-rowWidth*.5f,pieCenter.y-158*scale};
+        else {
+            at={a.x+(8+236*(gridIndex%2))*scale,a.y+(32+46*(gridIndex/2))*scale};
+            ++gridIndex;
+        }
+        RECT r={LONG(at.x),LONG(at.y),LONG(at.x+rowWidth),LONG(at.y+rowHeight)};
+        recentRows[i]=r;
+        bool active=item.available && canExecute() && recentReady && !pieAnimating &&
+            ((!preview.empty() && previewRecentHover>=0)?previewRecentHover==int(i):PtInRect(&r,cursor));
+        ImVec4 fill=ImGui::GetStyle().Colors[active?ImGuiCol_HeaderHovered:ImGuiCol_Button];
+        draw->AddRectFilled(at,{at.x+rowWidth,at.y+rowHeight},ImGui::ColorConvertFloat4ToU32(fill),ImGui::GetStyle().FrameRounding);
+        draw->AddRect(at,{at.x+rowWidth,at.y+rowHeight},tint(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
+        ImGui::SetCursorScreenPos(at);
+        ImGui::PushID(int(i)+400);
+        bool clicked=ImGui::InvisibleButton("##preset",{rowWidth,rowHeight});
+        if(clicked && pinned && active && !holdFinished) {
+            holdFinished=true;send(("document.recent."+item.id).c_str());
+        }
+        const ImU32 color=tint(canExecute() && recentReady && (item.available || clipboard)?ImGuiCol_Text:ImGuiCol_TextDisabled);
+        const auto split=item.size.rfind(' ');
+        std::string dimensions=item.size.substr(0,split);
+        dimensions.erase(std::remove(dimensions.begin(),dimensions.end(),' '),dimensions.end());
+        const std::string unit=split==std::string::npos?"":item.size.substr(split+1);
+        std::string detail=item.detail;
+        const auto gray=detail.find("grayscale");
+        if(gray!=std::string::npos)detail.replace(gray,9,"灰度");
+        const auto separator=detail.find(" · ");
+        const std::string resolution=detail.substr(0,separator);
+        const std::string mode=separator==std::string::npos?"":detail.substr(separator+4);
+        // Draw a vector outline from the actual preset ratio, without loading images.
+        float iconWidth=22*scale,iconHeight=28*scale;
+        try {
+            const auto cross=dimensions.find("×");
+            const double w=std::stod(dimensions.substr(0,cross));
+            const double h=std::stod(dimensions.substr(cross+2));
+            if(w>0 && h>0 && std::isfinite(w) && std::isfinite(h)) {
+                const double factor=std::min(22*scale/w,28*scale/h);
+                iconWidth=std::max(float(w*factor),scale);
+                iconHeight=std::max(float(h*factor),scale);
+            }
+        } catch(...) {}
+        const ImVec2 iconAt={roundf(at.x+5*scale+(22*scale-iconWidth)*.5f),roundf(at.y+(rowHeight-iconHeight)*.5f)};
+        draw->AddRect(iconAt,{iconAt.x+iconWidth,iconAt.y+iconHeight},color,0,0,scale);
+        if(clipboard) {
+            const ImVec2 clipAt={iconAt.x+iconWidth*.25f,iconAt.y-2*scale};
+            draw->AddRectFilled(clipAt,{clipAt.x+iconWidth*.5f,clipAt.y+4*scale},ImGui::ColorConvertFloat4ToU32(fill),scale);
+            draw->AddRect(clipAt,{clipAt.x+iconWidth*.5f,clipAt.y+4*scale},color,scale,0,scale);
+        }
+        const ImVec2 dimensionAt={at.x+33*scale,at.y+3*scale};
+        if(item.available) {
+            // Preset first-line text is 75% of v0.4.91; other menu text stays at PS size.
+            const std::string suffix=unit+(resolution.empty()?"":" @ "+resolution);
+            const float suffixWidth=suffixFont->CalcTextSizeA(suffixFont->FontSize,FLT_MAX,0,suffix.c_str()).x;
+            const float gap=3*scale;
+            const float numberWidth=text(dimensionFont,dimensionAt,color,dimensions,
+                std::max(0.f,rowWidth-38*scale-suffixWidth-gap));
+            text(suffixFont,{dimensionAt.x+numberWidth+gap,dimensionAt.y+dimensionFont->Ascent-suffixFont->Ascent},
+                color,suffix,suffixWidth);
+        } else text(small,dimensionAt,color,"复制图像后可用",rowWidth-38*scale);
+        // Each metadata value gets a compact badge; unused row space keeps the card fill.
+        const bool light=ImGui::GetStyle().Colors[ImGuiCol_WindowBg].x>.5f;
+        const bool metric=unit=="mm";
+        const ImVec4 badge=light?(metric?ImVec4(.68f,.82f,.61f,1):ImVec4(.66f,.75f,.90f,1)):
+            (metric?ImVec4(.18f,.29f,.16f,1):ImVec4(.19f,.25f,.37f,1));
+        const ImVec4 ink=light?ImVec4(.10f,.13f,.16f,1):ImVec4(.94f,.96f,.99f,1);
+        const ImVec2 infoAt={roundf(at.x+33*scale),roundf(at.y+24*scale)};
+        ImFont* titleFont=badgeFont;
+        const float padding=3*scale,gap=4*scale;
+        const float modeWidth=mode.empty()?0:titleFont->CalcTextSizeA(titleFont->FontSize,FLT_MAX,0,mode.c_str()).x+2*padding;
+        const float availableWidth=rowWidth-38*scale;
+        // Reserve space for the mode badge before truncating a long preset name.
+        const float nameLimit=std::max(0.f,availableWidth-modeWidth-(mode.empty()?0:gap)-2*padding);
+        auto badgeAt=infoAt;
+        auto drawBadge=[&](const std::string& value,float maxTextWidth) {
+            const float measured=titleFont->CalcTextSizeA(titleFont->FontSize,FLT_MAX,0,value.c_str()).x;
+            const float width=std::min(measured,maxTextWidth)+2*padding;
+            draw->AddRectFilled(badgeAt,{badgeAt.x+width,badgeAt.y+titleFont->FontSize+2*scale},
+                ImGui::ColorConvertFloat4ToU32(badge),ImGui::GetStyle().FrameRounding);
+            text(titleFont,{badgeAt.x+padding,badgeAt.y+scale},ImGui::ColorConvertFloat4ToU32(ink),value,maxTextWidth);
+            badgeAt.x+=width+gap;
+        };
+        drawBadge(item.name,nameLimit);
+        if(!mode.empty())drawBadge(mode,std::max(0.f,availableWidth-(badgeAt.x-infoAt.x)-2*padding));
+        ImGui::PopID();
+    }
+}
+// Read-only footer: never registers a widget or expands a gesture hit region.
+static ImVec4 footerBounds{};
+// Secondary icons keep the confirmed compact right column beside the ring.
+static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidgetHeight-quickGroupGap;}
+static const char* actionTipText(int action) {
+    if(action>=32 && action<39)return quickLabels[action-32];
+    if(action>=4 && action<12)return labelColors[action-4].name;
+    if(action==0)return panelKind==4?"打开新建文档窗口":layerAware && layerKind!=3?"选择同一父组中的相邻图层":"选择当前组内的图层";
+    if(action==2)return "将所选图层移到顶部";
+    if(action==3)return "将所选图层移到底部";
+    return nullptr;
+}
+static bool tipOverlaps(ImVec4 tip,RECT r,float gap=0) {
+    return r.right>r.left && r.bottom>r.top && tip.x<r.right+gap && tip.z>r.left-gap && tip.y<r.bottom+gap && tip.w>r.top-gap;
+}
+// Read-only tooltips never create an ImGui widget or a gesture hit region.
+static ImVec4 actionTipBounds(int action) {
+    const char* text=actionTipText(action);if(!text)return {};
+    auto* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    const float padding=6*scale,gap=6*scale;
+    const auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text);
+    const float width=extent.x+2*padding,height=extent.y+2*padding;
+    const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
+    RECT anchor=action>=32?quickRows[action-32]:action>=4?labelRows[action-4]:holdRows[action];
+    RECT group=anchor;
+    if(action>=32)group={quickRows[0].left,quickRows[0].top,quickRows[6].right,quickRows[6].bottom};
+    if(action>=4 && action<12)group=holdRows[1];
+    float basicRight=pieCenter.x+19*scale;
+    for(int i:{0,2,3})if(rowVisible(i))basicRight=std::max(basicRight,float(holdRows[i].right));
+    const auto heading=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,panelTitle());
+    const RECT centre={LONG(pieCenter.x-std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y-40*scale),LONG(pieCenter.x+std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y+19*scale)};
+    auto valid=[&](ImVec4 tip) {
+        for(int i=0;i<4;++i)if(rowVisible(i) && tipOverlaps(tip,holdRows[i],2*scale))return false;
+        for(auto r:quickRows)if(tipOverlaps(tip,r,2*scale))return false;
+        for(auto r:recentRows)if(tipOverlaps(tip,r,2*scale))return false;
+        if(tipOverlaps(tip,centre,2*scale))return false;
+        if(footerBounds.z>footerBounds.x && tipOverlaps(tip,{LONG(footerBounds.x),LONG(footerBounds.y),LONG(footerBounds.z),LONG(footerBounds.w)},2*scale))return false;
+        return true;
+    };
+    const float middle=(anchor.left+anchor.right)*.5f;
+    const std::array<ImVec2,9> candidates={{{middle-width*.5f,anchor.top-gap-height},
+        {middle<pieCenter.x?std::min(middle-width*.5f,centre.left-gap-width):std::max(middle-width*.5f,centre.right+gap),anchor.top-gap-height},
+        {middle-width*.5f,group.top-gap-height},
+        {middle<pieCenter.x?std::min(middle-width*.5f,centre.left-gap-width):std::max(float(anchor.left),basicRight+gap),group.top-gap-height},
+        {group.right+gap,(anchor.top+anchor.bottom-height)*.5f},
+        {group.left-gap-width,(anchor.top+anchor.bottom-height)*.5f},
+        {middle-width*.5f,anchor.bottom+gap},
+        {middle-width*.5f,group.bottom+gap},
+        {std::max(float(anchor.left),basicRight+gap),group.bottom+gap}}};
+    for(auto at:candidates) {
+        float x=std::clamp(at.x,pos.x+8*scale,pos.x+size.x-width-8*scale);
+        float y=std::clamp(at.y,pos.y+8*scale,pos.y+size.y-height-8*scale);
+        ImVec4 tip={roundf(x),roundf(y),roundf(x+width),roundf(y+height)};
+        if(valid(tip))return tip;
+    }
+    return {}; // Never cover a control when an unusually small viewport has no room.
+}
+static ImVec4 quickTipBounds(int index) {return actionTipBounds(32+index);}
+static void drawActionTip(int action) {
+    const auto r=actionTipBounds(action);if(r.z<=r.x)return;
+    auto* draw=ImGui::GetWindowDrawList();
+    auto* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    // Tooltip contrast is independent of the host theme (user preference).
+    draw->AddRectFilled({r.x,r.y},{r.z,r.w},IM_COL32(0,0,0,218),ImGui::GetStyle().FrameRounding);
+    draw->AddRect({r.x,r.y},{r.z,r.w},IM_COL32(255,255,255,32),ImGui::GetStyle().FrameRounding,0,scale);
+    draw->AddText(font,font->FontSize,{r.x+6*scale,r.y+6*scale},IM_COL32(245,245,245,255),actionTipText(action));
+}
+static void drawFooter(const std::vector<std::string>& messages,float y,bool avoidHomeGrid=false) {
+    auto* draw=ImGui::GetWindowDrawList();
+    ImFont* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
+    const float padding=figmaPadding*scale,gap=3*scale;
+    const float right=avoidHomeGrid?pieCenter.x+55*scale:pos.x+size.x-8*scale;
+    const float maxWidth=std::min((avoidHomeGrid?300.f:540.f)*scale,right-pos.x-16*scale)-2*padding;
+    std::vector<std::string> lines;
+    float width=0,height=0;
+    for(size_t index=0;index<messages.size();++index) {
+        const auto& message=messages[index];
+        if(message.empty())continue;
+        // Metadata stays on one line; task/result may use two. This reserves
+        // the space below the bottom action even for long backend diagnostics.
+        std::string text=message;
+        auto measure=[&](const std::string& value){return font->CalcTextSizeA(font->FontSize,FLT_MAX,maxWidth,value.c_str());};
+        const float maxLines=index+1==messages.size()?2.f:1.f;
+        bool trimmed=false;
+        while(!text.empty() && measure(text+(trimmed?"…":"")).y>maxLines*font->FontSize+.5f) {
+            size_t last=text.size()-1;
+            while(last && (static_cast<unsigned char>(text[last])&0xc0)==0x80)--last;
+            text.resize(last);trimmed=true;
+        }
+        if(trimmed)text+="…";
+        auto extent=measure(text);width=std::max(width,extent.x);
+        height+=extent.y+(lines.empty()?0:gap);lines.push_back(text);
+    }
+    if(lines.empty()){footerBounds={};return;}
+    width+=2*padding;height+=2*padding;
+    float x=std::min(pieCenter.x-width*.5f,right-width);
+    x=std::max(pos.x+8*scale,x);
+    y=std::min(y,pos.y+size.y-height-8*scale);
+    const ImVec2 a={roundf(x),roundf(y)},b={roundf(x+width),roundf(y+height)};
+    footerBounds={a.x,a.y,b.x,b.y};
+    auto bg=ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);bg.w=.92f;
+    draw->AddRectFilled(a,b,ImGui::ColorConvertFloat4ToU32(bg),ImGui::GetStyle().FrameRounding);
+    auto border=ImGui::GetStyleColorVec4(ImGuiCol_Border);border.w=.65f;
+    draw->AddRect(a,b,ImGui::ColorConvertFloat4ToU32(border),ImGui::GetStyle().FrameRounding,0,scale);
+    float textY=a.y+padding;
+    for(const auto& line:lines) {
+        draw->AddText(font,font->FontSize,{a.x+padding,roundf(textY)},tint(ImGuiCol_Text),line.c_str(),nullptr,maxWidth);
+        textY+=font->CalcTextSizeA(font->FontSize,FLT_MAX,maxWidth,line.c_str()).y+gap;
+    }
+}
+static void quickIcon(int index,ImVec2 at,bool enabled,ImU32 surface) {
+    auto* d=ImGui::GetWindowDrawList();const auto color=tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled);
+    const float glyphScale=figmaDisplayIconSize/20*scale;
+    auto p=[&](float x,float y){return ImVec2(at.x+x*glyphScale,at.y+y*glyphScale);};
+    const float thick=scale;
+    if(index==0 || index==1) {
+        d->AddRect(p(3,2),p(16,18),color,scale,0,thick);
+        if(index==0){d->AddLine(p(6,10),p(13,10),color,thick);d->AddLine(p(9.5f,6.5f),p(9.5f,13.5f),color,thick);}
+        else d->AddRectFilled(p(7,5),p(14,15),color,scale);
+    } else if(index==2) {
+        d->AddRect(p(1,6),p(19,17),color,2*scale,0,thick);
+        d->AddLine(p(2,6),p(2,3),color,thick);d->AddLine(p(2,3),p(9,3),color,thick);d->AddLine(p(9,3),p(11,6),color,thick);
+    } else if(index==3) {
+        d->AddLine(p(2,2),p(2,18),color,thick);d->AddLine(p(2,18),p(18,18),color,thick);
+        d->AddBezierCubic(p(3,16),p(13,16),p(8,3),p(18,3),color,thick,12);
+    } else if(index==4) {
+        drawFigmaMenuIcon(d,1,at,figmaDisplayIconSize*scale,color,surface);
+    } else if(index==5) {
+        d->AddLine(p(10,2),p(10,18),color,thick);d->AddLine(p(6,18),p(14,18),color,thick);d->AddLine(p(2,6),p(18,6),color,thick);
+        for(int x:{4,16}){d->AddLine(p(x,6),p(x-3,13),color,thick);d->AddLine(p(x,6),p(x+3,13),color,thick);d->AddLine(p(x-3,13),p(x+3,13),color,thick);}
+    } else {
+        d->AddCircle(p(10,10),8*glyphScale,color,24,thick);
+        d->PathArcTo(p(10,10),7*glyphScale,-1.5707963f,1.5707963f,12);d->PathFillConvex(color);
+    }
+}
+static void drawQuickGroups(int selected,float fac) {
+    if(panelKind==4 || panelKind==3 || !layerAware)return;
+    auto* d=ImGui::GetWindowDrawList();
+    for(int group=0;group<2;++group) {
+        const int first=group?3:0,count=group?4:3;
+        const float cell=figmaDisplayIconWidth*scale,height=figmaDisplayWidgetHeight*scale;
+        const ImVec2 a={pieCenter.x+65*scale,pieCenter.y+quickGroupY(group)*scale};
+        const ImVec2 b={a.x+count*cell,a.y+height};
+        const int begin=d->VtxBuffer.Size;
+        d->AddRectFilled(a,b,tint(ImGuiCol_Button),ImGui::GetStyle().FrameRounding);
+        for(int n=0;n<count;++n) {
+            const int i=first+n;const ImVec2 cellA={a.x+n*cell,a.y},cellB={cellA.x+cell,b.y};
+            quickRows[i]={LONG(cellA.x),LONG(cellA.y),LONG(cellB.x),LONG(cellB.y)};
+            if(selected==32+i)d->AddRectFilled(cellA,cellB,tint(ImGuiCol_HeaderHovered),ImGui::GetStyle().FrameRounding,n==0?ImDrawFlags_RoundCornersLeft:n==count-1?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone);
+            if(n)d->AddLine(cellA,{cellA.x,b.y},tint(ImGuiCol_Border),scale);
+            quickIcon(i,{cellA.x+(cell-figmaDisplayIconSize*scale)*.5f,cellA.y+(height-figmaDisplayIconSize*scale)*.5f},quickEnabled(i),tint(selected==32+i?ImGuiCol_HeaderHovered:ImGuiCol_Button));
+            if(pinned && !pieAnimating && quickEnabled(i) && !holdFinished) {
+                ImGui::SetCursorScreenPos(cellA);ImGui::PushID(400+i);
+                if(ImGui::InvisibleButton("##quick-layer",{cell,height})){holdFinished=true;send(quickActions[i]);}
+                ImGui::PopID();
+            }
+        }
+        d->AddRect(a,b,tint(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
+        const ImVec2 offset={((a.x+b.x)*.5f-pieCenter.x)*(fac-1),((a.y+b.y)*.5f-pieCenter.y)*(fac-1)};
+        for(int v=begin;v<d->VtxBuffer.Size;++v){d->VtxBuffer[v].pos.x+=roundf(offset.x);d->VtxBuffer[v].pos.y+=roundf(offset.y);}
+    }
 }
 static void drawPie() {
     auto* draw=ImGui::GetWindowDrawList();
     ImVec2 pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
     pieCenter={pos.x+size.x*.5f,pos.y+size.y*.5f};
+    if(panelKind==4)pieCenter.x=pos.x+270*scale;
     if (!pieStarted) pieStarted=GetTickCount64();
     float elapsed=previewAnimationMs>=0?previewAnimationMs:selfTest?60.f:float(GetTickCount64()-pieStarted);
     const float fac=pieAnimation(elapsed);
@@ -546,28 +946,29 @@ static void drawPie() {
     setOpacity(IsWindowVisible(window) && !holdFinished?fac:0.f);
     // Blender 5.2 defaults: 20-unit widgets, pie rows 1.5 widgets high,
     // 100-unit radius to the inner edge, roundness .4 of a widget.
-    const float rowHeight=30*scale,padding=5*scale,rounding=8*scale;
-    const char* hints[]={"4","","8","2"};
+    const float rowHeight=figmaWidgetHeight*scale,padding=figmaPadding*scale,rounding=ImGui::GetStyle().FrameRounding;
     const ImGuiKey numberKeys[]={ImGuiKey_4,ImGuiKey_None,ImGuiKey_8,ImGuiKey_2};
     const ImGuiKey keypadKeys[]={ImGuiKey_Keypad4,ImGuiKey_None,ImGuiKey_Keypad8,ImGuiKey_Keypad2};
     // Direction accelerators are local to an open pie, never global PS keys.
     if (canExecute() && !holdFinished && !ImGui::GetIO().KeyCtrl &&
         !ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper) {
-        for (int i:{0,2,3}) if (rowVisible(i) &&
+        for (int i:{0,2,3}) if (rowVisible(i) && rowEnabled(i) &&
             (ImGui::IsKeyPressed(numberKeys[i],false) || ImGui::IsKeyPressed(keypadKeys[i],false))) {
-            holdFinished=true;send(actions[i]);break;
+            holdFinished=true;send(rowAction(i));break;
         }
     }
     std::array<ImVec2,4> offsets{};
-    holdRows={};labelRows={};
+    holdRows={};labelRows={};quickRows={};
     for (int i=0;i<4;++i) {
         if (!rowVisible(i)) continue;
-        float width=i==1?98*scale:ImGui::CalcTextSize(labels[i]).x+60*scale;
+        float width=i==1?98*scale:ImGui::CalcTextSize(rowLabel(i)).x+36*scale;
         float height=i==1?56*scale:rowHeight;
-        float radius=65*scale;
-        if (i<2) radius=std::min(radius,std::max(20*scale,size.x*.5f-width-8*scale));
-        offsets[i]=i==0?ImVec2(-radius-width*.5f,0):i==1?ImVec2(radius+width*.5f,0):
-            i==2?ImVec2(0,-radius-height*.5f):ImVec2(0,radius+height*.5f);
+        // Palette below the centre; both sort buttons form one row above it.
+        // A closer palette leaves space for the read-only footer underneath.
+        float radius=(i==1?45.f:65.f)*scale;
+        if (i==0) radius=std::min(radius,std::max(20*scale,size.x*.5f-width-8*scale));
+        offsets[i]=i==0?ImVec2(-radius-width*.5f,0):i==1?ImVec2(0,radius+height*.5f):
+            ImVec2((i==2?-1.f:1.f)*width*.5f,-radius-height*.5f);
         ImVec2 a={pieCenter.x+offsets[i].x-width*.5f,pieCenter.y+offsets[i].y-height*.5f};
         holdRows[i]={LONG(a.x),LONG(a.y),LONG(a.x+width),LONG(a.y+height)};
     }
@@ -577,11 +978,22 @@ static void drawPie() {
             LONG(r.left+(7+(i%4+1)*21)*scale),LONG(r.top+(7+(i/4+1)*21)*scale)};
     }
     pieReady=!holdFinished;
+    drawRecentPresets();
+    // Build final hit rectangles before sampling, independent of animation.
+    if(panelKind!=4 && panelKind!=3 && layerAware)for(int i=0;i<7;++i){int group=i>=3,n=group?i-3:i;
+        float x=pieCenter.x+(65+figmaDisplayIconWidth*n)*scale,y=pieCenter.y+quickGroupY(group)*scale;
+        quickRows[i]={LONG(x),LONG(y),LONG(x+figmaDisplayIconWidth*scale),LONG(y+figmaDisplayWidgetHeight*scale)};}
     POINT cursor{};GetCursorPos(&cursor);int selected=holdActionAt(cursor);
+    if(!preview.empty() && previewQuickHover>=0 && previewQuickHover<7 && quickEnabled(previewQuickHover))selected=32+previewQuickHover;
+    if(!preview.empty() && previewActionHover>=0 && previewActionHover<4 && rowVisible(previewActionHover) && rowEnabled(previewActionHover))selected=previewActionHover;
     pendingHit=selected;
+    auto captionX=[&](float textWidth) {
+        const float centered=pieCenter.x-textWidth*.5f;
+        return panelKind==4?std::min(centered,pieCenter.x+55*scale-textWidth):centered;
+    };
     auto caption=[&](const char* text,float y) {
         auto extent=ImGui::CalcTextSize(text);
-        ImVec2 at={roundf(pieCenter.x-extent.x*.5f),roundf(y)};
+        ImVec2 at={roundf(captionX(extent.x)),roundf(y)};
         // A theme-colored second copy looks embossed on a transparent HWND.
         // Draw once with the same contrast as action labels.
         draw->AddText(at,tint(ImGuiCol_Text),text);
@@ -603,67 +1015,98 @@ static void drawPie() {
         if (!rowVisible(i)) continue;
         int vertexStart=draw->VtxBuffer.Size;
         ImVec2 a={float(holdRows[i].left),float(holdRows[i].top)},b={float(holdRows[i].right),float(holdRows[i].bottom)};
-        bool active=i==selected || (i==1 && selected>=4);
-        if (pinned && i!=1 && !pieAnimating && canExecute() && !holdFinished) {
+        bool active=i==selected || (i==1 && selected>=4 && selected<12);
+        if (pinned && i!=1 && !pieAnimating && rowEnabled(i) && !holdFinished) {
             ImGui::SetCursorScreenPos(a);ImGui::PushID(200+i);
-            if (ImGui::InvisibleButton("##pinned-action",{b.x-a.x,b.y-a.y})) {holdFinished=true;send(actions[i]);}
+            if (ImGui::InvisibleButton("##pinned-action",{b.x-a.x,b.y-a.y})) {holdFinished=true;send(rowAction(i));}
             ImGui::PopID();
         }
-        draw->AddRectFilled(a,b,active?tint(ImGuiCol_HeaderHovered):tint(ImGuiCol_WindowBg),rounding);
-        draw->AddRect(a,b,active?tint(ImGuiCol_CheckMark):tint(ImGuiCol_Border),rounding,0,scale);
+        if(i<2){draw->AddRectFilled(a,b,active?tint(ImGuiCol_HeaderHovered):tint(i==1?ImGuiCol_WindowBg:ImGuiCol_Button),rounding);draw->AddRect(a,b,tint(ImGuiCol_Border),rounding,0,scale);}
+        else {
+            draw->AddRectFilled(a,b,active?tint(ImGuiCol_HeaderHovered):tint(ImGuiCol_Button),rounding,i==2?ImDrawFlags_RoundCornersLeft:ImDrawFlags_RoundCornersRight);
+            if(i==2)draw->AddLine({b.x,a.y},{b.x,b.y},tint(ImGuiCol_Border),scale);
+        }
         if (i==1) {
             drawLabels();
         } else {
-            icon(i,{a.x+padding,a.y+(rowHeight-28*scale)*.5f});
+            icon(i,{a.x+padding,a.y+(rowHeight-28*scale)*.5f},active);
             float textY=roundf(a.y+(rowHeight-ImGui::GetFontSize())*.5f);
-            draw->AddText({roundf(a.x+25*scale),textY},canExecute()?tint(ImGuiCol_Text):tint(ImGuiCol_TextDisabled),labels[i]);
-            float hintWidth=ImGui::CalcTextSize(hints[i]).x;
-            draw->AddText({roundf(b.x-padding-hintWidth),textY},tint(ImGuiCol_PlotLines),hints[i]);
+            draw->AddText({roundf(a.x+25*scale),textY},rowEnabled(i)?tint(ImGuiCol_Text):tint(ImGuiCol_TextDisabled),rowLabel(i));
         }
         // Keep hit regions at their final positions so fast gestures don't
         // accidentally select a different card while visual cards overlap.
         for (int v=vertexStart;v<draw->VtxBuffer.Size;++v) {
-            draw->VtxBuffer[v].pos.x+=roundf(offsets[i].x*(fac-1));
+            draw->VtxBuffer[v].pos.x+=i>=2?0:roundf(offsets[i].x*(fac-1));
             draw->VtxBuffer[v].pos.y+=roundf(offsets[i].y*(fac-1));
         }
     }
-    // Only show exceptional state; the normal pie has no tutorial banner.
-    const char* hint=pinned?"已固定 · 右键 / Esc 关闭":panelKind==3 || inputFocused?"输入框编辑中":!canExecute()?"当前不可执行":nullptr;
-    if (hint) caption(hint,pieCenter.y+65*scale);
-    // Reuse the prewarmed small font; document captions never affect hit areas.
-    ImFont* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
-    std::string name=document;
-    const float maxWidth=240*scale;
-    auto width=[&](const std::string& text){return font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text.c_str()).x;};
-    if (width(name)>maxWidth) {
-        do {
-            size_t last=name.size()-1;
-            while (last && (static_cast<unsigned char>(name[last])&0xc0)==0x80) --last;
-            name.resize(last);
-        } while (!name.empty() && width(name+"…")>maxWidth);
-        name+="…";
+    if(rowVisible(2) && rowVisible(3)) {
+        const auto left=holdRows[2],right=holdRows[3];
+        ImVec2 a={float(left.left),float(left.top)},b={float(right.right),float(right.bottom)};
+        a.y+=roundf(offsets[2].y*(fac-1));b.y+=roundf(offsets[3].y*(fac-1));
+        // Both outer ends expand from their own centre; outline joins them at rest.
+        draw->AddRect(a,b,tint(ImGuiCol_Border),rounding,0,scale);
     }
-    draw->AddText(font,font->FontSize,{roundf(pieCenter.x-width(name)*.5f),roundf(pieCenter.y+120*scale)},
-                  tint(ImGuiCol_TextDisabled),name.c_str());
-    const std::string status=taskStatus();
-    draw->AddText(font,font->FontSize,
-                  {roundf(pieCenter.x-width(status)*.5f),roundf(pieCenter.y+120*scale+font->FontSize+5*scale)},
-                  tint(ImGuiCol_TextDisabled),status.c_str());
+    drawQuickGroups(selected,fac);
+    // Only show exceptional state; the normal pie has no tutorial banner.
+    const char* hint=pinned?"已固定":panelKind==3 || inputFocused?"输入框编辑中":!canExecute()?"当前不可执行":nullptr;
+    std::vector<std::string> messages;
+    if(panelKind!=4 && !document.empty())messages.push_back(document);
+    if(layerAware && panelKind!=4) {
+        const char* restriction=layerKind==0?"请重新打开菜单":layerBackground?"标签和排序需先解锁":
+            layerCrossParents?"跨父组多选，排序不可用":layerLocked?"排序不可用":"";
+        messages.push_back(layerTitle()+(restriction[0]?std::string(" · ")+restriction:""));
+    }
+    if(hint)messages.push_back(hint);
+    messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
+    drawFooter(messages,pieCenter.y+116*scale,panelKind==4);
+    if(selected>=0 && !pieAnimating && !holdFinished)drawActionTip(selected);
+}
+static void drawBusyFeedback() {
+    busyFeedback=true;quickRows={};
+    pieReady=false;pieAnimating=false;holdRows={};labelRows={};renderedHit=pendingHit=-1;
+    auto* draw=ImGui::GetWindowDrawList();
+    const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
+    pieCenter={pos.x+size.x*.5f,pos.y+size.y*.5f};
+    if (!feedbackStarted) feedbackStarted=GetTickCount64();
+    float fade=selfTest?1.f:pieAnimation(float(GetTickCount64()-feedbackStarted));
+    setOpacity(IsWindowVisible(window) && !holdFinished?fade:0.f);
+    draw->AddCircle(pieCenter,15.5f*scale,tint(ImGuiCol_WindowBg),40,7*scale);
+    if (taskBusy) {
+        // Indeterminate activity, not an invented percentage. Use elapsed
+        // system time so cursor motion and message rate cannot affect rotation.
+        float elapsed=previewAnimationMs>=0?previewAnimationMs:float(GetTickCount64()-taskStarted);
+        float angle=fmodf(elapsed,1100.f)*(6.2831853f/1100.f)-1.5707963f;
+        draw->PathArcTo(pieCenter,15.5f*scale,angle,angle+1.5707963f,12);
+        draw->PathStroke(tint(ImGuiCol_CheckMark),0,7*scale);
+    } else if (taskHasResult) {
+        if (taskFailed) {
+            draw->AddLine({pieCenter.x-5*scale,pieCenter.y-5*scale},{pieCenter.x+5*scale,pieCenter.y+5*scale},tint(ImGuiCol_Text),2*scale);
+            draw->AddLine({pieCenter.x-5*scale,pieCenter.y+5*scale},{pieCenter.x+5*scale,pieCenter.y-5*scale},tint(ImGuiCol_Text),2*scale);
+        } else {
+            draw->AddLine({pieCenter.x-6*scale,pieCenter.y},{pieCenter.x-2*scale,pieCenter.y+4*scale},tint(ImGuiCol_CheckMark),2*scale);
+            draw->AddLine({pieCenter.x-2*scale,pieCenter.y+4*scale},{pieCenter.x+6*scale,pieCenter.y-5*scale},tint(ImGuiCol_CheckMark),2*scale);
+        }
+    }
+    draw->AddCircle(pieCenter,12*scale,tint(ImGuiCol_Border),40,scale);
+    draw->AddCircle(pieCenter,19*scale,tint(ImGuiCol_Border),40,scale);
+    drawFooter({panelKind==4?"":document,taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:"")},pieCenter.y+32*scale);
 }
 static void drawMenu() {
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->Pos);
     ImGui::SetNextWindowSize(ImGui::GetMainViewport()->Size);
     ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,holdMode?0.f:scale);
-    ImGui::Begin("##menu",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings|(holdMode?ImGuiWindowFlags_NoBackground:0));
+    const bool feedback=taskBusy || busyFeedback;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,holdMode || feedback?0.f:scale);
+    ImGui::Begin("##menu",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings|((holdMode || feedback)?ImGuiWindowFlags_NoBackground:0));
     ImGui::PopStyleVar();
+    if (feedback) {drawBusyFeedback();ImGui::End();return;}
     if (holdMode) {drawPie();ImGui::End();return;}
     ImGui::TextWrapped("%s",taskStatus().c_str());
     if (contextMode) {
-        contextItems();ImGui::Separator();ImGui::TextDisabled("点击外部 / Esc 关闭");
+        contextItems();
     } else {
         ImGui::TextDisabled("%s",panelTitle());ImGui::SameLine();ImGui::TextDisabled("QUICK MENU");
-        if (holdMode) ImGui::TextDisabled("移动鼠标选择 · 松开执行 · 空白处取消");
         if (panelKind!=3 && !holdMode) {
             ImGui::SetNextItemWidth(-1);
             if (focusSearch) {ImGui::SetKeyboardFocusHere();focusSearch=false;}
@@ -679,7 +1122,7 @@ static void drawMenu() {
             selection=std::clamp(selection,0,count-1);
         }
         bool popupOpen=ImGui::IsPopupOpen("context");
-        if (!holdMode && count && canExecute() && !popupOpen && ImGui::IsKeyPressed(ImGuiKey_Enter,false)) send(actions[results[selection]]);
+        if (!holdMode && count && rowEnabled(results[selection]) && !popupOpen && ImGui::IsKeyPressed(ImGuiKey_Enter,false)) send(rowAction(results[selection]));
         // Quick-menu keyboard navigation is explicit. Letting Selectable also
         // receive ImGui nav activation can dispatch a second, different row.
         ImGui::PushItemFlag(ImGuiItemFlags_NoNav,true);
@@ -687,29 +1130,25 @@ static void drawMenu() {
         holdRows={};
         for (int r=0;r<count;++r) {
             int i=results[r];ImVec2 pos=ImGui::GetCursorScreenPos();
-            ImGui::PushID(i);
+            ImGui::PushID(i);ImGui::BeginDisabled(!rowEnabled(i));
             POINT cursor{};GetCursorPos(&cursor);
             RECT row={static_cast<LONG>(pos.x),static_cast<LONG>(pos.y),
                 static_cast<LONG>(pos.x+ImGui::GetContentRegionAvail().x),static_cast<LONG>(pos.y+27*scale)};
             bool highlighted=holdMode?PtInRect(&row,cursor):selection==r;
-            if (ImGui::Selectable("##row",highlighted,0,{0,27*scale}) && !holdMode) send(actions[i]);
+            if (ImGui::Selectable("##row",highlighted,0,{0,27*scale}) && !holdMode) send(rowAction(i));
             ImVec2 minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
             holdRows[i]={static_cast<LONG>(minimum.x),static_cast<LONG>(minimum.y),static_cast<LONG>(maximum.x),static_cast<LONG>(maximum.y)};
             if (i==3) bottomRow={pos.x+70*scale,pos.y+13*scale};
             if (!holdMode && ImGui::IsItemHovered() && (ImGui::GetIO().MouseDelta.x!=0 || ImGui::GetIO().MouseDelta.y!=0)) selection=r;
-            icon(i,pos);auto* draw=ImGui::GetWindowDrawList();
-            draw->AddText({pos.x+27*scale,pos.y+4*scale},ImGui::GetColorU32(ImGuiCol_Text),labels[i]);
-            float width=ImGui::CalcTextSize(shortcuts[i].c_str()).x;
-            draw->AddText({ImGui::GetWindowPos().x+ImGui::GetWindowWidth()-width-12*scale,pos.y+4*scale},tint(ImGuiCol_PlotLines),shortcuts[i].c_str());
-            ImGui::PopID();
+            icon(i,pos,highlighted);auto* draw=ImGui::GetWindowDrawList();
+            draw->AddText({pos.x+27*scale,pos.y+4*scale},tint(rowEnabled(i)?ImGuiCol_Text:ImGuiCol_TextDisabled),rowLabel(i));
+            ImGui::EndDisabled();ImGui::PopID();
         }
         ImGui::EndDisabled();
         if (!count) ImGui::TextDisabled(panelKind==3?"输入框编辑中，图层操作已暂停":"没有匹配的操作");
         if (inputFocused && panelKind!=3) ImGui::TextDisabled("输入框仍有焦点，图层操作已暂停");
-        if (panelKind==1 && !holdMode) {ImGui::Separator();ImGui::TextDisabled("右键展开图层操作");}
         ImGui::Separator();if (!holdMode && ImGui::MenuItem("后台管理…")) send("control");
         ImGui::PopItemFlag();
-        ImGui::TextDisabled(panelKind==3?"Esc 关闭":holdMode?"空白处松开取消    Esc 关闭":"↑ ↓ 选择    Enter 执行    Esc 关闭");
         ImGui::TextDisabled("%s",document.c_str());
         if (!notice.empty()) { ImGui::PushTextWrapPos();ImGui::TextColored({.94f,.65f,.35f,1},"%s",notice.c_str());ImGui::PopTextWrapPos(); }
         if (!holdMode && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
@@ -785,19 +1224,41 @@ int main() {
         else if (arg==L"--self-test") selfTest=true;
         else if (i+1<argc && arg==L"--preview-output") preview=argv[++i];
         else if (i+1<argc && arg==L"--preview-kind") {
-            std::wstring kind=argv[++i];previewKind=kind==L"context"?"context":kind==L"hold"?"hold":"menu";
+            std::wstring kind=argv[++i];previewKind=kind==L"context"?"context":kind==L"hold"?"hold":kind==L"busy"?"busy":"menu";
         }
         else if (i+1<argc && arg==L"--preview-theme") {
             std::wstring value=argv[++i];std::string name(value.begin(),value.end());
             if (knownTheme(name)) uiTheme=name;
         }
         else if (i+1<argc && arg==L"--preview-animation-ms") previewAnimationMs=std::stof(argv[++i]);
+        else if (i+1<argc && arg==L"--preview-recent-hover") previewRecentHover=std::stoi(argv[++i]);
+        else if (i+1<argc && arg==L"--preview-action-hover") previewActionHover=std::stoi(argv[++i]);
+        else if (i+1<argc && arg==L"--preview-quick-hover") previewQuickHover=std::stoi(argv[++i]);
+        else if (i+1<argc && arg==L"--preview-layer-context") {
+            std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
+            layerAware=true;layerMask=data.value("mask",0);
+            quickMask=data.value("quick_mask",0);
+            const std::string kind=data.value("kind","unknown");
+            const char* names[]={"unknown","background","pixel","group","text","smart","shape-fill","adjustment","mixed","other"};
+            layerKind=0;for(int n=0;n<10;++n)if(kind==names[n])layerKind=n;
+            layerCount=int(data.value("layer_ids",Json::array()).size());
+            layerBackground=data.value("background",false);layerLocked=data.value("locked",false);
+            layerCrossParents=!data.value("same_parent",true);
+        }
         else if (i+1<argc && arg==L"--preview-font-size") {
             std::wstring value=argv[++i];
             if (value==L"small" || value==L"medium" || value==L"large") uiFontSize=std::string(value.begin(),value.end());
         }
         else if (i+1<argc && arg==L"--preview-panel") {
-            std::wstring kind=argv[++i];panelKind=kind==L"canvas"?1:kind==L"layers"?2:kind==L"text"?3:0;
+            std::wstring kind=argv[++i];panelKind=kind==L"canvas"?1:kind==L"layers"?2:kind==L"text"?3:kind==L"home"?4:0;
+        }
+        else if (i+1<argc && arg==L"--preview-recents") {
+            std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
+            for(const auto& item:data.at("items")) {
+                recentPresets.push_back({item.at("id"),item.at("name"),item.at("size"),item.at("detail")});
+                requireText(recentPresets.back().name);requireText(recentPresets.back().size);requireText(recentPresets.back().detail);
+            }
+            recentReady=true;
         }
         else if (i+1<argc && arg==L"--icon") iconPath=argv[++i];
         else if (i+1<argc && arg==L"--parent") parent=std::stoul(argv[++i]);
@@ -835,8 +1296,9 @@ int main() {
         io.Fonts->Clear();
         glyphs.clear();requiredGlyphs.BuildRanges(&glyphs);
         auto inter=utf8(fontFolder/L"Inter.ttf"),cjk=utf8(fontFolder/L"NotoSansCJK.otf");
-        for (int index=0;index<3;++index) {
-        const float em=11.f+index;
+        constexpr float cachedFontEms[]={11.f,12.f,13.f,9.f,9.75f,10.5f,10.f,8.25f};
+        for (int index=0;index<int(std::size(cachedFontEms));++index) {
+        const float em=cachedFontEms[index];
         if (std::filesystem::exists(fontFolder/L"Inter.ttf") && std::filesystem::exists(fontFolder/L"NotoSansCJK.otf")) {
             // stb_truetype sizes by ascent-descent; Blender/FreeType sizes by
             // em. Convert hhea metrics; apply monitor DPI exactly once.
@@ -855,7 +1317,7 @@ int main() {
             throw std::runtime_error("Unable to build menu font atlas");
         fontDirty=false;
         ++fontBuilds;io.FontDefault=menuFonts[fontIndex()];
-        std::cerr<<"Font atlas prepared: three sizes, "<<(GetTickCount64()-fontStart)<<" ms, "
+        std::cerr<<"Font atlas prepared: eight cached sizes, "<<(GetTickCount64()-fontStart)<<" ms, "
                  <<io.Fonts->TexWidth<<"x"<<io.Fonts->TexHeight<<", builds="<<fontBuilds<<"\n";
     };
     loadFont();
@@ -872,8 +1334,8 @@ int main() {
     } else {
         allowed=true;document="示例文档.psd";
         if (selfTest) {
-            for (int kind=0;kind<4;++kind) for (int input=0;input<2;++input) {
-                procedure(window,WM_APP+17,kind|(input<<2)|16,73);
+            for (int kind=0;kind<5;++kind) for (int input=0;input<2;++input) {
+                procedure(window,WM_APP+17,(kind==4?32:kind)|(input<<2)|16,73);
                 if (panelKind!=kind || inputFocused!=bool(input) || !holdMode || contextMode || menuEpoch!=73)
                     throw std::runtime_error("Atomic pie preparation lost context/input/session");
             }
@@ -893,6 +1355,21 @@ int main() {
             if (holdMode || !contextMode || inputFocused || panelKind || menuEpoch!=74)
                 throw std::runtime_error("Atomic regular preparation retained pie state");
             procedure(window,WM_APP+17,0,0);
+            // Capabilities share the existing prepare message, keeping slots fixed.
+            procedure(window,WM_APP+17,16|2|64|(1u<<8)|(1u<<12)|(1u<<16)|(1u<<17),75);
+            if(!layerAware || layerKind!=1 || !rowEnabled(0) || rowEnabled(1) || rowEnabled(2) || rowEnabled(3) || !rowVisible(3))
+                throw std::runtime_error("Background capabilities removed slots or enabled writes");
+            auto disabledCount=testedActions.size();send("label.red");send("moveToTop");
+            if(testedActions.size()!=disabledCount)throw std::runtime_error("Disabled layer action dispatched");
+            procedure(window,WM_APP+17,16|2|64|(15u<<8)|(4u<<12)|(1u<<17),76);
+            if(layerTitle()!="文字图层" || !rowEnabled(1) || !rowEnabled(3) || std::string(rowLabel(0))!="选择相邻图层")
+                throw std::runtime_error("Text type/common capabilities lost");
+            procedure(window,WM_APP+17,16|2|64,77);
+            if(rowEnabled(0) || rowEnabled(1) || rowEnabled(2) || rowEnabled(3))
+                throw std::runtime_error("Unknown layer metadata enabled actions");
+            procedure(window,WM_APP+17,16|32|64,78);
+            if(!rowEnabled(0))throw std::runtime_error("Layer metadata disabled Home New");
+            procedure(window,WM_APP+17,0,0);
             if (pieAnimation(0)!=0 || pieAnimation(30)!=.5f || pieAnimation(60)!=1 || pieAnimation(120)!=1 || pieAnimation(0,true)!=1)
                 throw std::runtime_error("Blender pie animation timing failed");
             const float savedScale=scale;const float padding=ImGui::GetStyle().WindowPadding.x;
@@ -900,6 +1377,17 @@ int main() {
                 Json testSettings={{"enabled",true},{"shortcuts",Json::object()}};
                 accept({{"type","status"},{"data",{{"photoshop",{{"ui_theme",name}}},{"settings",testSettings}}}});
                 const auto& c=ImGui::GetStyle().Colors;
+                auto luminance=[](const ImVec4& color) {
+                    auto linear=[](float channel){return channel<=.04045f?channel/12.92f:powf((channel+.055f)/1.055f,2.4f);};
+                    return .2126f*linear(color.x)+.7152f*linear(color.y)+.0722f*linear(color.z);
+                };
+                auto contrast=[&](const ImVec4& foreground,const ImVec4& background) {
+                    float a=luminance(foreground),b=luminance(background);
+                    return (std::max(a,b)+.05f)/(std::min(a,b)+.05f);
+                };
+                if(contrast(c[ImGuiCol_Text],c[ImGuiCol_HeaderHovered])<4.5f ||
+                   contrast(c[ImGuiCol_PlotLines],c[ImGuiCol_Button])<4.5f)
+                    throw std::runtime_error("Theme preset text contrast failed");
                 bool light=uiTheme=="light" || uiTheme=="light-gray";
                 if (uiTheme!=name || (c[ImGuiCol_Text].x<c[ImGuiCol_WindowBg].x)!=light ||
                     scale!=savedScale || ImGui::GetStyle().WindowPadding.x!=padding)
@@ -910,12 +1398,18 @@ int main() {
             accept({{"type","status"},{"data",{{"photoshop",{{"connected",true},{"document","test.psd"}}},{"settings",settings}}}});
             accept({{"type","status"},{"data",{{"photoshop",{{"busy",true}}},{"settings",settings}}}});
             accept({{"type","operation"},{"busy",false}});
+            resetMenu();
             if (!canExecute()) throw std::runtime_error("Menu readiness lost after busy status");
             accept({{"type","operation"},{"busy",true},{"action","select"}});
             auto started=taskStarted;resetMenu();
             accept({{"type","status"},{"data",{{"photoshop",{{"busy",true}}},{"settings",settings}}}});
             if (canExecute() || taskStarted!=started || taskStatus().find("选择组内图层")==std::string::npos)
                 throw std::runtime_error("Running task status lost on reopen/status refresh");
+            accept({{"type","operation"},{"busy",true},{"queue_ready",true},{"queue_count",2}});
+            if (canExecute())
+                throw std::runtime_error("Busy actions accepted despite deterministic policy");
+            accept({{"type","operation"},{"busy",true},{"queue_ready",false},{"queue_count",0}});
+            if (canExecute()) throw std::runtime_error("Unknown target bypassed busy protection");
             accept({{"type","notice"},{"scope","operation"},{"ok",false},{"message","Operation timed out"}});
             if (taskStatus().find("执行中")==std::string::npos)
                 throw std::runtime_error("Timeout must not imply COM task stopped");
@@ -939,6 +1433,12 @@ int main() {
             auto previousResult=taskStatus();
             accept({{"type","notice"},{"scope","interaction"},{"ok",false},{"message","Menu cancelled"}});
             if (taskStatus()!=previousResult) throw std::runtime_error("Interaction overwrote task result");
+            accept({{"type","notice"},{"scope","operation"},{"ok",false},{"message","背景图层不支持颜色标签"}});
+            if (taskStatus().find("请先解锁")==std::string::npos)
+                throw std::runtime_error("Background rejection must have an actionable menu message");
+            previousResult=taskStatus();
+            accept({{"type","notice"},{"scope","interaction"},{"ok",false},{"message","Menu cancelled"}});
+            if (taskStatus()!=previousResult) throw std::runtime_error("Background rejection overwritten by cancel");
             notice.clear();taskFailed=false;taskHasResult=false;
             panelKind=1;if (!rowVisible(0) || rowVisible(2)) throw std::runtime_error("Canvas panel routing failed");
             panelKind=3;if (rowVisible(0)) throw std::runtime_error("Text panel routing failed");
@@ -953,9 +1453,10 @@ int main() {
         }
     if (!selfTest) {ShowWindow(window,SW_SHOWNORMAL);UpdateWindow(window);}
         resetMenu();
-        if (previewKind=="hold") {
-            SetWindowPos(window,nullptr,100,100,static_cast<int>(620*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+        if (previewKind=="hold" || previewKind=="busy") {
+            SetWindowPos(window,nullptr,100,100,static_cast<int>((panelKind==4?820:620)*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);
+            if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
         }
     }
     int frames=0;
@@ -1045,7 +1546,14 @@ int main() {
             if (selfTest && frames==21) {
                 holdOrigin={static_cast<LONG>(pieCenter.x),static_cast<LONG>(pieCenter.y)};
                 auto point=[&](float x,float y){return POINT{static_cast<LONG>(pieCenter.x+x*scale),static_cast<LONG>(pieCenter.y+y*scale)};};
-                for (const auto& entry:std::array<std::pair<POINT,int>,8>{{{point(-110,0),0},{point(68,0),-1},{point(0,-80),2},{point(0,80),3},{point(0,0),-1},{point(20,10),-1},{point(150,150),-1},{{-100,-100},-1}}})
+                if(footerBounds.y<=std::max(holdRows[1].bottom,holdRows[3].bottom) || footerBounds.w>ImGui::GetMainViewport()->Pos.y+ImGui::GetMainViewport()->Size.y ||
+                   holdActionAt({LONG((footerBounds.x+footerBounds.z)*.5f),LONG((footerBounds.y+footerBounds.w)*.5f)})!=-1)
+                    throw std::runtime_error("Footer overlaps actions, clips or commits a gesture");
+                if(std::abs((holdRows[1].left+holdRows[1].right)*.5f-pieCenter.x)>scale || holdRows[1].top<=pieCenter.y+19*scale ||
+                   holdRows[2].top!=holdRows[3].top || holdRows[2].right!=holdRows[3].left || holdRows[3].bottom>=pieCenter.y-19*scale ||
+                   std::abs((holdRows[2].left+holdRows[3].right)*.5f-pieCenter.x)>scale)
+                    throw std::runtime_error("Palette below ring; two distinct sort buttons aligned above");
+                for (const auto& entry:std::array<std::pair<POINT,int>,11>{{{point(-110,0),0},{point(45,0),-1},{point(110,0),-1},{point(-50,-80),2},{point(50,-80),3},{point(0,-80),-1},{point(0,80),10},{point(0,0),-1},{point(20,10),-1},{point(150,150),-1},{{-100,-100},-1}}})
                     if (holdActionAt(entry.first)!=entry.second) throw std::runtime_error("Pie direction/dead-zone hit test failed");
                 for (int i=0;i<4;++i) {
                     if (i==1) continue; // The palette commits only an explicit swatch.
@@ -1059,14 +1567,97 @@ int main() {
                     throw std::runtime_error("Blender 12-unit centre threshold failed");
                 panelKind=1;
                 if (std::string(panelTitle())!="画布操作" || !rowVisible(0) || !rowVisible(1) || rowVisible(2) || rowVisible(3) ||
-                    holdActionAt(point(0,-80))!=-1 || holdActionAt(point(0,80))!=-1)
+                    holdActionAt(point(-50,-80))!=-1 || holdActionAt(point(50,-80))!=-1 || holdActionAt(point(0,80))!=10)
                     throw std::runtime_error("Canvas pie leaked hidden layer-sort actions");
                 panelKind=2;
-                if (std::string(panelTitle())!="图层操作" || holdActionAt(point(0,-80))!=2 || holdActionAt(point(0,80))!=3)
+                if (std::string(panelTitle())!="图层操作" || holdActionAt(point(-50,-80))!=2 || holdActionAt(point(50,-80))!=3 || holdActionAt(point(0,80))!=10)
                     throw std::runtime_error("Layer pie lost sorting actions");
                 panelKind=3;
                 if (rowVisible(0) || rowVisible(1) || holdActionAt(point(-110,0))!=-1)
                     throw std::runtime_error("Input context exposed pie actions");
+                panelKind=4;
+                const bool previousAllowed=allowed,previousCapable=capable;
+                const std::string previousDocument=document;
+                // A real native dialog rejects COM reads. Returning to a
+                // verified Home must work on the first frame, without waiting
+                // for the next 1-second status read / 3-second broadcast.
+                Json homeSettings={{"enabled",true},{"shortcuts",Json::object()}};
+                accept({{"type","status"},{"data",{{"photoshop",{{"connected",false},{"document",nullptr}}},{"settings",homeSettings}}}});
+                if (!canExecute()) throw std::runtime_error("Home New entry waits for COM reconnect");
+                panelKind=0;
+                if (canExecute()) throw std::runtime_error("Disconnected layer operations became executable");
+                panelKind=4;inputFocused=true;
+                if (canExecute()) throw std::runtime_error("Home input protection lost");
+                inputFocused=false;homeSettings["enabled"]=false;
+                accept({{"type","status"},{"data",{{"photoshop",Json::object()},{"settings",homeSettings}}}});
+                if (canExecute()) throw std::runtime_error("Disabled Home entry became executable");
+                homepageCapable=true;allowed=previousAllowed;capable=previousCapable;document=previousDocument;
+                if (!rowVisible(0) || rowVisible(1) || rowVisible(2) || rowVisible(3) ||
+                    std::string(rowAction(0))!="document.new" || !matches(0,"new document") ||
+                    holdActionAt(point(0,-80))!=-1 || holdActionAt(point(68,0))!=-1)
+                    throw std::runtime_error("Home menu leaked layer actions");
+                auto homeActionCount=testedActions.size();
+                finishHold(point(-110,0));
+                if (testedActions.size()!=homeActionCount+1 || testedActions.back()!="document.new")
+                    throw std::runtime_error("Home release did not request the New dialog");
+                testedActions.pop_back();holdFinished=false;pieReady=true;
+                shownPresets={{"test-preset","剪贴板","64 × 32 px","72 ppi · RGB"}};
+                recentReady=true;
+                for(int i=1;i<9;++i)shownPresets.push_back({"test-"+std::to_string(i),"自定","64 × 32 px","72 ppi · RGB"});
+                // Clipboard above the ring, eight presets in two columns and four rows.
+                const auto previousLabelRows=labelRows;
+                const auto previousHoldRows=holdRows;
+                const auto previousPieCenter=pieCenter;
+                finishPlatformFrame();
+                SetWindowPos(window,nullptr,100,100,static_cast<int>(820*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+                ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();
+                ImGui::NewFrame();drawMenu();ImGui::Render();
+                if(recentRows.size()!=9)throw std::runtime_error("Recent preset grid count failed");
+                auto gridWindow=ImGui::GetMainViewport();
+                if(std::abs((recentRows[1].top+recentRows[1].bottom)*.5f-pieCenter.y)>scale)
+                    throw std::runtime_error("First preset row must align to ring, not centre the panel");
+                if(footerBounds.z>=recentRows[1].left || footerBounds.w>gridWindow->Pos.y+gridWindow->Size.y)
+                    throw std::runtime_error("Home footer overlaps presets or clips");
+                for(size_t i=0;i<recentRows.size();++i) {
+                    const auto r=recentRows[i];POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
+                    if(r.right<=r.left || r.bottom<=r.top || r.left<gridWindow->Pos.x || r.top<gridWindow->Pos.y ||
+                       r.right>gridWindow->Pos.x+gridWindow->Size.x || r.bottom>gridWindow->Pos.y+gridWindow->Size.y ||
+                       holdActionAt(middle)!=12+int(i))throw std::runtime_error("Recent grid button clipped or unreachable");
+                    if(i>1 && (i-1)%2 && (r.top!=recentRows[i-1].top || r.left<=recentRows[i-1].right))
+                        throw std::runtime_error("Recent grid column order failed");
+                    if(i>=3 && r.top<=recentRows[i-2].bottom)throw std::runtime_error("Recent grid row order failed");
+                    if(i==0 && (r.bottom>recentRows[1].top-32*scale || std::abs(middle.x-pieCenter.x)>scale))
+                        throw std::runtime_error("Clipboard was not centered above the menu");
+                }
+                auto recentRect=recentRows[0];POINT recentPoint={(recentRect.left+recentRect.right)/2,(recentRect.top+recentRect.bottom)/2};
+                shownPresets[0].available=false;
+                if(holdActionAt(recentPoint)!=-1)throw std::runtime_error("Unavailable clipboard preset became selectable");
+                auto redrawPresets=[&] {
+                    finishPlatformFrame();ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();
+                    ImGui::NewFrame();drawMenu();ImGui::Render();
+                };
+                redrawPresets();
+                if(!IsRectEmpty(&recentRows[0]) || holdActionAt(recentPoint)!=-1)
+                    throw std::runtime_error("Unavailable clipboard still drawn or selectable");
+                for(size_t i=1;i<recentRows.size();++i) {
+                    const auto r=recentRows[i];POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
+                    if(holdActionAt(middle)!=12+int(i))throw std::runtime_error("Clipboard visibility moved recent actions");
+                }
+                shownPresets[0].available=true;redrawPresets();
+                POINT neutral={LONG(pieCenter.x),LONG(pieCenter.y)};
+                holdFinished=false;pieReady=true;renderedHit=12;
+                finishHold(recentPoint,true,&neutral);
+                if(testedActions.back()!="hide")throw std::runtime_error("Recent preset exit committed");
+                testedActions.pop_back();holdFinished=false;pieReady=true;renderedHit=12;
+                finishHold(recentPoint,true,&recentPoint);
+                if(testedActions.back()!="document.recent.test-preset")throw std::runtime_error("Recent preset stable release failed");
+                auto submitted=testedActions.size();finishHold(recentPoint,true,&recentPoint);
+                if(testedActions.size()!=submitted)throw std::runtime_error("Recent preset release replayed");
+                testedActions.pop_back();shownPresets.clear();recentRows.clear();recentReady=false;
+                labelRows=previousLabelRows;holdRows=previousHoldRows;
+                pieCenter=previousPieCenter;
+                SetWindowPos(window,nullptr,100,100,static_cast<int>(620*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+                holdFinished=false;pieReady=true;renderedHit=-1;
                 panelKind=0;
                 for (int i=0;i<8;++i) {
                     auto r=labelRows[i];POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
@@ -1091,7 +1682,7 @@ int main() {
                     pinned=false;
                 }
                 holdOrigin=point(0,0);holdMoved=false;
-                POINT rowPoint=point(0,80);
+                POINT rowPoint=point(50,-80);
                 pinned=true;auto beforePin=testedActions.size();finishHold(rowPoint);
                 if (testedActions.size()!=beforePin || holdFinished)
                     throw std::runtime_error("Pinned menu must ignore key release");
@@ -1191,6 +1782,99 @@ int main() {
                 panelKind=2;allowed=false;numberFrame(ImGuiKey_2,true);numberFrame(ImGuiKey_2,false);
                 if (testedActions.size()!=before)
                     throw std::runtime_error("Pie accelerator bypassed panel/input/busy protection");
+                allowed=true;panelKind=2;holdFinished=false;
+                // Seven new segments use the same frozen-highlight release
+                // fencing as swatches, including veto by the latest cursor.
+                const auto quickCount=testedActions.size();
+                const bool oldAware=layerAware;const unsigned oldMask=layerMask;
+                procedure(window,WM_APP+17,WPARAM(2|16|64|(15<<8)|(2<<12)|(1<<17))|(WPARAM(127)<<32),menuEpoch);
+                if(quickMask!=127)throw std::runtime_error("64-bit quick capabilities lost in prepare");
+                numberFrame(ImGuiKey_None,false);
+                if(quickRows[0].left!=quickRows[3].left || quickRows[2].top!=quickRows[0].top ||
+                    quickRows[6].top!=quickRows[3].top || quickRows[2].bottom>=quickRows[3].top ||
+                    std::abs(quickRows[3].top-quickRows[2].bottom-quickGroupGap*scale)>scale ||
+                    quickRows[0].left<=pieCenter.x+19*scale ||
+                    holdActionAt({LONG(pieCenter.x-140*scale),LONG(pieCenter.y-42*scale)})!=-1)
+                    throw std::runtime_error("Quick groups must align right, remain separate and clear old left hits");
+                if(holdActionAt({quickRows[0].left+LONG(figmaDisplayIconWidth*scale*.5f),(quickRows[0].bottom+quickRows[3].top)/2})!=-1)
+                    throw std::runtime_error("Gap between quick rows must cancel");
+                // Canvas and Layers keep the confirmed near-centre column.
+                panelKind=1;numberFrame(ImGuiKey_None,false);
+                if(std::abs(quickRows[3].top-(pieCenter.y-15*scale))>scale)throw std::runtime_error("Canvas quick column moved away from ring");
+                for(int i=0;i<7;++i) {
+                    auto tip=quickTipBounds(i);
+                    if(tip.z<=tip.x)throw std::runtime_error("Canvas icon tooltip missing");
+                    if(tip.w>quickRows[0].top)throw std::runtime_error("Canvas tooltip must prefer above the icon group");
+                    for(auto r:quickRows)if(tipOverlaps(tip,r))throw std::runtime_error("Canvas tooltip covers an icon");
+                }
+                panelKind=2;numberFrame(ImGuiKey_None,false);
+                if(std::abs(quickRows[3].top-(pieCenter.y-15*scale))>scale)throw std::runtime_error("Layers quick column moved away from ring");
+                for(int action:{0,2,3}) {
+                    const auto tip=actionTipBounds(action);
+                    if(tip.w>holdRows[action].top)throw std::runtime_error("Basic tooltip must prefer above its button");
+                    if(tip.z<=tip.x || holdActionAt({LONG((tip.x+tip.z)*.5f),LONG((tip.y+tip.w)*.5f)})!=-1)
+                        throw std::runtime_error("Basic action tooltip missing or has a gesture hit");
+                    for(auto r:quickRows)if(tipOverlaps(tip,r))throw std::runtime_error("Basic tooltip covers an icon");
+                    for(int j=0;j<4;++j)if(rowVisible(j) && tipOverlaps(tip,holdRows[j]))throw std::runtime_error("Basic tooltip covers an action");
+                }
+                for(int i=0;i<7;++i) {
+                    const auto r=quickRows[i];POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
+                    holdFinished=false;pieReady=true;holdMoved=true;renderedHit=32+i;
+                    const auto tip=quickTipBounds(i);
+                    if(tip.w>quickRows[0].top)throw std::runtime_error("Layers tooltip must prefer above the icon group");
+                    for(const auto& button:quickRows)if(tip.x<button.right && tip.z>button.left && tip.y<button.bottom && tip.w>button.top)
+                        throw std::runtime_error("Quick tooltip overlaps either row");
+                    if(tip.z<=tip.x || tipOverlaps(tip,r) || tip.x<ImGui::GetMainViewport()->Pos.x || tip.z>ImGui::GetMainViewport()->Pos.x+ImGui::GetMainViewport()->Size.x ||
+                        holdActionAt({LONG((tip.x+tip.z)*.5f),LONG((tip.y+tip.w)*.5f)})!=-1)
+                        throw std::runtime_error("Quick tooltip overlaps icon, clips or commits a gesture");
+                    for(int action=0;action<4;++action)if(rowVisible(action)) {
+                        const auto card=holdRows[action];
+                        if(tip.x<card.right && tip.z>card.left && tip.y<card.bottom && tip.w>card.top)
+                            throw std::runtime_error("Quick tooltip overlaps a primary action");
+                    }
+                    if(holdActionAt(middle)!=32+i)throw std::runtime_error("Quick segment not reachable");
+                    const auto count=testedActions.size();finishHold(middle,true,&middle);finishHold(middle,true,&middle);
+                    if(testedActions.size()!=count+1 || testedActions.back()!=quickActions[i])throw std::runtime_error("Quick segment replay or wrong command");
+                    holdFinished=false;pieReady=true;renderedHit=32+i;
+                    POINT blank={LONG(pieCenter.x),LONG(pieCenter.y)};
+                    finishHold(middle,true,&blank);
+                    if(testedActions.back()!="hide")throw std::runtime_error("Quick segment stale hover committed");
+                    holdFinished=false;pieReady=true;quickMask=127 & ~(1u<<i);
+                    const auto disabled=testedActions.size();send(quickActions[i]);
+                    if(holdActionAt(middle)!=-1 || testedActions.size()!=disabled)throw std::runtime_error("Disabled quick segment executed");
+                    quickMask=127;
+                    pinned=true;holdFinished=false;
+                    io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(float(middle.x),float(middle.y));
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);numberFrame(ImGuiKey_None,false);
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);numberFrame(ImGuiKey_None,false);
+                    if(testedActions.back()!=quickActions[i] || !holdFinished)throw std::runtime_error("Pinned quick click failed");
+                    pinned=false;
+                }
+                quickMask=127;inputFocused=true;holdFinished=false;numberFrame(ImGuiKey_None,false);
+                if(quickEnabled(0))throw std::runtime_error("Quick action bypassed input protection");
+                inputFocused=false;panelKind=4;numberFrame(ImGuiKey_None,false);
+                for(const auto& r:quickRows)if(r.right || r.bottom)throw std::runtime_error("Home retained quick segments");
+                testedActions.resize(quickCount);quickMask=0;layerAware=oldAware;layerMask=oldMask;
+                panelKind=2;holdFinished=false;numberFrame(ImGuiKey_None,false);
+                accept({{"type","operation"},{"busy",true},{"action","color"}});
+                setHoldMode(true);
+                SetWindowPos(window,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+                numberFrame(ImGuiKey_4,true);numberFrame(ImGuiKey_4,false);
+                if (!busyFeedback || pieReady || pendingHit!=-1 || renderedHit!=-1 || canExecute() ||
+                    compositionOpacity!=1.f || !IsWindowVisible(window) || ImGui::GetDrawData()->TotalVtxCount<=0)
+                    throw std::runtime_error("Busy feedback did not render alone through production show path");
+                for (const auto& r:holdRows) if (r.right || r.bottom)
+                    throw std::runtime_error("Busy feedback retained action hit regions");
+                for (const auto& r:labelRows) if (r.right || r.bottom)
+                    throw std::runtime_error("Busy feedback retained label hit regions");
+                accept({{"type","notice"},{"scope","operation"},{"ok",true},{"message","Completed"}});
+                accept({{"type","operation"},{"busy",false}});
+                numberFrame(ImGuiKey_2,true);numberFrame(ImGuiKey_2,false);
+                if (!busyFeedback || canExecute() || testedActions.size()!=before)
+                    throw std::runtime_error("Completion expanded feedback or executed a hidden action");
+                setHoldMode(true);numberFrame(ImGuiKey_None,false);
+                if (busyFeedback || !canExecute() || !pieReady)
+                    throw std::runtime_error("Explicit reopen did not restore idle menu");
                 std::cout<<"Dear ImGui self-test passed: search, keyboard selection, Enter and mouse click dispatch; radial directions, centre cancellation, edge origin, single release, immediate swatch click; 100 hidden platform frames\n";break;
             }
             if (!preview.empty() && frames==20) {screenshot(preview);if (!previewLive) break;}

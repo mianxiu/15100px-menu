@@ -1,0 +1,275 @@
+// Experimental executor: only fixed-target labels, no arbitrary scripts.
+module.exports = function createLabels(ps, session) {
+  const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
+  const quickCommands=['layer.new','layer.solid','layer.group','adjustment.curves',
+    'adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite'];
+  // DOM-only, read-only metadata. No batchPlay, executeAsModal, pixels or
+  // thumbnails on the menu path. The executor uses this same eligibility rule.
+  function selectionContext() {
+    if (!ps.app.documents.length) return {session,document_id:null,layer_ids:[],kind:'none',mask:0};
+    const doc=ps.app.activeDocument,selected=Array.from(doc.activeLayers),k=ps.constants.LayerKind;
+    const kinds=selected.map(layer=>{
+      if(layer.isBackgroundLayer)return 'background';
+      for(const [key,name] of [['NORMAL','pixel'],['GROUP','group'],['TEXT','text'],['SMARTOBJECT','smart'],
+          ['SOLIDFILL','shape-fill'],['GRADIENTFILL','shape-fill'],['PATTERNFILL','shape-fill']])
+        if(k[key]!==undefined && layer.kind===k[key])return name;
+      const adjustment=['BLACKANDWHITE','BRIGHTNESSCONTRAST','CHANNELMIXER','COLORBALANCE','COLORLOOKUP',
+        'CURVES','EXPOSURE','GRADIENTMAP','HUESATURATION','INVERSION','LEVELS','PHOTOFILTER',
+        'POSTERIZE','SELECTIVECOLOR','THRESHOLD','VIBRANCE','GRAIN','CLARITY'];
+      if(adjustment.some(key=>k[key]!==undefined && layer.kind===k[key]))return 'adjustment';
+      return Object.values(k).includes(layer.kind)?'other':'unknown';
+    });
+    const ids=selected.map(l=>l.id).sort((a,b)=>a-b),background=kinds.includes('background');
+    const parents=selected.map(l=>l.parent ? l.parent.id : null);
+    const sameParent=parents.every(id=>id===parents[0]);
+    const locked=selected.some(layer=>{
+      for(let node=layer,depth=0;node && depth<64;node=node.parent,depth++)
+        if(node.allLocked || node.positionLocked)return true;
+      return false;
+    });
+    let mask=0;
+    if(selected.length && !kinds.includes('unknown')) {
+      if(!background)mask|=2;
+      if(selected.length===1) {
+        const active=selected[0],siblings=Array.from(active.parent ? active.parent.layers : doc.layers);
+        if(active.kind===k.GROUP) {if(active.layers.length)mask|=1;}
+        else {
+          const index=siblings.findIndex(l=>l.id===active.id);
+          if(index>=0 && ((index>0 && siblings[index-1].kind!==k.GROUP) ||
+              (index+1<siblings.length && siblings[index+1].kind!==k.GROUP)))mask|=1;
+        }
+      }
+      if(!background && !locked && sameParent) {
+        const siblings=Array.from(selected[0].parent ? selected[0].parent.layers : doc.layers)
+          .filter(l=>!l.isBackgroundLayer).map(l=>l.id);
+        const chosen=siblings.filter(id=>ids.includes(id));
+        if(chosen.length===ids.length) {
+          if(siblings.slice(0,ids.length).join(',')!==chosen.join(','))mask|=4;
+          if(siblings.slice(-ids.length).join(',')!==chosen.join(','))mask|=8;
+        }
+      }
+    }
+    if(ps.app.activeDocument.id!==doc.id || Array.from(doc.activeLayers,l=>l.id).sort((a,b)=>a-b).join(',')!==ids.join(','))
+      throw Error('Layer context changed during read');
+    const modes=ps.constants.DocumentMode || {},depths=ps.constants.BitsPerChannelType || {};
+    const layered=['RGB','CMYK','LAB','GRAYSCALE'].some(key=>modes[key]!==undefined && doc.mode===modes[key]);
+    const parentLocked=selected.some(layer=>{
+      for(let node=layer.parent,depth=0;node && depth<64;node=node.parent,depth++)if(node.allLocked)return true;
+      return false;
+    });
+    let quickMask=layered && ids.length && !parentLocked && !kinds.includes('unknown')?3:0;
+    if(quickMask && !background && !locked && sameParent)quickMask|=4;
+    const adjustmentDepth=[depths.EIGHT,depths.SIXTEEN].some(v=>v!==undefined && doc.bitsPerChannel===v);
+    if(quickMask && adjustmentDepth) {
+      quickMask|=8;
+      if(doc.mode===modes.RGB)quickMask|=112;
+    }
+    return {session,document_id:doc.id,layer_ids:ids,selection_count:ids.length,
+      kind:kinds.every(kind=>kind===kinds[0])?(kinds[0] || 'none'):'mixed',
+      types:[...new Set(kinds)],background,locked,same_parent:sameParent,mask,quick_mask:quickMask};
+  }
+  async function capture() {
+    if (!ps.app.documents.length) throw Error('No document');
+    const doc = ps.app.activeDocument;
+    const ids = doc.activeLayers.map(layer => layer.id).sort((a,b)=>a-b);
+    const [active] = await ps.action.batchPlay([{_obj:'get',_target:[
+      {_ref:'property',_property:'layerID'},{_ref:'layer',_enum:'ordinal',_value:'targetEnum'}]}], {});
+    if (ps.app.activeDocument.id !== doc.id || !ids.length || !ids.includes(active.layerID))
+      throw Error('Target changed or no selected layers');
+    return {session, document_id:doc.id, active_layer_id:active.layerID, layer_ids:ids};
+  }
+  async function setLabel(request) {
+    const command = request.command || 'label';
+    const quickIndex=quickCommands.indexOf(command);
+    if (!['label','select','moveToTop','moveToBottom'].includes(command) && quickIndex<0) throw Error('Unknown command');
+    if (command === 'label' && !colors.has(request.color)) throw Error('Unknown label color');
+    const expected = request.target;
+    if (!expected || expected.session !== session) throw Error('Plugin session changed');
+    return ps.core.executeAsModal(async context => {
+      if (context.isCancelled || Date.now() > request.expires_at_ms) throw Error('Cancelled or expired');
+      const actual = await capture();
+      if (actual.document_id !== expected.document_id || actual.active_layer_id !== expected.active_layer_id ||
+          !Array.isArray(expected.layer_ids) || actual.layer_ids.join(',') !== expected.layer_ids.join(','))
+        throw Error('Document or layer target changed');
+      if (context.isCancelled || Date.now() > request.expires_at_ms) throw Error('Cancelled or expired');
+      // A locked Background has no color property in PS 24. Setting it as a
+      // layer converts it and allocates a new ID. Reject the whole selection
+      // before history/write rather than silently unlocking or partially coloring.
+      if (command === 'label' && ps.app.activeDocument.activeLayers.some(layer => layer.isBackgroundLayer))
+        throw Error('背景图层不支持颜色标签，请先解锁背景图层；本次未修改任何图层');
+      const eligibility=selectionContext(),bit={select:1,label:2,moveToTop:4,moveToBottom:8}[command];
+      if(quickIndex>=0 ? !(eligibility.quick_mask & (1<<quickIndex)) : !(eligibility.mask & bit))throw Error(quickIndex>=0?
+        '当前文档模式／位深或选择不支持此操作；打组需同一父组、非背景且未锁定':command==='label'?'当前图层类型未识别，未修改图层':
+        command==='select'?'当前选择没有可选的组内／相邻图层':
+        '当前选择不可排序：背景、位置锁定、跨组选择或已经位于目标位置');
+      const history = await context.hostControl.suspendHistory({documentID:actual.document_id,name:quickIndex>=0?'Menu '+command:'Menu layer label'});
+      try {
+        if(quickIndex>=0) {
+          const doc=ps.app.activeDocument,k=ps.constants.LayerKind;
+          const names=['空白图层','纯色填充','组','曲线','色相／饱和度','色彩平衡','黑白'];
+          const kinds=[k.NORMAL,k.SOLIDFILL,k.GROUP,k.CURVES,k.HUESATURATION,k.COLORBALANCE,k.BLACKANDWHITE];
+          function allIds(layers) {return Array.from(layers).flatMap(l=>[l.id,...(l.kind===k.GROUP?allIds(l.layers):[])]);}
+          const before=allIds(doc.layers);
+          let created;
+          if(command==='layer.new') {
+            function find(layers,id) {for(const layer of layers) {if(layer.id===id)return layer;if(layer.kind===k.GROUP) {const hit=find(layer.layers,id);if(hit)return hit;}}}
+            const anchor=find(doc.layers,actual.active_layer_id);
+            if(!anchor)throw Error('新建图层目标已改变');
+            const parentId=anchor.parent ? anchor.parent.id : null;
+            const siblings=Array.from(anchor.parent ? anchor.parent.layers : doc.layers,l=>l.id);
+            // Leave name unspecified: Photoshop owns its localized Layer N
+            // naming/counter, exactly as its native New Layer command does.
+            const results=await ps.action.batchPlay([{_obj:'make',_target:[{_ref:'layer'}],_options:{dialogOptions:'dontDisplay'}}],{});
+            if(results.some(r=>r._obj==='error'))throw Error('Photoshop 拒绝新建空白图层');
+            created=doc.activeLayers[0];
+            if(!created || before.includes(created.id))throw Error('新建空白图层读取失败');
+            const positioned=()=> {
+              const parent=created.parent ? created.parent.id : null;
+              const order=Array.from(anchor.parent ? anchor.parent.layers : doc.layers,l=>l.id);
+              return parent===parentId && order.indexOf(created.id)+1===order.indexOf(anchor.id);
+            };
+            // Native make may enter an expanded selected group. Explicitly
+            // keep the new layer above the frozen anchor, in its same parent.
+            if(!positioned())await created.move(anchor,ps.constants.ElementPlacement.PLACEBEFORE);
+            const order=Array.from(anchor.parent ? anchor.parent.layers : doc.layers,l=>l.id).filter(id=>id!==created.id);
+            if(!positioned() || order.join(',')!==siblings.join(','))throw Error('新建图层位置核验失败');
+          }
+          else if(command==='layer.group')created=await doc.createLayerGroup({name:names[2],fromLayers:Array.from(doc.activeLayers)});
+          else {
+            // Photoshop may consume the active empty pixel layer when making
+            // a fill/adjustment. Give it a disposable layer inside this same
+            // history transaction so the user's selected layer is preserved.
+            const placeholder=await doc.createLayer();
+            let type;
+            if(command==='layer.solid') {
+              const rgb=ps.app.foregroundColor.rgb;
+              if(!['red','green','blue'].every(key=>Number.isFinite(rgb[key]) && rgb[key]>=0 && rgb[key]<=255))throw Error('前景色读取失败');
+              type={_obj:'solidColorLayer',color:{_obj:'RGBColor',red:rgb.red,grain:rgb.green,blue:rgb.blue}};
+            } else {
+              const defaults={
+                'adjustment.curves':{_obj:'curves',presetKind:{_enum:'presetKindType',_value:'presetKindDefault'}},
+                'adjustment.hueSaturation':{_obj:'hueSaturation',presetKind:{_enum:'presetKindType',_value:'presetKindDefault'},colorize:false},
+                'adjustment.colorBalance':{_obj:'colorBalance',shadowLevels:[0,0,0],midtoneLevels:[0,0,0],highlightLevels:[0,0,0],preserveLuminosity:true},
+                'adjustment.blackWhite':{_obj:'blackAndWhite',red:40,yellow:60,grain:40,cyan:60,blue:20,magenta:80,useTint:false}
+              };
+              type=defaults[command];
+            }
+            const obj=command==='layer.solid'?'contentLayer':'adjustmentLayer';
+            const results=await ps.action.batchPlay([{_obj:'make',_target:[{_ref:obj}],using:{_obj:obj,name:names[quickIndex],type},_options:{dialogOptions:'dontDisplay'}}],{});
+            if(results.some(r=>r._obj==='error'))throw Error('Photoshop 拒绝创建图层');
+            created=doc.activeLayers[0];
+            if(allIds(doc.layers).includes(placeholder.id))await placeholder.delete();
+          }
+          const after=new Set(allIds(doc.layers)),original=new Set(before);
+          const added=[...after].filter(id=>!original.has(id));
+          if(!created || created.kind!==kinds[quickIndex] || added.length!==1 || added[0]!==created.id ||
+              before.some(id=>!after.has(id)))throw Error('新图层类型／数量核验失败：'+JSON.stringify({actual:created && created.kind,expected:kinds[quickIndex],id:created && created.id,added,before,after:[...after]}));
+          if(command==='layer.group' && Array.from(created.layers,l=>l.id).sort((a,b)=>a-b).join(',')!==actual.layer_ids.join(','))
+            throw Error('打组成员核验失败');
+          await context.hostControl.resumeHistory(history,true);
+          return {verified:true,command,layer_id:created.id,kind:created.kind,count:command==='layer.group'?actual.layer_ids.length:1};
+        }
+        if (command !== 'label') {
+          const doc = ps.app.activeDocument;
+          function find(layers,id) { for(const layer of layers) { if(layer.id===id)return layer; if(layer.kind===ps.constants.LayerKind.GROUP) {const hit=find(layer.layers,id);if(hit)return hit;} } }
+          const active=find(doc.layers,actual.active_layer_id);
+          const siblings=Array.from(active.parent ? active.parent.layers : doc.layers);
+          let affected=[];
+          if(command==='select') {
+            let selected;
+            if(active.kind===ps.constants.LayerKind.GROUP) selected=Array.from(active.layers);
+            else { const index=siblings.findIndex(x=>x.id===active.id);let start=index,end=index;
+              while(start>0 && siblings[start-1].kind!==ps.constants.LayerKind.GROUP)start--;
+              while(end+1<siblings.length && siblings[end+1].kind!==ps.constants.LayerKind.GROUP)end++;
+              selected=siblings.slice(start,end+1);
+            }
+            if(!selected.length)throw Error('No layers in group');
+            for(let i=0;i<selected.length;i++) {
+              const d={_obj:'select',_target:[{_ref:'layer',_id:selected[i].id}],makeVisible:false};
+              if(i)d.selectionModifier={_enum:'selectionModifierType',_value:'addToSelection'};
+              const result=await ps.action.batchPlay([d],{});if(result.some(x=>x._obj==='error'))throw Error('Selection failed');
+            }
+            affected=selected.map(x=>x.id).sort((a,b)=>a-b);
+            if((await capture()).layer_ids.join(',')!==affected.join(','))throw Error('Selection readback mismatch');
+          } else {
+            const selected=siblings.filter(x=>actual.layer_ids.includes(x.id));
+            if(selected.length!==actual.layer_ids.length || selected.some(x=>x.isBackgroundLayer))throw Error('Select movable layers within one parent');
+            const others=siblings.filter(x=>!actual.layer_ids.includes(x.id));
+            if(others.length) {
+              const top=command==='moveToTop',anchor=top?others[0]:others[others.length-1];
+              const order=top?selected:[...selected].reverse();
+              const placement=top||anchor.isBackgroundLayer?ps.constants.ElementPlacement.PLACEBEFORE:ps.constants.ElementPlacement.PLACEAFTER;
+              // Bottom above a locked background must preserve the original order.
+              for(const layer of (!top&&anchor.isBackgroundLayer?selected:order))await layer.move(anchor,placement);
+            }
+            affected=selected.map(x=>x.id);
+            const reordered=Array.from(active.parent?active.parent.layers:doc.layers).filter(x=>!x.isBackgroundLayer).map(x=>x.id);
+            const edge=command==='moveToTop'?reordered.slice(0,affected.length):reordered.slice(-affected.length);
+            if(edge.join(',')!==affected.join(','))throw Error('Order readback mismatch');
+          }
+          await context.hostControl.resumeHistory(history,true);
+          return {verified:true,count:affected.length,command};
+        }
+        const results = await ps.action.batchPlay([{_obj:'set',_target:[{_ref:'layer',_enum:'ordinal',_value:'targetEnum'}],
+          to:{_obj:'layer',color:{_enum:'color',_value:request.color}},_options:{dialogOptions:'dontDisplay'}}], {});
+        if (results.some(result => result._obj === 'error')) throw Error('Photoshop rejected label');
+        const verified = await ps.action.batchPlay(actual.layer_ids.map(id=>({_obj:'get',
+          _target:[{_ref:'property',_property:'color'},{_ref:'layer',_id:id},{_ref:'document',_id:actual.document_id}]})), {});
+        if (verified.length !== actual.layer_ids.length || verified.some(v=>!v.color || v.color._value !== request.color))
+          throw Error('Label readback mismatch');
+        let inherited=0;
+        if(request.color==='none') {
+          async function scan(layers, parentColored) { for(const layer of layers) {
+            const group=layer.kind===ps.constants.LayerKind.GROUP;
+            if(actual.layer_ids.includes(layer.id)&&parentColored)inherited++;
+            if(group) {const [v]=await ps.action.batchPlay([{_obj:'get',_target:[{_ref:'property',_property:'color'},{_ref:'layer',_id:layer.id}]}],{});
+              await scan(layer.layers,parentColored || v.color._value!=='none');}
+          }}
+          if(ps.constants)await scan(ps.app.activeDocument.layers,false);
+        }
+        await context.hostControl.resumeHistory(history, true);
+        return {verified:true, count:actual.layer_ids.length, inherited, color:request.color, target:actual};
+      } catch (error) {
+        await context.hostControl.resumeHistory(history, false);
+        throw error;
+      }
+    }, {commandName:'Menu layer label', timeOut:0});
+  }
+  function documentTarget() {
+    return {session, document_ids:Array.from(ps.app.documents,d=>d.id).sort((a,b)=>a-b),
+      active_document_id:ps.app.documents.length?ps.app.activeDocument.id:null};
+  }
+  async function createDocument(request) {
+    const preset=request.preset,expected=request.target;
+    const units=['pixelsUnit','millimetersUnit','centimetersUnit','inchesUnit','pointsUnit','picasUnit'];
+    if (!expected || expected.session!==session || !Array.isArray(expected.document_ids)) throw Error('Plugin session changed');
+    if (!preset || !units.includes(preset.units) || !['width','height'].every(k=>
+        Number.isFinite(preset[k]) && preset[k]>0 && preset[k]<=300000) || JSON.stringify(preset).length>3000)
+      throw Error('Invalid recent document preset');
+    return ps.core.executeAsModal(async context=>{
+      const actual=documentTarget();
+      if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+      if(actual.document_ids.join(',')!==expected.document_ids.join(',') || actual.active_document_id!==expected.active_document_id)
+        throw Error('Document target changed');
+      let created;
+      try {
+        // Pass PS's own preset JSON intact. This preserves physical units,
+        // symbolic print defaults, profiles, artboards and guide settings.
+        created=await ps.app.createDocument({presetJSON:JSON.stringify(preset)});
+        if(!created || !Number.isInteger(created.id))throw Error('New document result unavailable');
+        return {document_id:created.id,name:created.title,width:created.width,height:created.height,
+          resolution:created.resolution,verified:true};
+      } catch(error) {
+        // Never close a pre-existing/user document or replay an uncertain make.
+        const added=Array.from(ps.app.documents).filter(d=>!actual.document_ids.includes(d.id));
+        if(added.length===1) {
+          try {await added[0].closeWithoutSaving();}
+          catch(_) {error.resultUnknown=true;}
+        } else if(added.length)error.resultUnknown=true;
+        throw error;
+      }
+    },{commandName:'Menu recent document',timeOut:0});
+  }
+  return {capture,setLabel,documentTarget,createDocument,selectionContext};
+};
+
