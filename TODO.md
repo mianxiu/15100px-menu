@@ -2,6 +2,14 @@
 
 更新日期：2026-10-12。
 
+## 目录整理（2026-10-12）
+
+- [ ] 将目录整理提交推送master，并为现有v0.4.115 Release补充整理后的源码ZIP／SHA256与说明；保留原标签和程序附件，上传后核验。
+
+- [x] 旧独立 Python／JSX 实验集中到legacy；保留当前入口、COM兼容模块和仍被后端引用的photoshop_action。
+- [x] dist仅保留当前v0.4.115；旧发行包、诊断及配置／文档恢复资料可恢复归档到.local，原Figma ZIP／JSON和实验PSD分别保存到design／recovery。公开前Git历史备份在.local/recovery/git-history/private-history-backup.git。删除可重新构建的旧缓存，保留现用Python环境；锁定的capslock-history日志留原位。归档索引.local/archive/organization-manifest.json。
+- [x] 整理后222项源码回归通过；13份图标生成输出哈希不变，当前发行ZIP哈希不变；实际服务仍为同一PID的v0.4.115、UXP0.3.7，dist与已安装EXE及实际菜单／热键资源哈希一致，数据目录保留，未重启PS或服务。1909项归档逐项核对源已移除、目的地存在；按文件长度统计净减少约597MiB，旧发行包／原稿归档不计释放空间。证据.runtime/organization-verification.json、.runtime/organization-tests.log、.runtime/directory-inventory-before.json／after.json。本次未修改UI或操作行为，无新增实机交互验收项，也未将回归当作实机测试。
+
 ## v0.4.115 GitHub Release
 
 - [x] 准备 Windows x64 统一离线 ZIP、SHA256、中文发行说明，修正安装说明中的 UXP 版本为实际内置0.3.7。EXE与已运行版本一致，沿用已通过的回归／原生／烟雾与实机证据。
@@ -10,7 +18,7 @@
 ## 仓库公开与 MIT 许可
 
 - [x] 添加标准 MIT、第三方声明及现有库／字体的许可副本；前端包标记 MIT，分发包保留项目／第三方许可。检查405个历史文本对象的常见令牌／私钥格式，未发现匹配，也未发现历史凭据配置文件。
-- [x] master／work 全部可达历史清理完整 Figma 导出、测试 PSD、本机 VS Code 配置与 pyvenv.cfg，并分别加入 MIT；以明确旧 SHA 的 force-with-lease 原子推送。GitHub 已公开，匿名访问与 MIT 识别核验通过。原文件与历史备份在本地保留，44个工作文件哈希保留，首次公开时未纳入功能修改；本轮另行同步已验证的v0.4.115／UXP0.3.7更新。证据.runtime/open-source-public-verification.json、.runtime/open-source-local-preservation.json、.runtime/public-history-exclusions.json；恢复备份.runtime/private-history-backup.git。
+- [x] master／work 全部可达历史清理完整 Figma 导出、测试 PSD、本机 VS Code 配置与 pyvenv.cfg，并分别加入 MIT；以明确旧 SHA 的 force-with-lease 原子推送。GitHub 已公开，匿名访问与 MIT 识别核验通过。原文件与历史备份在本地保留，44个工作文件哈希保留，首次公开时未纳入功能修改；本轮另行同步已验证的v0.4.115／UXP0.3.7更新。证据.runtime/open-source-public-verification.json、.runtime/open-source-local-preservation.json、.runtime/public-history-exclusions.json；恢复备份已于目录整理时移至.local/recovery/git-history/private-history-backup.git。
 
 ## v0.4.115 横向分隔线tip与自然宽度过渡
 

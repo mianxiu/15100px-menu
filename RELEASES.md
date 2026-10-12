@@ -22,3 +22,9 @@ Windows x64 统一离线分发包，内置 UXP 0.3.7。最低 Photoshop 24.0.1�
 222 项后台回归、原生菜单自测与最终 EXE 烟雾／重启持久化通过。真实 Photoshop 中 35 项填充／调整位置与原生命令对照、8 项空白层回归通过；横向 tip、动态宽度及取消行为由用户实机确认。安装要求不表示其他 Photoshop 版本已完成实机兼容验证。
 
 下载后使用随附 `.zip.sha256` 校验 ZIP；Windows PowerShell 可运行 `Get-FileHash .\PhotoshopMenu-Backend-0.4.115.zip -Algorithm SHA256` 并比对文件中的哈希。
+
+## 目录整理补充（2026-10-12）
+
+目录整理未改变程序版本或二进制。旧独立实验集中到`legacy/`，本地设计原稿、旧发行包与恢复资料放在忽略提交的`.local/`；`dist/`仅保留当前版本。目录规范见`docs/DIRECTORY.md`，图标生成器支持整理后的本地原稿路径。222项源码回归通过，图标生成输出、运行组件和原发行ZIP哈希不变。
+
+整理后的源码另行提供`PhotoshopMenu-Source-0.4.115-organized.zip`及其SHA256，源码包不包含完整设计导出、PSD、用户配置、构建缓存或本地归档。原v0.4.115标签及已有程序附件保持不变；GitHub默认的Source code附件仍对应原发布标签，整理后的目录请使用补充源码ZIP。

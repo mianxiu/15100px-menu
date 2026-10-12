@@ -6,7 +6,9 @@ Geometry is compiled into MenuHost; opening the menu does not read JSON/assets.
 import hashlib,json,re,runpy,sys,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-source=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'151500PX.figma-export.zip'
+source=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'.local/design/151500PX.figma-export.zip'
+if len(sys.argv)==1 and not source.is_file():source=ROOT/'151500PX.figma-export.zip'
+if not source.is_file():raise SystemExit('Provide a local Figma export path; raw designs are not distributed. Expected .local/design/151500PX.figma-export.zip or an explicit argument.')
 with zipfile.ZipFile(source) as archive:
     design=archive.read('design.figma-export.json')
     source_svgs={id:archive.read('svg/'+id.replace(':','%3A')+'.svg') for id in ('324:0','326:461')}

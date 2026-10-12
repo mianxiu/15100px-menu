@@ -179,3 +179,7 @@ uxp/offline-probe/probe-config.js
 /151500PX.figma-export.zip
 /extendScriptTest/*.psd
 /pyvenv.cfg
+
+# Private local design, archives and recovery data
+/.local/
+/legacy/extendScriptTest/*.psd
