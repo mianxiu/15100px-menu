@@ -173,3 +173,9 @@ native/HotkeyHost.exe
 
 /native/MenuHost.exe
 uxp/offline-probe/probe-config.js
+
+# Local design exports and experiment documents
+/151500PX.figma-export.json
+/151500PX.figma-export.zip
+/extendScriptTest/*.psd
+/pyvenv.cfg
