@@ -163,3 +163,10 @@ Lib/
 Scripts/
 .vscode/
 extendScriptTest/TESTFILE.psd
+
+# Local design exports / environment / experiment documents
+/151500PX.figma-export.json
+/151500PX.figma-export.zip
+/extendScriptTest/*.psd
+/pyvenv.cfg
+/.vscode/
