@@ -2,7 +2,7 @@
 
 Photoshop 原生浮动菜单与独立后台管理工具。
 
-Windows 离线包见 [GitHub Releases](https://github.com/mianxiu/15100px-menu/releases)，版本与安装说明见 [发行说明](RELEASES.md)。
+已发布 [v0.4.115 Release](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.115)：[Windows x64 统一离线 ZIP](https://github.com/mianxiu/15100px-menu/releases/download/v0.4.115/PhotoshopMenu-Backend-0.4.115.zip)（内置 UXP 0.3.7）及 [SHA256](https://github.com/mianxiu/15100px-menu/releases/download/v0.4.115/PhotoshopMenu-Backend-0.4.115.zip.sha256)。版本与安装说明见 [发行说明](RELEASES.md)。
 
 当前实际运行 v0.4.115：所有菜单修改操作经本地 UXP 插件 0.3.7 执行，COM 用于主题／字体／连接只读查询，以及正常桌面环境中的独立启动助手。点击PS、任务栏切回PS、Alt+Tab切回PS均授予触发资格；单纯hover不授予。启动服务后需要一次主动激活。
 

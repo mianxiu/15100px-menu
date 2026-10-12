@@ -5,7 +5,7 @@
 ## v0.4.115 GitHub Release
 
 - [x] 准备 Windows x64 统一离线 ZIP、SHA256、中文发行说明，修正安装说明中的 UXP 版本为实际内置0.3.7。EXE与已运行版本一致，沿用已通过的回归／原生／烟雾与实机证据。
-- [ ] 推送 v0.4.115 标签，上传 ZIP 与 SHA256 并发布 GitHub Release；核验远端资产哈希及匿名下载。
+- [x] v0.4.115 标签已推送，GitHub Release 已发布并设为 Latest，统一 ZIP 与 SHA256 上传完成。GitHub资产digest与本地一致，匿名重新下载两份文件并核验哈希通过；ZIP SHA256 c320f2b33c44545ae325f986b7c4aa9d8d5ad6fa2482d6c205587b346ea7c96a。证据.runtime/release-0.4.115-artifact-verification.json、.runtime/release-0.4.115-public-verification.json；下载链接已加入README。
 
 ## 仓库公开与 MIT 许可
 
