@@ -4,7 +4,7 @@
 
 ## 目录整理（2026-10-12）
 
-- [ ] 将目录整理提交推送master，并为现有v0.4.115 Release补充整理后的源码ZIP／SHA256与说明；保留原标签和程序附件，上传后核验。
+- [x] 目录整理提交c20eb84已推送master，现有v0.4.115 Release已补充整理后的源码ZIP／SHA256与说明；两份新增附件匿名下载哈希核验通过，原标签、程序附件ID／大小／digest及下载链接不变，Release仍为Latest。源码ZIP SHA256：745e329e6625f613648de01e92df90409e28892485a62a9f7733536f4315a0fd。证据.runtime/organization-release-verification.json；README加入下载链接。
 
 - [x] 旧独立 Python／JSX 实验集中到legacy；保留当前入口、COM兼容模块和仍被后端引用的photoshop_action。
 - [x] dist仅保留当前v0.4.115；旧发行包、诊断及配置／文档恢复资料可恢复归档到.local，原Figma ZIP／JSON和实验PSD分别保存到design／recovery。公开前Git历史备份在.local/recovery/git-history/private-history-backup.git。删除可重新构建的旧缓存，保留现用Python环境；锁定的capslock-history日志留原位。归档索引.local/archive/organization-manifest.json。
