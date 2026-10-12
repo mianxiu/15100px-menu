@@ -2,11 +2,57 @@
 
 更新日期：2026-10-12。
 
-## MIT 开源与仓库公开
+## 仓库公开与 MIT 许可
 
-- [x] 添加 MIT 和第三方许可声明；字体保留 OFL，分发包包含许可文件，前端包标记 MIT。
-- [x] 完整 Figma 导出、测试 PSD 与本机 VS Code／虚拟环境配置从 master／work 可达历史中清理，保留必要的编译图标／SVG；本地原始文件与历史备份保留。
-- [x] 清理后的 master／work 以明确旧SHA的 force-with-lease 原子推送；公开状态、匿名访问和 GitHub 的 MIT 识别已核验。原文件／历史备份及既有未提交功能更新保留在本地，后者不纳入本轮推送。
+- [x] 添加标准 MIT、第三方声明及现有库／字体的许可副本；前端包标记 MIT，分发包保留项目／第三方许可。检查405个历史文本对象的常见令牌／私钥格式，未发现匹配，也未发现历史凭据配置文件。
+- [x] master／work 全部可达历史清理完整 Figma 导出、测试 PSD、本机 VS Code 配置与 pyvenv.cfg，并分别加入 MIT；以明确旧 SHA 的 force-with-lease 原子推送。GitHub 已公开，匿名访问与 MIT 识别核验通过。原文件与历史备份在本地保留，44个工作文件哈希保留，首次公开时未纳入功能修改；本轮另行同步已验证的v0.4.115／UXP0.3.7更新。证据.runtime/open-source-public-verification.json、.runtime/open-source-local-preservation.json、.runtime/public-history-exclusions.json；恢复备份.runtime/private-history-backup.git。
+
+## v0.4.115 横向分隔线tip与自然宽度过渡
+
+- [x] 根因是图标分隔线两侧中性窄缝处实际命中返回-1，但tip间隙判定把整格都视作按钮，立即清空。复用同一窄缝判定，提示保留最多90毫秒，松键仍取消，禁用按钮仍隐藏；不扩大点击／执行命中。
+- [x] 移除最长提示预留宽度；当前文字加左右各6单位内边距，背景120毫秒平滑改变，文字交叉淡入淡出，中途反向从当前几何继续。首次150／同组稳定60毫秒及中心／组外／输入／忙碌／关闭清空保留。AGENTS／README同步。
+- [x] 原生横向窄缝保留及松键取消、动画起点不跳跃／中间值连续／反向连续／精确结束内边距和既有分流／输入焦点／取消／无命中自测、222项后台回归通过。最终EXE完整烟雾及重启持久化通过。初轮预览读回不完整，最终预览采用独立离屏重绘纹理，不改生产绘制路径；30份最终四主题／不同字号预览完整按钮／色块／状态标记核验通过。
+- [x] 正常退出旧服务后解除短暂EXE文件锁并更新实际入口v0.4.115；入口／dist／收据、实际菜单／热键路径／父服务／组件哈希一致，配置凭据及PS文档／UXP0.3.7保留，未重启PS。备份dist/0.4.114-backup、.runtime/before-0.4.115-data；证据.runtime/native-selftest-0.4.115.log、.runtime/tests-0.4.115.log、.runtime/tip115-preview-readback.json、.runtime/smoke-0.4.115-final.log、.runtime/installed-0.4.115-final-verification.json、.runtime/tip115-active-workers.json。
+- [x] 用户于2026-10-12实机确认v0.4.115“提示与操作都正常”：横向跨分隔线提示连续、长短文字宽度变化自然、左右留白一致，回中心／分隔线松键只取消，操作验收通过。先前生产API工作区保护拒绝记录仍作为未执行保留，不替代本次用户确认；记录.runtime/tip115-popup-live.json及用户回复。
+
+## v0.4.114 快速切换tip防闪烁
+
+- [x] 加入与执行命中独立的提示状态：首次停留150毫秒、同组切换60毫秒、间隙保留最多90毫秒；预设和右侧图标固定各自同组框位置／宽度，剪贴板独立。移出组／中心／禁用按钮、输入保护、动画、关闭、忙碌与提交立即隐藏。保留原即时hover、点击、松键执行与取消；AGENTS／README同步。
+- [x] 原生确定性时序核验快速划过不显示、间隙连续、稳定换文案、间隙到期、中心离开、跨组重新等待、禁用清空和同组固定几何；既有预设／图标无命中／避让／单次提交、画布图层分流、输入焦点与取消自测和222项后台回归通过。四主题及不同字号共30份预览通过。
+- [x] 最终EXE首次烟雾临时进程关闭超时／文件锁清理失败，未计通过；第二次完整烟雾及重启持久化通过，WMI确认无临时测试EXE残留。正常切换实际入口v0.4.114，配置凭据、PS文档及UXP0.3.7保留，未重启PS；组件路径／父服务／dist／收据哈希一致。备份dist/0.4.113-backup、.runtime/before-0.4.114-data；证据.runtime/native-selftest-0.4.114.log、.runtime/tests-0.4.114.log、.runtime/tip114-preview-readback.json、.runtime/smoke-0.4.114-retry.log、.runtime/installed-0.4.114-final-verification.json、.runtime/tip114-active-workers.json。
+- [x] 用户于2026-10-12实机确认v0.4.114“提示更稳定，操作正常”：快速切换tip改善、停留更新、回中心隐藏及点击／松键取消验收通过。此前生产API工作区保护拒绝记录保留为未执行，不替代本次用户实机确认；证据.runtime/tip114-popup-live.json及用户回复。后续横向窄缝／padding问题按v0.4.115重新验收。
+
+## v0.4.113 首页卡片比例、宽度与预设tip
+
+- [x] 尺寸数字10／10.75／11.5、单位／分辨率及标签8.5逻辑字号，两行整体居中、间距3、统一图文起点34。左右列分别测量内容后确定宽度154～228，允许不等宽；剪贴板独立收窄，行高随实际字体计算，保留2列×4行及比例图标。去除“最近预设”常驻标题，悬停卡片使用上方黑色半透明tip，剪贴板独立说明，命中只限原卡片；首排仍与圆环等高。README／AGENTS同步。
+- [x] 222项后台回归、原生非等宽／剪贴板独立宽度／字体层级／紧凑高度／首排对齐、每张卡片tip避让与无命中、退出／中心取消／单次松键提交及原有画布图层分流／输入焦点／禁用保护自测通过。四主题、不同字号及首尾卡片tip共20份预览及内容读回检查、最终EXE烟雾通过；首轮自测日志重定向与脚本自身写同一文件冲突，修正调用后完整自测通过。
+- [x] 正常退出旧后台后更新实际入口v0.4.113，配置凭据和PS文档／UXP0.3.7保留，未重启PS。入口／dist／收据与实际菜单／热键组件路径／父服务／哈希一致。备份dist/0.4.112-backup、.runtime/before-0.4.113-data；证据.runtime/tests-0.4.113.log、.runtime/native-selftest-0.4.113.log、.runtime/cards113-preview-readback.json、.runtime/smoke-0.4.113.log、.runtime/installed-0.4.113-final-verification.json、.runtime/cards113-active-workers.json。
+- [ ] 新版实体外观、预设／剪贴板点击和中心松键取消确认。生产API被PS工作区保护拒绝，文档数量保持，未标为实机显示／点击通过；证据.runtime/cards113-popup-live.json。
+
+## v0.4.112 填充与调整层按PS原生位置新建
+
+- [x] 修复DOM临时层默认建在文档顶部导致最终填充／调整层同样置顶：先定位临时层，创建后清理并再次核验。普通／组内层同父组紧邻上方；组本身／空组在组内顶部，与PS原生命令一致；空白层在组外上方的既有规则保留。移除填充／调整／组的固定名称，使用默认编号；同一历史事务、读回、失败回滚和冻结目标保护保留。AGENTS／README同步。
+- [x] 30种位置模拟，含临时层被替换／保留、移动失败回滚和默认名称；222项后台回归、原生分流／输入焦点／命中／取消／tooltip自测、最终EXE烟雾通过。
+- [x] 真实PS24.0.1对照35项填充／调整：根层中间／底部、嵌套组内层、组本身、空组、多选活动层、背景；名称、父组、相邻位置与原生命令一致，原层及顺序保留，一次撤销恢复；目标改变拒绝。空白层8项原生命名／位置／撤销回归通过。证据.runtime/created-layers-0.4.112-live.json、.runtime/blank-layer-0.4.112-live.json。
+- [x] 已正常切换实际入口v0.4.112／UXP0.3.7并通过正常桌面COM助手重启PS；更新前没有打开文档。配置凭据、入口／dist／收据、实际组件路径／父服务／哈希及部署插件资源核验一致。备份dist/0.4.111-backup、.runtime/before-0.4.112-data；证据.runtime/installed-0.4.112-final-verification.json、.runtime/position112-active-workers.json、.runtime/tests-0.4.112.log、.runtime/native-selftest-0.4.112.log、.runtime/smoke-0.4.112.log。
+- [x] 七个创建／调整／打组命令、纯色前景色及精确打组成员回归通过，临时文档清理。生产菜单API因工作区保护未打开，单独记为未执行，未当作点击通过；证据.runtime/quick-layers-0.4.112-live.json。统一后台分发包dist/PhotoshopMenu-Backend-0.4.112.zip已构建，内嵌插件与工作区资源核验一致。
+- [ ] 实体菜单点击创建后的插入位置／默认编号／一次撤销验收；真实执行端对照不替代实体键鼠验收。
+
+## v0.4.111 基本操作图文比例与首页图标统一
+
+- [x] 带文字的相邻／组内选择、上下移动、首页新建统一12图标／95%PS文字／左9、间隔6、右9，按文本尺寸同步按钮和命中。右侧16纯图标不缩小，原锚点／配色／上方tooltip保持；组内选择和新建新增同风格SVG，预设／剪贴板18×18范围、真实比例、灰填充及内边框，极窄比例收紧边框避免反向。
+- [x] AGENTS记录未来所有图标按同一Figma家族规范，明确网格、边框、黑／灰层级、图文指标、源资源／补绘说明、SVG／原生生成和主题／命中验收。README同步使用说明与来源。
+- [x] 222项后台回归、原生分流／输入焦点／命中／取消／tooltip／首页自测、四主题／三字号／首页有无剪贴板及极窄比例共42份预览控件读回与最终EXE烟雾通过。预览捕获改为实际绘制纹理，修复不完整帧读回；异常初始预览没有标为通过，修正后重新检查完整42份。最终入口v0.4.111、实际组件路径／父服务／构建／dist／收据哈希一致，配置凭据和PS／UXP0.3.6保留。备份dist/0.4.110-backup、dist/0.4.111-first-build-backup及.runtime/before-0.4.111-data／before-final-0.4.111-data。
+- [x] 生产API工作区保护拒绝，文档数量保持，未标为实际显示通过；证据.runtime/balance111-popup-live.json。构建／运行证据.runtime/tests-0.4.111.log、.runtime/native-selftest-0.4.111.log、.runtime/balance111-preview-readback.json、.runtime/balance111-*.png、.runtime/smoke-0.4.111.log、.runtime/installed-0.4.111-final-verification.json、.runtime/balance111-active-workers.json。
+- [x] 用户确认v0.4.111“图标没问题”；另报告曲线等新建置顶，按v0.4.112修复，不把外观确认记为新建位置通过。
+- [ ] 首页点击、中心取消／右键重开及完整输入焦点矩阵单独确认。
+
+## v0.4.110 缺少图标按Figma风格补绘
+
+- [x] 六枚缺少对应组件的空白／纯色／打组／曲线／色彩平衡／黑白图标，按原9×9网格、1单位边框、黑／灰填充及留白补绘；文件夹参考749:0、去除排序标记。数据／SVG／生成原生头文件及来源哈希完整，原四枚直接复用与六枚风格扩展明确区分；import工具统一生成，两排位置、大小、配色、上方tooltip和命中保持。AGENTS／README同步。
+- [x] 222项后台回归、原生画布／图层分流、输入焦点／禁用／命中／取消／tooltip自测、四主题28份正常／hover／禁用预览及最终EXE烟雾通过；正常更新实际入口v0.4.110，配置凭据及PS／UXP0.3.6保留，实际组件路径、父服务及构建／dist／收据哈希一致。备份dist/0.4.109-backup、.runtime/before-0.4.110-data。
+- [x] 生产菜单API被鼠标工作区保护拒绝，文档数量保持，没有标为显示／键鼠通过；证据.runtime/style110-popup-live.json，其余证据.runtime/tests-0.4.110.log、.runtime/native-selftest-0.4.110.log、.runtime/style110-*.png、.runtime/smoke-0.4.110.log、.runtime/installed-0.4.110-final-verification.json、.runtime/style110-active-workers.json。
+- [ ] 新版实际显示与补绘图标实体风格外观、hover／点击、中心取消／右键重开及完整输入焦点矩阵确认；渲染和API可见性不替代用户实机验收。
 
 ## v0.4.109 tooltip上方定位与推送
 

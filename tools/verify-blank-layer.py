@@ -29,7 +29,7 @@ def status():
 async def main():
     current = status()
     assert current['version'] == APP_VERSION and not current['photoshop']['busy']
-    assert current['uxp']['version'] == '0.3.6' and current['photoshop']['uxp_ready']
+    assert current['uxp']['version'] == json.loads((ROOT/'uxp/offline-probe/manifest.json').read_text('utf-8'))['version'] and current['photoshop']['uxp_ready']
     app = win32com.client.GetActiveObject('Photoshop.Application')
     previous = app.ActiveDocument if app.Documents.Count else None
     prefix = 'Menu blank verification ' + str(time.time_ns())
@@ -120,7 +120,7 @@ async def main():
             raise AssertionError('Stale target accepted')
         assert tree() == before
         checks.append({'frozen_target_rejected_without_creation': True})
-        report = {'version': APP_VERSION, 'uxp': '0.3.6', 'checks': checks,
+        report = {'version': APP_VERSION, 'uxp': json.loads((ROOT/'uxp/offline-probe/manifest.json').read_text('utf-8'))['version'], 'checks': checks,
                   'scope': 'Real PS disposable documents and installed UXP executor; physical menu clicks remain separate.'}
         (ROOT / f'.runtime/blank-layer-{APP_VERSION}-live.json').write_text(
             json.dumps(report, ensure_ascii=False, indent=2), 'utf-8')

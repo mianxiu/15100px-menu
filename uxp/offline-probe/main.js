@@ -51,7 +51,7 @@ async function probe(reason) {
       await record(folder, 'probe-last.json', {
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.6', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.7', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         plugin_id: 'com.15100px.menu.offline-probe',
@@ -71,7 +71,7 @@ async function probe(reason) {
         seen.has(request.id) || !Number.isFinite(request.expires_at_ms) ||
         request.expires_at_ms < Date.now() || request.expires_at_ms > Date.now() + 30000) return;
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {id: request.id, probe_version: '0.3.6', operation: request.operation,
+    const response = {id: request.id, probe_version: '0.3.7', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     try {

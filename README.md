@@ -2,7 +2,31 @@
 
 Photoshop 原生浮动菜单与独立后台管理工具。
 
-当前实际运行 v0.4.109：所有菜单修改操作经本地 UXP 插件 0.3.6 执行，COM 用于主题／字体／连接只读查询，以及正常桌面环境中的独立启动助手。点击PS、任务栏切回PS、Alt+Tab切回PS均授予触发资格；单纯hover不授予。启动服务后需要一次主动激活。
+当前实际运行 v0.4.115：所有菜单修改操作经本地 UXP 插件 0.3.7 执行，COM 用于主题／字体／连接只读查询，以及正常桌面环境中的独立启动助手。点击PS、任务栏切回PS、Alt+Tab切回PS均授予触发资格；单纯hover不授予。启动服务后需要一次主动激活。
+
+v0.4.115修复横向跨图标分隔线时tip明灭：复用实际命中的分隔线中性窄缝判定，提示最多保留90毫秒，松键仍取消，禁用按钮不保留。首次150毫秒／同组稳定60毫秒不变；去掉最长文字撑满所有提示的固定宽度，背景按当前文字加左右各6单位内边距，在120毫秒内平滑变化，文字交叉淡入淡出。中途反向切换从当前几何继续，中心／组外／输入／忙碌／提交／关闭立即清空；动画与命中、hover高亮、执行完全独立。
+
+v0.4.115已正常更新实际入口。原生横向中性窄缝保留／松键取消、宽度过渡与反向连续／最终精确内边距及既有分流／输入焦点／取消自测、222项后台回归和最终EXE烟雾通过。初轮预览出现不完整读回，最终预览改为将同一已完成绘制数据重绘到独立离屏纹理，仅用于导出；四主题／不同字号30份完整按钮／色块／状态标记及视觉检查通过，异常初轮未计通过。更新时旧EXE短暂文件锁在核验旧进程退出后解除，未强杀；入口／dist／收据、菜单／热键实际路径／父服务／组件哈希一致，配置凭据、PS文档及UXP0.3.7保留，未重启PS。生产API被鼠标工作区保护拒绝，文档数量保持，未计实体显示／点击通过。证据.runtime/native-selftest-0.4.115.log、.runtime/tests-0.4.115.log、.runtime/tip115-preview-readback.json、.runtime/tip115-*.png、.runtime/smoke-0.4.115-final.log、.runtime/installed-0.4.115-final-verification.json、.runtime/tip115-active-workers.json、.runtime/tip115-popup-live.json。用户于2026-10-12实机确认v0.4.115“提示与操作都正常”：横向跨分隔线提示连续、动态宽度和均匀内边距、回中心／分隔线松键取消验收通过。
+
+v0.4.114减少快速切换tip闪烁：首次停留150毫秒显示，同组切换稳定60毫秒后更新文字，经过同组间隙最多保留90毫秒；预设与右侧图标分别固定同组提示框的位置及宽度，剪贴板使用独立提示。中心／控件组外／禁用按钮立即隐藏，输入保护、动画、关闭、忙碌和任务提交清空。时序只影响只读提示，不参与hover高亮、点击／松键命中或执行。原生确定性时序／固定几何／tip无命中及既有分流、输入焦点、取消自测和222项后台回归通过，四主题首页／图标及不同字号30份预览检查通过。首次最终EXE烟雾在临时进程关闭超时并导致清理文件锁错误，第二次完整检查和重启持久化通过，已确认没有遗留测试EXE；失败记录保留，未当作通过。
+
+v0.4.114已正常更新实际运行入口，菜单／热键路径、父服务及组件／dist／收据哈希一致，配置凭据、PS文档及UXP0.3.7保留，未重启PS。生产菜单API被鼠标工作区保护拒绝，文档数量保持，未标为实体显示／点击验收。证据.runtime/native-selftest-0.4.114.log、.runtime/tests-0.4.114.log、.runtime/tip114-*.png、.runtime/tip114-preview-readback.json、.runtime/smoke-0.4.114-retry.log、.runtime/installed-0.4.114-final-verification.json、.runtime/tip114-active-workers.json、.runtime/tip114-popup-live.json。用户于2026-10-12实机确认v0.4.114“提示更稳定，操作正常”；后续指出横向窄缝仍闪烁、固定宽度留白不均，按v0.4.115继续修复；原反馈不视为这些新增问题已通过。
+
+v0.4.113优化首页预设／剪贴板卡片：尺寸数字使用10／10.75／11.5逻辑字号，单位／分辨率和第二行标签8.5；两行整体垂直居中，行间3单位，图文起点34，保留比例图标和各自标签。两列分别测量所含卡片内容后确定列宽（154～228逻辑单位），可以不等宽；剪贴板独立按内容收窄，行高随实际字体计算。移除常驻“最近预设”标题，首排继续与圆环等高，悬停卡片时在整列上方显示黑色半透明tip；剪贴板有独立新建说明。保持2列×4行、主题色／蓝色hover、直接点击创建及中心／空白松键取消；tip无控件／无命中。
+
+v0.4.113已构建并正常更新实际入口。222项后台回归、原生列宽／字体层级／首排锚点／tooltip避让及无命中／预设退出取消与单次提交／既有画布图层分流及输入焦点保护自测、四主题及不同字号共20份预览、最终EXE烟雾通过。实际菜单／热键路径、父服务及组件／dist／收据哈希一致，配置凭据、PS文档和UXP0.3.7保留，未重启PS。生产菜单API因鼠标不在PS工作区被保护拒绝，文档数量保持；未记为实际显示／点击通过。证据.runtime/tests-0.4.113.log、.runtime/native-selftest-0.4.113.log、.runtime/cards113-*.png、.runtime/cards113-preview-readback.json、.runtime/smoke-0.4.113.log、.runtime/installed-0.4.113-final-verification.json、.runtime/cards113-active-workers.json、.runtime/cards113-popup-live.json。新版实体外观、预设／剪贴板点击及中心取消仍待用户验收。
+
+v0.4.112修复纯色填充和四种调整层跑到文档最顶层：承接PS空白层复用的临时层先定位，再执行原生命令，清理临时层后核验最终位置。普通层／组内层在同一父组紧邻活动层上方；选中组本身时在该组内顶部，与PS原生命令一致。空白层在所选组外上方的既有规则保留。填充／调整／打组名称交由PS默认命名，创建与位置调整保持一次撤销，原层和顺序不变，失败回滚、冻结目标改变拒绝；图标与布局不变。
+
+v0.4.112／UXP0.3.7已正常更新实际入口并重启PS加载。222项后台回归、原生分流／输入焦点／命中／取消／tooltip自测、30种UXP位置模拟和最终EXE烟雾通过。真实PS24.0.1中35项填充／调整与原生命令对照通过，覆盖根层中间／底部、嵌套组内层、组本身、空组、多选活动层和背景；每项独立读回名称、父组、相邻位置、原层及一次撤销，另验证目标改变拒绝。空白层8项位置／原生命名／撤销回归和七种命令／前景色读回／打组成员回归通过。实际入口／dist／收据、菜单／热键进程路径及父服务／组件哈希、已部署插件与内置资源一致，原配置凭据保留。重启前没有打开文档，测试仅创建并关闭自己的临时文档。证据.runtime/created-layers-0.4.112-live.json、.runtime/blank-layer-0.4.112-live.json、.runtime/quick-layers-0.4.112-live.json、.runtime/tests-0.4.112.log、.runtime/native-selftest-0.4.112.log、.runtime/smoke-0.4.112.log、.runtime/installed-0.4.112-final-verification.json、.runtime/position112-active-workers.json。统一分发包dist/PhotoshopMenu-Backend-0.4.112.zip已构建。生产菜单API被工作区保护拒绝，未记为菜单点击通过；用户已确认v0.4.111图标没有问题，本次位置修复后的实体菜单点击仍待用户验收，执行端实测不替代此项。
+
+v0.4.111调整带文字的相邻／组内选择、上下移动和首页新建：图标12逻辑单位、文字按PS字号95%显示，左内边距9、图文间隔6、右内边距9，按真实文本宽度同步按钮／命中，图文垂直居中。右侧纯图标继续16／24×30，原环绕位置、蓝色hover、上方黑色半透明tooltip保留。组内选择及首页新建新增同风格SVG；预设／剪贴板图标以18×18为主体最大范围，保留真实宽高比并统一灰填充和1网格单位内边框，极窄比例收紧边框避免反向尺寸；卡片和两行标签布局不变。AGENTS.md的“Figma来源与UI验证”规定今后所有图标统一9×9网格、黑／灰层级、边框、比例和留白，原组件与补绘来源分别记录；数据／SVG／生成器随项目保存。
+
+v0.4.111最终构建已正常更新实际入口，222项后台回归、原生画布／图层／首页、输入焦点保护、所有现有命中／取消／tooltip避让自测及最终EXE烟雾通过；四主题、三字号、首页有／无剪贴板和极窄比例共42份预览完整控件读回检查通过。预览导出改读取实际绑定的绘制纹理，修复单独查询交换链缓冲区时的不完整捕获；该改动不影响普通菜单执行。实际菜单／热键进程路径、父服务及组件／dist／收据哈希一致，配置凭据和PS／UXP0.3.6保留。生产API被鼠标工作区保护拒绝，文档数量保持；新版实际显示、图文比例、首页点击／取消仍待用户验收，未将预览当实机通过。证据.runtime/tests-0.4.111.log、.runtime/native-selftest-0.4.111.log、.runtime/balance111-*.png、.runtime/balance111-preview-readback.json、.runtime/smoke-0.4.111.log、.runtime/installed-0.4.111-final-verification.json、.runtime/balance111-active-workers.json、.runtime/balance111-popup-live.json。
+
+v0.4.110按用户要求重绘导出中没有对应组件的六枚图标：空白图层、纯色、打组、曲线、色彩平衡、黑白。统一采用Figma的9×9内容网格、1单位边框、黑／灰填充、方形框与留白；打组采用749:0文件夹轮廓并移除排序标记，保留各操作含义。四枚原组件继续直接复用；六枚明确记录为项目风格扩展，不冒称原图标。补绘数据native/figma-inspired-icons.json，生成器tools/build-menu-style-icons.py，SVG在native/figma-inspired-assets，native/StyledMenuIcons.h构建编译；tools/import-figma-menu.py同步生成两组资源，唤出时不读设计文件。右侧两排、16单位图标、24×30按钮、主题／蓝色hover和上方黑色半透明tooltip保持，规则写入AGENTS.md。
+
+v0.4.110已正常更新实际入口，222项后台回归、原生画布／图层分流、输入焦点／禁用／七图标命中／取消／上方tooltip避让自测、四主题28份正常／hover／禁用预览和最终EXE烟雾通过。实际菜单／热键进程路径、父服务及组件／dist／收据哈希一致，配置凭据保留；PS／UXP0.3.6未重启，生产菜单API被鼠标工作区保护拒绝，文档数量保持；未将其记为实际显示或键鼠验收。补绘图标的实体风格外观／点击及完整焦点矩阵仍待用户确认。证据.runtime/tests-0.4.110.log、.runtime/native-selftest-0.4.110.log、.runtime/style110-*.png、.runtime/smoke-0.4.110.log、.runtime/installed-0.4.110-final-verification.json、.runtime/style110-active-workers.json、.runtime/style110-popup-live.json。
 
 v0.4.109 tooltip优先按钮上方；两排图标间放不下时显示在整组上方，必要时横向避让排序／标题。上方不可用时才尝试侧面／下方，不遮操作或增加命中；黑色半透明底、浅色文字、原布局保留，AGENTS同步。222项后台回归、5项前端语言测试及前端构建、UXP命令／类型／标色模拟、原生画布／图层／基本操作上方定位与避让／输入焦点／取消自测、四主题16份预览及最终EXE烟雾通过。已正常切换实际入口v0.4.109，菜单／热键实际路径及父服务、组件／dist／收据哈希一致，配置凭据保留；PS／UXP0.3.6未重启，真实PS生产API菜单可见，文档数量保持。上移后的实体外观仍待用户确认。证据.runtime/tests-0.4.109.log、.runtime/frontend-tests-0.4.109.log、.runtime/frontend-build-0.4.109.log、.runtime/native-selftest-0.4.109.log、.runtime/tip109-*.png、.runtime/smoke-0.4.109.log、.runtime/installed-0.4.109-final-verification.json、.runtime/tip109-active-workers.json、.runtime/tip109-popup-live.json。
 
@@ -18,13 +42,13 @@ v0.4.106／UXP0.3.6已构建、正常更新实际入口并重启PS加载，222�
 
 重启前两份文档已保存恢复副本并重新打开工作副本，原文件未改动；恢复目录.runtime/uxp036-recovery-106，恢复记录restored.json。证据.runtime/blank-layer-0.4.106-live.json、.runtime/quick-layers-0.4.106-live.json、.runtime/tests-0.4.106.log、.runtime/native-selftest-0.4.106.log、.runtime/blank106-*.png、.runtime/smoke-0.4.106.log、.runtime/installed-0.4.106-final-verification.json、.runtime/blank106-active-workers.json、.runtime/blank106-popup-live.json。
 
-v0.4.107使用完整151500PX.figma-export.zip（123份SVG、1471个带几何节点，无缺失矢量路径），直接复用相邻图层选择、色相饱和度、移到同父组顶部／底部四枚原图标。排序保留原始三次贝塞尔轮廓与节点变换，转换绕向以适配原生填充；构建时编译，不在唤出路径读文件。空白层、纯色、打组、曲线、色彩平衡、黑白六项没有语义对应的组件，继续使用现有图标，不用其他功能图标替代；此限制是缺少对应组件，不再是路径缺失。现有靠近圆环的右列、16单位图标、24×30按钮、统一4圆角、PS主题色和蓝色hover保持。来源、哈希及适配见native/figma-menu-provenance.json，排序源SVG存于native/figma-assets。
+v0.4.107使用完整151500PX.figma-export.zip（123份SVG、1471个带几何节点，无缺失矢量路径），直接复用相邻图层选择、色相饱和度、移到同父组顶部／底部四枚原图标。排序保留原始三次贝塞尔轮廓与节点变换，转换绕向以适配原生填充；构建时编译，不在唤出路径读文件。v0.4.107时空白层、纯色、打组、曲线、色彩平衡、黑白六项没有语义对应的组件，保留旧图标；用户随后要求按原风格补绘，v0.4.110已统一为风格扩展，此限制是缺少对应组件，不再是路径缺失。现有靠近圆环的右列、16单位图标、24×30按钮、统一4圆角、PS主题色和蓝色hover保持。来源、哈希及适配见native/figma-menu-provenance.json，排序源SVG存于native/figma-assets。
 
 用户已确认v0.4.104“其他正常”，已记录原布局操作验收；v0.4.105上移布局已被用户指出过高，v0.4.106恢复原高度；邻近tooltip待单独确认。v0.4.104历史记录：图标12→16、按钮及命中18×24→24×30、右侧两排间隙4；222项回归、原生自测、四主题预览、最终EXE烟雾、入口与实际组件哈希核验以及PS生产API窗口可见性通过。证据.runtime/installed-0.4.104-final-verification.json、.runtime/large104-popup-live.json。
 
 用户已实机确认v0.4.101控件样式、图标上方提示和点击／中心松键取消正常。按随后反馈，v0.4.102将小图标和相邻层选择图标内容从9增至12逻辑单位（约大33%），18×24图标分段及命中范围不变，强调色沿用原有随PS主题调整的蓝色，未采用Figma配色。222项后台回归、原生点击／松键／取消与提示无命中检查、四主题预览及最终EXE烟雾通过；实际入口／dist／原生组件／收据哈希一致，配置凭据、PS文档及UXP0.3.5保留，未重启PS。证据.runtime/tests-0.4.102.log、.runtime/native-selftest-0.4.102.log、.runtime/icon102-*.png、.runtime/smoke-0.4.102.log、.runtime/installed-0.4.102-final-verification.json；放大后的实体图标外观及右键重开／完整焦点矩阵未单独验收。
 
-原生菜单控件采用Figma导出指标：主按钮24逻辑单位高，源图标分段18×24、源图标9（当前内容16、分段24×30），主题圆角统一4，提示与状态区内边距6、边框1；并排仍使用共同外框及内部分隔。按钮正常填充使用现有PS主题的Button色，面板／底部信息区使用WindowBg色；悬停tooltip使用黑色半透明底和浅色文字，蓝色hover和PS字号保留。预设的2列×4行、字体及卡片大小、色块大小、环绕锚点保持，卡片／剪贴板／标签改为同一4圆角，剪贴板与新建按钮正常底色一致。指标由tools/import-figma-menu.py从326:514和223:20构建导入，并编译进菜单，不在唤出路径解析设计文件。
+原生菜单控件采用Figma导出指标：主按钮24逻辑单位高，源图标分段18×24、源图标9（当前纯图标内容16、分段24×30；带文字图标12），主题圆角统一4，提示与状态区内边距6、边框1；并排仍使用共同外框及内部分隔。按钮正常填充使用现有PS主题的Button色，面板／底部信息区使用WindowBg色；悬停tooltip使用黑色半透明底和浅色文字，蓝色hover和PS字号保留。预设的2列×4行、字体及卡片大小、色块大小、环绕锚点保持，卡片／剪贴板／标签改为同一4圆角，剪贴板与新建按钮正常底色一致。指标由tools/import-figma-menu.py从326:514和223:20构建导入，并编译进菜单，不在唤出路径解析设计文件。
 
 七个小图标的悬停动作名在当前控件附近显示独立黑色半透明tooltip，优先上方并避让图层排序及其他控件；移出图标、动画中、任务提交后不显示。底部仅保留文档、图层类型／限制、固定／输入状态和任务信息，不重复悬停动作名。提示只绘制、不注册控件、不扩展点击／松键命中；小图标命中同步按24×30可见区域更新，分隔线、空白及中心取消保护保留。
 
@@ -75,7 +99,7 @@ Photoshop 首页按 CapsLock 唤出的环绕菜单左侧显示“新建文档”
 
 v0.4.74 名称验证记录：中文名称已由PS新UXP会话确认：plugin_name="Photoshop 快捷菜单"，command_label="检查连接"，版本0.3.1；英文新会话对应名称和入口亦通过。最终实际EXE action.execute 在自建临时文档红色／清除、独立COM读回正确并生成UXP succeeded任务，临时文档已清理。证据 `.runtime/i18n-0.4.74-chinese-live.json`、`.runtime/i18n-0.4.74-english-live.json`、`.runtime/release-0.4.74-verification.json`、`.runtime/installed-0.4.74-final-verification.json`。PS原生Plugins菜单视觉文字未直接截图，完整实体键鼠回归与跨环境兼容性仍待验收。
 
-统一离线包：`dist/PhotoshopMenu-Backend-0.4.109.zip`。主 `PhotoshopMenu.exe` 已内置三份 UXP 资源，在后台“插件管理”安装／更新、禁用／启用、导入／导出离线 ZIP、回退或卸载，不需要单独 OfflineSetup。缺少插件或凭据异常时自动打开后台。最低 Photoshop 24.0.1，无最高版本限制；安装读取本机EXE版本，版本不可确认或未找到支持版本时拒绝，页面支持填写自定义Photoshop.exe路径。安装／更新／卸载／回退先正常关闭PS，后台保持运行；安装／更新后默认自动启动PS；禁用执行立即生效并保留插件文件，已加载插件仍驻留PS。任务进行中或结果未知时拒绝管理请求，不排队、不强制结束操作。每次更换前备份，失败恢复，保留个人凭据／配置／历史；导出更新包不包含凭据。旧 OfflineSetup 仅为历史部署方式，已有安装和数据目录可继续用新版后台管理。详见 [OFFLINE-INSTALL.md](OFFLINE-INSTALL.md)。
+统一离线包：`dist/PhotoshopMenu-Backend-0.4.111.zip`。主 `PhotoshopMenu.exe` 已内置三份 UXP 资源，在后台“插件管理”安装／更新、禁用／启用、导入／导出离线 ZIP、回退或卸载，不需要单独 OfflineSetup。缺少插件或凭据异常时自动打开后台。最低 Photoshop 24.0.1，无最高版本限制；安装读取本机EXE版本，版本不可确认或未找到支持版本时拒绝，页面支持填写自定义Photoshop.exe路径。安装／更新／卸载／回退先正常关闭PS，后台保持运行；安装／更新后默认自动启动PS；禁用执行立即生效并保留插件文件，已加载插件仍驻留PS。任务进行中或结果未知时拒绝管理请求，不排队、不强制结束操作。每次更换前备份，失败恢复，保留个人凭据／配置／历史；导出更新包不包含凭据。旧 OfflineSetup 仅为历史部署方式，已有安装和数据目录可继续用新版后台管理。详见 [OFFLINE-INSTALL.md](OFFLINE-INSTALL.md)。
 
 实际服务已切换至v0.4.75，安装入口与dist/PhotoshopMenu.exe哈希一致，原生菜单／热键构建哈希核验一致；UXP仍0.3.1，原用户设置及凭据保留。194项后台回归、5项前端检查及最终EXE烟雾／重启通过。实际管理页中英文、任务选择、跨页编辑保留／放弃恢复、键盘切换、1120×760五页面与560×700窄窗口边界通过；最终页面确认为EXE内置index-ByaysUET.js。证据.runtime/backend-tabs-0.4.75-ui-verification.json、.runtime/backend-tabs-0.4.75-ui.png及.runtime/installed-0.4.75-final-verification.json。v0.4.75第一构建在临时文档真实UXP标色／清除读回通过；最终仅修正任务详情重建后再次尝试，因其他应用在前台被焦点保护拒绝、未提交任务，临时文档清理。没有以这次拒绝宣称最终构建正向操作通过。旧v0.4.74程序／配置保留于dist/0.4.74-backup和.runtime/before-0.4.75-data。本轮未改原生菜单／热键逻辑，完整实体hover／输入／焦点／取消矩阵未重新人工验收。
 
@@ -83,7 +107,7 @@ v0.4.74 名称验证记录：中文名称已由PS新UXP会话确认：plugin_nam
 
 构建统一包：先 `./build-exe.ps1` 构建主程序，再运行 `Scripts/python.exe tools/build-backend-package.py`。主EXE只白名单内置manifest/main/labels三份插件资源，附可导入UXP ZIP；本机probe-config.js和uxp-config.json禁止分发。旧build-offline-package.py保留为历史独立安装器构建方式。
 
-下列旧版本段落为历史记录；当前状态以文首v0.4.109和对应验收证据为准。
+下列旧版本段落为历史记录；当前状态以文首v0.4.111和对应验收证据为准。
 
 此前统一入口已运行v0.4.51（2026-10-11）。PS进程扫描移到后台；Caps／左Win／已接管鼠标按住，或最近250ms有输入时不更新钩子，待输入安静后再维护。250ms只限制维护，不延迟菜单响应。98项回归、原生状态／维护自测、最终EXE烟雾和重启通过；实际版本及组件SHA256核验见 `.runtime/release-0.4.51-verification.json`。用户已确认本轮长按／快速连按无误切换、菜单正常；长期稳定性继续记录观察。
 
@@ -363,7 +387,7 @@ backend/plugins.py       脚本包校验、版本切换、回滚、更新源
 frontend/                后台管理 WebUI（SolidJS + Vite）
 jsx/                     内置脚本包与 manifest
 .runtime/                设置、日志、升级包、管理浏览器配置（不提交）
-extendScriptTest/        原有实验脚本（不含 PSD 样例）
+extendScriptTest/        原有实验脚本（不含公开 PSD 样例）
 ```
 
 日志：`.runtime/service.log`（轮转保存）和 `.runtime/overlay.log`（原生菜单进程）。已安装脚本及回滚历史位于 `.runtime/plugins`。
@@ -709,6 +733,4 @@ v0.4.92：锁定背景图层不支持颜色标签，先明确提示“请先解�
 
 项目代码与文档采用 [MIT License](LICENSE)：允许商用、修改和分发，也允许闭源使用；分发副本或重要部分时保留版权与许可声明。第三方库和字体保留各自原始许可，参见 [第三方许可说明](THIRD_PARTY_NOTICES.md)。字体为 OFL 1.1，不能用项目 MIT 替换。
 
-完整 Figma 导出、实验 PSD 和本机 VS Code／虚拟环境配置不纳入公开仓库；构建直接使用已提交的原生图标几何与必要 SVG，重新导入设计时自行提供本地导出文件。
-
-仓库已公开，匿名访问与 GitHub 的 MIT 识别已核验；master／work 的可达历史均排除原始导出和测试文档。
+仓库 https://github.com/mianxiu/15100px-menu 已公开并识别为 MIT。完整 Figma 导出、实验 PSD、本机 VS Code 配置及 pyvenv.cfg 不纳入公开仓库和可达历史；本地副本与私有恢复备份保留。构建使用已提交的原生图标几何与必要 SVG，重新导入设计时自行提供本地导出。首次公开只推送历史清理与许可变更；本轮同步已实现并验证的 v0.4.115／UXP0.3.7 功能更新。

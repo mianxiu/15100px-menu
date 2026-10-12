@@ -106,40 +106,47 @@ module.exports = function createLabels(ps, session) {
       try {
         if(quickIndex>=0) {
           const doc=ps.app.activeDocument,k=ps.constants.LayerKind;
-          const names=['空白图层','纯色填充','组','曲线','色相／饱和度','色彩平衡','黑白'];
           const kinds=[k.NORMAL,k.SOLIDFILL,k.GROUP,k.CURVES,k.HUESATURATION,k.COLORBALANCE,k.BLACKANDWHITE];
           function allIds(layers) {return Array.from(layers).flatMap(l=>[l.id,...(l.kind===k.GROUP?allIds(l.layers):[])]);}
           const before=allIds(doc.layers);
+          function find(layers,id) {for(const layer of layers) {if(layer.id===id)return layer;if(layer.kind===k.GROUP) {const hit=find(layer.layers,id);if(hit)return hit;}}}
+          const anchor=find(doc.layers,actual.active_layer_id);
+          if(!anchor)throw Error('新建图层目标已改变');
+          // Fill/adjustment creation follows native PS: selecting a group
+          // creates inside it; the existing blank-layer rule stays above it.
+          const insideGroup=command!=='layer.new' && command!=='layer.group' && anchor.kind===k.GROUP;
+          const parentId=insideGroup?anchor.id:anchor.parent ? anchor.parent.id : null;
+          const siblingLayers=()=>insideGroup?anchor.layers:anchor.parent ? anchor.parent.layers : doc.layers;
+          const siblings=Array.from(siblingLayers(),l=>l.id);
+          const firstChild=insideGroup?Array.from(anchor.layers)[0]:null;
+          async function position(layer) {
+            const positioned=()=> {
+              const parent=layer.parent ? layer.parent.id : null;
+              const order=Array.from(siblingLayers(),l=>l.id);
+              return parent===parentId && (insideGroup?order[0]===layer.id:
+                order.indexOf(layer.id)+1===order.indexOf(anchor.id));
+            };
+            if(!positioned())await layer.move(insideGroup?(firstChild || anchor):anchor,
+              insideGroup && !firstChild?ps.constants.ElementPlacement.PLACEINSIDE:ps.constants.ElementPlacement.PLACEBEFORE);
+            const order=Array.from(siblingLayers(),l=>l.id).filter(id=>id!==layer.id);
+            if(!positioned() || order.join(',')!==siblings.join(','))throw Error('新建图层位置核验失败');
+          }
           let created;
           if(command==='layer.new') {
-            function find(layers,id) {for(const layer of layers) {if(layer.id===id)return layer;if(layer.kind===k.GROUP) {const hit=find(layer.layers,id);if(hit)return hit;}}}
-            const anchor=find(doc.layers,actual.active_layer_id);
-            if(!anchor)throw Error('新建图层目标已改变');
-            const parentId=anchor.parent ? anchor.parent.id : null;
-            const siblings=Array.from(anchor.parent ? anchor.parent.layers : doc.layers,l=>l.id);
             // Leave name unspecified: Photoshop owns its localized Layer N
             // naming/counter, exactly as its native New Layer command does.
             const results=await ps.action.batchPlay([{_obj:'make',_target:[{_ref:'layer'}],_options:{dialogOptions:'dontDisplay'}}],{});
             if(results.some(r=>r._obj==='error'))throw Error('Photoshop 拒绝新建空白图层');
             created=doc.activeLayers[0];
             if(!created || before.includes(created.id))throw Error('新建空白图层读取失败');
-            const positioned=()=> {
-              const parent=created.parent ? created.parent.id : null;
-              const order=Array.from(anchor.parent ? anchor.parent.layers : doc.layers,l=>l.id);
-              return parent===parentId && order.indexOf(created.id)+1===order.indexOf(anchor.id);
-            };
-            // Native make may enter an expanded selected group. Explicitly
-            // keep the new layer above the frozen anchor, in its same parent.
-            if(!positioned())await created.move(anchor,ps.constants.ElementPlacement.PLACEBEFORE);
-            const order=Array.from(anchor.parent ? anchor.parent.layers : doc.layers,l=>l.id).filter(id=>id!==created.id);
-            if(!positioned() || order.join(',')!==siblings.join(','))throw Error('新建图层位置核验失败');
           }
-          else if(command==='layer.group')created=await doc.createLayerGroup({name:names[2],fromLayers:Array.from(doc.activeLayers)});
+          else if(command==='layer.group')created=await doc.createLayerGroup({fromLayers:Array.from(doc.activeLayers)});
           else {
             // Photoshop may consume the active empty pixel layer when making
             // a fill/adjustment. Give it a disposable layer inside this same
             // history transaction so the user's selected layer is preserved.
             const placeholder=await doc.createLayer();
+            await position(placeholder);
             let type;
             if(command==='layer.solid') {
               const rgb=ps.app.foregroundColor.rgb;
@@ -155,19 +162,22 @@ module.exports = function createLabels(ps, session) {
               type=defaults[command];
             }
             const obj=command==='layer.solid'?'contentLayer':'adjustmentLayer';
-            const results=await ps.action.batchPlay([{_obj:'make',_target:[{_ref:obj}],using:{_obj:obj,name:names[quickIndex],type},_options:{dialogOptions:'dontDisplay'}}],{});
+            const results=await ps.action.batchPlay([{_obj:'make',_target:[{_ref:obj}],using:{_obj:obj,type},_options:{dialogOptions:'dontDisplay'}}],{});
             if(results.some(r=>r._obj==='error'))throw Error('Photoshop 拒绝创建图层');
             created=doc.activeLayers[0];
-            if(allIds(doc.layers).includes(placeholder.id))await placeholder.delete();
+            if(created && placeholder.id!==created.id && allIds(doc.layers).includes(placeholder.id))await placeholder.delete();
           }
-          const after=new Set(allIds(doc.layers)),original=new Set(before);
+          if(created && command!=='layer.group')await position(created);
+          const afterIds=allIds(doc.layers),after=new Set(afterIds),original=new Set(before);
           const added=[...after].filter(id=>!original.has(id));
           if(!created || created.kind!==kinds[quickIndex] || added.length!==1 || added[0]!==created.id ||
               before.some(id=>!after.has(id)))throw Error('新图层类型／数量核验失败：'+JSON.stringify({actual:created && created.kind,expected:kinds[quickIndex],id:created && created.id,added,before,after:[...after]}));
+          if(command!=='layer.group' && afterIds.filter(id=>id!==created.id).join(',')!==before.join(','))throw Error('原图层顺序核验失败');
           if(command==='layer.group' && Array.from(created.layers,l=>l.id).sort((a,b)=>a-b).join(',')!==actual.layer_ids.join(','))
             throw Error('打组成员核验失败');
           await context.hostControl.resumeHistory(history,true);
-          return {verified:true,command,layer_id:created.id,kind:created.kind,count:command==='layer.group'?actual.layer_ids.length:1};
+          return {verified:true,command,layer_id:created.id,name:created.name,kind:created.kind,
+            parent_id:created.parent ? created.parent.id : null,anchor_id:anchor.id,count:command==='layer.group'?actual.layer_ids.length:1};
         }
         if (command !== 'label') {
           const doc = ps.app.activeDocument;

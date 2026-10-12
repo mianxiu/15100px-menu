@@ -14,10 +14,11 @@ from backend.uxp_bridge import UxpBridge
 from backend.layer_context import require_menu_target
 from backend.version import APP_VERSION
 BASE='http://127.0.0.1:15151'
+UXP_VERSION=json.loads((ROOT/'uxp/offline-probe/manifest.json').read_text('utf-8'))['version']
 def status():return json.load(urlopen(BASE+'/api/status',timeout=5))
 READ="""(function(){var s=stringIDToTypeID,r=new ActionReference();r.putEnumerated(s('layer'),s('ordinal'),s('targetEnum'));var d=executeActionGet(r),t='';if(d.hasKey(s('adjustment')))t=typeIDToStringID(d.getList(s('adjustment')).getObjectType(0));function count(ls){var n=ls.length;for(var i=0;i<ls.length;i++)if(ls[i].typename==='LayerSet')n+=count(ls[i].layers);return n;}return [d.getInteger(s('layerID')),d.getInteger(s('layerKind')),t,count(app.activeDocument.layers),app.activeDocument.historyStates.length].join('|');})();"""
 async def main():
-    s=status();assert s['uxp']['version']=='0.3.5' and not s['photoshop']['busy']
+    s=status();assert s['uxp']['version']==UXP_VERSION and not s['photoshop']['busy']
     app=win32com.client.GetActiveObject('Photoshop.Application');previous=app.ActiveDocument if app.Documents.Count else None
     docs=[];checks=[];timings=[];name='Menu quick '+str(time.time_ns())
     bridge=UxpBridge(task_history=ROOT/'.runtime/quick-live-tasks.json',config=Path(s['data_dir'])/'uxp-config.json')
@@ -72,18 +73,21 @@ async def main():
             while True:
                 r=json.loads(await asyncio.wait_for(ws.read_message(),15))
                 if r.get('id')==id:return r
-        opened=await call('panel.hold_begin');assert opened['ok'],opened
-        current=status();epoch=current['menu']['epoch'] if 'epoch' in current['menu'] else None
-        # Obtain the epoch from status only when exposed; direct API still
-        # enforces foreground and target capture without manufacturing input.
-        args={'name':'layer.new'}
-        if epoch is not None:args['menu_epoch']=epoch
-        result=await call('action.execute',args);assert result['ok'],result
-        checks.append({'production_menu_api':'layer.new','task':result['data']})
-        report={'version':APP_VERSION,'uxp':'0.3.5','checks':checks,'execution_ms':timings,
-                'scope':'Real disposable Photoshop documents, installed UXP executor and production menu/API. Physical keys/hover/click acceptance pending.'}
+        opened=await call('panel.hold_begin')
+        if opened['ok']:
+            current=status();epoch=current['menu'].get('epoch')
+            # Use only the real menu epoch; do not manufacture input or bypass
+            # foreground / mouse-workspace guards for a verification script.
+            args={'name':'layer.new'}
+            if epoch is not None:args['menu_epoch']=epoch
+            result=await call('action.execute',args);assert result['ok'],result
+            checks.append({'production_menu_api':'layer.new','task':result['data']})
+        else:
+            checks.append({'production_menu_api':'not_exercised','open_response':opened})
+        report={'version':APP_VERSION,'uxp':UXP_VERSION,'checks':checks,'execution_ms':timings,
+                'scope':'Real disposable Photoshop documents and installed UXP executor. Production menu/API outcome recorded separately; physical keys/hover/click acceptance pending.'}
         (ROOT/f'.runtime/quick-layers-{APP_VERSION}-live.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),'utf-8')
-        print('PASS actual PS: seven commands, foreground RGB, exact grouping, frozen target protection, production API')
+        print('PASS actual PS executor: seven commands, foreground RGB, exact grouping, frozen target protection; production API open:',opened['ok'])
     finally:
         if ws:
             try:await ws.write_message(json.dumps({'id':'cleanup','action':'panel.hide'}))

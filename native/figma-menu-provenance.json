@@ -116,7 +116,7 @@
     "adjustment.colorBalance",
     "adjustment.blackAndWhite"
   ],
-  "unmatched_reason": "No component with corresponding operation semantics; existing native glyphs retained. Full export contains vector paths.",
+  "unmatched_reason": "No original components for these six operations; user authorized matching-style authored extensions.",
   "ui_reference": {
     "node_ids": [
       "326:514",
@@ -142,5 +142,97 @@
       24
     ]
   },
-  "adaptation": "Source rounding, metrics, exact primitive and outlined vector geometry compiled into native menu. Source 9-unit glyphs display at 16 units per user feedback. Existing PS palette, blue hover, font settings, near-centre radial anchors, preset dimensions, swatch size and hit bounds retained."
+  "adaptation": "Source rounding, metrics, exact primitive and outlined vector geometry compiled into native menu. Source 9-unit glyphs display at 16 units per user feedback. Existing PS palette, blue hover, font settings, near-centre radial anchors, preset dimensions, swatch size and hit bounds retained.",
+  "styled_extensions": [
+    {
+      "operation": "layer.groupSelect",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layer-groupSelect.svg",
+      "sha256": "ad4bb906b06e39f19df22c6b24d95fcac024cf8fbe4ee8b03f3265dff82a64f2",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "document.newDialog",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/document-newDialog.svg",
+      "sha256": "690305f16cb3e35c1a8696e502b8bb51688d52eb4624cb5dc8d03a00d6a0549b",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "layer.new",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layer-new.svg",
+      "sha256": "6617cb71c3d9a82367101aee4906c2b6fb56a16aaa2adea3dad148736311f102",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "layer.solid",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layer-solid.svg",
+      "sha256": "1a8ac2eca078472b097cdd0d479637663ff5af8bc3e67768227e3bf4e62eca23",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "layer.group",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layer-group.svg",
+      "sha256": "aec6c2cd7f9774b86bd675870125b9eee7e01cbd8dfd36c58d9c03dfb868bd60",
+      "adaptation": "Folder silhouette from 749:0, without sort-child marks; inside one-unit border retained."
+    },
+    {
+      "operation": "adjustment.curves",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/adjustment-curves.svg",
+      "sha256": "8347ea2a352610dab25bbd76e5a5d443590c480f88bb14314cecaf95e2283214",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "adjustment.colorBalance",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/adjustment-colorBalance.svg",
+      "sha256": "d0abb6f42f933baed7c9d4c160ece0013b081cda99df55754252b14ab14d5aab",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "adjustment.blackAndWhite",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/adjustment-blackAndWhite.svg",
+      "sha256": "748bf19fcf74feecf22f15a40a49381ef53776d64a27f16846683210c6c69702",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    }
+  ],
+  "extension_source": {
+    "file": "native/figma-inspired-icons.json",
+    "sha256": "f382df86819552cd992d2f2420984775988ad5bce879939f1260aa6c38a47abc",
+    "reference_nodes": [
+      "809:619",
+      "346:6",
+      "749:0",
+      "385:14"
+    ],
+    "grid": 9,
+    "stroke": 1,
+    "root_size": [
+      18,
+      24
+    ]
+  },
+  "text_action_metrics": {
+    "icon_size": 12,
+    "text_scale": 0.95,
+    "left_padding": 9,
+    "icon_text_gap": 6,
+    "right_padding": 9
+  },
+  "home_procedural_icons": {
+    "operations": [
+      "document.recent",
+      "document.clipboard"
+    ],
+    "max_size": [
+      18,
+      18
+    ],
+    "style": "Actual aspect ratio, same grey fill and one grid-unit inside border; clipboard cap uses matching linework"
+  }
 }

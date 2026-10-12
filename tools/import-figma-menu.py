@@ -3,7 +3,7 @@
 Unsupported vector nodes are never guessed or traced from preview images.
 Geometry is compiled into MenuHost; opening the menu does not read JSON/assets.
 """
-import hashlib,json,re,sys,zipfile
+import hashlib,json,re,runpy,sys,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 source=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'151500PX.figma-export.zip'
@@ -95,6 +95,12 @@ struct FigmaIconRect {float x,y,w,h,a,b,start,end,stroke,strokeTone;};
 static constexpr float figmaDisplayIconSize = 16.0f;
 static constexpr float figmaDisplayIconWidth = 24.0f;
 static constexpr float figmaDisplayWidgetHeight = 30.0f;
+// Optical balance for text actions; icon-only segments retain their larger size.
+static constexpr float figmaBasicIconSize = 12.0f;
+static constexpr float figmaBasicTextScale = .95f;
+static constexpr float figmaBasicLeftPadding = 9.0f;
+static constexpr float figmaBasicIconGap = 6.0f;
+static constexpr float figmaBasicRightPadding = 9.0f;
 '''+''.join(blocks)+'''struct FigmaPathCommand {char op;float x,y,x2,y2,x3,y3;};
 '''+''.join(vector_blocks)+'''
 static void drawFigmaSortIcon(ImDrawList* draw,int icon,ImVec2 at,float size,ImU32 ink) {
@@ -146,3 +152,4 @@ static void drawFigmaMenuIcon(ImDrawList* draw,int icon,ImVec2 at,float size,ImU
 (ROOT/'native/FigmaMenuIcons.h').write_text(header,'utf-8')
 (ROOT/'native/figma-menu-provenance.json').write_text(json.dumps({'source':source.name,'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),'design_sha256':hashlib.sha256(design).hexdigest(),'geometry_coverage':data['geometryCoverage'],'icons':provenance,'unmatched_operations':['layer.new','layer.solid','layer.group','adjustment.curves','adjustment.colorBalance','adjustment.blackAndWhite'],'unmatched_reason':'No component with corresponding operation semantics; existing native glyphs retained. Full export contains vector paths.','ui_reference':{'node_ids':['326:514','223:20'],'metrics':metrics,'display_icon_size':16,'display_icon_button':[24,30],'item_spacing':0,'icon_root':[18,24]},'adaptation':'Source rounding, metrics, exact primitive and outlined vector geometry compiled into native menu. Source 9-unit glyphs display at 16 units per user feedback. Existing PS palette, blue hover, font settings, near-centre radial anchors, preset dimensions, swatch size and hit bounds retained.'},ensure_ascii=False,indent=2),'utf-8')
 print('Imported 4 original Figma icons (2 primitive, 2 outlined vector); no runtime file reads')
+runpy.run_path(str(ROOT/'tools/build-menu-style-icons.py'))

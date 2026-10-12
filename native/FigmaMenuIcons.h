@@ -12,6 +12,12 @@ static constexpr float figmaBorder = 1.0f;
 static constexpr float figmaDisplayIconSize = 16.0f;
 static constexpr float figmaDisplayIconWidth = 24.0f;
 static constexpr float figmaDisplayWidgetHeight = 30.0f;
+// Optical balance for text actions; icon-only segments retain their larger size.
+static constexpr float figmaBasicIconSize = 12.0f;
+static constexpr float figmaBasicTextScale = .95f;
+static constexpr float figmaBasicLeftPadding = 9.0f;
+static constexpr float figmaBasicIconGap = 6.0f;
+static constexpr float figmaBasicRightPadding = 9.0f;
 static constexpr FigmaIconRect figmaIcon0[] = {
     {0.00000000f, 0.00000000f, 9.00000000f, 5.00000000f, 0.67431195f, 0.67431195f, 0.00000000f, 1.00000000f, 1.00000000f, 0.00000001f},
     {0.00000000f, 4.00000000f, 9.00000000f, 5.00000000f, 0.67431195f, 0.67431195f, 0.00000000f, 1.00000000f, 1.00000000f, 0.00000001f},
