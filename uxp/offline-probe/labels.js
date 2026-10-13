@@ -8,9 +8,22 @@ module.exports = function createLabels(ps, session) {
   function selectionContext(quickOnly=false) {
     if (!ps.app.documents.length) return {session,document_id:null,layer_ids:[],kind:'none',mask:0};
     const doc=ps.app.activeDocument,selected=Array.from(doc.activeLayers),k=ps.constants.LayerKind;
+    // Host-backed DOM getters are costly. Reuse reads only within this one
+    // snapshot, never across requests or the final selection identity check.
+    const properties=new Map(),siblingLists=new Map();
+    function read(layer,key) {
+      let values=properties.get(layer);
+      if(!values) {values=Object.create(null);properties.set(layer,values);}
+      if(!Object.prototype.hasOwnProperty.call(values,key))values[key]=layer[key];
+      return values[key];
+    }
+    function siblings(parent) {
+      if(!siblingLists.has(parent))siblingLists.set(parent,Array.from(parent?read(parent,'layers'):doc.layers));
+      return siblingLists.get(parent);
+    }
     const kinds=selected.map(layer=>{
-      if(layer.isBackgroundLayer)return 'background';
-      const kind=layer.kind;
+      if(read(layer,'isBackgroundLayer'))return 'background';
+      const kind=read(layer,'kind');
       for(const [key,name] of [['NORMAL','pixel'],['GROUP','group'],['TEXT','text'],['SMARTOBJECT','smart'],
           ['SOLIDFILL','shape-fill'],['GRADIENTFILL','shape-fill'],['PATTERNFILL','shape-fill']])
         if(k[key]!==undefined && kind===k[key])return name;
@@ -20,33 +33,47 @@ module.exports = function createLabels(ps, session) {
       if(adjustment.some(key=>k[key]!==undefined && kind===k[key]))return 'adjustment';
       return Object.values(k).includes(kind)?'other':'unknown';
     });
-    const ids=selected.map(l=>l.id).sort((a,b)=>a-b),background=kinds.includes('background');
-    const parents=selected.map(l=>l.parent ? l.parent.id : null);
-    const sameParent=parents.every(id=>id===parents[0]);
-    const locked=selected.some(layer=>{
-      for(let node=layer,depth=0;node && depth<64;node=node.parent,depth++)
-        if(node.allLocked || node.positionLocked)return true;
-      return false;
-    });
+    const ids=selected.map(l=>read(l,'id')).sort((a,b)=>a-b),background=kinds.includes('background');
+    const parents=selected.map(l=>read(l,'parent'));
+    const parentIds=parents.map(parent=>parent?read(parent,'id'):null);
+    const sameParent=parentIds.every(id=>id===parentIds[0]);
+    let locked=false,parentLocked=false;
+    for(const layer of selected) {
+      for(let node=layer,depth=0;node && depth<=64;node=read(node,'parent'),depth++) {
+        const allLocked=read(node,'allLocked');
+        if(depth<64 && (allLocked || read(node,'positionLocked')))locked=true;
+        if(depth>0 && allLocked)parentLocked=true;
+      }
+    }
     let mask=0;
     if(!quickOnly && selected.length && !kinds.includes('unknown')) {
       if(!background)mask|=2;
       if(selected.length===1) {
-        const active=selected[0],siblings=Array.from(active.parent ? active.parent.layers : doc.layers);
-        if(active.kind===k.GROUP) {if(active.layers.length)mask|=1;}
+        const active=selected[0],order=siblings(parents[0]);
+        if(read(active,'kind')===k.GROUP) {if(read(active,'layers').length)mask|=1;}
         else {
-          const index=siblings.findIndex(l=>l.id===active.id);
-          if(index>=0 && ((index>0 && siblings[index-1].kind!==k.GROUP) ||
-              (index+1<siblings.length && siblings[index+1].kind!==k.GROUP)))mask|=1;
+          const index=order.findIndex(l=>read(l,'id')===ids[0]);
+          if(index>=0 && ((index>0 && read(order[index-1],'kind')!==k.GROUP) ||
+              (index+1<order.length && read(order[index+1],'kind')!==k.GROUP)))mask|=1;
         }
       }
       if(!background && !locked && sameParent) {
-        const siblings=Array.from(selected[0].parent ? selected[0].parent.layers : doc.layers)
-          .filter(l=>!l.isBackgroundLayer).map(l=>l.id);
-        const chosen=siblings.filter(id=>ids.includes(id));
+        const order=siblings(parents[0]),chosen=order.filter(l=>ids.includes(read(l,'id')));
         if(chosen.length===ids.length) {
-          if(siblings.slice(0,ids.length).join(',')!==chosen.join(','))mask|=4;
-          if(siblings.slice(-ids.length).join(',')!==chosen.join(','))mask|=8;
+          // To establish an edge, stop at the first unselected non-background
+          // layer. There is no need to query every sibling's expensive
+          // isBackgroundLayer getter; unusual background positions still work.
+          function atEdge(bottom) {
+            let count=0;
+            for(let i=bottom?order.length-1:0;i>=0 && i<order.length;i+=bottom?-1:1) {
+              const layer=order[i];
+              if(ids.includes(read(layer,'id'))) {if(++count===ids.length)return true;}
+              else if(!read(layer,'isBackgroundLayer'))return false;
+            }
+            return false;
+          }
+          if(!atEdge(false))mask|=4;
+          if(!atEdge(true))mask|=8;
         }
       }
     }
@@ -55,10 +82,6 @@ module.exports = function createLabels(ps, session) {
     const modes=ps.constants.DocumentMode || {},depths=ps.constants.BitsPerChannelType || {};
     const mode=doc.mode,depth=doc.bitsPerChannel;
     const layered=['RGB','CMYK','LAB','GRAYSCALE'].some(key=>modes[key]!==undefined && mode===modes[key]);
-    const parentLocked=selected.some(layer=>{
-      for(let node=layer.parent,depth=0;node && depth<64;node=node.parent,depth++)if(node.allLocked)return true;
-      return false;
-    });
     let quickMask=layered && ids.length && !parentLocked && !kinds.includes('unknown')?3:0;
     if(quickMask && !background && !locked && sameParent)quickMask|=4;
     const adjustmentDepth=[depths.EIGHT,depths.SIXTEEN].some(v=>v!==undefined && depth===v);
@@ -87,6 +110,12 @@ module.exports = function createLabels(ps, session) {
       throw Error('Target changed or no selected layers');
     return {session, document_id:doc.id, active_layer_id:active.layerID, layer_ids:ids};
   }
+  function selectionMatches(value) {
+    if(!value || value.session!==session || !Array.isArray(value.layer_ids) || !ps.app.documents.length)return false;
+    const doc=ps.app.activeDocument;
+    const ids=Array.from(doc.activeLayers,l=>l.id).sort((a,b)=>a-b);
+    return ps.app.activeDocument.id===doc.id && doc.id===value.document_id && ids.join(',')===value.layer_ids.join(',');
+  }
   async function setLabel(request) {
     const command = request.command || 'label';
     const quickIndex=quickCommands.indexOf(command);
@@ -94,13 +123,17 @@ module.exports = function createLabels(ps, session) {
     if (command === 'label' && !colors.has(request.color)) throw Error('Unknown label color');
     const expected = request.target;
     if (!expected || expected.session !== session) throw Error('Plugin session changed');
+    const started=Date.now(),timings={};
     return ps.core.executeAsModal(async context => {
+      timings.modal_wait_ms=Date.now()-started;
       if (context.isCancelled || Date.now() > request.expires_at_ms) throw Error('Cancelled or expired');
+      let stageStarted=Date.now();
       const actual = await capture();
       if (actual.document_id !== expected.document_id || actual.active_layer_id !== expected.active_layer_id ||
           !Array.isArray(expected.layer_ids) || actual.layer_ids.join(',') !== expected.layer_ids.join(','))
         throw Error('Document or layer target changed');
       if (context.isCancelled || Date.now() > request.expires_at_ms) throw Error('Cancelled or expired');
+      timings.target_ms=Date.now()-stageStarted;stageStarted=Date.now();
       // A locked Background has no color property in PS 24. Setting it as a
       // layer converts it and allocates a new ID. Reject the whole selection
       // before history/write rather than silently unlocking or partially coloring.
@@ -113,7 +146,9 @@ module.exports = function createLabels(ps, session) {
         '当前文档模式／位深或选择不支持此操作；打组需同一父组、非背景且未锁定':command==='label'?'当前图层类型未识别，未修改图层':
         command==='select'?'当前选择没有可选的组内／相邻图层':
         '当前选择不可排序：背景、位置锁定、跨组选择或已经位于目标位置');
+      timings.eligibility_ms=Date.now()-stageStarted;stageStarted=Date.now();
       const history = await context.hostControl.suspendHistory({documentID:actual.document_id,name:quickIndex>=0?'Menu '+command:'Menu layer label'});
+      timings.history_open_ms=Date.now()-stageStarted;stageStarted=Date.now();
       try {
         if(quickIndex>=0) {
           const doc=ps.app.activeDocument,k=ps.constants.LayerKind;
@@ -135,6 +170,7 @@ module.exports = function createLabels(ps, session) {
           const parentId=parentLayer?parentLayer.id:null;
           const siblingLayers=()=>parentLayer?parentLayer.layers:doc.layers;
           const siblings=Array.from(siblingLayers(),l=>l.id);
+          timings.tree_before_ms=Date.now()-stageStarted;stageStarted=Date.now();
           let placementMoves=0,placeholderUsed=false;
           function position(layer) {
             const parent=layer.parent,order=Array.from(siblingLayers(),l=>l.id);
@@ -199,18 +235,29 @@ module.exports = function createLabels(ps, session) {
             created=doc.activeLayers[0];
             if(created && placeholder && placeholder.id!==created.id && allIds(doc.layers).includes(placeholder.id))await placeholder.delete();
           }
+          timings.creation_ms=Date.now()-stageStarted;stageStarted=Date.now();
           if(created && command!=='layer.group')position(created);
           const afterIds=allIds(doc.layers),after=new Set(afterIds),original=new Set(before);
           const added=[...after].filter(id=>!original.has(id));
-          if(!created || created.kind!==kinds[quickIndex] || added.length!==1 || added[0]!==created.id ||
+          const createdId=created && created.id,createdKind=created && created.kind;
+          if(!created || createdKind!==kinds[quickIndex] || added.length!==1 || added[0]!==createdId ||
               before.some(id=>!after.has(id)))throw Error('新图层类型／数量核验失败：'+JSON.stringify({actual:created && created.kind,expected:kinds[quickIndex],id:created && created.id,added,before,after:[...after]}));
           if(command!=='layer.group' && afterIds.filter(id=>id!==created.id).join(',')!==before.join(','))throw Error('原图层顺序核验失败');
           if(command==='layer.group' && Array.from(created.layers,l=>l.id).sort((a,b)=>a-b).join(',')!==actual.layer_ids.join(','))
             throw Error('打组成员核验失败');
-          await context.hostControl.resumeHistory(history,true);
-          return {verified:true,command,layer_id:created.id,name:created.name,kind:created.kind,
-            parent_id:created.parent ? created.parent.id : null,anchor_id:anchor.id,count:command==='layer.group'?actual.layer_ids.length:1,
+          const name=created.name,parent=created.parent;
+          const result={verified:true,command,layer_id:createdId,name,kind:createdKind,
+            parent_id:parent?parent.id:null,anchor_id:anchor.id,count:command==='layer.group'?actual.layer_ids.length:1,
             placement_moves:placementMoves,placeholder_used:placeholderUsed};
+          timings.verify_ms=Date.now()-stageStarted;stageStarted=Date.now();
+          // Read the new state while the same PS modal still owns the target.
+          // Metadata failure cannot undo a successfully verified creation:
+          // the caller falls back to its normal full post-operation snapshot.
+          try {result.selection_context=selectionContext();}catch(_) {}
+          timings.selection_prepare_ms=Date.now()-stageStarted;stageStarted=Date.now();
+          await context.hostControl.resumeHistory(history,true);
+          timings.history_commit_ms=Date.now()-stageStarted;
+          return {...result,timings_ms:timings};
         }
         if (command !== 'label') {
           const doc = ps.app.activeDocument;
@@ -314,6 +361,6 @@ module.exports = function createLabels(ps, session) {
       }
     },{commandName:'Menu recent document',timeOut:0});
   }
-  return {capture,setLabel,documentTarget,createDocument,selectionContext};
+  return {capture,setLabel,documentTarget,createDocument,selectionContext,selectionMatches};
 };
 

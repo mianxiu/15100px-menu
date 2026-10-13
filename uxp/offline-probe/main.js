@@ -27,17 +27,20 @@ async function finishResponse(folder,response) {
     try {await (await folder.getEntry(name)).delete();}catch(_){}
   }
 }
-async function updateLayerContext(folder,now,force=false) {
+async function updateLayerContext(folder,now,force=false,prepared=null) {
   if(!force && now-contextReadAt<100)return;
   contextReadAt=now;
   let value;
-  try {value=labels.selectionContext();}
+  try {value=prepared && labels.selectionMatches(prepared)?prepared:labels.selectionContext();}
   catch(_) {value={session,document_id:null,layer_ids:[],kind:'unknown',mask:0};}
+  // Throttle from read completion: if DOM work itself takes over 100ms,
+  // measuring from its start would immediately launch another costly read.
+  const readDone=Date.now();contextReadAt=readDone;
   const signature=JSON.stringify(value);
-  const snapshot={...value,schema:1,plugin_time_ms:now};
+  const snapshot={...value,schema:1,plugin_time_ms:readDone};
   if(force || signature!==contextSignature || now-contextWriteAt>=1000) {
     await record(folder,'layer-context.json',snapshot);
-    contextSignature=signature;contextWriteAt=now;
+    contextSignature=signature;contextWriteAt=Date.now();
   }
   return snapshot;
 }
@@ -69,7 +72,7 @@ async function probe(reason) {
       await record(folder, 'probe-last.json', {
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.9', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.10', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         plugin_id: 'com.15100px.menu.offline-probe',
@@ -104,10 +107,13 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.9', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.10', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
+    const timingStarted=Date.now(),timings={};
     if(modifying)await record(folder,'result-'+request.id+'.json',{...response,phase:'accepted'});
+    timings.accept_ms=Date.now()-timingStarted;
+    const operationStarted=Date.now();
     try {
       if (request.operation === 'inspect') response.target = labels.documentTarget();
       if (request.operation === 'capture') response.target = await labels.capture();
@@ -115,15 +121,19 @@ async function probe(reason) {
       if (request.operation === 'new_document') response.result = await labels.createDocument(request);
     } catch (error) { response.phase = 'failed'; response.error = String(error); response.result_unknown=!!error.resultUnknown; }
     response.completed_at_ms = Date.now();
+    timings.operation_ms=Date.now()-operationStarted;
     if(modifying) {
       // Keep the committed outcome even if metadata storage fails. Prepare the
       // new selection before confirming completion, so an immediately reopened
       // menu cannot freeze the previous layer. This never repeats a mutation.
       pendingResponse=response;
       if(response.phase==='completed') {
-        try {response.layer_context=await updateLayerContext(folder,Date.now(),true);}
+        const feedbackStarted=Date.now();
+        try {response.layer_context=await updateLayerContext(folder,Date.now(),true,response.result.selection_context);}
         catch(error) {console.log('Selection feedback unavailable',String(error));}
+        timings.selection_feedback_ms=Date.now()-feedbackStarted;
       }
+      response.timings_ms=timings;
       await finishResponse(folder,response);
     }
     else await record(folder, 'probe-response.json', response);

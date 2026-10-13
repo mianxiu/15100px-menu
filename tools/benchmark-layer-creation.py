@@ -56,10 +56,16 @@ async def main():
                     app.DoJavaScript('app.activeDocument.activeLayer=app.activeDocument.artLayers.getByName("Middle");')
                     start=time.perf_counter()
                     if mode=='native':app.DoJavaScript(script)
-                    else:await bridge.execute(action,frozen_target=frozen if args.frozen_menu else None)
+                    else:completed=await bridge.execute(action,frozen_target=frozen if args.frozen_menu else None)
                     elapsed=(time.perf_counter()-start)*1000
+                    phase={}
+                    if mode=='uxp':
+                        wire=json.loads((bridge.transport.folder/'probe-request.json').read_text('utf-8-sig'))
+                        receipt=json.loads((bridge.transport.folder/('result-'+wire['id']+'.json')).read_text('utf-8-sig'))
+                        for key,value in receipt.get('timings_ms',{}).items():phase['plugin_'+key]=value
+                        for key,value in json.loads(completed['result']).get('timings_ms',{}).items():phase['plugin_'+key]=value
                     assert int(app.DoJavaScript('app.activeDocument.layers.length'))==5
-                    if index>=2:measured[mode].append({'total_ms':elapsed,**(dict(stages) if mode=='uxp' else {})})
+                    if index>=2:measured[mode].append({'total_ms':elapsed,**(dict(stages) if mode=='uxp' else {}),**phase})
                     app.DoJavaScript('app.activeDocument.activeHistoryState=app.activeDocument.historyStates[app.activeDocument.historyStates.length-2];')
                     assert int(app.DoJavaScript('app.activeDocument.layers.length'))==4
             result[action]={mode:{'summary':{key:summary([v[key] for v in values]) for key in values[0]},'samples':values} for mode,values in measured.items()}

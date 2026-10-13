@@ -22,7 +22,7 @@ async def main():
     target=await asyncio.to_thread(bridge._capture_target)
     evidence=[]
     try:
-        for action in ['layer.new','adjustment.curves','adjustment.hueSaturation','layer.new','adjustment.colorBalance','adjustment.blackWhite','layer.solid','layer.new']:
+        for action in ['layer.new','adjustment.curves','adjustment.hueSaturation','layer.new','adjustment.colorBalance','adjustment.blackWhite','layer.solid','layer.new','layer.group','layer.new']:
             frozen={key:target[key] for key in ('session','document_id','layer_ids')}
             frozen['active_layer_id']=frozen['layer_ids'][0]
             started=time.perf_counter()
@@ -37,10 +37,11 @@ async def main():
                 'anchor':frozen['active_layer_id'],'created':created['layer_id'],
                 'placement_moves':created['placement_moves'],'execute_ms':round(elapsed,2)})
             # No timer, polling, COM read or capture before the next operation.
-        assert int(app.DoJavaScript('app.activeDocument.layers.length'))==9
+        count=int(app.DoJavaScript('(function(){function count(ls){var n=0;for(var i=0;i<ls.length;i++){n++;if(ls[i].typename==="LayerSet")n+=count(ls[i].layers);}return n;}return count(app.activeDocument.layers);})();'))
+        assert count==11
         assert int(app.DoJavaScript('app.activeDocument.activeLayer.id'))==target['layer_ids'][0]
         report={'version':APP_VERSION,'plugin':status['photoshop']['uxp_version'],
-            'cases':evidence,'scope':'Real PS scratch; confirmed result supplies exact next target, eight consecutive operations without additional capture, polling, wait or retry. Physical menu opening remains separate.'}
+            'cases':evidence,'scope':'Real PS scratch; confirmed result supplies exact next target, ten consecutive operations including grouping then native inside-group creation, without additional capture, polling, wait or retry. Physical menu opening remains separate.'}
         (ROOT/f'.runtime/consecutive-creation-{APP_VERSION}.json').write_text(json.dumps(report,indent=2),'utf-8')
         print(json.dumps(report),flush=True)
     finally:

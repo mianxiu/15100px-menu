@@ -56,6 +56,12 @@ async function main(){
   const anchor=doc.layers[1],originalIds=doc.layers.map(x=>x.id);doc.activeLayers=[anchor];
   const blank=await run('layer.new'),created=doc.activeLayers[0];
   assert.equal(blank.layer_id,created.id);assert.equal(created.name,'Layer 3');
+  assert.deepEqual(blank.selection_context.layer_ids,[created.id]);
+  assert.equal(api.selectionMatches(blank.selection_context),true);
+  assert.equal(api.selectionMatches({...blank.selection_context,session:'other'}),false);
+  assert.equal(api.selectionMatches({...blank.selection_context,document_id:999}),false);
+  doc.activeLayers=[anchor];assert.equal(api.selectionMatches(blank.selection_context),false);
+  doc.activeLayers=[created];
   assert.equal(doc.layers.indexOf(created)+1,doc.layers.indexOf(anchor));
   assert.deepEqual(doc.layers.filter(x=>x!==created).map(x=>x.id),originalIds);
   for(const command of ['layer.new','layer.solid','adjustment.curves','adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite']){
@@ -119,6 +125,13 @@ async function main(){
   const w1=writes;await run('adjustment.curves');assert.equal(writes-w1,2,'Uncertain pixel layer keeps placeholder');
   const empty=fixture('root-middle');empty.boundsNoEffects={left:0,top:0,right:0,bottom:0};
   const w2=writes;await run('adjustment.curves');assert.equal(writes-w2,2,'Empty pixel layer keeps placeholder');
+  fixture('root-middle');const originalMode=Object.getOwnPropertyDescriptor(doc,'mode'),writesBefore=writes;
+  Object.defineProperty(doc,'mode',{configurable:true,get(){
+    if(writes>writesBefore)throw Error('post-creation metadata unavailable');return 'RGB';
+  }});
+  const metadataFailed=await run('layer.new');
+  assert.equal(metadataFailed.verified,true);assert.equal(metadataFailed.selection_context,undefined);
+  Object.defineProperty(doc,'mode',originalMode);
   console.log('PASS '+placementChecks+' creation placements, native group-inside, zero moves, multi-focus, consumed/retained placeholder, native naming descriptors, wrong insertion rollback');
   console.log('PASS seven commands, RGB foreground, exact group membership, target/eligibility before history, failed readback rollback');
 }
