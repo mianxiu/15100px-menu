@@ -18,7 +18,7 @@
 - [x] 禁止网络调用的两份隔离文件环境首次部署／更新／禁用启用／卸载回退与独立凭据通过，使用实际安装代码和本机PS版本文件检查；关闭宿主条件为模拟。证据.runtime/fresh-profiles-0.4.117-verification.json。此项不冒称新Windows账号或跨机实测。
 - [ ] 当前完整实体CapsLock／hover分流／输入框／跨应用焦点／取消及恢复反馈视觉确认；Windows键鼠工具两次0x80070020初始化失败，停止重试，已请求用户确认，未将预览和接口当作通过。
 - [ ] 全新Windows用户与更高PS版本完整离线安装／加载／卸载回退实测；本机仅mianx用户和PS24.0.1，没有对应环境，文件隔离测试不替代。
-- [ ] 构建统一包、提交推送并发布v0.4.118 Release（包含未单独发布的v0.4.116／117功能），核验匿名下载与哈希后记录。
+- [x] 最终统一包已构建，功能提交8377b65／v0.4.118标签已推送，GitHub Release已发布为Latest（包含未单独发布的v0.4.116／117功能）。两份公开附件匿名下载哈希核验通过，ZIP SHA256：f5ad7e94f0389aff40c83d08fa9fbf62a32f5e005ed36c6c3ddf27ba169c6b1e。旧v0.4.115发布附件不变；116／117本地构建包可恢复归档到.local/archive/dist。证据.runtime/release-0.4.118-public-verification.json、.runtime/118-release-dist-archive.json。
 
 ## v0.4.116 UXP超时／断线后的结果核对（UXP 0.3.8）
 
