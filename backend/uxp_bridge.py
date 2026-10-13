@@ -1,4 +1,5 @@
 """Production UXP execution using private local files; no COM write fallback."""
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ from .photoshop_bridge import PhotoshopBridge
 from .photoshop_version import require_version
 from .plugins import version
 from .layer_context import unavailable,validate,fresh
+from .uxp_recovery import PendingUxp
 
 def compatible(value):
     try:return version(value)[:2]==(0,3)
@@ -35,6 +37,9 @@ class UxpTransport:
     def __init__(self, config):
         self.config=Path(config)
         self.storage=Path(os.environ.get('APPDATA',str(Path.home()/'AppData/Roaming')))/'Adobe/UXP/PluginsStorage/PHSP'
+        self.pending=PendingUxp(self.config.parent/'uxp-pending.json',self.storage)
+        self.task_id=None
+        self.response_timeout=120
 
     @property
     def folder(self):
@@ -55,6 +60,7 @@ class UxpTransport:
 
     def call(self, operation, **payload):
         import msvcrt
+        if self.pending.value or self.pending.error:raise RuntimeError('上一项 UXP 结果待核对，未提交新请求')
         token=json.loads(self.config.read_text('utf-8-sig'))['token']
         folder=self.folder # Pin this host for the entire request, including its response.
         with (folder/'transport.lock').open('a+b') as lease:
@@ -66,15 +72,25 @@ class UxpTransport:
                 if not compatible(heartbeat.get('probe_version')) or time.time()*1000-heartbeat.get('plugin_time_ms',0)>15000:
                     raise RuntimeError('UXP 未就绪，请正常启动 Photoshop 并加载 0.3.x 插件')
                 identity=secrets.token_hex(16)
-                request={**payload,'id':identity,'token':token,'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
+                modifying=operation in ('set_label','new_document')
+                if modifying and version(heartbeat.get('probe_version'))<(0,3,8):
+                    raise RuntimeError('请更新并重新加载 UXP 0.3.8，以支持结果核对；未提交修改')
+                request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
                 encoded=json.dumps(request)
                 if len(encoded.encode('utf-8'))>4096:raise ValueError('UXP 请求超出本地协议长度，未提交操作')
                 temporary=folder/(identity+'.tmp')
-                temporary.write_text(encoded,'utf-8');publish_request(temporary,folder/'probe-request.json')
-                deadline=time.monotonic()+120
+                if modifying:self.pending.begin(request,folder,self.task_id)
+                try:
+                    temporary.write_text(encoded,'utf-8');publish_request(temporary,folder/'probe-request.json')
+                except Exception:
+                    if modifying:self.pending.clear()
+                    raise
+                deadline=time.monotonic()+self.response_timeout
                 while time.monotonic()<deadline:
                     try:
-                        response=json.loads((folder/'probe-response.json').read_text('utf-8-sig'))
+                        response=self.pending.read_result(allow_unknown=True) if modifying else json.loads((folder/'probe-response.json').read_text('utf-8-sig'))
+                        if response is None:
+                            time.sleep(.008);continue
                         if response.get('id')==identity:
                             if response.get('phase')!='completed':
                                 if response.get('result_unknown'):raise UxpResultUnknown(response.get('error','新建结果未知，请检查 Photoshop'))
@@ -82,7 +98,7 @@ class UxpTransport:
                             return response
                     except (FileNotFoundError,PermissionError,json.JSONDecodeError):pass
                     time.sleep(.008)
-                raise UxpResultUnknown('UXP 回应超时，结果未知；已阻止后续操作，请检查 PS 后重启服务')
+                raise UxpResultUnknown('UXP 回应超时，结果待核对；已阻止新操作，不自动重发')
             finally:
                 lease.seek(0);msvcrt.locking(lease.fileno(),msvcrt.LK_UNLCK,1)
 
@@ -94,6 +110,58 @@ class UxpBridge(PhotoshopBridge):
         self.document_guard=None
         self.transport=UxpTransport(config or Path(task_history).parent/'uxp-config.json')
         self.layer_context=unavailable()
+        self._reconcile_lock=asyncio.Lock()
+        self._recovery_feedback=''
+        if self.transport.pending.value or self.transport.pending.error:
+            self.busy=True
+            if self.transport.pending.value:self._active_task_id=self.transport.pending.value['task_id']
+
+    async def reconcile_result(self):
+        """Read original receipt only; never publish a request or query PS state."""
+        async with self._reconcile_lock:
+            pending=self.transport.pending
+            if not isinstance(pending,PendingUxp):return {'active':False}
+            if not pending.value:return pending.snapshot()
+            task_id=pending.value['task_id']
+            try:task=self.tasks.get(task_id)
+            except ValueError:return {**pending.snapshot(),'message':'原任务历史记录缺失，保留待核对记录并阻止修改'}
+            if task['state'] in ('succeeded','failed'):
+                await self.tasks.flush()
+                await asyncio.to_thread(pending.clear)
+                self.busy=False
+                if task.get('reconciled'):
+                    self.last_error=task.get('error','')
+                    self._recovery_feedback='UXP 最终结果已核对：'+task.get('message','')+'；未重复执行'
+                return {'active':False}
+            # A live worker still owns the result callback; do not release busy
+            # or overwrite its outcome while it waits for the same receipt.
+            if task['state']!='result-unknown' or (not task.get('restored') and getattr(self,'_operation_future',None) is not None and not self._operation_future.done()):
+                return pending.snapshot()
+            response=await asyncio.to_thread(pending.read_result)
+            if response is None:return pending.snapshot()
+            success=response['phase']=='completed'
+            try:message=self._result_message(task['action'],json.dumps(response['result'])) if success else '原 UXP 任务已确认失败，未重复执行'
+            except (ValueError,KeyError,TypeError):return pending.snapshot()
+            self.tasks.confirm_uxp_result(task_id,'succeeded' if success else 'failed',message=message,
+                error='' if success else response['error'],reconciled=True,
+                uxp_request_id=response['id'],uxp_session=response['session'])
+            await self.tasks.flush()
+            await asyncio.to_thread(pending.clear)
+            self.busy=False
+            self.last_error='' if success else response['error']
+            self._recovery_feedback='UXP 最终结果已核对：'+message+'；未重复执行'
+            self._queue_changed.set()
+            return {'active':False,'message':self._recovery_feedback,'task_id':task_id}
+
+    async def status(self,force=False):
+        await self.reconcile_result()
+        return await super().status(force)
+
+    async def _execute_task(self,*args,**kwargs):
+        await self.reconcile_result()
+        if not self.busy:self._recovery_feedback=''
+        try:return await super()._execute_task(*args,**kwargs)
+        finally:await self.reconcile_result()
 
     def read_layer_context(self):
         # Called by the desktop monitor, never by the low-level hook or open().
@@ -118,6 +186,11 @@ class UxpBridge(PhotoshopBridge):
         value=super()._status_snapshot()
         value['execution_backend']='uxp-local-files'
         value['layer_context']=self.layer_context
+        recovery=self.transport.pending.snapshot() if isinstance(self.transport.pending,PendingUxp) else {'active':False}
+        if recovery['active']:
+            value.update(message=recovery['message'],status_wait_reason='uxp-result-pending',status_fresh=False,busy=True)
+        elif self._recovery_feedback:recovery['message']=self._recovery_feedback
+        value['uxp_recovery']=recovery
         try:
             heartbeat=json.loads((self.transport.folder/'probe-last.json').read_text('utf-8-sig'))
             value['uxp_ready']=compatible(heartbeat.get('probe_version')) and time.time()*1000-heartbeat.get('plugin_time_ms',0)<15000
@@ -140,11 +213,40 @@ class UxpBridge(PhotoshopBridge):
         if action.startswith('label.') or action=='color':
             payload.update(command='label',color=action.split('.',1)[1] if '.' in action else 'orange')
         else:payload['command']=action
-        return json.dumps(self.transport.call('set_label',**payload)['result'])
+        self.transport.task_id=self._active_task_id
+        self._uxp_worker_active=True
+        try:
+            response=self.transport.call('set_label',**payload)
+            # The plugin captured this selection after the mutation, before its
+            # final receipt. Hand it to the desktop before completion feedback;
+            # do not reuse the pre-creation cache in a freshly opened menu.
+            context=validate(response.get('layer_context'),self._captured_app)
+            self.layer_context=context if fresh(context) else unavailable()
+            return json.dumps(response['result'])
+        finally:self._uxp_worker_active=False
 
-    async def execute(self, action, before_dispatch=None, enqueue=False):
+    def _bind_menu_target(self,target):
+        if self.focus_guard:self.focus_guard()
+        if (not isinstance(target,dict) or not isinstance(target.get('session'),str) or not target['session'] or
+            type(target.get('document_id')) is not int or target['document_id']<=0 or
+            not isinstance(target.get('layer_ids'),list) or len(target['layer_ids'])!=1 or
+            type(target['layer_ids'][0]) is not int or target['layer_ids'][0]<=0 or
+            target.get('active_layer_id')!=target['layer_ids'][0]):
+            raise ValueError('Invalid frozen single-layer menu target')
+        self._captured_target={key:target[key] for key in ('session','document_id','active_layer_id','layer_ids')}
+        self._captured_target['layer_ids']=list(target['layer_ids'])
+        self._captured_app=target['session']
+        return {**self._captured_target,'instance_binding':target['session']}
+
+    async def execute(self, action, before_dispatch=None, enqueue=False, frozen_target=None):
         if action=='document.recent':raise ValueError('请从首页最近预设列表选择尺寸')
         if self.execution_guard:self.execution_guard()
+        if frozen_target is not None:
+            # The menu already froze one selected layer. The plugin rechecks
+            # session/document/active selection inside its modal before writes;
+            # another capture IPC would only rediscover the same identity.
+            frozen={**frozen_target,'layer_ids':list(frozen_target.get('layer_ids',[]))}
+            return await self._execute_task(action,before_dispatch,capture=lambda:self._bind_menu_target(frozen))
         return await super().execute(action,before_dispatch,enqueue=False)
 
     def _capture_new_target(self):
@@ -157,7 +259,10 @@ class UxpBridge(PhotoshopBridge):
 
     def _execute_new_document(self, preset):
         if self.document_guard:self.document_guard()
-        return json.dumps(self.transport.call('new_document',target=self._captured_target,preset=preset)['result'])
+        self.transport.task_id=self._active_task_id
+        self._uxp_worker_active=True
+        try:return json.dumps(self.transport.call('new_document',target=self._captured_target,preset=preset)['result'])
+        finally:self._uxp_worker_active=False
 
     async def execute_recent(self, preset, before_dispatch=None):
         if self.execution_guard:self.execution_guard()

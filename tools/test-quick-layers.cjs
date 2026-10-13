@@ -11,15 +11,25 @@ action:{batchPlay:async list=>list.map(d=>{
   if(d._target[0]._ref==='layer') {
     assert.equal(d.using,undefined);assert.equal(d._options.dialogOptions,'dontDisplay');
     const layer=attach({id:next++,kind:'pixel',name:'Layer '+(next-1)});
-    doc.layers.unshift(layer);doc.activeLayers=[layer];return {};
+    const anchor=doc.activeLayers[0],parent=anchor.kind==='group'?anchor:anchor.parent;
+    const siblings=parent?parent.layers:doc.layers;
+    layer.parent=parent;
+    if(badMove){doc.layers.unshift(layer);layer.parent=null;}
+    else siblings.splice(anchor.kind==='group'?0:siblings.indexOf(anchor),0,layer);
+    doc.activeLayers=[layer];return {};
   }
   assert.equal(d.using.name,undefined);
   const type=d.using.type._obj;
   const kind={solidColorLayer:'fill',curves:'curves',hueSaturation:'hue',colorBalance:'balance',blackAndWhite:'bw'}[type];
   assert.equal(d._options.dialogOptions,'dontDisplay');
   if(type==='solidColorLayer')assert.deepEqual(d.using.type.color,{_obj:'RGBColor',red:12,grain:34,blue:56});
-  if(consumeEmpty)remove(doc.activeLayers[0]);
-  const layer=attach({id:next++,kind:wrongKind?'pixel':kind,name:type+' '+next});doc.layers.unshift(layer);doc.activeLayers=[layer];return {};
+  const anchor=doc.activeLayers[0],bounds=anchor.boundsNoEffects;
+  const parent=anchor.kind==='group'?anchor:anchor.parent,siblings=parent?parent.layers:doc.layers;
+  const index=anchor.kind==='group'?0:siblings.indexOf(anchor);
+  if(consumeEmpty && anchor.kind==='pixel' && !anchor.isBackgroundLayer && !(bounds && bounds.right>bounds.left && bounds.bottom>bounds.top))remove(anchor);
+  const layer=attach({id:next++,kind:wrongKind?'pixel':kind,name:type+' '+next,parent});
+  if(badMove){doc.layers.unshift(layer);layer.parent=null;}else siblings.splice(index,0,layer);
+  doc.activeLayers=[layer];return {};
 })},core:{executeAsModal:async f=>{
   const snapshot=structuredClone({layers:doc.layers,active:doc.activeLayers});
   return f({isCancelled:false,hostControl:{suspendHistory:async()=>{histories++;return 1;},resumeHistory:async(id,commit)=>{
@@ -30,16 +40,12 @@ let badMove=false;
 function remove(layer) {const layers=layer.parent?layer.parent.layers:doc.layers;const i=layers.indexOf(layer);assert.ok(i>=0);layers.splice(i,1);}
 function attach(layer) {
   Object.defineProperty(layer,'move',{value:async(anchor,placement)=>{
-    if(badMove)return;
-    assert.ok(['before','inside'].includes(placement));remove(layer);
-    layer.parent=placement==='inside'?anchor:anchor.parent;
-    const layers=layer.parent?layer.parent.layers:doc.layers;
-    layers.splice(placement==='inside'?0:layers.indexOf(anchor),0,layer);
+    throw Error('Creation must use native insertion, never move');
   }});
   Object.defineProperty(layer,'delete',{value:async()=>remove(layer)});
   return layer;
 }
-doc.createLayer=async()=>{writes++;const l=attach({id:next++,kind:'pixel'});doc.layers.unshift(l);doc.activeLayers=[l];return l;};
+doc.createLayer=async()=>{throw Error('DOM top-then-move creation must not be used');};
 doc.createLayerGroup=async({name,fromLayers})=>{assert.equal(name,undefined);writes++;for(const layer of fromLayers)remove(layer);const l={id:next++,kind:'group',layers:[...fromLayers]};for(const child of l.layers)child.parent=l;doc.layers.unshift(l);doc.activeLayers=[l];return l;};
 const api=create(ps,'s');
 async function run(command,target=null){return api.setLabel({command,target:target || await api.capture(),expires_at_ms:Date.now()+5000});}
@@ -86,10 +92,12 @@ async function main(){
   for(const caseName of ['root-middle','group-child','group-itself','group-empty','multi-focus-lower']) {
     for(const command of ['layer.new','layer.solid','adjustment.curves','adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite']) {
       const anchor=fixture(caseName),ids=flatten(doc.layers);
-      const inside=command!=='layer.new' && anchor.kind==='group';
+      assert.equal(api.selectionContext(true).quick_mask,api.selectionContext().quick_mask,'Creation-only capability must match full fresh eligibility');
+      const inside=anchor.kind==='group';
       const parent=inside?anchor:anchor.parent;
       const originalSiblings=(parent?parent.layers:doc.layers).map(l=>l.id);
       const result=await run(command),made=doc.activeLayers[0];
+      assert.equal(result.placement_moves,0,'Native creation must not be repositioned');
       assert.equal(result.layer_id,made.id);assert.equal(made.parent,parent);
       const siblings=(parent?parent.layers:doc.layers).map(l=>l.id);
       if(inside)assert.equal(siblings[0],made.id);
@@ -105,7 +113,13 @@ async function main(){
   const failedAnchor=fixture('root-middle'),originalTree=flatten(doc.layers),r0=rollbacks;
   badMove=true;await assert.rejects(run('adjustment.curves'),/位置核验失败/);badMove=false;
   assert.deepEqual(flatten(doc.layers),originalTree);assert.equal(rollbacks,r0+1);
-  console.log('PASS '+placementChecks+' creation placements, native group-inside/blank-outside, multi-focus, consumed/retained placeholder, native naming descriptors, failed move rollback');
+  const filled=fixture('root-middle');filled.boundsNoEffects={left:0,top:0,right:32,bottom:32};
+  const w0=writes;await run('adjustment.curves');assert.equal(writes-w0,1,'Filled layer must avoid placeholder creation');
+  const uncertain=fixture('root-middle');uncertain.boundsNoEffects={left:0,top:0,right:NaN,bottom:32};
+  const w1=writes;await run('adjustment.curves');assert.equal(writes-w1,2,'Uncertain pixel layer keeps placeholder');
+  const empty=fixture('root-middle');empty.boundsNoEffects={left:0,top:0,right:0,bottom:0};
+  const w2=writes;await run('adjustment.curves');assert.equal(writes-w2,2,'Empty pixel layer keeps placeholder');
+  console.log('PASS '+placementChecks+' creation placements, native group-inside, zero moves, multi-focus, consumed/retained placeholder, native naming descriptors, wrong insertion rollback');
   console.log('PASS seven commands, RGB foreground, exact group membership, target/eligibility before history, failed readback rollback');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

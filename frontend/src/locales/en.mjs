@@ -288,5 +288,7 @@ export default {
   "请从首页最近预设列表选择尺寸": "Choose dimensions from the Home recent presets",
   "最近预设已改变，请重新打开菜单": "Recent presets changed; reopen the menu",
   "菜单已重新打开，未创建文档": "Menu reopened; no document was created",
-  "最近预设新建需要 UXP 执行端": "Creating from recent presets requires UXP"
+  "最近预设新建需要 UXP 执行端": "Creating from recent presets requires UXP",
+  "核对 UXP 任务结果": "Check original UXP result",
+  "只读取原请求的最终记录，不重新执行、不切换 COM。缺少可靠结果时继续阻止修改，重启不会清除待核对记录。": "Only read the original result; never replay or fall back to COM. Changes remain blocked without reliable evidence, including after restart."
 };

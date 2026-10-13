@@ -262,6 +262,7 @@ class PhotoshopBridge:
             if before_dispatch:
                 await before_dispatch(target)
             future = asyncio.get_running_loop().run_in_executor(self.executor, execute or self._execute, action)
+            self._operation_future = future
             dispatched = True
             future.add_done_callback(finished)
             result = await asyncio.wait_for(asyncio.shield(future), self.operation_timeout)

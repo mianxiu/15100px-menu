@@ -29,6 +29,8 @@ async function main() {
   assert.equal((await api.setLabel(request)).count,2);
   assert.equal((await api.setLabel({...request,color:'none'})).color,'none');
   mismatch=true; await assert.rejects(api.setLabel(request)); assert.equal(rollback,1);
+  ps.core.executeAsModal=async fn=>fn({hostControl:{suspendHistory:async()=>1,resumeHistory:async(id,commit)=>{if(!commit)throw Error('rollback failed');}}});
+  await assert.rejects(api.setLabel(request),error=>error.resultUnknown===true);
   console.log('PASS: session/document/selection/expiry/cancel protections; multi-label/clear/readback rollback');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

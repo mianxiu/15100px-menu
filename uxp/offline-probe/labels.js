@@ -5,19 +5,20 @@ module.exports = function createLabels(ps, session) {
     'adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite'];
   // DOM-only, read-only metadata. No batchPlay, executeAsModal, pixels or
   // thumbnails on the menu path. The executor uses this same eligibility rule.
-  function selectionContext() {
+  function selectionContext(quickOnly=false) {
     if (!ps.app.documents.length) return {session,document_id:null,layer_ids:[],kind:'none',mask:0};
     const doc=ps.app.activeDocument,selected=Array.from(doc.activeLayers),k=ps.constants.LayerKind;
     const kinds=selected.map(layer=>{
       if(layer.isBackgroundLayer)return 'background';
+      const kind=layer.kind;
       for(const [key,name] of [['NORMAL','pixel'],['GROUP','group'],['TEXT','text'],['SMARTOBJECT','smart'],
           ['SOLIDFILL','shape-fill'],['GRADIENTFILL','shape-fill'],['PATTERNFILL','shape-fill']])
-        if(k[key]!==undefined && layer.kind===k[key])return name;
+        if(k[key]!==undefined && kind===k[key])return name;
       const adjustment=['BLACKANDWHITE','BRIGHTNESSCONTRAST','CHANNELMIXER','COLORBALANCE','COLORLOOKUP',
         'CURVES','EXPOSURE','GRADIENTMAP','HUESATURATION','INVERSION','LEVELS','PHOTOFILTER',
         'POSTERIZE','SELECTIVECOLOR','THRESHOLD','VIBRANCE','GRAIN','CLARITY'];
-      if(adjustment.some(key=>k[key]!==undefined && layer.kind===k[key]))return 'adjustment';
-      return Object.values(k).includes(layer.kind)?'other':'unknown';
+      if(adjustment.some(key=>k[key]!==undefined && kind===k[key]))return 'adjustment';
+      return Object.values(k).includes(kind)?'other':'unknown';
     });
     const ids=selected.map(l=>l.id).sort((a,b)=>a-b),background=kinds.includes('background');
     const parents=selected.map(l=>l.parent ? l.parent.id : null);
@@ -28,7 +29,7 @@ module.exports = function createLabels(ps, session) {
       return false;
     });
     let mask=0;
-    if(selected.length && !kinds.includes('unknown')) {
+    if(!quickOnly && selected.length && !kinds.includes('unknown')) {
       if(!background)mask|=2;
       if(selected.length===1) {
         const active=selected[0],siblings=Array.from(active.parent ? active.parent.layers : doc.layers);
@@ -52,17 +53,18 @@ module.exports = function createLabels(ps, session) {
     if(ps.app.activeDocument.id!==doc.id || Array.from(doc.activeLayers,l=>l.id).sort((a,b)=>a-b).join(',')!==ids.join(','))
       throw Error('Layer context changed during read');
     const modes=ps.constants.DocumentMode || {},depths=ps.constants.BitsPerChannelType || {};
-    const layered=['RGB','CMYK','LAB','GRAYSCALE'].some(key=>modes[key]!==undefined && doc.mode===modes[key]);
+    const mode=doc.mode,depth=doc.bitsPerChannel;
+    const layered=['RGB','CMYK','LAB','GRAYSCALE'].some(key=>modes[key]!==undefined && mode===modes[key]);
     const parentLocked=selected.some(layer=>{
       for(let node=layer.parent,depth=0;node && depth<64;node=node.parent,depth++)if(node.allLocked)return true;
       return false;
     });
     let quickMask=layered && ids.length && !parentLocked && !kinds.includes('unknown')?3:0;
     if(quickMask && !background && !locked && sameParent)quickMask|=4;
-    const adjustmentDepth=[depths.EIGHT,depths.SIXTEEN].some(v=>v!==undefined && doc.bitsPerChannel===v);
+    const adjustmentDepth=[depths.EIGHT,depths.SIXTEEN].some(v=>v!==undefined && depth===v);
     if(quickMask && adjustmentDepth) {
       quickMask|=8;
-      if(doc.mode===modes.RGB)quickMask|=112;
+      if(mode===modes.RGB)quickMask|=112;
     }
     return {session,document_id:doc.id,layer_ids:ids,selection_count:ids.length,
       kind:kinds.every(kind=>kind===kinds[0])?(kinds[0] || 'none'):'mixed',
@@ -72,6 +74,13 @@ module.exports = function createLabels(ps, session) {
     if (!ps.app.documents.length) throw Error('No document');
     const doc = ps.app.activeDocument;
     const ids = doc.activeLayers.map(layer => layer.id).sort((a,b)=>a-b);
+    if(ids.length===1) {
+      // A single selected layer is necessarily the active layer. Keep the
+      // fresh document/selection readback, avoid a host batchPlay round trip.
+      if(ps.app.activeDocument.id!==doc.id || doc.activeLayers.map(layer=>layer.id).join(',')!==ids.join(','))
+        throw Error('Target changed or no selected layers');
+      return {session,document_id:doc.id,active_layer_id:ids[0],layer_ids:ids};
+    }
     const [active] = await ps.action.batchPlay([{_obj:'get',_target:[
       {_ref:'property',_property:'layerID'},{_ref:'layer',_enum:'ordinal',_value:'targetEnum'}]}], {});
     if (ps.app.activeDocument.id !== doc.id || !ids.length || !ids.includes(active.layerID))
@@ -97,7 +106,9 @@ module.exports = function createLabels(ps, session) {
       // before history/write rather than silently unlocking or partially coloring.
       if (command === 'label' && ps.app.activeDocument.activeLayers.some(layer => layer.isBackgroundLayer))
         throw Error('背景图层不支持颜色标签，请先解锁背景图层；本次未修改任何图层');
-      const eligibility=selectionContext(),bit={select:1,label:2,moveToTop:4,moveToBottom:8}[command];
+      // Creation needs its own mask, not neighbouring-layer/sort capabilities.
+      // All document/selection/type/lock/mode/depth checks remain fresh.
+      const eligibility=selectionContext(quickIndex>=0),bit={select:1,label:2,moveToTop:4,moveToBottom:8}[command];
       if(quickIndex>=0 ? !(eligibility.quick_mask & (1<<quickIndex)) : !(eligibility.mask & bit))throw Error(quickIndex>=0?
         '当前文档模式／位深或选择不支持此操作；打组需同一父组、非背景且未锁定':command==='label'?'当前图层类型未识别，未修改图层':
         command==='select'?'当前选择没有可选的组内／相邻图层':
@@ -107,29 +118,31 @@ module.exports = function createLabels(ps, session) {
         if(quickIndex>=0) {
           const doc=ps.app.activeDocument,k=ps.constants.LayerKind;
           const kinds=[k.NORMAL,k.SOLIDFILL,k.GROUP,k.CURVES,k.HUESATURATION,k.COLORBALANCE,k.BLACKANDWHITE];
-          function allIds(layers) {return Array.from(layers).flatMap(l=>[l.id,...(l.kind===k.GROUP?allIds(l.layers):[])]);}
+          // Reuse original type reads inside this modal; reread the actual
+          // tree/order and every new node, without another full anchor walk.
+          const knownKinds=new Map(),knownLayers=new Map();
+          function allIds(layers) {return Array.from(layers).flatMap(l=>{
+            const id=l.id,kind=knownKinds.has(id)?knownKinds.get(id):l.kind;
+            knownKinds.set(id,kind);knownLayers.set(id,l);
+            return [id,...(kind===k.GROUP?allIds(l.layers):[])];
+          });}
           const before=allIds(doc.layers);
-          function find(layers,id) {for(const layer of layers) {if(layer.id===id)return layer;if(layer.kind===k.GROUP) {const hit=find(layer.layers,id);if(hit)return hit;}}}
-          const anchor=find(doc.layers,actual.active_layer_id);
+          const anchor=knownLayers.get(actual.active_layer_id);
           if(!anchor)throw Error('新建图层目标已改变');
-          // Fill/adjustment creation follows native PS: selecting a group
-          // creates inside it; the existing blank-layer rule stays above it.
-          const insideGroup=command!=='layer.new' && command!=='layer.group' && anchor.kind===k.GROUP;
-          const parentId=insideGroup?anchor.id:anchor.parent ? anchor.parent.id : null;
-          const siblingLayers=()=>insideGroup?anchor.layers:anchor.parent ? anchor.parent.layers : doc.layers;
+          // A selected group receives its new layer inside, like native PS.
+          const insideGroup=command!=='layer.group' && knownKinds.get(anchor.id)===k.GROUP;
+          const parentLayer=insideGroup?anchor:anchor.parent;
+          const parentId=parentLayer?parentLayer.id:null;
+          const siblingLayers=()=>parentLayer?parentLayer.layers:doc.layers;
           const siblings=Array.from(siblingLayers(),l=>l.id);
-          const firstChild=insideGroup?Array.from(anchor.layers)[0]:null;
-          async function position(layer) {
-            const positioned=()=> {
-              const parent=layer.parent ? layer.parent.id : null;
-              const order=Array.from(siblingLayers(),l=>l.id);
-              return parent===parentId && (insideGroup?order[0]===layer.id:
-                order.indexOf(layer.id)+1===order.indexOf(anchor.id));
-            };
-            if(!positioned())await layer.move(insideGroup?(firstChild || anchor):anchor,
-              insideGroup && !firstChild?ps.constants.ElementPlacement.PLACEINSIDE:ps.constants.ElementPlacement.PLACEBEFORE);
-            const order=Array.from(siblingLayers(),l=>l.id).filter(id=>id!==layer.id);
-            if(!positioned() || order.join(',')!==siblings.join(','))throw Error('新建图层位置核验失败');
+          let placementMoves=0,placeholderUsed=false;
+          function position(layer) {
+            const parent=layer.parent,order=Array.from(siblingLayers(),l=>l.id);
+            const index=order.indexOf(layer.id),anchorIndex=order.indexOf(anchor.id);
+            const positioned=(parent?parent.id:null)===parentId && index>=0 &&
+              (insideGroup?index===0:anchorIndex>=0 && index+1===anchorIndex);
+            if(!positioned || order.filter(id=>id!==layer.id).join(',')!==siblings.join(','))
+              throw Error('新建图层位置核验失败：PS 原生创建位置不符，已回滚；未移动图层');
           }
           let created;
           if(command==='layer.new') {
@@ -145,8 +158,27 @@ module.exports = function createLabels(ps, session) {
             // Photoshop may consume the active empty pixel layer when making
             // a fill/adjustment. Give it a disposable layer inside this same
             // history transaction so the user's selected layer is preserved.
-            const placeholder=await doc.createLayer();
-            await position(placeholder);
+            // Only an empty/uncertain pixel layer needs a disposable anchor.
+            // Bounds without effects prove pixels exist; non-pixel/background
+            // layers are not consumed by Photoshop's native make command.
+            let mayConsume=anchor.kind===k.NORMAL && !anchor.isBackgroundLayer;
+            if(mayConsume) {
+              try {
+                const b=anchor.boundsNoEffects;
+                if(b && ['left','top','right','bottom'].every(key=>Number.isFinite(b[key])) && b.right>b.left && b.bottom>b.top)
+                  mayConsume=false;
+              } catch(_) {} // Unknown bounds keep the original protection.
+            }
+            let placeholder=null;
+            if(mayConsume) {
+              // Native make inserts above the selected layer. DOM createLayer
+              // starts at the document top and its later move is visibly jarring.
+              const made=await ps.action.batchPlay([{_obj:'make',_target:[{_ref:'layer'}],_options:{dialogOptions:'dontDisplay'}}],{immediateRedraw:false});
+              if(made.some(r=>r._obj==='error'))throw Error('PS 拒绝创建保护层');
+              placeholder=doc.activeLayers[0];placeholderUsed=true;
+              if(!placeholder || before.includes(placeholder.id))throw Error('保护层创建读取失败');
+              position(placeholder);
+            }
             let type;
             if(command==='layer.solid') {
               const rgb=ps.app.foregroundColor.rgb;
@@ -165,9 +197,9 @@ module.exports = function createLabels(ps, session) {
             const results=await ps.action.batchPlay([{_obj:'make',_target:[{_ref:obj}],using:{_obj:obj,type},_options:{dialogOptions:'dontDisplay'}}],{});
             if(results.some(r=>r._obj==='error'))throw Error('Photoshop 拒绝创建图层');
             created=doc.activeLayers[0];
-            if(created && placeholder.id!==created.id && allIds(doc.layers).includes(placeholder.id))await placeholder.delete();
+            if(created && placeholder && placeholder.id!==created.id && allIds(doc.layers).includes(placeholder.id))await placeholder.delete();
           }
-          if(created && command!=='layer.group')await position(created);
+          if(created && command!=='layer.group')position(created);
           const afterIds=allIds(doc.layers),after=new Set(afterIds),original=new Set(before);
           const added=[...after].filter(id=>!original.has(id));
           if(!created || created.kind!==kinds[quickIndex] || added.length!==1 || added[0]!==created.id ||
@@ -177,7 +209,8 @@ module.exports = function createLabels(ps, session) {
             throw Error('打组成员核验失败');
           await context.hostControl.resumeHistory(history,true);
           return {verified:true,command,layer_id:created.id,name:created.name,kind:created.kind,
-            parent_id:created.parent ? created.parent.id : null,anchor_id:anchor.id,count:command==='layer.group'?actual.layer_ids.length:1};
+            parent_id:created.parent ? created.parent.id : null,anchor_id:anchor.id,count:command==='layer.group'?actual.layer_ids.length:1,
+            placement_moves:placementMoves,placeholder_used:placeholderUsed};
         }
         if (command !== 'label') {
           const doc = ps.app.activeDocument;
@@ -240,7 +273,8 @@ module.exports = function createLabels(ps, session) {
         await context.hostControl.resumeHistory(history, true);
         return {verified:true, count:actual.layer_ids.length, inherited, color:request.color, target:actual};
       } catch (error) {
-        await context.hostControl.resumeHistory(history, false);
+        try {await context.hostControl.resumeHistory(history, false);}
+        catch(_) {error.resultUnknown=true;}
         throw error;
       }
     }, {commandName:'Menu layer label', timeOut:0});

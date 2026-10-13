@@ -258,6 +258,11 @@ class Application(web.Application):
             return self.tasks.get(args.get('id'))
         if action == 'tasks.cancel':
             return self.bridge.request_cancel(args.get('id'))
+        if action == 'tasks.reconcile':
+            if not isinstance(self.bridge,UxpBridge):raise ValueError('结果核对仅适用于 UXP 任务')
+            result=await self.bridge.reconcile_result()
+            await self.broadcast({'type':'status','data':await self.dispatch('status',{})})
+            return {**result,'message':result.get('message','没有待核对的 UXP 任务')}
         if action=='photoshop.start':
             if self.operation_lock.locked() or self.bridge.busy or getattr(self.bridge,'_queue',[]):
                 raise RuntimeError('请等待当前操作结束；启动请求未排队')
@@ -363,6 +368,11 @@ class Application(web.Application):
                     async with self.panel_lock:
                         if 'menu_epoch' in args and args['menu_epoch'] != self.desktop.menu_epoch:
                             return {"message":"已忽略旧菜单操作"}
+                        frozen_target=None
+                        snapshot=getattr(self.desktop,'menu_layer_context',None)
+                        if isinstance(self.bridge,UxpBridge) and 'menu_epoch' in args and snapshot and len(snapshot.get('layer_ids',[]))==1:
+                            frozen_target={key:snapshot.get(key) for key in ('session','document_id','layer_ids')}
+                            frozen_target['active_layer_id']=snapshot['layer_ids'][0]
                     # Target reads can also wait for Photoshop; show busy
                     # feedback before entering COM, not just before writing.
                     if not self.bridge.busy:
@@ -376,7 +386,11 @@ class Application(web.Application):
                             await asyncio.to_thread(self.desktop.hide)
                     # Capture before hiding; the PS-side check and write
                     # share one JSX call on the original COM connection.
-                    result = await self.bridge.execute(name, before_dispatch=before_dispatch)
+                    if frozen_target is not None:
+                        result=await self.bridge.execute(name,before_dispatch=before_dispatch,frozen_target=frozen_target)
+                    else:result = await self.bridge.execute(name, before_dispatch=before_dispatch)
+                    if isinstance(self.bridge,UxpBridge):
+                        self.desktop.layer_context=dict(self.bridge.layer_context)
                 logging.info("Script action completed: %s", name)
                 await self.broadcast({"type": "notice", "scope": "operation", "action": name, "ok": True, "message": result["message"]})
                 return result

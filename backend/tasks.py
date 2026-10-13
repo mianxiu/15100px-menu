@@ -134,6 +134,20 @@ class TaskStore:
             try:self.on_change(self.get(task_id))
             except Exception:logging.exception('Task status notification failed')
 
+    def confirm_uxp_result(self, task_id, state, **details):
+        """Record evidence after restart, without making history executable."""
+        record = self.records[task_id]
+        if record.get('channel') != 'uxp-local-files' or record['state'] != 'result-unknown' or state not in ('succeeded', 'failed'):
+            raise ValueError('Only an unknown UXP result can be confirmed')
+        if not record.get('restored'):
+            self.update(task_id, state, **details)
+            return
+        elapsed = record.get('elapsed_ms', 0)
+        record.setdefault('timeline', []).append({'state':state, 'started_at':datetime.now(timezone.utc).isoformat(),
+                                                  'start_elapsed_ms':elapsed, 'duration_ms':0})
+        record.update(deepcopy(details), state=state)
+        self._changed(task_id)
+
     def get(self, task_id):
         if not isinstance(task_id,str) or task_id not in self.records:
             raise ValueError('未找到当前服务会话中的任务')

@@ -54,9 +54,10 @@ static bool taskBusy=false,taskFailed=false,taskHasResult=false;
 static bool busyFeedback=false;
 static ULONGLONG feedbackStarted=0;
 static ULONGLONG taskStarted=0;
-static std::string taskName,taskError;
+static std::string taskName,taskError,taskRecovery;
 static int taskQueueCount=0;
 static std::string taskStatus() {
+    if (!taskRecovery.empty()) return taskRecovery;
     if (taskBusy) return "执行中："+(taskName.empty()?std::string("Photoshop 操作"):taskName)+
         " · "+std::to_string((GetTickCount64()-taskStarted)/1000)+" 秒"+
         (taskQueueCount>0?" · 等待 "+std::to_string(taskQueueCount)+" 项":"");
@@ -408,6 +409,8 @@ static void accept(const Json& event) {
         homepageCapable=data.at("settings").value("enabled",true);
         if (ps.contains("document")) capable=capable && ps["document"].is_string();
         updateBusy(ps.value("busy",false),ps.value("queue_ready",false),ps.value("queue_count",0));
+        taskRecovery=ps.contains("uxp_recovery")?ps["uxp_recovery"].value("message",std::string()):std::string();
+        if (!taskRecovery.empty()) {taskError.clear();taskFailed=false;requireText(taskRecovery);}
         document=ps.contains("document") && ps["document"].is_string()?ps["document"].get<std::string>():ps.value("message","Photoshop 未连接");
         const auto& settings=data.at("settings");rightHide=settings.value("right_click_hide",false);
         for (int i=0;i<4;++i) shortcuts[i]=shortcut(settings.at("shortcuts").value(actions[i],""));
@@ -418,7 +421,7 @@ static void accept(const Json& event) {
             if (action=="document.recent")taskName="按最近预设新建文档";
             for (const auto& label:labelColors) if (action==std::string("label.")+label.id) taskName=std::string(label.name)+"标签";
             for(int i=0;i<7;++i)if(action==quickActions[i])taskName=quickLabels[i];
-            notice.clear();taskError.clear();taskFailed=false;taskHasResult=false;
+            notice.clear();taskError.clear();taskRecovery.clear();taskFailed=false;taskHasResult=false;
         }
         updateBusy(event.value("busy",false),event.value("queue_ready",false),event.value("queue_count",0));
     }
@@ -569,21 +572,23 @@ static void theme() {
     auto& style=ImGui::GetStyle();style=ImGuiStyle();
     if (i<2) ImGui::StyleColorsLight();else ImGui::StyleColorsDark();
     auto gray=[](int v){float f=v/255.f;return ImVec4(f,f,f,1);};
-    const int background[]={240,184,83,50},fill[]={252,209,69,41},pressed[]={191,128,56,31};
+    const int background[]={240,184,83,50},fill[]={252,209,69,41};
     const int text[]={41,15,240,225},muted[]={84,56,214,173},disabled[]={168,128,135,115};
     const int border[]={204,148,102,71},divider[]={217,153,62,38};
     // Less saturated blue on light themes; subdued blue on dark themes.
     // Keep the theme's normal text readable on every hover surface.
     const ImVec4 hover[]={ImVec4(220/255.f,238/255.f,1,1),ImVec4(168/255.f,199/255.f,226/255.f,1),
         ImVec4(53/255.f,79/255.f,108/255.f,1),ImVec4(46/255.f,64/255.f,84/255.f,1)};
+    const ImVec4 active[]={ImVec4(195/255.f,221/255.f,248/255.f,1),ImVec4(146/255.f,183/255.f,216/255.f,1),
+        ImVec4(44/255.f,68/255.f,96/255.f,1),ImVec4(39/255.f,56/255.f,76/255.f,1)};
     auto& c=style.Colors;
     c[ImGuiCol_WindowBg]=c[ImGuiCol_PopupBg]=gray(background[i]);
     c[ImGuiCol_Text]=gray(text[i]);c[ImGuiCol_TextDisabled]=gray(disabled[i]);
     c[ImGuiCol_Border]=gray(border[i]);c[ImGuiCol_Separator]=gray(divider[i]);
     c[ImGuiCol_FrameBg]=c[ImGuiCol_Button]=gray(fill[i]);
     c[ImGuiCol_FrameBgHovered]=c[ImGuiCol_ButtonHovered]=c[ImGuiCol_HeaderHovered]=hover[i];
-    c[ImGuiCol_FrameBgActive]=c[ImGuiCol_ButtonActive]=c[ImGuiCol_HeaderActive]=gray(pressed[i]);
-    c[ImGuiCol_Header]=gray(pressed[i]);
+    c[ImGuiCol_FrameBgActive]=c[ImGuiCol_ButtonActive]=c[ImGuiCol_HeaderActive]=active[i];
+    c[ImGuiCol_Header]=c[ImGuiCol_TextSelectedBg]=hover[i];
     // Reuse PlotLines for secondary labels; all hand-drawn UI uses this palette.
     c[ImGuiCol_PlotLines]=gray(muted[i]);
     c[ImGuiCol_CheckMark]=c[ImGuiCol_NavHighlight]=i<2?ImVec4(.08f,.45f,.90f,1):ImVec4(.30f,.65f,1,1);
@@ -1244,7 +1249,7 @@ static void drawMenu() {
         ImGui::Separator();if (!holdMode && ImGui::MenuItem("后台管理…")) send("control");
         ImGui::PopItemFlag();
         ImGui::TextDisabled("%s",document.c_str());
-        if (!notice.empty()) { ImGui::PushTextWrapPos();ImGui::TextColored({.94f,.65f,.35f,1},"%s",notice.c_str());ImGui::PopTextWrapPos(); }
+        if (!notice.empty()) { ImGui::PushTextWrapPos();ImGui::TextColored(ImGui::GetStyle().Colors[ImGuiCol_Text],"%s",notice.c_str());ImGui::PopTextWrapPos(); }
         if (!holdMode && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
             if (rightHide) send("hide");else ImGui::OpenPopup("context");
         }
@@ -1502,7 +1507,11 @@ int main() {
                     float a=luminance(foreground),b=luminance(background);
                     return (std::max(a,b)+.05f)/(std::min(a,b)+.05f);
                 };
-                if(contrast(c[ImGuiCol_Text],c[ImGuiCol_HeaderHovered])<4.5f ||
+                if(contrast(c[ImGuiCol_Text],c[ImGuiCol_Header])<4.5f ||
+                   contrast(c[ImGuiCol_Text],c[ImGuiCol_HeaderActive])<4.5f ||
+                   contrast(c[ImGuiCol_Text],c[ImGuiCol_ButtonActive])<4.5f ||
+                   contrast(c[ImGuiCol_Text],c[ImGuiCol_WindowBg])<4.5f ||
+                   contrast(c[ImGuiCol_Text],c[ImGuiCol_HeaderHovered])<4.5f ||
                    contrast(c[ImGuiCol_PlotLines],c[ImGuiCol_Button])<4.5f)
                     throw std::runtime_error("Theme preset text contrast failed");
                 bool light=uiTheme=="light" || uiTheme=="light-gray";

@@ -93,14 +93,19 @@ async def main():
             await asyncio.sleep(.02)
         raise AssertionError(value)
 
-    cases=[('root-middle',ROOT_SETUP),('root-bottom',ROOT_SETUP+'d.activeLayer=low;'),
+    empty_pixel=ROOT_SETUP.replace("d.selection.selectAll();d.selection.fill(app.foregroundColor);d.selection.deselect();",'')
+    cases=[('root-middle',ROOT_SETUP),('root-empty-pixel',empty_pixel),('root-bottom',ROOT_SETUP+'d.activeLayer=low;'),
            ('group-child',GROUP_SETUP),('group-itself',GROUP_SETUP+'d.activeLayer=g;'),
            ('group-empty',EMPTY_SETUP),('multi-focus-lower',ROOT_SETUP+MULTI),('background','')]
     commands=['layer.solid','adjustment.curves','adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite']
     try:
         for case,setup in cases:
             for command in commands:
-                reference=create(case+' native '+command,setup)
+                # Native make consumes an empty selected pixel layer and keeps
+                # its name. Our required behaviour preserves the original;
+                # compare default creation name/position with a filled anchor,
+                # then independently assert the empty original tree is intact.
+                reference=create(case+' native '+command,ROOT_SETUP if case=='root-empty-pixel' else setup)
                 js(native(command))
                 reference_rows=tree()
                 expected=signature(reference_rows,int(js('app.activeDocument.activeLayer.id')))
@@ -111,8 +116,12 @@ async def main():
                 before=tree()
                 async def guard(target):
                     require_menu_target(frozen,command,target)
-                result=await bridge.execute(command,guard)
+                binding={key:frozen[key] for key in ('session','document_id','layer_ids')}
+                binding['active_layer_id']=binding['layer_ids'][0]
+                result=await bridge.execute(command,guard,frozen_target=binding if len(binding['layer_ids'])==1 else None)
                 after=tree()
+                creation=json.loads(result['result'])
+                assert creation['placement_moves']==0,(case,command,'Native creation was moved')
                 added=[row for row in after if row['id'] not in {row['id'] for row in before}]
                 assert len(added)==1,(case,command,added)
                 actual=signature(after,added[0]['id'])
@@ -121,6 +130,8 @@ async def main():
                 js('var d=app.activeDocument;d.activeHistoryState=d.historyStates[d.historyStates.length-2];')
                 assert tree()==before,(case,command,'single undo')
                 checks.append({'case':case,'command':command,'native':expected,'actual':actual,
+                               'native_reference_filled_anchor':case=='root-empty-pixel',
+                               'placement_moves':creation['placement_moves'],'placeholder_used':creation['placeholder_used'],
                                'original_tree_preserved':True,'single_undo':True,'task_id':result['task_id']})
                 print('Passed real PS:',case,command,actual,flush=True)
                 doc.Close(2)
@@ -132,7 +143,9 @@ async def main():
         try:
             async def guard(target):
                 require_menu_target(frozen,'adjustment.curves',target)
-            await bridge.execute('adjustment.curves',guard)
+            binding={key:frozen[key] for key in ('session','document_id','layer_ids')}
+            binding['active_layer_id']=binding['layer_ids'][0]
+            await bridge.execute('adjustment.curves',guard,frozen_target=binding)
         except RuntimeError:
             pass
         else:
@@ -142,7 +155,7 @@ async def main():
         report={'version':APP_VERSION,'uxp':VERSION,'checks':checks,
                 'scope':'Installed executor vs native Photoshop commands in disposable documents; physical menu acceptance separate.'}
         (ROOT/f'.runtime/created-layers-{APP_VERSION}-live.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),'utf-8')
-        print('PASS',len(cases)*len(commands),'native comparisons; names, parent, next sibling, originals and one undo; stale target rejected')
+        print('PASS',len(cases)*len(commands),'creation cases; native default names/placement, empty originals preserved, one undo; stale target rejected')
     finally:
         await bridge.close()
         await asyncio.sleep(.3)

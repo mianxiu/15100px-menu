@@ -75,6 +75,40 @@ class UxpBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.busy=True
         with self.assertRaises(RuntimeError):await self.bridge.execute('label.red',enqueue=True)
         self.bridge.transport.call.assert_not_called()
+    async def test_frozen_single_menu_uses_one_mutation_and_same_target(self):
+        result=await self.bridge.execute('layer.new',frozen_target=self.target)
+        self.assertEqual(result['target']['active_layer_id'],2)
+        self.assertEqual(self.bridge.transport.call.call_count,1)
+        self.assertEqual(self.bridge.transport.call.call_args.args,('set_label',))
+        self.assertEqual(self.bridge.transport.call.call_args.kwargs['target'],self.target)
+    async def test_frozen_target_invalid_or_busy_never_publishes(self):
+        with self.assertRaises(ValueError):await self.bridge.execute('layer.new',frozen_target={**self.target,'layer_ids':[2,3]})
+        self.bridge.busy=True
+        with self.assertRaises(RuntimeError):await self.bridge.execute('layer.new',frozen_target=self.target)
+        self.bridge.transport.call.assert_not_called()
+    async def test_confirmed_creation_publishes_new_selection_before_next_task(self):
+        def call(op,**kw):
+            anchor=kw['target']['active_layer_id']
+            new=anchor+1
+            return {'result':{'count':1,'verified':True,'layer_id':new},
+                'layer_context':{'schema':1,'session':'test','document_id':1,
+                    'layer_ids':[new],'kind':'pixel','mask':11,'quick_mask':127,
+                    'plugin_time_ms':time.time()*1000}}
+        self.bridge.transport.call.side_effect=call
+        target=self.target
+        for expected in (3,4):
+            await self.bridge.execute('layer.new',frozen_target=target)
+            self.assertFalse(self.bridge.busy)
+            self.assertEqual(self.bridge.layer_context['layer_ids'],[expected])
+            target={**self.target,'layer_ids':[expected],'active_layer_id':expected}
+        self.assertEqual(self.bridge.transport.call.call_count,2)
+    async def test_mismatched_receipt_context_cannot_retain_old_selection(self):
+        self.bridge.layer_context={'kind':'pixel','layer_ids':[2],'mask':15}
+        self.bridge.transport.call.return_value={'result':{'count':1,'verified':True}}
+        self.bridge.transport.call.side_effect=None
+        await self.bridge.execute('layer.new',frozen_target=self.target)
+        self.assertEqual(self.bridge.layer_context['kind'],'unknown')
+        self.assertEqual(self.bridge.layer_context['mask'],0)
     async def test_unknown_keeps_service_busy_no_fallback(self):
         def call(op,**kw):
             if op=='capture':return {'target':self.target}

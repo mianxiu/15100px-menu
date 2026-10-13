@@ -85,23 +85,29 @@ async def main():
             anchor = next(row for row in before if row['id'] == anchor_id)
             async def guard(target):
                 require_menu_target(frozen, 'layer.new', target)
-            result = await bridge.execute('layer.new', guard)
+            binding={key:frozen[key] for key in ('session','document_id','layer_ids')}
+            binding['active_layer_id']=binding['layer_ids'][0]
+            result = await bridge.execute('layer.new', guard,frozen_target=binding if len(binding['layer_ids'])==1 else None)
             after = tree()
+            creation=json.loads(result['result'])
             new = [row for row in after if row['id'] not in {r['id'] for r in before}]
             assert len(new) == 1, (case, new)
             made = new[0]
             assert made['name'] == expected_name, (case, made, expected_name)
-            assert made['parent'] == anchor['parent'], (case, made, anchor)
-            siblings = [row['id'] for row in after if row['parent'] == anchor['parent']]
-            assert siblings.index(made['id']) + 1 == siblings.index(anchor_id), (case, siblings)
+            parent_id=anchor_id if case=='group-itself' else anchor['parent']
+            assert made['parent'] == parent_id, (case, made, anchor)
+            siblings = [row['id'] for row in after if row['parent'] == parent_id]
+            assert (siblings[0]==made['id'] if case=='group-itself' else siblings.index(made['id'])+1==siblings.index(anchor_id)), (case, siblings)
+            assert creation['placement_moves']==0,(case,'Native blank creation moved')
             assert [row for row in after if row['id'] != made['id']] == before, case
             assert int(js('app.activeDocument.activeLayer.id')) == made['id']
             # One undo must remove the creation and any corrective placement.
             js('var d=app.activeDocument;d.activeHistoryState=d.historyStates[d.historyStates.length-2];')
             assert tree() == before, ('single undo', case)
             checks.append({'case': case, 'name': made['name'], 'native_name': expected_name,
-                           'anchor': anchor, 'created': made, 'same_parent_above': True,
+                           'anchor': anchor, 'created': made, 'native_position': True,
                            'original_layers_preserved': True, 'single_undo': True,
+                           'placement_moves':creation['placement_moves'],
                            'task_id': result['task_id']})
             print('Passed real PS case:',case,'name:',made['name'],flush=True)
             doc.Close(2)
@@ -113,7 +119,9 @@ async def main():
         try:
             async def guard(target):
                 require_menu_target(frozen, 'layer.new', target)
-            await bridge.execute('layer.new', guard)
+            binding={key:frozen[key] for key in ('session','document_id','layer_ids')}
+            binding['active_layer_id']=binding['layer_ids'][0]
+            await bridge.execute('layer.new', guard,frozen_target=binding)
         except RuntimeError:
             pass
         else:
