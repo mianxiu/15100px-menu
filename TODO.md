@@ -6,7 +6,7 @@
 - [x] 匿名真实118统一包下载、GitHub digest／ZIP／EXE SHA256及PE版本校验通过；线程下载，不阻塞热键。证据.runtime/github-update-source.json。
 - [x] 实际入口119→120独立EXE助手正常退出／等待父进程／备份／替换／重启通过，配置凭据／PS文档／UXP0.3.10保留，原生组件哈希一致。证据.runtime/installed-0.4.120-verification.json。
 - [x] 最终120已正常切换实际入口，EXE／菜单／热键／UXP哈希及原设置凭据核验；248项后台回归、6项前端测试／构建、最终EXE烟雾／重启、真实PS十次连续创建通过。自动化接口与真实键鼠验收分开记录。证据.runtime/installed-0.4.120-final-verification.json、.runtime/tests-0.4.120-final.log、.runtime/frontend-tests120.log、.runtime/smoke-0.4.120-delivered.log、.runtime/consecutive-creation-0.4.120.json。
-- [ ] 最终构建切换、发布120统一包，隔离旧版本“检查／下载／安装／重连”完整验证；119性能功能随120发布，不覆盖既有118附件。
+- [x] 发布120为Latest，功能提交63fbcd7／v0.4.120标签已推送，两份公开附件匿名下载哈希一致，ZIP SHA256：9dfc63abbba56f7db83a4ac41777b495e53037506060274acd7a788575ddce6b。隔离较低版本私有引导构建通过真实界面检查／下载／校验／安装／自动重连，设置／偏好／安装归属／旧EXE备份通过，中文／英文控件正确；不冒称公开119支持更新。初次检查早于120公开，正确未提供草稿升级，公开后检查才提供120。证据.runtime/release-0.4.120-public-verification.json、.runtime/github-update120-gui-lifecycle.json、.runtime/github-update120-installed.png、.runtime/github-update120-english.png。119性能功能随120发布；118公开附件不变。
 - [ ] 完整实体输入／焦点矩阵、全新Windows账号和更高PS版本沿用未验收项。
 
 更新日期：2026-10-13。
@@ -20,7 +20,7 @@
 - [x] 用户于2026-10-13实机确认最终119方案“更顺畅，操作正常”：连续创建／立即重开／选中组新建空白层复验通过。较早候选的“体感差别不大”保留为中间反馈，不代替最终确认。
 - [ ] 完整实体输入／焦点矩阵、全新Windows账号及更高PS版本沿用118未验收项；长期驻留、多DPI等后置。
 - [x] v0.4.119本地统一包已生成，嵌入资源与源码逐字节一致、Windows版本元数据及实际入口核验通过；包内保留许可和离线说明。
-- [ ] 发布v0.4.119 GitHub Release；公开最新版仍v0.4.118。
+- [x] v0.4.119优化随v0.4.120 GitHub Release一起发布，公开Latest为120；不单独建立119 Release。
 
 ## v0.4.118交付与剩余验收
 
