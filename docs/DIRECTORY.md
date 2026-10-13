@@ -9,7 +9,7 @@
 | `photoshop_action/` 与根目录 COM 兼容模块 | 后端仍引用的兼容代码 |
 | `tools/`、`tests/` | 维护工具与自动回归 |
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
-| `dist/` | 当前本地构建 v0.4.119 EXE、统一 ZIP、UXP ZIP 与校验文件；旧版本附件另行归档保留 |
+| `dist/` | 当前本地构建 v0.4.120 EXE、统一 ZIP、UXP ZIP 与校验文件；旧版本附件另行归档保留 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |

@@ -34,13 +34,16 @@ export class Client {
         this.pending.delete(id);
         reject(new Error('响应超时，操作结果未知；请检查 Photoshop，避免重复执行'));
       }, 50000);
-      this.pending.set(id, {resolve, reject, timer});
+      this.pending.set(id, {resolve, reject, timer, action});
       try { this.socket.send(JSON.stringify({id, action, args})); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
   }
   rejectPending(message) {
-    for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error(message)); }
+    for (const request of this.pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error(request.action.startsWith('application.update.') ? '应用更新连接断开，请重新连接查看更新状态；不会重复安装' : message));
+    }
     this.pending.clear();
   }
   close() {

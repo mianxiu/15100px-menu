@@ -13,6 +13,17 @@ class FakeSocket {
 }
 globalThis.WebSocket = FakeSocket;
 
+test('app installation disconnect is reported separately and never replayed', async () => {
+  const client=new Client('ws://localhost',()=>{},()=>{});
+  client.connect();client.socket.open();const old=client.socket;
+  const result=client.request('application.update.install');
+  const rejected=assert.rejects(result,/不会重复安装/);
+  old.close();await rejected;clearTimeout(client.reconnect);
+  client.connect();client.socket.open();
+  assert.equal(client.socket.sent,undefined);
+  assert.equal(client.pending.size,0);client.close();
+});
+
 test('correlates replies and rejects interrupted operations without replay', async () => {
   const client = new Client('ws://localhost', () => {}, () => {});
   client.connect(); const socket = client.socket; socket.open();

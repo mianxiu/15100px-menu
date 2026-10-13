@@ -26,6 +26,7 @@ from .uxp_management import UxpManager
 from .photoshop_launch import PhotoshopLauncher
 from .language import read_language, save_language
 from .recent_documents import RecentDocuments
+from .application_updates import ApplicationUpdates
 
 APP_ID = "photoshop-menu"
 from .version import APP_VERSION
@@ -178,6 +179,10 @@ class Application(web.Application):
         self.panel_lock = asyncio.Lock()
         self.operation_lock = asyncio.Lock()
         self.recent_documents = RecentDocuments()
+        self.application_updates = ApplicationUpdates(self.runtime)
+        self.updating = False
+        self.closing = False
+        self.headless = self.no_desktop = False
         super().__init__([
             (r"/websocket", WSHandler), (r"/api/health", HealthHandler),
             (r"/api/status", StatusHandler), (r"/api/service", ServiceHandler),
@@ -225,7 +230,16 @@ class Application(web.Application):
         return contracts
 
     def require_uxp_enabled(self):
+        if self.updating:raise RuntimeError('应用正在更新，本次操作未接受')
         if not self.uxp.enabled:raise RuntimeError('UXP 执行已禁用，请在后台插件管理中启用')
+
+    def require_update_idle(self):
+        pending=getattr(getattr(self.bridge,'transport',None),'pending',None)
+        if (self.updating or self.operation_lock.locked() or self.bridge.busy or
+            getattr(self.bridge,'_queue',[]) or self.photoshop_launcher.active or
+            pending and (pending.value or pending.error)):
+            raise RuntimeError('请先完成操作或核对未知结果，再安装应用更新；未排队、未重发')
+        if self.desktop and self.desktop.visible:raise RuntimeError('请先收起操作菜单，再安装应用更新')
 
     async def photoshop_start_ready(self, started_at_ms):
         if not isinstance(self.bridge,UxpBridge):return True
@@ -244,6 +258,25 @@ class Application(web.Application):
                 return {'message':'插件已安装；自动启动未接受：'+str(error)}
 
     async def dispatch(self, action, args):
+        if getattr(self,'closing',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
+            raise RuntimeError('服务正在退出，本次操作未接受')
+        if getattr(self,'updating',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
+            raise RuntimeError('应用正在更新，本次操作未接受')
+        if action=='application.update.status':return self.application_updates.snapshot()
+        if action=='application.update.auto':return self.application_updates.set_auto(args.get('enabled'))
+        if action in ('application.update.check','application.update.download'):
+            return self.application_updates.start(action.rsplit('.',1)[1])
+        if action=='application.update.install':
+            self.require_update_idle()
+            async with self.operation_lock:
+                self.updating=True
+                try:
+                    result=await self.application_updates.prepare_install(self.port,self.headless,self.no_desktop)
+                except Exception:
+                    self.updating=False
+                    raise
+                asyncio.get_running_loop().call_later(.5,self.stop_event.set)
+                return result
         if action=='language.set':
             save_language(self.runtime,args.get('language'))
             await self.broadcast({'type':'status','data':await self.dispatch('status',{})})
@@ -301,6 +334,7 @@ class Application(web.Application):
                     "version": APP_VERSION, "settings": self.preferences.get(), "plugin": self.plugins.status(), 'uxp':uxp,
                     "data_dir": str(self.runtime),
                     "service": service_identity(),
+                    "application_update": self.application_updates.snapshot(),
                     "menu": {"ready": bool(self.desktop and self.desktop.hwnd),
                              "hwnd": self.desktop.hwnd if self.desktop else None,
                              "pid": self.desktop.process.pid if self.desktop and self.desktop.process else None,
@@ -492,6 +526,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
     if not (ROOT / "frontend/dist/index.html").is_file():
         raise RuntimeError("缺少前端构建，请在 frontend 中运行 npm install 和 npm run build")
     app = Application(port, runtime=runtime)
+    app.headless,app.no_desktop=headless,no_desktop
     try:
         server = app.listen(port, address="127.0.0.1", max_buffer_size=MAX_PACKAGE + 65536)
     except OSError:
@@ -544,6 +579,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
                                  isinstance(app.bridge,UxpBridge) and (not uxp_install['installed'] or uxp_install['error'])):
                 await app.dispatch("control.open", {})
         status_task = asyncio.create_task(poll_status())
+        app.application_updates.schedule=asyncio.create_task(app.application_updates.periodic())
         await app.photoshop_launcher.resume()
         if not headless and not no_desktop and not app.photoshop_launcher.active:
             await app.auto_start_photoshop()
@@ -552,6 +588,8 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             signal.signal(sig, lambda *_: loop.call_soon_threadsafe(app.stop_event.set))
         await app.stop_event.wait()
     finally:
+        app.closing=True
+        await app.application_updates.close()
         if status_task:
             status_task.cancel()
             await asyncio.gather(status_task, return_exceptions=True)

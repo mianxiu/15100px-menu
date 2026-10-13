@@ -1,5 +1,14 @@
 # Photoshop Menu TODO
 
+## v0.4.120 GitHub应用更新
+
+- [x] 独立应用更新tab、中文／英文、每日检查可关闭；只检查正式Release，不自动下载／安装，不混用旧JSX更新。
+- [x] 匿名真实118统一包下载、GitHub digest／ZIP／EXE SHA256及PE版本校验通过；线程下载，不阻塞热键。证据.runtime/github-update-source.json。
+- [x] 实际入口119→120独立EXE助手正常退出／等待父进程／备份／替换／重启通过，配置凭据／PS文档／UXP0.3.10保留，原生组件哈希一致。证据.runtime/installed-0.4.120-verification.json。
+- [x] 最终120已正常切换实际入口，EXE／菜单／热键／UXP哈希及原设置凭据核验；248项后台回归、6项前端测试／构建、最终EXE烟雾／重启、真实PS十次连续创建通过。自动化接口与真实键鼠验收分开记录。证据.runtime/installed-0.4.120-final-verification.json、.runtime/tests-0.4.120-final.log、.runtime/frontend-tests120.log、.runtime/smoke-0.4.120-delivered.log、.runtime/consecutive-creation-0.4.120.json。
+- [ ] 最终构建切换、发布120统一包，隔离旧版本“检查／下载／安装／重连”完整验证；119性能功能随120发布，不覆盖既有118附件。
+- [ ] 完整实体输入／焦点矩阵、全新Windows账号和更高PS版本沿用未验收项。
+
 更新日期：2026-10-13。
 
 ## 当前交付与剩余验收（v0.4.119）
