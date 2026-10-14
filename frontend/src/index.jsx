@@ -2,10 +2,7 @@ import {render} from 'solid-js/web';
 import {createSignal, createEffect, onMount, onCleanup, For, Show} from 'solid-js';
 import {Client} from './client.mjs';
 import {translate} from './i18n.mjs';
-import './style.css';
-import './tasks.css';
-import './language.css';
-import './application.css';
+import {applyMenuTheme} from './theme.mjs';
 import './admin.css';
 
 const pages = [['overview','运行状态'],['settings','菜单设置'],['plugins','插件管理'],['updates','应用更新'],['tasks','最近任务'],['logs','运行日志']];
@@ -34,6 +31,7 @@ function App() {
   const appUpdate=()=>state().application_update || {};
   const updateBusy=()=>['checking','downloading','installing'].includes(appUpdate().phase);
   createEffect(()=>{document.documentElement.lang=state().language || 'zh-CN';document.title='Photoshop Menu — '+t('后台管理');});
+  createEffect(()=>applyMenuTheme(document.documentElement,state().photoshop.ui_theme));
   function accept(data) {
     setState(data);
     if (!dirty()) setForm(structuredClone(data.settings));
