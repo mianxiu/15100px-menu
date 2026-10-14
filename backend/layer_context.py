@@ -32,7 +32,11 @@ def validate(value,session,now_ms=None):
     quick=value.get('quick_mask',0)
     if type(quick) is not int or not 0<=quick<=127 or quick and not ids:
         return unavailable()
-    return {**value,'label':LABELS[kind]}
+    result={**value,'label':LABELS[kind]}
+    if 'shape_editor' in value:
+        from .shape_paint import metadata
+        result['shape_editor']=metadata(value['shape_editor']) if kind=='shape-fill' and len(ids)==1 and not value.get('locked') else {'available':False}
+    return result
 
 def flags(value):
     """Packed into the existing single prepare message, with no new round trip."""
@@ -45,6 +49,12 @@ def flags(value):
             (value.get('quick_mask',0)<<32))
 
 def require_menu_target(value,name,target):
+    if name=='shape.paint':
+        if (not value or value.get('kind')!='shape-fill' or len(value.get('layer_ids',[]))!=1 or value.get('locked')
+                or value.get('background') or not value.get('shape_editor',{}).get('available')):
+            raise TaskCancelled('颜色调整仅用于单选未锁定的形状／填充图层，请重新打开菜单')
+        if any(value.get(k)!=target.get(k) for k in ('session','document_id','layer_ids')):raise TaskCancelled('文档或图层选择已改变，请重新打开菜单；本次未修改图层')
+        return
     quick=name in QUICK_ACTIONS
     bit=(1<<list(QUICK_ACTIONS).index(name)) if quick else (2 if name=='color' or name.startswith('label.') else {'select':1,'moveToTop':4,'moveToBottom':8}.get(name,0))
     if not value or not value.get('quick_mask' if quick else 'mask',0)&bit:

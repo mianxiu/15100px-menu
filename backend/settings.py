@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-DEFAULTS = {"enabled": True, "menu_width": 360, "menu_height": 300,
+DEFAULTS = {"enabled": True, "menu_width": 360, "menu_height": 300, "render_mode":"auto",
             "right_click_open": False,
             "right_click_hide": False, "open_control_on_start": False, "update_url": "",
             "shortcuts": {"toggle": "capslock", "hide": "esc", "select": "capslock+a",
@@ -33,9 +33,11 @@ def chord(value):
 
 
 def validate(data):
+    if isinstance(data,dict):data={"render_mode":"auto",**data}
     if not isinstance(data, dict) or set(data) != set(DEFAULTS):
         raise ValueError("设置字段不完整或包含未知字段")
     result = copy.deepcopy(data)
+    if result['render_mode'] not in ('auto','gpu','cpu'):raise ValueError('渲染模式必须为自动、GPU或CPU')
     for key in ("enabled", "right_click_open", "right_click_hide", "open_control_on_start"):
         if type(result[key]) is not bool:
             raise ValueError("开关必须为布尔值")

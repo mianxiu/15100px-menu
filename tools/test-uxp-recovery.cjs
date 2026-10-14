@@ -1,7 +1,8 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-const code=fs.readFileSync(require('node:path').join(__dirname,'../uxp/offline-probe/main.js'),'utf8');
+const source=process.argv.includes('--read-benchmark')?'./fixtures/read-strategies-0.3.11/main.js':'../uxp/offline-probe/main.js';
+const code=fs.readFileSync(require('node:path').join(__dirname,source),'utf8');
 const immediate=()=>new Promise(resolve=>setImmediate(resolve));
 async function settle(){for(let i=0;i<25;i++)await immediate();}
 function host(files,control) {
@@ -28,7 +29,8 @@ function host(files,control) {
       assert.equal(saved.phase,'accepted');control.executed++;
       if(control.unknown){const e=Error('rollback uncertain');e.resultUnknown=true;throw e;}
       return {count:1,verified:true,...(control.prepared?{selection_context:{session:'prepared',kind:'pixel',layer_ids:[99]}}:{})};
-    },selectionMatches:()=>!control.selectionChanged,createDocument:async()=>{control.created++;return {document_id:99};}};
+    },selectionMatches:()=>!control.selectionChanged,interfacePreferences:async()=>({ui_theme:'dark',ui_font_size:'small'}),observeShape:async()=>({available:false}),
+    createDocument:async()=>{control.created++;return {document_id:99};}};
   const context={console:{log(){}},setInterval(fn){interval=fn;},module:{exports:{}},require(name){
     if(name==='./probe-config.js')return 'secret';
     if(name==='./labels.js')return ()=>labels;

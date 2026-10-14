@@ -26,6 +26,13 @@ def window_transition(method):
     return call
 
 
+def shape_editor_allowed(panel, shape, hold, context=None):
+    context=context or {}
+    return bool(hold and shape.get('available') is True and panel.get('kind')=='layers' and not panel.get('input_focused')
+                and context.get('kind')=='shape-fill' and len(context.get('layer_ids',[]))==1
+                and not context.get('locked') and not context.get('background'))
+
+
 def process_parent(pid):
     """Windows venv python.exe can launch a second Python process."""
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -112,8 +119,8 @@ def panel_bounds(ps_rect, work_rect, cursor, width, height):
     return max(left, min(cursor[0], right-width)), max(top, min(cursor[1], bottom-height)), width, height
 
 
-def pie_bounds(ps_rect, work_rect, cursor, scale, home=False):
-    width, height = round((820 if home else 620)*scale), round(440*scale)
+def pie_bounds(ps_rect, work_rect, cursor, scale, home=False, color_editor=False):
+    width, height = round((920 if color_editor else 820 if home else 620)*scale), round((560 if color_editor else 440)*scale)
     return panel_bounds(ps_rect, work_rect,
                         (cursor[0]-(round(270*scale) if home else width//2), cursor[1]-height//2), width, height)
 
@@ -194,6 +201,7 @@ class Desktop:
             return
         payload = json.dumps({"enabled": self.settings["enabled"],
             "text_input": bool(self.panel_context and (self.panel_context.current['kind'] == 'text' or self.panel_context.current.get('input_focused'))),
+            "color_editor": bool(self.visible and getattr(self,'color_editor_active',False)),
             "right_click_open": False,
             "hwnd": self.hwnd or 0, "visible": self.visible,
             "bindings": {name: list(chord(value)) for name,value in self.settings["shortcuts"].items()}})
@@ -282,11 +290,16 @@ class Desktop:
             for line in process.stdout:
                 event = json.loads(line)
                 if event.get('type') == 'ready':
+                    self.graphics=event.get('graphics',{})
                     self.attach(event['hwnd'], event['pid'], self.token)
                     self.menu_ready.set()
+                elif event.get('type') == 'graphics':
+                    self.graphics=event.get('graphics',{})
+                    logging.info('Menu graphics: %s',self.graphics)
                 elif event.get('type') == 'action':
                     logging.info('Dear ImGui menu action: %s', event['action'])
-                    self.notify({'action':event['action'], 'menu_epoch':event.get('session',self.menu_epoch)})
+                    self.notify({'action':event['action'], 'menu_epoch':event.get('session',self.menu_epoch),
+                        **({'params':event['params']} if 'params' in event else {})})
                 elif event.get('type') == 'selection':
                     logging.info('Menu release decision: %s', event)
         except Exception:
@@ -482,11 +495,19 @@ class Desktop:
         scale = (u.GetDpiForWindow(hwnd) or 96) / 96
         work = win32api.GetMonitorInfo(win32api.MonitorFromPoint(cursor, c.MONITOR_DEFAULTTONEAREST))["Work"]
         panel = self.panel_context.snapshot(hwnd) if self.panel_context else {'kind': 'generic'}
+        self.menu_layer_context=None
+        if self.layer_context_provider and panel.get('kind')!='home':
+            from .layer_context import fresh,unavailable
+            self.menu_layer_context=dict(self.layer_context) if fresh(self.layer_context) else unavailable()
+        from .shape_paint import metadata
+        shape=metadata((self.menu_layer_context or {}).get('shape_editor'))
+        self.color_editor_active=shape_editor_allowed(panel,shape,hold,self.menu_layer_context)
+        if not self.color_editor_active:shape={'available':False}
         width = min(self.settings["menu_width"],260) if context else self.settings["menu_width"]
         height = min(self.settings["menu_height"],240) if context else self.settings["menu_height"]
         bounds = panel_bounds(rect, work, cursor, round(width*scale), round(height*scale))
         if hold:
-            bounds = pie_bounds(rect, work, cursor, scale, home=panel.get('kind')=='home')
+            bounds = pie_bounds(rect, work, cursor, scale, home=panel.get('kind')=='home',color_editor=self.color_editor_active)
         # Recheck after setup: focus can change while a hotkey request is queued.
         if self.gui.GetForegroundWindow() != foreground or not self._is_photoshop(hwnd):
             raise RuntimeError("Photoshop 焦点已改变，已取消唤出")
@@ -498,12 +519,17 @@ class Desktop:
         # showing. Avoid three synchronous renderer-thread round trips.
         self.menu_epoch += 1
         flags = panel_flags(panel, context, hold)
-        self.menu_layer_context=None
-        if self.layer_context_provider and panel.get('kind')!='home':
-            from .layer_context import flags as layer_flags,fresh,unavailable
-            self.menu_layer_context=dict(self.layer_context) if fresh(self.layer_context) else unavailable()
+        if self.menu_layer_context is not None:
+            from .layer_context import flags as layer_flags
             flags |= layer_flags(self.menu_layer_context)
         self.gui.SendMessage(self.hwnd, 0x8011, flags, self.menu_epoch)
+        class CopyData(ctypes.Structure):
+            _fields_=[('tag',ctypes.c_size_t),('size',W.DWORD),('data',ctypes.c_void_p)]
+        payload=json.dumps(shape,ensure_ascii=False).encode('utf-8')
+        if len(payload)>65534:raise RuntimeError('形状颜色信息超出菜单限制')
+        buffer=ctypes.create_string_buffer(payload)
+        packet=CopyData(0x53485045,len(payload)+1,ctypes.cast(buffer,ctypes.c_void_p))
+        self.gui.SendMessage(self.hwnd,0x4a,0,ctypes.addressof(packet))
         show_popup(self.gui, self.hwnd, root, bounds)
         try:
             self.gui.SetForegroundWindow(self.hwnd)
@@ -517,6 +543,9 @@ class Desktop:
         return {"message": "操作菜单已打开", "panel_context": panel,'layer_context':self.menu_layer_context}
 
     def require_menu_layer_target(self,name,target):
+        if name=='shape.paint' and not getattr(self,'color_editor_active',False):
+            from .tasks import TaskCancelled
+            raise TaskCancelled('形状颜色仅在图层面板菜单可用；本次未修改')
         if self.layer_context_provider:
             from .layer_context import require_menu_target
             require_menu_target(self.menu_layer_context,name,target)
@@ -614,6 +643,9 @@ class Desktop:
             # must not prevent CapsLock from closing a paused menu.
             if not self._scope():
                 raise RuntimeError('请先让 Photoshop 或其菜单获得焦点')
+            if getattr(self,'color_editor_active',False):
+                self.gui.SendMessage(self.hwnd,0x8016,0,0)
+                return {'message':'已结束形状颜色调整'}
             return self.hide()
         return self.open()
 

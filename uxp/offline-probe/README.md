@@ -1,4 +1,10 @@
-# Photoshop 快捷菜单 v0.3.7 — UXP
+# Photoshop 快捷菜单 v0.3.10 — UXP
+
+当前为PhotoshopMenu v0.4.120内置的生产写入端，启动PS自动加载；所有修改经本机文件协议与UXP执行，不联网、不回退COM、不重发未知结果。普通及组内层上方直接原生创建，选中组时在组内顶部；PS默认编号、原层保留、实时目标检查与同一历史事务一次撤销均保留，创建后在完成前同步精确新选择。
+
+0.3.10在单次快照内复用属性／父组／兄弟列表，并在同modal准备创建后的选择快照；缓存不跨任务，结束后核对身份。读取实验0.3.11仅位于tools/fixtures/read-strategies-0.3.11，不嵌入发行包。完整连续创建与特殊图层／数量测试未证明替换get／multiGet或事件兜底更快，生产保持当前方案。见[实测报告](../../docs/READ-STRATEGIES.md)。
+
+以下为0.3.7及更早实现的历史记录；旧“组外空白层”规则已被上方当前组内原生规则取代。
 
 Plugin 0.3.7 is the production write endpoint for PhotoshopMenu 0.4.112. It loads at Photoshop startup and handles menu labels, clear, selection, sorting and layer creation through authenticated local PluginData files, executeAsModal, target checks and result readback. COM remains read-only for theme/font/connection status. There is no network permission or automatic COM write fallback.
 
@@ -7,6 +13,14 @@ Plugin 0.3.7 is the production write endpoint for PhotoshopMenu 0.4.112. It load
 The main PhotoshopMenu.exe embeds manifest/main/labels and its backend Plugin Management page installs, enables/disables execution, imports/exports offline updates, rolls back and uninstalls UXP. Build the unified EXE ZIP with tools/build-backend-package.py; the separate OfflineSetup is historical deployment only. It includes the main EXE and manifest/main/labels only, generating or reusing the user's token locally. Never distribute probe-config.js or user uxp-config.json. See OFFLINE-INSTALL.md for install/update/rollback/uninstall and the physical validation limits, and PERFORMANCE.md for the actual COM/UXP comparison. Minimum Photoshop is 24.0.1, enforced by installer metadata, plugin manifest and runtime heartbeat checks, with no upper bound. The physical validation scope remains 24.0.1 / UXP 6.3.3; later-version installation eligibility is not compatibility acceptance. The original plugin ID/name is retained for installation identity.
 
 The sections below are historical experiment notes, not current production status. Experimental clients must not run concurrently with the production transport.
+
+## Shape paint (UXP 0.3.12)
+
+The fixed `shape.paint` command edits a single unlocked vector shape in RGB 8/16-bit documents. Metadata reads four targeted properties and caches them for 500 ms; non-shape layers retain the original DOM-only observation. Preset classes accept the host's pattern class aliases. No status JSX or network calls are introduced.
+
+The native picker edits a local draft. Tab switches solid/gradient/pattern. Fill/stroke, RGB/Hex, black/white, existing gradient stops (2–32), loaded local pattern names, stroke width and swapping are supported. Hold release inside the picker submits once; a pinned picker submits on the next CapsLock. Centre/blank release, Esc and right click discard. Existing radial buttons execute their own actions.
+
+Execution checks the captured session/document/selection and paint revision again inside one modal/history transaction. One shapeStyle set is read back, checking paint, enabled flags, width and unchanged layer identity/order. Failure rolls back; an unconfirmed rollback remains unknown and cannot be replayed. Independent live tests verify vector path streams and one undo. Physical key/mouse acceptance is recorded separately in TODO.md.
 
 ## Commands and safeguards
 
@@ -30,3 +44,7 @@ Production update: plugin 0.3.0 is now used by PhotoshopMenu v0.4.69 for all men
 Backend v0.4.83 displays the manifest version in the Chinese and English plugin names. Name application changes only the manifest while Photoshop is closed and preserves IDs, code, credentials and enable state.
 
 UXP 0.3.6: blank-layer creation uses the native make command without an explicit name. Placement is verified immediately above the frozen active layer in the same parent, corrected only when necessary, and committed as one undoable history entry. A selected group receives a sibling above itself; a selected group child receives a sibling within that group. tools/verify-blank-layer.py validates eight disposable real Photoshop cases against native naming plus stale-target rejection.
+
+## 0.3.13 形状与填充
+
+形状层保持填充／描边及类型切换；普通纯色、渐变、图案填充层支持编辑自身内容，保持类型且不修改描边。按原生填充描述符写入，一次历史事务，写后核对类型／身份／顺序，失败回滚；未知结果禁止重发。

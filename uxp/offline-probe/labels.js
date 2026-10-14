@@ -1,6 +1,7 @@
 // Experimental executor: only fixed-target labels, no arbitrary scripts.
 module.exports = function createLabels(ps, session) {
   const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
+  const shapePaint=createShapePaint(ps,session,capture,selectionContext);
   const quickCommands=['layer.new','layer.solid','layer.group','adjustment.curves',
     'adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite'];
   // DOM-only, read-only metadata. No batchPlay, executeAsModal, pixels or
@@ -117,6 +118,7 @@ module.exports = function createLabels(ps, session) {
     return ps.app.activeDocument.id===doc.id && doc.id===value.document_id && ids.join(',')===value.layer_ids.join(',');
   }
   async function setLabel(request) {
+    if(request.command==='shape.paint')return shapePaint.apply(request);
     const command = request.command || 'label';
     const quickIndex=quickCommands.indexOf(command);
     if (!['label','select','moveToTop','moveToBottom'].includes(command) && quickIndex<0) throw Error('Unknown command');
@@ -361,6 +363,161 @@ module.exports = function createLabels(ps, session) {
       }
     },{commandName:'Menu recent document',timeOut:0});
   }
-  return {capture,setLabel,documentTarget,createDocument,selectionContext,selectionMatches};
+  let interfaceState={ui_theme:'dark',ui_font_size:'small'};
+  async function interfacePreferences() {
+    // Only UXP DOM/get reads. Never execute JSX or enter a modal to observe UI.
+    try {
+      const value=ps.app.preferences.interface.textFontSize, sizes=ps.constants.FontSize || {};
+      for(const key of ['SMALL','MEDIUM','LARGE'])if(sizes[key]!==undefined && value===sizes[key])
+        interfaceState.ui_font_size=key.toLowerCase();
+    } catch(_) {}
+    try {
+      const [value]=await ps.action.batchPlay([{_obj:'get',_target:[
+        {_ref:'property',_property:'interfacePrefs'},{_ref:'application',_enum:'ordinal',_value:'targetEnum'}],
+        _options:{dialogOptions:'dontDisplay'}}],{});
+      const raw=value?.interfacePrefs?.kuiBrightnessLevel;
+      const name=typeof raw==='string'?raw:raw?._value;
+      const theme={kPanelBrightnessOriginal:'light',kPanelBrightnessLightGray:'light-gray',
+        kPanelBrightnessMediumGray:'dark-gray',kPanelBrightnessDarkGray:'dark'}[name];
+      if(theme)interfaceState.ui_theme=theme;
+    } catch(_) {}
+    return {...interfaceState};
+  }
+  return {capture,setLabel,documentTarget,createDocument,selectionContext,selectionMatches,interfacePreferences,observeShape:shapePaint.observe};
 };
 
+
+// Cached vector-paint metadata and one-transaction writes. No JSX or previews.
+function createShapePaint(ps,session,capture,selectionContext) {
+  let cache=null,serial=0,catalog=[],catalogAt=0,catalogInfo={};
+  const clone=value=>JSON.parse(JSON.stringify(value));
+  const rgb=color=>color?._obj==='RGBColor'?[color.red,color.grain??color.green,color.blue].map(v=>Math.round(Number(v))):null;
+  function paint(raw) {
+    if(raw?._obj==='solidColorLayer') {const c=rgb(raw.color);return c && c.every(v=>Number.isFinite(v))?{kind:'solid',rgb:c}:null;}
+    if(raw?._obj==='gradientLayer') {
+      const colors=raw.gradient?.colors;
+      if(!Array.isArray(colors) || colors.length<2 || colors.length>32)return null;
+      const stops=colors.map(v=>({rgb:rgb(v.color),location:Math.round(v.location)}));
+      return stops.every(v=>v.rgb && v.rgb.every(Number.isFinite))?{kind:'gradient',stops}:null;
+    }
+    if(raw?._obj==='patternLayer' && typeof raw.pattern?.name==='string')return {kind:'pattern',name:raw.pattern.name};
+    return null;
+  }
+  async function patterns() {
+    if(Date.now()-catalogAt<30000)return catalog;
+    try {
+      const [v]=await ps.action.batchPlay([{_obj:'get',_target:[{_ref:'property',_property:'presetManager'},
+        {_ref:'application',_enum:'ordinal',_value:'targetEnum'}],_options:{dialogOptions:'dontDisplay'}}],{});
+      catalogInfo={keys:Object.keys(v),groups:(v.presetManager || []).map(x=>({kind:x._obj,keys:Object.keys(x),count:Array.isArray(x.name)?x.name.length:0}))};
+      const group=v.presetManager?.find(x=>/pattern|PttR/i.test(x._obj || ''));
+      catalog=Array.isArray(group?.name)?group.name.filter(v=>typeof v==='string' && v.length<=128).slice(0,128):[];
+      catalogAt=Date.now();
+    } catch(error) {catalogInfo={error:String(error)};}
+    return catalog;
+  }
+  async function readCore(doc,id) {
+    const keys=['layerKind','hasVectorMask','adjustment','AGMStrokeStyleInfo'];
+    const result=await ps.action.batchPlay(keys.map(key=>({_obj:'get',_target:[{_ref:'property',_property:key},
+      {_ref:'layer',_id:id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})),{});
+    const vector=result[1]?.hasVectorMask===true;
+    const fill=result[2]?.adjustment?.[0],stroke=result[3]?.AGMStrokeStyleInfo;
+    if(!paint(fill))return null;
+    const defaultStroke={_obj:'strokeStyle',strokeStyleVersion:2,strokeEnabled:false,fillEnabled:true,
+      strokeStyleLineWidth:{_unit:'pixelsUnit',_value:1},strokeStyleContent:{_obj:'solidColorLayer',color:{_obj:'RGBColor',red:0,grain:0,blue:0}}};
+    const actualStroke=vector?(stroke || defaultStroke):defaultStroke;
+    if(actualStroke.strokeStyleLineWidth && !['pixelsUnit','pointsUnit'].includes(actualStroke.strokeStyleLineWidth._unit))return null;
+    if(!paint(actualStroke.strokeStyleContent))return null;
+    return {fill,stroke:actualStroke,vector};
+  }
+  async function observe(context,force=false) {
+    if(context.kind!=='shape-fill' || context.layer_ids?.length!==1 || context.locked || !ps.app.documents.length)
+      return {available:false};
+    const doc=ps.app.activeDocument,id=context.layer_ids[0],key=doc.id+':'+id;
+    if(!force && cache?.key===key && Date.now()-cache.at<500)return cache.data;
+    if(doc.mode!==ps.constants.DocumentMode.RGB || ![ps.constants.BitsPerChannelType.EIGHT,ps.constants.BitsPerChannelType.SIXTEEN].includes(doc.bitsPerChannel))
+      return {available:false};
+    const raw=await readCore(doc,id);
+    if(!raw) {cache={key,at:Date.now(),data:{available:false}};return cache.data;}
+    if(ps.app.activeDocument.id!==doc.id || doc.activeLayers.length!==1 || doc.activeLayers[0].id!==id)
+      return {available:false};
+    const signature=JSON.stringify(raw),revision=cache?.key===key && cache.signature===signature?cache.data.revision:session+':'+(++serial);
+    const fill={...paint(raw.fill),enabled:raw.stroke.fillEnabled!==false};
+    const stroke={...paint(raw.stroke.strokeStyleContent),enabled:!!raw.stroke.strokeEnabled,
+      width:Number(raw.stroke.strokeStyleLineWidth?._value ?? 1)*(raw.stroke.strokeStyleLineWidth?._unit==='pointsUnit'?doc.resolution/72:1)};
+    const data={available:true,vector:raw.vector,revision,fill,stroke,patterns:await patterns(),pattern_catalog:catalogInfo};
+    cache={key,at:Date.now(),signature,raw,data};return data;
+  }
+  function validatePaint(value) {
+    if(!value || !['solid','gradient','pattern'].includes(value.kind) || typeof value.enabled!=='boolean')throw Error('Invalid paint type');
+    const color=c=>Array.isArray(c) && c.length===3 && c.every(v=>typeof v==='number' && Number.isFinite(v) && v>=0 && v<=255);
+    if(value.kind==='solid' && !color(value.rgb))throw Error('Invalid RGB color');
+    if(value.kind==='gradient' && (!Array.isArray(value.stops) || value.stops.length<2 || value.stops.length>32 ||
+      value.stops.some((s,i)=>!color(s.rgb) || !Number.isInteger(s.location) || s.location<0 || s.location>4096 || i && s.location<value.stops[i-1].location)))throw Error('Invalid gradient stops');
+    if(value.kind==='pattern' && (typeof value.name!=='string' || !value.name || value.name.length>128))throw Error('Invalid pattern name');
+  }
+  function build(value,previous) {
+    if(value.kind==='solid')return {_obj:'solidColorLayer',color:{_obj:'RGBColor',red:value.rgb[0],grain:value.rgb[1],blue:value.rgb[2]}};
+    if(value.kind==='pattern') {
+      if(!catalog.includes(value.name) && previous?.pattern?.name!==value.name)throw Error('图案预设已改变，请重新打开菜单');
+      const next=previous?._obj==='patternLayer'?clone(previous):{_obj:'patternLayer'};
+      next.pattern=previous?.pattern?.name===value.name?clone(previous.pattern):{_obj:'pattern',name:value.name};return next;
+    }
+    const next=previous?._obj==='gradientLayer'?clone(previous):{_obj:'gradientLayer',type:{_enum:'gradientType',_value:'linear'},
+      angle:{_unit:'angleUnit',_value:0},scale:{_unit:'percentUnit',_value:100}};
+    const old=next.gradient || {};
+    next.gradient={...old,_obj:'gradientClassEvent',name:old.name || 'Menu gradient',gradientForm:{_enum:'gradientForm',_value:'customStops'},
+      interfaceIconFrameDimmed:4096,colors:value.stops.map((s,i)=>({_obj:'colorStop',
+        color:{_obj:'RGBColor',red:s.rgb[0],grain:s.rgb[1],blue:s.rgb[2]},type:{_enum:'colorStopType',_value:'userStop'},
+        location:s.location,midpoint:old.colors?.[i]?.midpoint ?? 50})),
+      transparency:old.transparency || [0,4096].map(location=>({_obj:'transferSpec',opacity:{_unit:'percentUnit',_value:100},location,midpoint:50}))};
+    return next;
+  }
+  function samePaint(actual,wanted) {
+    if(!actual || actual.kind!==wanted.kind || actual.enabled!==wanted.enabled)return false;
+    const close=(a,b)=>a.length===b.length && a.every((v,i)=>Math.abs(v-b[i])<=1);
+    if(actual.kind==='solid')return close(actual.rgb,wanted.rgb);
+    if(actual.kind==='pattern')return actual.name===wanted.name;
+    return actual.stops.length===wanted.stops.length && actual.stops.every((s,i)=>s.location===wanted.stops[i].location && close(s.rgb,wanted.stops[i].rgb));
+  }
+  async function apply(request) {
+    const params=request.paint;
+    if(!params || typeof params.revision!=='string' || params.revision.length>128)throw Error('Missing shape revision');
+    validatePaint(params.fill);validatePaint(params.stroke);
+    if(typeof params.stroke.width!=='number' || !Number.isFinite(params.stroke.width) || params.stroke.width<0 || params.stroke.width>1000)throw Error('Invalid stroke width');
+    return ps.core.executeAsModal(async context=>{
+      if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+      const actual=await capture(),expected=request.target;
+      if(expected?.session!==session || actual.document_id!==expected.document_id || actual.active_layer_id!==expected.active_layer_id || actual.layer_ids.join(',')!==expected.layer_ids?.join(','))throw Error('Document or layer target changed');
+      const eligibility=selectionContext(),before=await observe(eligibility,true);
+      if(!before.available || before.revision!==params.revision)throw Error('填充／描边已改变，请重新打开菜单；本次未修改');
+      if(!before.vector && params.fill.kind!==before.fill.kind)throw Error('普通填充层保持PS原生类型；本次未修改');
+      if(!before.vector && (!params.fill.enabled || params.stroke.kind!==before.stroke.kind || params.stroke.enabled!==before.stroke.enabled
+          || params.stroke.width!==before.stroke.width || JSON.stringify(params.stroke.rgb)!==JSON.stringify(before.stroke.rgb)))
+        throw Error('普通填充层不支持形状描边或禁用填充；本次未修改');
+      const original=cache.raw,doc=ps.app.activeDocument,anchor=doc.activeLayers[0];
+      const parent=anchor.parent,parentId=parent?.id ?? null,order=Array.from(parent?parent.layers:doc.layers,l=>l.id);
+      const to=before.vector?{_obj:'shapeStyle',fillContents:build(params.fill,original.fill),strokeStyle:{...clone(original.stroke),
+        strokeStyleVersion:2,fillEnabled:params.fill.enabled,strokeEnabled:params.stroke.enabled,
+        strokeStyleLineWidth:{_unit:'pixelsUnit',_value:params.stroke.width},
+        strokeStyleContent:build(params.stroke,original.stroke.strokeStyleContent)}}:build(params.fill,original.fill);
+      if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+      const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu shape paint'});
+      try {
+        const [response]=await ps.action.batchPlay([{_obj:'set',_target:[{_ref:'contentLayer',_enum:'ordinal',_value:'targetEnum'}],
+          to,_options:{dialogOptions:'dontDisplay'}}],{});
+        if(response?._obj==='error')throw Error(response.message || 'Photoshop 拒绝修改形状颜色');
+        const after=await observe(selectionContext(),true);
+        if(!after.available || after.vector!==before.vector || !samePaint(after.fill,params.fill) || !samePaint(after.stroke,params.stroke) || Math.abs(after.stroke.width-params.stroke.width)>.01 ||
+          doc.activeLayers.length!==1 || doc.activeLayers[0].id!==anchor.id || (anchor.parent?.id ?? null)!==parentId ||
+          Array.from(parent?parent.layers:doc.layers,l=>l.id).join(',')!==order.join(','))throw Error('形状颜色／图层身份读回不符，已回滚');
+        await context.hostControl.resumeHistory(history,true);
+        return {count:1,verified:true,placement_moves:0,fill_kind:after.fill.kind,stroke_kind:after.stroke.kind,selection_context:selectionContext()};
+      } catch(error) {
+        try {await context.hostControl.resumeHistory(history,false);cache=null;}
+        catch(_) {error.resultUnknown=true;}
+        throw error;
+      }
+    },{commandName:'Menu shape paint',timeOut:0});
+  }
+  return {observe,apply};
+}

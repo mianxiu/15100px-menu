@@ -1,0 +1,180 @@
+// Read-only, network-free installation and local IPC probe.
+const {app} = require('photoshop');
+const uxp = require('uxp');
+const token = require('./probe-config.js');
+const session = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+const labels = require('./labels.js')(require('photoshop'), session);
+const seen = new Set();
+let sequence = 0;
+let running = false;
+let lastRequest = null;
+let lastHeartbeat = 0;
+let pluginManifest = null;
+let contextReadAt=0,contextWriteAt=0,contextSignature='';
+let contextDirty=1,contextReadGeneration=0,contextReadCount=0,notificationCount=0,notificationReady=false;
+let notificationFormat='none',notificationEvents=null;
+const notificationNames=['select','make','delete','set','undo','redo','open','close','move','historyStateChanged','modalJavaScriptScopeExit'];
+function notificationChanged() {notificationCount++;contextDirty++;contextReadAt=0;}
+async function registerNotifications(format='objects') {
+  const action=require('photoshop').action;
+  if(notificationEvents)try {await action.removeNotificationListener(notificationEvents,notificationChanged);}catch(_){}
+  notificationReady=false;
+  try {
+    const events=format==='objects'?notificationNames.map(event=>({event})):notificationNames;
+    await action.addNotificationListener(events,notificationChanged);
+    notificationEvents=events;notificationFormat=format;notificationReady=true;
+  } catch(_) {notificationEvents=null;notificationFormat='none';}
+  return notificationReady;
+}
+let pendingResponse=null;
+let completedReceipts=[];
+let lastWorkAt=0;
+async function finishResponse(folder,response) {
+  // Store the final outcome before the compatibility response slot. If storage
+  // is temporarily unavailable, retain the outcome in memory and only retry
+  // writing that outcome, never run the Photoshop command again.
+  await record(folder,'result-'+response.id+'.json',response);
+  await record(folder,'probe-response.json',response);
+  pendingResponse=null;
+  completedReceipts.push('result-'+response.id+'.json');
+  if(completedReceipts.length>64) {
+    const name=completedReceipts.shift();
+    try {await (await folder.getEntry(name)).delete();}catch(_){}
+  }
+}
+async function updateLayerContext(folder,now,force=false,prepared=null) {
+  const events=labels.readPolicy && labels.readPolicy().refresh==='events';
+  if(!force && now-contextReadAt<(events && notificationReady && contextReadGeneration===contextDirty?1000:100))return;
+  const generation=contextDirty;
+  contextReadAt=now;
+  let value;
+  try {value=prepared && labels.selectionMatches(prepared)?prepared:await (labels.selectionContextAsync?labels.selectionContextAsync():labels.selectionContext());}
+  catch(_) {value={session,document_id:null,layer_ids:[],kind:'unknown',mask:0};}
+  // Throttle from read completion: if DOM work itself takes over 100ms,
+  // measuring from its start would immediately launch another costly read.
+  const readDone=Date.now();contextReadAt=readDone;
+  contextReadGeneration=generation;contextReadCount++;
+  const signature=JSON.stringify(value);
+  const snapshot={...value,schema:1,plugin_time_ms:readDone};
+  if(force || signature!==contextSignature || now-contextWriteAt>=1000) {
+    await record(folder,'layer-context.json',snapshot);
+    contextSignature=signature;contextWriteAt=Date.now();
+  }
+  return snapshot;
+}
+async function metadata() {
+  if (!pluginManifest) {
+    try {
+      const folder = await uxp.storage.localFileSystem.getPluginFolder();
+      pluginManifest = JSON.parse(await (await folder.getEntry('manifest.json')).read());
+    } catch (_) { return {plugin_name: 'unavailable', command_label: 'unavailable'}; }
+  }
+  return {plugin_name: pluginManifest.name, command_label: pluginManifest.entrypoints[0].label.default};
+}
+function optional(read) {
+  try { const value = read(); return value == null ? 'unavailable' : String(value); }
+  catch (_) { return 'unavailable'; }
+}
+async function record(folder, name, value) {
+  const file = await folder.createFile(name, {overwrite: true});
+  await file.write(JSON.stringify(value));
+}
+async function probe(reason) {
+  if (running) return;
+  running = true;
+  try {
+    const folder = await uxp.storage.localFileSystem.getDataFolder();
+    if(pendingResponse) {await finishResponse(folder,pendingResponse);return;}
+    const now = Date.now();
+    if (reason !== 'poll' || now - lastHeartbeat >= 5000) {
+      await record(folder, 'probe-last.json', {
+        ...await metadata(),
+        reason: reason === 'poll' ? 'heartbeat' : reason,
+        sequence: ++sequence, probe_version: '0.3.11', session, transport: 'plugin-data-files',
+        photoshop_version: optional(() => uxp.host.version),
+        uxp_version: optional(() => uxp.versions.uxp),
+        plugin_id: 'com.15100px.menu.offline-probe',
+        document_count: app.documents.length, document_name: app.documents.length ? app.activeDocument.title : null, plugin_time_ms: now, phase: 'ready'
+      });
+      lastHeartbeat = now;
+    }
+    let request;
+    try {
+      const file = await folder.getEntry('probe-request.json');
+      const raw = await file.read();
+      if (raw.length > 4096) return;
+      request = JSON.parse(raw);
+    } catch (_) { await updateLayerContext(folder,now);return; }
+    if (request.token !== token || !['inspect','capture','set_label','new_document'].includes(request.operation) ||
+        typeof request.id !== 'string' || request.id.length > 128 ||
+        seen.has(request.id) || !Number.isFinite(request.expires_at_ms) ||
+        request.expires_at_ms < Date.now() || request.expires_at_ms > Date.now() + 30000) {
+      // Metadata DOM reads are comparatively costly. Pending work takes
+      // priority; a short quiet period also lets capture's write arrive before
+      // an unrelated cache refresh. Execution still rechecks fresh eligibility.
+      if(now-lastWorkAt>=80)await updateLayerContext(folder,now);
+      return;
+    }
+    if(request.session && request.session!==session)return;
+    const modifying=['set_label','new_document'].includes(request.operation);
+    if(modifying) {
+      if(!/^[0-9a-f]{32}$/.test(request.id))return;
+      // A durable accepted/final receipt survives plugin reload. Its presence
+      // consumes this ID even if no final result could be recorded.
+      try {await folder.getEntry('result-'+request.id+'.json');seen.add(request.id);return;}
+      catch(_){}
+    }
+    seen.add(request.id); // Consume before any write; never retry after an uncertain response.
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.11', operation: request.operation,
+      transport: 'plugin-data-files', document_count: app.documents.length,
+      completed_at_ms: Date.now(), phase: 'completed'};
+    const timingStarted=Date.now(),timings={};
+    if(modifying)await record(folder,'result-'+request.id+'.json',{...response,phase:'accepted'});
+    timings.accept_ms=Date.now()-timingStarted;
+    const operationStarted=Date.now();
+    try {
+      if (request.operation === 'inspect') response.target = labels.documentTarget();
+      if (request.operation === 'inspect' && Object.prototype.hasOwnProperty.call(request,'read_experiment')) {
+        response.read_experiment=labels.configureReads(request.read_experiment);contextDirty++;contextReadAt=0;
+        if(request.read_experiment && request.read_experiment.notification_format)
+          await registerNotifications(request.read_experiment.notification_format);
+      }
+      if (request.operation === 'inspect' && request.read_probe===true) response.read_probe=await labels.readProbe();
+      if (request.operation === 'inspect' && request.refresh_probe===true) response.refresh_probe={
+        reads:contextReadCount,notifications:notificationCount,notification_ready:notificationReady,notification_format:notificationFormat,
+        generation:contextDirty,read_generation:contextReadGeneration,policy:labels.readPolicy?labels.readPolicy():null};
+      if (request.operation === 'capture') response.target = await labels.capture();
+      if (request.operation === 'set_label') response.result = await labels.setLabel(request);
+      if (request.operation === 'new_document') response.result = await labels.createDocument(request);
+    } catch (error) { response.phase = 'failed'; response.error = String(error); response.result_unknown=!!error.resultUnknown; }
+    response.completed_at_ms = Date.now();
+    timings.operation_ms=Date.now()-operationStarted;
+    if(modifying) {
+      // Keep the committed outcome even if metadata storage fails. Prepare the
+      // new selection before confirming completion, so an immediately reopened
+      // menu cannot freeze the previous layer. This never repeats a mutation.
+      pendingResponse=response;
+      if(response.phase==='completed') {
+        const feedbackStarted=Date.now();
+        try {response.layer_context=await updateLayerContext(folder,Date.now(),true,response.result.selection_context);}
+        catch(error) {console.log('Selection feedback unavailable',String(error));}
+        timings.selection_feedback_ms=Date.now()-feedbackStarted;
+      }
+      response.timings_ms=timings;
+      await finishResponse(folder,response);
+    }
+    else await record(folder, 'probe-response.json', response);
+    lastRequest = request.id;
+    // Capture gets a quiet period while its write follows; after modification
+    // refresh the new selection on the next poll, without an extra 80ms wait.
+    lastWorkAt=modifying?0:Date.now();
+  } catch (error) {
+    console.log('Offline file probe error', String(error));
+  } finally { running = false; }
+}
+module.exports = {commands: {probe: () => probe('command')}};
+probe('startup');
+// Notifications make selection/type/lock changes visible on the next poll;
+// the bounded DOM poll also covers changes made by external COM scripts.
+registerNotifications('objects').then(ready=>{if(!ready)return registerNotifications('strings');});
+setInterval(() => probe('poll'), 16);

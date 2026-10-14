@@ -339,6 +339,7 @@ class Application(web.Application):
                              "hwnd": self.desktop.hwnd if self.desktop else None,
                              "pid": self.desktop.process.pid if self.desktop and self.desktop.process else None,
                              "renderer": "Dear ImGui / C++ / DirectX 11",
+                             "graphics": getattr(self.desktop,'graphics',{}) if self.desktop else {},
                              "visible": bool(self.desktop and self.desktop.visible),
                              "panel_context": self.desktop.panel_context.current if self.desktop and self.desktop.panel_context else {'kind': 'generic', 'label': '通用操作', 'source': 'fallback'},
                              "native_hotkeys": bool(self.desktop and self.desktop.native and self.desktop.native.poll() is None and self.desktop.ready.is_set()),
@@ -389,6 +390,7 @@ class Application(web.Application):
             name = args.get("name")
             if name=='document.recent':raise ValueError('请从首页最近预设列表选择尺寸')
             validate_command(name, args.get("params"))
+            if name=='shape.paint' and not isinstance(self.bridge,UxpBridge):raise ValueError('形状颜色需要UXP执行插件')
             if self.photoshop_launcher.active:raise RuntimeError('Photoshop 正在启动或结果待确认，请等待就绪后重新选择')
             if isinstance(self.bridge,UxpBridge):self.require_uxp_enabled()
             logging.info("Script action requested: %s", name)
@@ -420,7 +422,9 @@ class Application(web.Application):
                             await asyncio.to_thread(self.desktop.hide)
                     # Capture before hiding; the PS-side check and write
                     # share one JSX call on the original COM connection.
-                    if frozen_target is not None:
+                    if name=='shape.paint':
+                        result=await self.bridge.execute_shape(args.get('params'),before_dispatch=before_dispatch,frozen_target=frozen_target)
+                    elif frozen_target is not None:
                         result=await self.bridge.execute(name,before_dispatch=before_dispatch,frozen_target=frozen_target)
                     else:result = await self.bridge.execute(name, before_dispatch=before_dispatch)
                     if isinstance(self.bridge,UxpBridge):
@@ -538,7 +542,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         try:
             event_args = {}
             if isinstance(action, dict):
-                event_args = {key:action[key] for key in ('menu_epoch','cursor') if key in action}
+                event_args = {key:action[key] for key in ('menu_epoch','cursor','params') if key in action}
                 action = action['action']
                 if 'menu_epoch' in event_args and (not app.desktop or event_args['menu_epoch'] != app.desktop.menu_epoch):
                     return

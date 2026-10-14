@@ -19,6 +19,7 @@
 #include <sstream>
 #include <fstream>
 #include <filesystem>
+#include <chrono>
 #include "vendor/json/json.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -27,6 +28,7 @@
 #include "MenuGlyphs.h"
 #include "FigmaMenuIcons.h"
 #include "StyledMenuIcons.h"
+#include "MenuUiMetrics.h"
 
 using Json=nlohmann::json;
 static HWND window;
@@ -37,6 +39,10 @@ static void showPopupWindow(ImGuiViewport* viewport) {
 static DWORD backendParent=0;
 static ID3D11Device* device;
 static ID3D11DeviceContext* context;
+static std::string renderMode="auto",activeRenderMode="",renderAdapter,benchmarkRenderMode="auto";
+static bool rendererDirty=false;
+static bool benchmarkRenderCompletion=false;
+static Json graphicsInfo(){return Json{{"requested",renderMode},{"active",activeRenderMode},{"adapter",renderAdapter}};}
 static IDXGISwapChain* swapChain;
 static HANDLE frameLatency=nullptr;
 static bool frameGranted=false;
@@ -228,6 +234,8 @@ static int previewRecentHover=-1;
 static int previewQuickHover=-1,previewActionHover=-1;
 static bool previewLifecycle=false;
 static bool previewLive=false;
+static bool previewShape=false;
+static std::wstring shapeBenchmarkOutput;
 static bool selfTest=false;
 static std::vector<std::string> testedActions;
 static size_t labelTestActionCount=0;
@@ -251,6 +259,9 @@ static std::string normalized(std::string value) {
     for (unsigned char c:value) if (!isspace(c)) result+=static_cast<char>(tolower(c));
     return result;
 }
+static ImVec2 basicLabelExtent(int index);
+static float basicTextOffset();
+#include "ShapeColorEditor.h"
 static bool matches(int i,const std::string& query) {
     std::string haystack=normalized(std::string(rowLabel(i))+" "+(panelKind==4?"新建 文档 new document create":keywords[i])+" "+rowShortcut(i));
     std::istringstream words(query);std::string word;
@@ -271,14 +282,24 @@ static void setOpacity(float opacity) {
 }
 static bool createDevice(HWND hwnd) {
     D3D_FEATURE_LEVEL levels[]={D3D_FEATURE_LEVEL_11_0,D3D_FEATURE_LEVEL_10_0},level;
-    HRESULT result=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+    HRESULT result=renderMode=="cpu"?E_FAIL:D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,
         levels,2,D3D11_SDK_VERSION,&device,&level,&context);
+    const bool hardware=SUCCEEDED(result);
     if (FAILED(result)) result=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,
         levels,2,D3D11_SDK_VERSION,&device,&level,&context);
     if (FAILED(result)) return false;
+    activeRenderMode=hardware?"gpu":"cpu";
     IDXGIDevice* dxgi=nullptr;IDXGIAdapter* adapter=nullptr;IDXGIFactory2* factory=nullptr;IDXGISwapChain1* chain=nullptr;
     result=device->QueryInterface(IID_PPV_ARGS(&dxgi));
     if (SUCCEEDED(result)) result=dxgi->GetAdapter(&adapter);
+    if (SUCCEEDED(result)) {
+        DXGI_ADAPTER_DESC info{};
+        if(SUCCEEDED(adapter->GetDesc(&info))) {
+            std::wstring name(info.Description);std::string ascii(name.begin(),name.end());
+            renderAdapter=ascii;
+            std::cerr<<"DX11 renderer: "<<(hardware?"hardware GPU":"software WARP")<<", adapter="<<ascii<<"\n";
+        }
+    }
     if (SUCCEEDED(result)) result=adapter->GetParent(IID_PPV_ARGS(&factory));
     RECT bounds{};GetClientRect(hwnd,&bounds);
     DXGI_SWAP_CHAIN_DESC1 desc{};
@@ -413,12 +434,15 @@ static void accept(const Json& event) {
         if (!taskRecovery.empty()) {taskError.clear();taskFailed=false;requireText(taskRecovery);}
         document=ps.contains("document") && ps["document"].is_string()?ps["document"].get<std::string>():ps.value("message","Photoshop 未连接");
         const auto& settings=data.at("settings");rightHide=settings.value("right_click_hide",false);
+        const std::string nextMode=settings.value("render_mode",std::string("auto"));
+        if((nextMode=="auto" || nextMode=="gpu" || nextMode=="cpu") && nextMode!=renderMode){renderMode=nextMode;rendererDirty=true;}
         for (int i=0;i<4;++i) shortcuts[i]=shortcut(settings.at("shortcuts").value(actions[i],""));
     } else if (type=="operation") {
         if (event.value("busy",false) && event.contains("action")) {
             std::string action=event.value("action","");taskName=action;
             for (int i=0;i<4;++i) if (action==actions[i]) taskName=labels[i];
             if (action=="document.recent")taskName="按最近预设新建文档";
+            if (action=="shape.paint")taskName="调整形状填充与描边";
             for (const auto& label:labelColors) if (action==std::string("label.")+label.id) taskName=std::string(label.name)+"标签";
             for(int i=0;i<7;++i)if(action==quickActions[i])taskName=quickLabels[i];
             notice.clear();taskError.clear();taskRecovery.clear();taskFailed=false;taskHasResult=false;
@@ -449,6 +473,7 @@ static int holdActionAt(POINT point) {
     if (dx*dx+dy*dy<12*12*scale*scale || (!pinned && !holdMoved)) return -1;
     RECT bounds{};GetWindowRect(window,&bounds);
     if (!PtInRect(&bounds,point)) return -1;
+    if(shapeEditor.ready() && PtInRect(&shapeEditor.bounds,point))return 100;
     for(int i=0;i<7;++i)if(quickEnabled(i) && PtInRect(&quickRows[i],point)) {
         if(quickDividerAt(i,point))return -1;
         return 32+i;
@@ -491,6 +516,7 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     if (requireHighlight && !selfTest) std::cout<<Json({{"type","selection"},{"session",menuEpoch},
         {"cursor",{point.x,point.y}},{"frozen_hit",frozenHit},{"current_cursor",{current.x,current.y}},
         {"current_hit",currentHit},{"highlight",renderedHit},{"chosen",chosen}}).dump()<<std::endl;
+    if(chosen==100){commitShapeDraft();holdFinished=true;pieReady=false;setOpacity(0.f);return;}
     holdFinished=true;pieReady=false;
     setOpacity(0.f);
     if (chosen>=32 && chosen<39)send(quickActions[chosen-32]);
@@ -499,6 +525,17 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     else send(chosen<0?"hide":rowAction(chosen));
 }
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    if(msg==WM_COPYDATA){
+        auto* data=reinterpret_cast<COPYDATASTRUCT*>(lp);
+        if(!data || data->dwData!=0x53485045 || !data->lpData || data->cbData<2 || data->cbData>65536)return FALSE;
+        try {auto* text=static_cast<const char*>(data->lpData);shapeEditor.prepare(Json::parse(text,text+data->cbData-1));}
+        catch(...) {shapeEditor.prepare(Json{{"available",false}});}
+        return TRUE;
+    }
+    if(msg==WM_APP+22){
+        if(IsWindowVisible(hwnd) && !holdFinished){commitShapeDraft();holdFinished=true;pieReady=false;setOpacity(0.f);}
+        return 0;
+    }
     if (msg==WM_APP+21) {
         if (IsWindowVisible(hwnd)) finishHold({static_cast<LONG>(wp),static_cast<LONG>(lp)},true);
         return 0;
@@ -1044,7 +1081,7 @@ static void drawPie() {
     const ImGuiKey numberKeys[]={ImGuiKey_4,ImGuiKey_None,ImGuiKey_8,ImGuiKey_2};
     const ImGuiKey keypadKeys[]={ImGuiKey_Keypad4,ImGuiKey_None,ImGuiKey_Keypad8,ImGuiKey_Keypad2};
     // Direction accelerators are local to an open pie, never global PS keys.
-    if (canExecute() && !holdFinished && !ImGui::GetIO().KeyCtrl &&
+    if (canExecute() && !shapeEditor.ready() && !holdFinished && !ImGui::GetIO().KeyCtrl &&
         !ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper) {
         for (int i:{0,2,3}) if (rowVisible(i) && rowEnabled(i) &&
             (ImGui::IsKeyPressed(numberKeys[i],false) || ImGui::IsKeyPressed(keypadKeys[i],false))) {
@@ -1072,6 +1109,7 @@ static void drawPie() {
             LONG(r.left+(7+(i%4+1)*21)*scale),LONG(r.top+(7+(i/4+1)*21)*scale)};
     }
     pieReady=!holdFinished;
+    drawShapeEditor();
     drawRecentPresets();
     // Build final hit rectangles before sampling, independent of animation.
     if(panelKind!=4 && panelKind!=3 && layerAware)for(int i=0;i<7;++i){int group=i>=3,n=group?i-3:i;
@@ -1153,6 +1191,8 @@ static void drawPie() {
         messages.push_back(layerTitle()+(restriction[0]?std::string(" · ")+restriction:""));
     }
     if(hint)messages.push_back(hint);
+    if(shapeEditor.ready() && shapeEditor.dirty)messages.push_back("形状颜色待应用");
+    if(shapeEditor.ready() && shapeEditor.copyFailed)messages.push_back("剪贴板暂时不可用，未复制颜色");
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
     drawFooter(messages,pieCenter.y+116*scale,panelKind==4);
     const int tipAction=actionTipText(selected)?selected:-1;
@@ -1258,6 +1298,49 @@ static void drawMenu() {
     if (contextMode && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) send("hide");
     ImGui::End();
 }
+static void benchmarkShapeEditor(const Json& fixture) {
+    if(shapeBenchmarkOutput.empty())return;
+    Json report={{"scope",benchmarkRenderCompletion?"warm CPU build/submission plus DX11 EVENT completion (includes queue/driver/query wait); no Present/vsync or physical key latency":"warm native CPU frame build + DX11 command submission; no Present/vsync, physical key latency or PS IPC"},{"graphics",graphicsInfo()},{"samples_per_case",200},{"font","large"},{"dpi_scale",scale},{"cases",Json::array()}};
+    ID3D11Query* completion=nullptr;
+    if(benchmarkRenderCompletion){D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};if(FAILED(device->CreateQuery(&desc,&completion)))throw std::runtime_error("Unable to create render completion query");}
+    auto& io=ImGui::GetIO();io.FontDefault=menuFonts[2];layerAware=true;layerKind=6;layerCount=1;layerMask=15;quickMask=127;panelKind=2;
+    const auto actionsBefore=testedActions.size();
+    for(const char* themeName:{"light","light-gray","dark-gray","dark"}){
+        uiTheme=themeName;theme();
+        for(const char* kind:{"plain","solid","gradient","pattern"}){
+            shapeEditor.prepare(fixture);setHoldMode(true);
+            if(std::string(kind)=="plain")shapeEditor.available=false;
+            else if(std::string(kind)=="gradient")shapeEditor.mode(1);
+            else if(std::string(kind)=="pattern")shapeEditor.mode(2);
+            std::vector<double> values,completed;int vertices=0;
+            for(int frame=0;frame<220;++frame){
+                ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();io.DeltaTime=1.f/60;
+                const auto start=std::chrono::steady_clock::now();
+                ImGui::NewFrame();drawMenu();ImGui::Render();
+                context->OMSetRenderTargets(1,&target,nullptr);const float clear[]={0,0,0,0};context->ClearRenderTargetView(target,clear);
+                ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+                const double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+                if(completion){
+                    context->End(completion);context->Flush();HRESULT done;
+                    while((done=context->GetData(completion,nullptr,0,D3D11_ASYNC_GETDATA_DONOTFLUSH))==S_FALSE){
+                        if(std::chrono::steady_clock::now()-start>std::chrono::seconds(2))throw std::runtime_error("Render completion timed out");
+                        SwitchToThread();
+                    }
+                    if(FAILED(done))throw std::runtime_error("Render device failed during completion benchmark");
+                    if(frame>=20)completed.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
+                }
+                vertices=ImGui::GetDrawData()->TotalVtxCount;finishPlatformFrame();
+                if(frame>=20)values.push_back(elapsed);
+            }
+            std::sort(values.begin(),values.end());
+            report["cases"].push_back({{"theme",themeName},{"kind",kind},{"median_ms",values[100]},{"p95_ms",values[189]},{"vertices",vertices}});
+            if(completion){std::sort(completed.begin(),completed.end());report["cases"].back()["completion_median_ms"]=completed[100];report["cases"].back()["completion_p95_ms"]=completed[189];}
+        }
+    }
+    if(completion)completion->Release();
+    if(testedActions.size()!=actionsBefore)throw std::runtime_error("Rendering benchmark submitted an operation");
+    std::ofstream output{std::filesystem::path(shapeBenchmarkOutput)};output<<report.dump(2);
+}
 static void screenshot(const std::wstring& path) {
     ID3D11Texture2D *buffer=nullptr,*staging=nullptr;
     // Capture the texture actually bound for this frame. A flip-chain buffer
@@ -1344,6 +1427,12 @@ int main() {
         if (arg==L"--preview-lifecycle") previewLifecycle=true;
         else if (arg==L"--preview-live") previewLive=true;
         else if (arg==L"--self-test") selfTest=true;
+        else if (arg==L"--benchmark-render-completion") benchmarkRenderCompletion=true;
+        else if (i+1<argc && arg==L"--render-mode") {
+            std::wstring value=argv[++i];std::string mode(value.begin(),value.end());
+            if(mode=="auto" || mode=="gpu" || mode=="cpu")renderMode=benchmarkRenderMode=mode;
+        }
+        else if (i+1<argc && arg==L"--benchmark-shape-output") {shapeBenchmarkOutput=argv[++i];selfTest=true;}
         else if (i+1<argc && arg==L"--preview-output") preview=argv[++i];
         else if (i+1<argc && arg==L"--preview-kind") {
             std::wstring kind=argv[++i];previewKind=kind==L"context"?"context":kind==L"hold"?"hold":kind==L"busy"?"busy":"menu";
@@ -1356,6 +1445,11 @@ int main() {
         else if (i+1<argc && arg==L"--preview-recent-hover") previewRecentHover=std::stoi(argv[++i]);
         else if (i+1<argc && arg==L"--preview-action-hover") previewActionHover=std::stoi(argv[++i]);
         else if (i+1<argc && arg==L"--preview-quick-hover") previewQuickHover=std::stoi(argv[++i]);
+        else if (i+1<argc && arg==L"--preview-shape") {
+            std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
+            shapeEditor.prepare(data);previewShape=true;previewKind="hold";
+            layerAware=true;layerKind=6;layerCount=1;layerMask=15;quickMask=127;panelKind=2;
+        }
         else if (i+1<argc && arg==L"--preview-layer-context") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
             layerAware=true;layerMask=data.value("mask",0);
@@ -1399,10 +1493,14 @@ int main() {
     IMGUI_CHECKVERSION();ImGui::CreateContext();auto& io=ImGui::GetIO();
     io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_ViewportsEnable;
     io.IniFilename=nullptr;io.LogFilename=nullptr;
-    if (selfTest) io.ConfigFlags|=ImGuiConfigFlags_NoMouseCursorChange;
+    // Photoshop owns its tool cursor. The visible overlay must never replace
+    // the desktop cursor during renderer frames/status updates. Our window
+    // class supplies its arrow on ordinary client WM_SETCURSOR messages.
+    // Keep this policy identical in production and automated checks.
+    io.ConfigFlags|=ImGuiConfigFlags_NoMouseCursorChange;
     scale=ImGui_ImplWin32_GetDpiScaleForHwnd(window);theme();
     if (!preview.empty() || selfTest) SetWindowPos(window,nullptr,100,100,
-        static_cast<int>((contextMode?260:360)*scale),static_cast<int>((contextMode?240:300)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+        static_cast<int>((previewShape?920:contextMode?260:360)*scale),static_cast<int>((previewShape?560:contextMode?240:300)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
     io.ConfigViewportsNoTaskBarIcon=true;
     std::wstring fontPath; wchar_t windowsPath[MAX_PATH];GetWindowsDirectoryW(windowsPath,MAX_PATH);fontPath=std::wstring(windowsPath)+L"/Fonts/msyh.ttc";
     int size=WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,nullptr,0,nullptr,nullptr);std::string font(size,0);WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,font.data(),size,nullptr,nullptr);
@@ -1450,12 +1548,14 @@ int main() {
         std::cerr<<"Unable to initialize menu renderer resources\n";return 1;
     }
     if (preview.empty() && !selfTest) {
-        std::cout<<Json({{"type","ready"},{"hwnd",reinterpret_cast<uintptr_t>(window)},{"pid",GetCurrentProcessId()}}).dump()<<std::endl;
+        std::cout<<Json({{"type","ready"},{"hwnd",reinterpret_cast<uintptr_t>(window)},{"pid",GetCurrentProcessId()},{"graphics",graphicsInfo()}}).dump()<<std::endl;
         std::thread(readEvents).detach();
         if (parent) std::thread([parent]{HANDLE process=OpenProcess(SYNCHRONIZE,FALSE,parent);if (process){WaitForSingleObject(process,INFINITE);CloseHandle(process);}PostMessageW(window,WM_CLOSE,0,0);}).detach();
     } else {
         allowed=true;document="示例文档.psd";
         if (selfTest) {
+            if (!(io.ConfigFlags&ImGuiConfigFlags_NoMouseCursorChange))
+                throw std::runtime_error("Menu renderer must preserve the Photoshop tool cursor");
             for (int kind=0;kind<5;++kind) for (int input=0;input<2;++input) {
                 procedure(window,WM_APP+17,(kind==4?32:kind)|(input<<2)|16,73);
                 if (panelKind!=kind || inputFocused!=bool(input) || !holdMode || contextMode || menuEpoch!=73)
@@ -1580,7 +1680,7 @@ int main() {
     if (!selfTest) {ShowWindow(window,SW_SHOWNORMAL);UpdateWindow(window);}
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
-            SetWindowPos(window,nullptr,100,100,static_cast<int>((panelKind==4?820:620)*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowPos(window,nullptr,100,100,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?560:440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);
             if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
         }
@@ -1629,6 +1729,11 @@ int main() {
                         throw std::runtime_error("Dynamic Chinese glyph missing from a cached size");
             }
             // Prepare pending fonts while hidden, on receipt of PS status.
+            if(rendererDirty && !IsWindowVisible(window)) {
+                if(!recoverRenderer())throw std::runtime_error("Unable to switch menu graphics device");
+                rendererDirty=false;
+                std::cout<<Json{{"type","graphics"},{"graphics",graphicsInfo()}}.dump()<<std::endl;
+            }
             // Deferring this until ShowWindow blocked the first CapsLock frame.
             // Preserve an acquired slot if a hide arrived during the wait.
             // Dropping it without Present can strand the next reopen.
@@ -2069,7 +2174,98 @@ int main() {
                 setHoldMode(true);numberFrame(ImGuiKey_None,false);
                 if (busyFeedback || !canExecute() || !pieReady)
                     throw std::runtime_error("Explicit reopen did not restore idle menu");
-                std::cout<<"Dear ImGui self-test passed: search, keyboard selection, Enter and mouse click dispatch; radial directions, centre cancellation, edge origin, single release, immediate swatch click; 100 hidden platform frames\n";break;
+                const auto shapeCount=testedActions.size();
+                Json shapeFixture={{"available",true},{"revision","test:1"},
+                    {"fill",{{"kind","solid"},{"enabled",true},{"rgb",{12,34,56}}}},
+                    {"stroke",{{"kind","solid"},{"enabled",false},{"rgb",{0,0,0}},{"width",1}}},
+                    {"patterns",{"Test Pattern"}}};
+                shapeEditor.prepare(shapeFixture);setHoldMode(true);panelKind=2;layerAware=true;layerKind=6;layerCount=1;layerLocked=layerBackground=false;
+                SetWindowPos(window,nullptr,0,0,int(920*scale),int(560*scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+                ImGui_ImplWin32_NewFrame();
+                numberFrame(ImGuiKey_None,false);holdMoved=true;
+                if(!shapeEditor.ready() || shapeEditor.bounds.right<=shapeEditor.bounds.left || ImGui::GetDrawData()->TotalVtxCount<=0)
+                    throw std::runtime_error("Shape editor did not render through production window path");
+                shapeEditor.mode(1);shapeEditor.mode(2);shapeEditor.mode(0);
+                if(testedActions.size()!=shapeCount || shapeEditor.dirty)throw std::runtime_error("Local type switching wrote or lost original draft");
+                Json parsed;
+                if(!parseShapeHex("#3a8185",parsed) || parsed!=Json({58,129,133}) || shapeHex(parsed)!="#3A8185" ||
+                    !parseShapeHex("FFFFFF",parsed) || parseShapeHex("#12345",parsed) || parseShapeHex("#XX8185",parsed))
+                    throw std::runtime_error("Hex input validation failed");
+                copyShapeHex(shapeEditor.current()["rgb"]);
+                if(testedCopiedHex!="#0C2238" || testedActions.size()!=shapeCount || shapeEditor.dirty)
+                    throw std::runtime_error("Hex copy changed the draft or submitted Photoshop action");
+                for(int context:{0,1,3,4}){panelKind=context;numberFrame(ImGuiKey_None,false);
+                    if(shapeEditor.ready() || shapeEditor.bounds.right)throw std::runtime_error("Shape editor escaped Layers context");}
+                panelKind=2;
+                for(int kind:{0,1,2,3,4,5,7,8,9}){layerKind=kind;numberFrame(ImGuiKey_None,false);
+                    if(shapeEditor.ready() || shapeEditor.bounds.right)throw std::runtime_error("Stale shape metadata enabled a nonshape layer");}
+                layerKind=6;layerCount=2;numberFrame(ImGuiKey_None,false);
+                if(shapeEditor.ready())throw std::runtime_error("Multiple shapes enabled color application");
+                layerCount=1;layerLocked=true;numberFrame(ImGuiKey_None,false);
+                if(shapeEditor.ready())throw std::runtime_error("Locked shape enabled color application");
+                layerLocked=false;numberFrame(ImGuiKey_None,false);
+                testedCopiedHex.clear();pinned=true;
+                const auto copyRect=shapeEditor.copyBounds;
+                io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);
+                io.AddMousePosEvent((copyRect.left+copyRect.right)*.5f,(copyRect.top+copyRect.bottom)*.5f);
+                numberFrame(ImGuiKey_None,false);
+                io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);numberFrame(ImGuiKey_None,false);
+                io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);numberFrame(ImGuiKey_None,false);
+                if(testedCopiedHex!="#0C2238" || shapeEditor.dirty || testedActions.size()!=shapeCount)
+                    throw std::runtime_error("Hex copy widget changed paint or failed its local click");
+                pinned=false;
+                shapeEditor.mode(1);shapeEditor.current()["stops"]=Json::array({
+                    Json{{"rgb",{0,0,0}},{"location",0}},Json{{"rgb",{200,40,80}},{"location",2048}},Json{{"rgb",{255,255,255}},{"location",4096}}});
+                shapeEditor.original=shapeEditor.draft;shapeEditor.changed();pinned=true;numberFrame(ImGuiKey_None,false);
+                if(shapeEditor.gradientBounds.right<=shapeEditor.gradientBounds.left || gradientPosition(-10,0,100)!=0 || gradientPosition(200,0,100)!=4096)
+                    throw std::runtime_error("Gradient bar bounds or edge positions invalid");
+                auto gradientRect=shapeEditor.gradientBounds;
+                const float marker=menuGradientHandleSize*scale,left=gradientRect.left+marker*.5f,width=gradientRect.right-gradientRect.left-marker;
+                const float markerY=gradientRect.top+(menuGradientBarHeight+menuCompactGap+menuGradientHandleSize*.5f)*scale;
+                auto gradientMouse=[&](float x,bool down){io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(x,markerY);io.AddMouseButtonEvent(ImGuiMouseButton_Left,down);numberFrame(ImGuiKey_None,false);};
+                gradientMouse(left+width*.5f,false);gradientMouse(left+width*.5f,true);
+                gradientMouse(left+width*.75f,true);gradientMouse(left+width*.75f,false);
+                if(shapeEditor.stop!=1 || std::abs(shapeEditor.current()["stops"][1]["location"].get<int>()-3072)>1 || !shapeEditor.dirty || testedActions.size()!=shapeCount)
+                    throw std::runtime_error("Gradient marker drag did not update only its local position");
+                shapeEditor.stop=0;moveGradientStop(4096);
+                if(shapeEditor.current()["stops"][0]["location"]!=shapeEditor.current()["stops"][1]["location"])
+                    throw std::runtime_error("Gradient markers crossed their neighbours");
+                shapeEditor.prepare(shapeFixture);pinned=false;numberFrame(ImGuiKey_None,false);
+                POINT paintPoint={(shapeEditor.bounds.left+shapeEditor.bounds.right)/2,(shapeEditor.bounds.top+shapeEditor.bounds.bottom)/2};
+                renderedHit=100;finishHold(paintPoint,true,&paintPoint);
+                if(testedActions.back()!="hide")throw std::runtime_error("Unchanged paint submitted");
+                auto resetShape=[&]{shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;};
+                resetShape();shapeEditor.current()["rgb"]={200,30,10};shapeEditor.changed();
+                renderedHit=100;finishHold(paintPoint,true,&paintPoint);auto paintSubmitted=testedActions.size();finishHold(paintPoint);
+                if(testedActions.back()!="shape.paint" || testedShapePaint["fill"]["rgb"]!=Json({200,30,10}) || testedActions.size()!=paintSubmitted)
+                    throw std::runtime_error("Paint release payload or single submission failed");
+                resetShape();shapeEditor.current()["rgb"]={200,30,10};shapeEditor.changed();
+                POINT neutral={LONG(pieCenter.x),LONG(pieCenter.y)};renderedHit=100;finishHold(paintPoint,true,&neutral);
+                if(testedActions.back()!="hide")throw std::runtime_error("Paint stale cursor bypassed centre cancellation");
+                resetShape();shapeEditor.current()["rgb"]={200,30,10};shapeEditor.changed();pinned=true;
+                SendMessageW(window,WM_APP+22,0,0);auto pinnedSubmitted=testedActions.size();SendMessageW(window,WM_APP+22,0,0);
+                if(testedActions.back()!="shape.paint" || testedActions.size()!=pinnedSubmitted)throw std::runtime_error("Pinned paint repeated");
+                resetShape();inputFocused=true;numberFrame(ImGuiKey_None,false);
+                if(shapeEditor.ready() || shapeEditor.bounds.right)throw std::runtime_error("Input protection retained shape editor");
+                inputFocused=false;shapeEditor.prepare(Json{{"available",false}});testedActions.resize(shapeCount);
+                shapeFixture["vector"]=false;shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);
+                if(!shapeEditor.ready() || shapeEditor.vector || shapeEditor.channel!=0 || shapeEditor.bounds.right<=shapeEditor.bounds.left)
+                    throw std::runtime_error("Plain fill must expose only fill controls");
+                shapeEditor.prepare(Json{{"available",false}});
+                const auto previousRenderMode=renderMode;
+                for(const char* mode:{"cpu","gpu","auto"}){
+                    renderMode=mode;
+                    if(!recoverRenderer() || (renderMode=="cpu" && activeRenderMode!="cpu"))
+                        throw std::runtime_error("Graphics mode switch failed");
+                    numberFrame(ImGuiKey_None,false);
+                    if(!IsWindowVisible(window) || ImGui::GetDrawData()->TotalVtxCount<=0)
+                        throw std::runtime_error("Graphics mode lost visible menu content");
+                }
+                renderMode=shapeBenchmarkOutput.empty()?previousRenderMode:benchmarkRenderMode;
+                if(!recoverRenderer())throw std::runtime_error("Unable to restore requested benchmark graphics mode");
+                shapeFixture["vector"]=true;
+                benchmarkShapeEditor(shapeFixture);
+                std::cout<<"Dear ImGui self-test passed: original radial/focus/input/cancel matrix; shape local draft, types, single release, stale cursor, pinned commit; production SHOWWINDOW content and 100 hidden frames\n";break;
             }
             if (!preview.empty() && frames==20) {screenshot(preview);if (!previewLive) break;}
             if (SUCCEEDED(swapChain->Present(1,0))) renderedHit=holdFinished?-1:pendingHit;

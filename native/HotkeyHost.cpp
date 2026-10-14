@@ -15,7 +15,7 @@
 enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace };
 static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false; HWND overlay=nullptr; std::array<Binding,6> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false; HWND overlay=nullptr; std::array<Binding,6> bindings{}; };
 static int alias(int key) {
     if (key==160 || key==161) return 16;
     if (key==162 || key==163) return 17;
@@ -67,7 +67,7 @@ struct KeyMachine {
         const Binding* match=nullptr;
         bool tabPrefix=false;
         for (const auto& b:cfg.bindings) {
-            if (cfg.textInput && b.action>=Select && b.action<=Bottom) continue;
+            if ((cfg.textInput || cfg.colorEditor && visible) && b.action>=Select && b.action<=Bottom) continue;
             if (!b.count || (!visible && b.action==Hide)) continue;
             for (int i=0;i<b.count-1;++i) if (b.keys[i]==9) tabPrefix=true;
             if (b.keys[b.count-1]!=key) continue;
@@ -83,7 +83,7 @@ struct KeyMachine {
         if (match) {
             consumed[key]=true;
             if (match->action==Toggle) { if (!repeated) {
-                if (visible) {pending=-1;action=Hide;}
+                if (visible) {pending=-1;action=cfg.colorEditor?Toggle:Hide;}
                 else {pending=key;used=false;pressTime=now;action=HoldBegin;}
             } }
             else { if (pending!=-1) used=true; if (!repeated) action=match->action; }
@@ -97,7 +97,7 @@ struct KeyMachine {
             for (const auto& b:cfg.bindings) for (int i=0;i<b.count;++i)
                 if (b.keys[i]==VK_CAPITAL) {consumed[key]=true;return true;}
         }
-        if (pending!=-1 && key!=pending) used=true;
+        if (pending!=-1 && key!=pending && !(cfg.colorEditor && visible)) used=true;
         return consumed[key];
     }
 };
@@ -364,8 +364,10 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
                 return 1;
             }
         }
+        Config localConfig=config;
+        localConfig.colorEditor=config.colorEditor && menuWindow(foreground);
         bool blocked=routeKey(keys,input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
-                     commandScope,processScope,config,IsWindowVisible(config.overlay),action,GetTickCount64());
+                     commandScope,processScope,localConfig,IsWindowVisible(config.overlay),action,GetTickCount64());
         if (input.vkCode==VK_CAPITAL) {
             unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
             if (next!=tail.load(std::memory_order_acquire)) {
@@ -474,6 +476,7 @@ static Config parse(const std::string& line) {
     };
     next.enabled=field("enabled","(true|false)")=="true";
     if (std::regex_search(line,match,std::regex("\"text_input\"\\s*:\\s*(true|false)"))) next.textInput=match[1]=="true";
+    if (std::regex_search(line,match,std::regex("\"color_editor\"\\s*:\\s*(true|false)"))) next.colorEditor=match[1]=="true";
     next.overlay=reinterpret_cast<HWND>(std::stoull(field("hwnd","([0-9]+)")));
     for (int a=Toggle;a<=Bottom;++a) {
         auto list=field(names[a],"\\[([^\\]]+)\\]");
@@ -788,6 +791,16 @@ static int selfTest() {
     check(state.event(20,false,false,empty,false,action) && action==HoldCancel);
     check(!state.event(20,true,true,empty,false,action));
     check(!state.event(20,false,true,empty,false,action));
+    Config paintConfig=cfg;paintConfig.colorEditor=true;
+    KeyMachine paintKeys;
+    check(paintKeys.event(20,true,true,paintConfig,false,action,3000) && action==HoldBegin);
+    for(int local:{9,65,67,87,83,49,70}) {
+        check(!paintKeys.event(local,true,true,paintConfig,true,action,3100) && action==None);
+        check(!paintKeys.event(local,false,true,paintConfig,true,action,3200) && action==None);
+    }
+    check(paintKeys.event(20,false,true,paintConfig,true,action,3400) && action==HoldRelease);
+    check(paintKeys.event(20,true,true,paintConfig,true,action,3500) && action==Toggle);
+    check(paintKeys.event(20,false,true,paintConfig,true,action,3510) && action==None);
     cfg.bindings[0]={Toggle,{9},1}; cfg.bindings[1]={Top,{9,87},2};
     for (int i=0;i<10000;++i) {
         check(state.event(9,true,true,cfg,false,action) && action==HoldBegin);

@@ -124,7 +124,8 @@ class MenuTests(unittest.TestCase):
     def test_cpp_imgui_search_keyboard_and_mouse_dispatch(self):
         result=subprocess.run([str(ROOT/'native/MenuHost.exe'),'--self-test'],capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('keyboard selection, Enter and mouse click dispatch',result.stdout)
+        self.assertIn('original radial/focus/input/cancel matrix',result.stdout)
+        self.assertIn('shape local draft',result.stdout)
 
     def test_iconified_popup_is_restored_before_showing(self):
         from backend.desktop import show_popup

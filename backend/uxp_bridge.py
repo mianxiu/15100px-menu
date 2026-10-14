@@ -103,6 +103,29 @@ class UxpTransport:
                 lease.seek(0);msvcrt.locking(lease.fileno(),msvcrt.LK_UNLCK,1)
 
 class UxpBridge(PhotoshopBridge):
+    def _status(self):
+        # Avoid status DoJavaScript calls that may reset Photoshop's tool cursor
+        # even for a read-only script. Observe the UXP heartbeat instead.
+        # An older/missing plugin may use native COM properties as a fallback,
+        # but never execute a script from the status path.
+        try:
+            heartbeat=json.loads((self.transport.folder/'probe-last.json').read_text('utf-8-sig'))
+            theme=heartbeat.get('ui_theme');font=heartbeat.get('ui_font_size')
+            if theme in ('light','light-gray','dark-gray','dark'):self.ui_theme=theme
+            if font in ('small','medium','large'):self.ui_font_size=font
+            name=heartbeat.get('document_name')
+            return {'connected':True,'ui_theme':self.ui_theme,'ui_font_size':self.ui_font_size,
+                'document':name if isinstance(name,str) else None,'message':'已连接 Photoshop'}
+        except (OSError,ValueError,RuntimeError):
+            try:
+                app=self._application();count=int(app.Documents.Count)
+                return {'connected':True,'ui_theme':self.ui_theme,'ui_font_size':self.ui_font_size,
+                    'document':str(app.ActiveDocument.Name) if count else None,
+                    'message':'Photoshop 已连接，等待 UXP 加载'}
+            except Exception:
+                return {'connected':False,'ui_theme':self.ui_theme,'ui_font_size':self.ui_font_size,
+                    'document':None,'message':'请先启动 Photoshop'}
+
     def __init__(self, task_history=None, config=None):
         super().__init__(task_history)
         self.tasks.channel='uxp-local-files'
@@ -248,6 +271,21 @@ class UxpBridge(PhotoshopBridge):
             frozen={**frozen_target,'layer_ids':list(frozen_target.get('layer_ids',[]))}
             return await self._execute_task(action,before_dispatch,capture=lambda:self._bind_menu_target(frozen))
         return await super().execute(action,before_dispatch,enqueue=False)
+
+    async def execute_shape(self, params, before_dispatch=None, frozen_target=None):
+        from .shape_paint import parameters
+        params=parameters(params)
+        if self.execution_guard:self.execution_guard()
+        def write(action):
+            self.transport.task_id=self._active_task_id;self._uxp_worker_active=True
+            try:
+                response=self.transport.call('set_label',command='shape.paint',target=self._captured_target,paint=params)
+                value=validate(response.get('layer_context'),self._captured_app)
+                self.layer_context=value if fresh(value) else unavailable()
+                return json.dumps(response['result'])
+            finally:self._uxp_worker_active=False
+        capture=(lambda:self._bind_menu_target(frozen_target)) if frozen_target is not None else self._capture_target
+        return await self._execute_task('shape.paint',before_dispatch,capture=capture,execute=write)
 
     def _capture_new_target(self):
         if self.document_guard:self.document_guard()

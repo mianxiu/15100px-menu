@@ -20,7 +20,7 @@ QUICK_ACTIONS = {
     'adjustment.colorBalance': {'label':'新建色彩平衡调整图层'},
     'adjustment.blackWhite': {'label':'新建黑白调整图层'},
 }
-COMMANDS = {**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS}
+COMMANDS = {**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS,'shape.paint':{'label':'调整形状填充与描边'}}
 
 
 @dataclass(frozen=True)
@@ -49,13 +49,18 @@ REGISTRY = MappingProxyType({
     'document.recent': Command('document.recent','按最近预设新建文档','new-document-dimensions-returned',
         channel='uxp-local-files', conditions=('uxp-ready','photoshop-home','action-focus','not-busy'),
         target_document='captured-UXP-session-and-document-set; cancel-if-changed', target_layers='not-applicable'),
+    'shape.paint':Command('shape.paint','调整形状填充与描边','paint-and-vector-identity-read-back',
+        channel='uxp-local-files',parameters=('revision','fill','stroke')),
 })
 
 
 def validate_command(name, params=None):
     if not isinstance(name, str) or name not in REGISTRY:
         raise ValueError("未知的图层操作")
-    if params is not None and (not isinstance(params, dict) or params):
+    if name=='shape.paint' and params is not None:
+        from .shape_paint import parameters
+        parameters(params)
+    elif params is not None and (not isinstance(params, dict) or params):
         raise ValueError("此命令不接受参数")
     return REGISTRY[name]
 

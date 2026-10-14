@@ -27,6 +27,8 @@ with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as bundle:
     for p in (exe,exe.with_suffix('.exe.sha256'),ROOT/'OFFLINE-INSTALL.md',ROOT/'PERFORMANCE.md',ROOT/'RELEASES.md',ROOT/'LICENSE',ROOT/'THIRD_PARTY_NOTICES.md',plugin):bundle.write(p,p.name)
     bundle.write(ROOT/'docs/CONTEXT-COVERAGE.md','docs/CONTEXT-COVERAGE.md')
     bundle.write(ROOT/'docs/UPDATES.md','docs/UPDATES.md')
+    bundle.write(ROOT/'docs/READ-STRATEGIES.md','docs/READ-STRATEGIES.md')
+    bundle.write(ROOT/'docs/UI-GUIDE.md','docs/UI-GUIDE.md')
     for notice in sorted((ROOT/'licenses').glob('*.txt')):bundle.write(notice,'licenses/'+notice.name)
     for source,target in ((ROOT/'native/fonts/OFL-1.1.txt','licenses/fonts-OFL-1.1.txt'),(ROOT/'native/fonts/COPYRIGHT.txt','licenses/fonts-COPYRIGHT.txt'),(ROOT/'native/vendor/imgui/LICENSE.txt','licenses/imgui.txt'),(ROOT/'native/vendor/json/LICENSE.MIT','licenses/json.txt'),(ROOT/'native/vendor/manifest.json','licenses/native-manifest.json')):bundle.write(source,target)
 output.with_suffix('.zip.sha256').write_text(sha(output)+'  '+output.name+'\n','ascii')
