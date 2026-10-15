@@ -10,7 +10,7 @@ Photoshop 原生浮动菜单与独立后台管理工具。
 
 自动ENG尚未启用。[可行性评估](docs/INPUT-LANGUAGE-ASSESSMENT.md)确认本机有英文布局，但现有标准输入保护不足以可靠排除所有PS自绘文字／重命名。后续先只读观察，不把UIA／COM检测或输入法切换等待加入键盘钩子。
 
-发布状态：包含中文／浮动面板识别补强的最终候选已构建、隔离统一包及EXE烟雾已核验，但F测试打开的原生Layer Style窗口仍被检测为打开；早期运行构建按通用45秒超时记为结果未知，保护仍保留。源码中的最终候选已修正为异步受理、等待用户结束窗口且不重发；取消后必须核对原请求终态，再正常更新。当前公开Latest仍为133，不能以候选已构建冒称134已部署／发布。
+发布状态：包含中文／浮动面板识别补强的最终候选已构建、隔离统一包及EXE烟雾已核验，但F测试打开的原生Layer Style窗口仍被检测为打开；早期运行构建按通用45秒超时记为结果未知，保护仍保留。源码中的最终候选已修正为异步受理、等待用户结束窗口且不重发；取消后必须核对原请求终态，再正常更新。源码与v0.4.134标签已推送，统一ZIP及SHA256已上传为[GitHub Release草稿](https://github.com/mianxiu/15100px-menu/releases/tag/untagged-475ff1559e307f9fa8fb)，远端大小／SHA256与本地一致；草稿需仓库写入权限才能查看。当前公开Latest仍为133，不能以候选已构建冒称134已部署／公开发布。
 
 已发布 [v0.4.133 Release](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.133)（Latest）：[Windows x64统一离线包](https://github.com/mianxiu/15100px-menu/releases/download/v0.4.133/PhotoshopMenu-Backend-0.4.133.zip)与[SHA256](https://github.com/mianxiu/15100px-menu/releases/download/v0.4.133/PhotoshopMenu-Backend-0.4.133.zip.sha256)，内置UXP0.3.13，最低PS24.0.1。两份附件匿名下载哈希一致，EXE与本机实际运行版一致；从120起可在后台“应用更新”升级，内置插件按需在“插件管理”更新。渐变条样式仍待细化，自动切换ENG仅记录为TODO、本版未实现。
 
