@@ -1,4 +1,15 @@
 export default {
+  "点击开始后有5秒准备时间。请切回PS、点击图层列表，再按下面的菜单快捷键；PS前方的小提示会显示采集倒计时。":"You have 5 seconds to switch to Photoshop, click the Layers panel and use the menu shortcut below. A non-activating hint shows the countdown over Photoshop.",
+  "准备：请切回PS并点击图层列表":"Get ready: switch to Photoshop and click the Layers panel",
+  "正在启动只读检测，请保持PS前台":"Starting read-only checks; keep Photoshop in front",
+  "正在采集：请在PS中按菜单唤出键":"Collecting: use the menu shortcut in Photoshop",
+  "采集结束，正在整理报告":"Sampling ended; preparing the report",
+  "正在开始采集，请保持PS前台":"Starting sampling; keep Photoshop in front",
+  "正在等待采集结束，请保持PS前台":"Waiting for sampling to finish; keep Photoshop in front",
+  "诊断采集已取消":"Diagnostic cancelled",
+  "个采样":"samples",
+  "采集完成后，导出完整JSON报告并发送给我。":"When complete, export and send the full JSON report.",
+
   "远程兼容（默认关闭）":"Remote compatibility (off by default)",
   "通过向日葵等远程软件操作时可开启。保存后先在PS工作区内点击一次，再按菜单快捷键；不增加任务栏、Alt+Tab或悬停激活，输入框和弹窗保护保留。":"Enable when using Sunlogin or similar remote software. After saving, click inside the Photoshop workspace before using the menu shortcut. Taskbar, Alt+Tab and hover activation are not added; input and dialog protection remain.",
   "选择上一个图层":"Select layer above", "选择下一个图层":"Select layer below",

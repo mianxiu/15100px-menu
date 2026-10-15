@@ -1,5 +1,9 @@
 # Photoshop Menu TODO
 
+- [x] 141诊断倒计时代码／构建／实际入口：后台和PS前方提示已接入5秒准备、真实采样进度及完成状态。287项后台、13项前端、最终EXE烟雾与重启通过；实际141后台浏览器倒数5→4、10样本和导出通过。原生独立窗口验证可见绘制、焦点不变及点击穿透；PS进程／文档／配置保留。证据.runtime/countdown141-browser.json、caps141-final-verification.json。
+- [ ] 141 PS25／RDP实体提示验收：新电脑更新后确认提示位置、倒计时可读且不抢焦点；自动窗口测试不代替该机实机验收。
+- [x] PS25 RDP报告核对：用户上传2026-10-15 20:30:56至20:31:06报告，实际后台137／PS25.5.1／UXP14；多次捕获可见PhotoshopMenuImGui且root-owner为PS，确认该次菜单已打开。面板为generic/fallback，137未含138新增的PS25签名；报告无trigger_decisions，不能推断输入／弹窗保护或非RDP触发已通过。仅只读解析附件，未修改新电脑。
+
 - [x] 140发行：源码／标签与公开Latest140，匿名附件大小／SHA256及139生产更新器检查／下载／校验通过；实际入口及dist为140，原PS进程／文档保持，UXP仍14。证据.runtime/caps140-final-verification.json、release-0.4.140-public-verification.json及release140-updater-verification.json。远程兼容开启后的实机验收继续保持未完成，不据发行完成勾选功能整体验收。
 
 - [ ] 140远程兼容交付：用户已明确授权默认关闭的收窄方案，并补充同机RDP模式可唤出。代码已加入菜单设置开关、旧配置默认关闭迁移及两秒内同一有效PS工作区注入左键配对；不修改注入Alt+Tab／任务栏过滤，输入／弹窗及交互保护保持。284项后台及12项前端回归通过；原生窗口范围回归及最终EXE烟雾／重启检查通过，实际入口140、两原生组件／前端资源哈希一致，PS4024及文档／原配置保持。开关关闭的真实注入Shift+Z仍activation_not_qualified（.runtime/remote-0.4.140-off-verification.json）；开启状态的实机自动对照因前台窗口被切换未通过，临时文档／窗口／设置均在finally恢复，不虚报成功。向日葵PS25实机结果尚未验收。

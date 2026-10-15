@@ -320,7 +320,7 @@ class Desktop:
                 self.menu_ready.clear()
 
     def event(self, event):
-        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document'):
+        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress'):
             return
         with self.menu_lock:
             if self.process and self.process.poll() is None:

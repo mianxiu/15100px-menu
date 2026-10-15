@@ -297,8 +297,12 @@ class Application(web.Application):
         if getattr(self,'updating',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
             raise RuntimeError('应用正在更新，本次操作未接受')
         if action=='diagnostics.start':
-            result=self.diagnostics.start()
             desktop=self.desktop
+            def diagnostic_progress(snapshot):
+                if desktop:desktop.event({'type':'diagnostic.progress',**snapshot,'trigger':desktop.settings['shortcuts']['toggle'],'language':read_language(self.runtime)})
+                asyncio.create_task(self.broadcast({'type':'diagnostics','data':snapshot}))
+            self.diagnostics.listener=diagnostic_progress
+            result=self.diagnostics.start()
             if desktop:
                 from collections import deque
                 desktop.trigger_events=deque(maxlen=64);desktop.diagnostic_trace=True;desktop._native_config()

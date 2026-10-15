@@ -2,6 +2,7 @@ import {render} from 'solid-js/web';
 import {createSignal, createEffect, onMount, onCleanup, For, Show} from 'solid-js';
 import {Client} from './client.mjs';
 import {translate} from './i18n.mjs';
+import {diagnosticClock} from './diagnostics.mjs';
 import {applyMenuTheme} from './theme.mjs';
 import './admin.css';
 
@@ -32,8 +33,9 @@ function App() {
   const updateBusy=()=>['checking','downloading','installing'].includes(appUpdate().phase);
   createEffect(()=>{document.documentElement.lang=state().language || 'zh-CN';document.title='Photoshop Menu — '+t('后台管理');});
   createEffect(()=>applyMenuTheme(document.documentElement,state().photoshop.ui_theme));
+  const receivedDiagnostic=value=>({...value,received_at:performance.now()});
   function accept(data) {
-    setState(data);
+    setState({...data,diagnostics:receivedDiagnostic(data.diagnostics)});
     if (!dirty()) setForm(structuredClone(data.settings));
   }
   const client = new Client(`ws://${location.host}/websocket`, status => {
@@ -42,11 +44,12 @@ function App() {
   }, event => {
     if(event.type==='status') accept(event.data);
     if(event.type==='notice') setNotice(event);
+    if(event.type==='diagnostics')setState(previous=>({...previous,diagnostics:receivedDiagnostic(event.data)}));
     if(event.type==='tasks') setState(previous=>({...previous,tasks:event.data}));
   });
   async function call(action,args={}) {
     setWorking(true);
-    try {const result=await client.request(action,args); if(action==='status')accept(result); if(action==='diagnostics.start')setState(previous=>({...previous,diagnostics:result})); if(result.photoshop_start)setState(previous=>({...previous,photoshop_start:result.photoshop_start})); if(!['application.update.check','application.update.download'].includes(action))setNotice({ok:true,message:result.message || t("操作完成")}); return result;}
+    try {const result=await client.request(action,args); if(action==='status')accept(result); if(action==='diagnostics.start')setState(previous=>({...previous,diagnostics:receivedDiagnostic(result)})); if(result.photoshop_start)setState(previous=>({...previous,photoshop_start:result.photoshop_start})); if(!['application.update.check','application.update.download'].includes(action))setNotice({ok:true,message:result.message || t("操作完成")}); return result;}
     catch(error){setNotice({ok:false,message:error.message}); throw error;}
     finally{setWorking(false);}
   }
@@ -101,7 +104,16 @@ function App() {
     finally{setWorking(false);event.target.value='';}
   }
   function UxpRecovery(){return <Show when={state().photoshop.uxp_recovery?.active || state().photoshop.uxp_recovery?.message}><div role="status"><p>{t(state().photoshop.uxp_recovery.message)}</p><Show when={state().photoshop.uxp_recovery.active}><button disabled={disabled()} onClick={()=>perform('tasks.reconcile')}>{t("核对 UXP 任务结果")}</button><p>{t("只读取原请求的最终记录，不重新执行、不切换 COM。缺少可靠结果时继续阻止修改，重启不会清除待核对记录。")}</p></Show></div></Show>;}
-  function DiagnosticPanel(){return <section><h2>{t("菜单诊断")}</h2><p>{t("采集前请记住当前菜单快捷键。点击后5秒内切回PS，把鼠标放在图层列表，按该快捷键并停留约10秒。")}</p><p><kbd>{state().settings.shortcuts?.toggle}</kbd></p><p role="status">{t(state().diagnostics?.message || '尚未采集诊断')}</p><div class="buttons"><button disabled={disabled() || state().diagnostics?.phase==='collecting'} onClick={()=>perform('diagnostics.start')}>{t("开始只读诊断")}</button><button disabled={disabled() || !state().diagnostics?.ready} onClick={exportDiagnostics}>{t("导出诊断报告")}</button></div><p class="caption">{t("仅采集窗口结构、权限与组件状态，不读取输入文字、文档或凭据，不操作PS。")}</p></section>;}
+  function DiagnosticPanel(){
+    const [now,setNow]=createSignal(performance.now());
+    createEffect(()=>{if(state().diagnostics?.phase!=='collecting')return;
+      const timer=setInterval(()=>setNow(performance.now()),200);onCleanup(()=>clearInterval(timer));});
+    const clock=()=>diagnosticClock(state().diagnostics,now());
+    return <section><h2>{t("菜单诊断")}</h2><p>{t("点击开始后有5秒准备时间。请切回PS、点击图层列表，再按下面的菜单快捷键；PS前方的小提示会显示采集倒计时。")}</p><p><kbd>{state().settings.shortcuts?.toggle}</kbd></p>
+      <div class="diagnostic-progress"><span role="status">{t(clock().label)}</span><Show when={clock().showSeconds}><strong aria-live="off">{clock().seconds} {t("秒")}</strong></Show></div>
+      <Show when={state().diagnostics?.phase==='collecting' && state().diagnostics?.stage==='sampling'}><p class="caption">{state().diagnostics.samples_done || 0} / {state().diagnostics.samples_total || 10} {t("个采样")}</p></Show>
+      <div class="buttons"><button disabled={disabled() || state().diagnostics?.phase==='collecting'} onClick={()=>perform('diagnostics.start')}>{t("开始只读诊断")}</button><button disabled={disabled() || !state().diagnostics?.ready} onClick={exportDiagnostics}>{t("导出诊断报告")}</button></div><p class="caption">{t("采集完成后，导出完整JSON报告并发送给我。")}</p><p class="caption">{t("仅采集窗口结构、权限与组件状态，不读取输入文字、文档或凭据，不操作PS。")}</p></section>;
+  }
   async function exportDiagnostics(){try{const report=await call('diagnostics.export');const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='ps-menu-diagnostic-'+Date.now()+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{}}
   function UxpFollow(){return <><label class="option-row"><input type="checkbox" checked={state().uxp_auto_update?.enabled ?? true} disabled={disabled()} onChange={e=>perform('uxp.auto',{enabled:e.target.checked})}/><span>{t("已安装UXP自动跟随内置版本更新")}</span></label><p role="status">{t(state().uxp_auto_update?.message || '等待检查内置 UXP')}</p><p class="caption">{t("保存并关闭PS后自动安装较新内置版，不自动关闭PS。禁用、卸载、回退和未知结果保护优先。")}</p></>;}
   function PhotoshopStartup(){return <>

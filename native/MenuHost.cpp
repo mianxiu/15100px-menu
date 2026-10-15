@@ -31,6 +31,7 @@
 #include "MenuUiMetrics.h"
 
 using Json=nlohmann::json;
+#include "DiagnosticHint.h"
 static HWND window;
 static void (*platformShowWindow)(ImGuiViewport*)=nullptr;
 static void showPopupWindow(ImGuiViewport* viewport) {
@@ -423,6 +424,7 @@ static std::string shortcut(const std::string& raw) {
 }
 static void accept(const Json& event) {
     std::string type=event.value("type","");
+    if (type=="diagnostic.progress") {DiagnosticHint::update(event);return;}
     if (type=="document") {
         if (event.contains("name") && event["name"].is_string()) document=event["name"].get<std::string>();
     } else if (type=="status") {
@@ -1636,6 +1638,7 @@ int main() {
     } else {
         allowed=true;document="示例文档.psd";
         if (selfTest) {
+            DiagnosticHint::selfTest();
             if (!(io.ConfigFlags&ImGuiConfigFlags_NoMouseCursorChange))
                 throw std::runtime_error("Menu renderer must preserve the Photoshop tool cursor");
             for (int kind=0;kind<5;++kind) for (int input=0;input<2;++input) {
@@ -2389,6 +2392,7 @@ int main() {
     } catch (const std::exception& error) {std::cerr<<error.what()<<"\n";return 1;}
     ImGui_ImplDX11_Shutdown();ImGui_ImplWin32_Shutdown();ImGui::DestroyContext();releaseTarget();
     releaseDevice();
+    DiagnosticHint::shutdown();
     if (IsWindow(window)) DestroyWindow(window);UnregisterClassW(wc.lpszClassName,wc.hInstance);
     if (iconHandle) DestroyIcon(iconHandle);CoUninitialize();return 0;
 }

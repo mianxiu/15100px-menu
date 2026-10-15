@@ -7,6 +7,7 @@ param(
     [ValidateRange(1,30)][int]$Samples = 10,
     [ValidateRange(100,5000)][int]$IntervalMs = 1000,
     [string]$OutputPath,
+    [switch]$ProgressStream,
     [ValidateRange(1,65535)][int]$BackendPort = 15151
 )
 $ErrorActionPreference = 'Stop'
@@ -93,6 +94,12 @@ function Window-Chain([IntPtr]$Handle) {
 }
 Write-Host "Read-only diagnostics. In $DelaySeconds seconds, click Photoshop's taskbar button, hover Layers, then press the configured menu shortcut shown in the backend. Keep Photoshop foreground until sampling ends."
 if ($DelaySeconds) { Start-Sleep -Seconds $DelaySeconds }
+function Send-DiagnosticProgress([string]$Stage,[int]$RemainingMs,[int]$Done) {
+    if ($ProgressStream) {
+        Write-Output ('PSMENU_PROGRESS ' + ([ordered]@{stage=$Stage;remaining_ms=$RemainingMs;samples_done=$Done} | ConvertTo-Json -Compress))
+    }
+}
+Send-DiagnosticProgress 'sampling' (($Samples-1)*$IntervalMs) 0
 $captures = New-Object 'System.Collections.Generic.List[object]'
 for ($sample=0; $sample -lt $Samples; $sample++) {
     $foreground = [PhotoshopPanelReadOnly]::GetForegroundWindow()
@@ -114,8 +121,10 @@ for ($sample=0; $sample -lt $Samples; $sample++) {
         menu_active=($focus.menuOwner -ne [IntPtr]::Zero)
         caps_down=(([int][PhotoshopPanelReadOnly]::GetAsyncKeyState(20) -band 0x8000) -ne 0)
     })
+    if ($sample -lt $Samples-1) { Send-DiagnosticProgress 'sampling' (($Samples-1-$sample)*$IntervalMs) ($sample+1) }
     if ($sample -lt $Samples-1) { Start-Sleep -Milliseconds $IntervalMs }
 }
+Send-DiagnosticProgress 'processing' 0 $Samples
 $panelRoots = New-Object 'System.Collections.Generic.List[System.IntPtr]'
 $find = [PhotoshopPanelReadOnly+Callback]{ param($h, $p)
     $class = [PhotoshopPanelReadOnly]::Class($h)
