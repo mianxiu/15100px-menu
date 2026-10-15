@@ -132,6 +132,12 @@ class UxpExecutionGateTests(unittest.IsolatedAsyncioTestCase):
             app.uxp.set_enabled.assert_called_once_with(False)
 
 class UxpManagementApiTests(AsyncHTTPTestCase):
+    def test_follow_and_diagnostic_states_are_in_public_status(self):
+        state=json.loads(self.fetch('/api/status').body)
+        self.assertTrue(state['uxp_auto_update']['enabled'])
+        self.assertEqual(state['diagnostics']['phase'],'idle')
+        self.assertFalse(state['diagnostics']['ready'])
+
     def get_app(self):
         self.temp=tempfile.TemporaryDirectory();base=Path(self.temp.name)
         self.bridge=UxpBridge(task_history=base/'data/tasks.json')

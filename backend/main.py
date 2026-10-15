@@ -27,6 +27,8 @@ from .photoshop_launch import PhotoshopLauncher
 from .language import read_language, save_language
 from .recent_documents import RecentDocuments
 from .application_updates import ApplicationUpdates
+from .uxp_auto_update import UxpAutoUpdate
+from .diagnostics import Diagnostics
 
 APP_ID = "photoshop-menu"
 from .version import APP_VERSION
@@ -181,6 +183,8 @@ class Application(web.Application):
         self._dialog_tasks=set()
         self.recent_documents = RecentDocuments()
         self.application_updates = ApplicationUpdates(self.runtime)
+        self.uxp_auto=UxpAutoUpdate(self.runtime)
+        self.diagnostics=Diagnostics(self.runtime,ROOT/"tools/inspect-panels.ps1",port)
         self.updating = False
         self.closing = False
         self.headless = self.no_desktop = False
@@ -242,6 +246,35 @@ class Application(web.Application):
             raise RuntimeError('请先完成操作或核对未知结果，再安装应用更新；未排队、未重发')
         if self.desktop and self.desktop.visible:raise RuntimeError('请先收起操作菜单，再安装应用更新')
 
+    async def sync_uxp_auto(self, force=False):
+        import time
+        from .plugins import version
+        if not isinstance(self.bridge,UxpBridge):return
+        if not force and time.monotonic()-self.uxp_auto.checked<15:return
+        self.uxp_auto.checked=time.monotonic()
+        if self.operation_lock.locked() or self.updating or self.closing:return
+        if not self.uxp_auto.enabled:
+            self.uxp_auto.phase='disabled';return
+        # Read-only discovery does not occupy the interactive operation lock.
+        current=await asyncio.to_thread(self.uxp.status)
+        if current['installed'] and current['enabled'] and not current['error'] and version(current['version'])<version(current['bundled_version']):
+            if await asyncio.to_thread(self.uxp.running):
+                self.uxp_auto.phase='waiting';self.uxp_auto.message='UXP 待更新；保存并关闭 PS 后自动安装';return
+        else:
+            if current['error']:
+                self.uxp_auto.phase='blocked';self.uxp_auto.message='安装异常，请在插件管理中检查'
+            elif not current['installed'] or not current['enabled']:
+                self.uxp_auto.phase='inactive';self.uxp_auto.message='未安装或已禁用；保留当前选择'
+            else:
+                self.uxp_auto.phase='current';self.uxp_auto.message='已安装版本已跟随内置插件'
+            return
+        pending=getattr(getattr(self.bridge,'transport',None),'pending',None)
+        blocked=bool(self.bridge.busy or getattr(self.bridge,'_queue',[]) or self.photoshop_launcher.active or
+                     pending and (pending.value or pending.error) or self.desktop and self.desktop.visible)
+        if self.operation_lock.locked() or self.updating or self.closing:return
+        async with self.operation_lock:
+            await asyncio.to_thread(self.uxp_auto.step,self.uxp,blocked)
+
     async def photoshop_start_ready(self, started_at_ms):
         if not isinstance(self.bridge,UxpBridge):return True
         try:
@@ -263,6 +296,13 @@ class Application(web.Application):
             raise RuntimeError('服务正在退出，本次操作未接受')
         if getattr(self,'updating',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
             raise RuntimeError('应用正在更新，本次操作未接受')
+        if action=='diagnostics.start':return self.diagnostics.start()
+        if action=='diagnostics.status':return self.diagnostics.snapshot()
+        if action=='diagnostics.export':return self.diagnostics.export()
+        if action=='uxp.auto':
+            result=self.uxp_auto.set_enabled(args.get('enabled'))
+            await self.broadcast({'type':'status','data':await self.dispatch('status',{})})
+            return result
         if action=='application.update.status':return self.application_updates.snapshot()
         if action=='application.update.auto':return self.application_updates.set_auto(args.get('enabled'))
         if action in ('application.update.check','application.update.download'):
@@ -298,6 +338,7 @@ class Application(web.Application):
             await self.broadcast({'type':'status','data':await self.dispatch('status',{})})
             return {**result,'message':result.get('message','没有待核对的 UXP 任务')}
         if action=='photoshop.start':
+            await self.sync_uxp_auto(force=True)
             if self.operation_lock.locked() or self.bridge.busy or getattr(self.bridge,'_queue',[]):
                 raise RuntimeError('请等待当前操作结束；启动请求未排队')
             async with self.operation_lock:
@@ -316,6 +357,7 @@ class Application(web.Application):
                 elif action in ('uxp.enable','uxp.disable'):result=await asyncio.to_thread(self.uxp.set_enabled,action=='uxp.enable')
                 elif action=='uxp.apply-language':result=await asyncio.to_thread(self.uxp.apply_language)
                 else:result=await asyncio.to_thread(getattr(self.uxp,action.split('.')[1]))
+            if action in ('uxp.rollback','uxp.uninstall'):self.uxp_auto.set_enabled(False)
             if action=='uxp.install':
                 startup=await self.auto_start_photoshop()
                 if startup:result['message']+='；'+startup['message']
@@ -336,6 +378,7 @@ class Application(web.Application):
                     "data_dir": str(self.runtime),
                     "service": service_identity(),
                     "application_update": self.application_updates.snapshot(),
+                    "uxp_auto_update": self.uxp_auto.snapshot(), "diagnostics": self.diagnostics.snapshot(),
                     "menu": {"ready": bool(self.desktop and self.desktop.hwnd),
                              "hwnd": self.desktop.hwnd if self.desktop else None,
                              "pid": self.desktop.process.pid if self.desktop and self.desktop.process else None,
@@ -586,6 +629,8 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         loop.call_soon_threadsafe(lambda: asyncio.create_task(notification(action)))
     async def poll_status():
         while not app.stop_event.is_set():
+            try:await app.sync_uxp_auto()
+            except Exception:logging.exception('UXP follow update check failed')
             await app.broadcast({"type": "status", "data": await app.dispatch("status", {})})
             await asyncio.to_thread(app.control.refresh_icon)
             try:
@@ -609,6 +654,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             if not headless and (app.preferences.data["open_control_on_start"] or
                                  isinstance(app.bridge,UxpBridge) and (not uxp_install['installed'] or uxp_install['error'])):
                 await app.dispatch("control.open", {})
+        await app.sync_uxp_auto(force=True)
         status_task = asyncio.create_task(poll_status())
         app.application_updates.schedule=asyncio.create_task(app.application_updates.periodic())
         await app.photoshop_launcher.resume()
@@ -620,6 +666,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         await app.stop_event.wait()
     finally:
         app.closing=True
+        await app.diagnostics.close()
         await app.application_updates.close()
         if status_task:
             status_task.cancel()

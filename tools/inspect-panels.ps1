@@ -6,7 +6,8 @@ param(
     [ValidateRange(0,60)][int]$DelaySeconds = 5,
     [ValidateRange(1,30)][int]$Samples = 10,
     [ValidateRange(100,5000)][int]$IntervalMs = 1000,
-    [string]$OutputPath
+    [string]$OutputPath,
+    [ValidateRange(1,65535)][int]$BackendPort = 15151
 )
 $ErrorActionPreference = 'Stop'
 if (-not ('PhotoshopPanelReadOnly' -as [type])) {
@@ -177,7 +178,7 @@ foreach ($proc in @(Get-Process -Name Photoshop,PhotoshopMenu,HotkeyHost,MenuHos
 }
 $result = [ordered]@{ schema=2; read_only=$true; note='Snapshots are not a keyboard event log. A brief key press may occur between samples.'; processes=@($processes.ToArray()); recognized_workspace_count=$panelRoots.Count; samples=@($captures.ToArray()); panels=@($panels.ToArray()) }
 try {
-    $status = Invoke-RestMethod -Uri 'http://127.0.0.1:15151/api/status' -TimeoutSec 5
+    $status = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/api/status" -TimeoutSec 5
     $result.backend = $status.version
     $result.bundled_uxp = $status.uxp.bundled_version
     $result.installed_uxp = $status.uxp.version
