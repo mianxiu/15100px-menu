@@ -111,6 +111,11 @@ class MenuFocusTests(unittest.TestCase):
         self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(1910,1030),1), (1300,540,620,500))
         self.assertEqual(pie_bounds((-1920,0,0,1080),(-1920,0,0,1040),(-960,520),1.5), (-1425,145,930,750))
 
+    def test_color_editor_reserves_left_panel_without_displacing_radial_anchor(self):
+        self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(960,520),1,color_editor=True),(310,240,920,560))
+        self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(1330,520),2,color_editor=True),(30,0,1840,1040))
+        self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(1910,1030),1,color_editor=True),(1000,480,920,560))
+
     def test_home_grid_uses_wider_popup_and_clamps_at_monitor_edge(self):
         self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(960,520),1,home=True),(690,300,820,440))
         self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(1910,1030),1,home=True),(1100,600,820,440))

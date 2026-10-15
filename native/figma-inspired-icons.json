@@ -1,76 +1,344 @@
 {
   "reference": "151500PX.figma-export.zip",
-  "reference_nodes": ["809:619", "346:6", "749:0", "385:14"],
+  "reference_nodes": [
+    "809:619",
+    "346:6",
+    "749:0",
+    "385:14"
+  ],
   "authorship": "Project-authored icons matching the user's Figma style; not original Figma components.",
   "grid": 9,
-  "root_size": [18, 24],
+  "root_size": [
+    18,
+    24
+  ],
   "stroke": 1,
   "icons": [
     {
-      "index": 7, "operation": "layer.groupSelect", "name": "选择组内图层",
+      "index": 7,
+      "operation": "layer.groupSelect",
+      "name": "选择组内图层",
       "shapes": [
-        {"kind": "rect", "bounds": [0, 3, 6, 6], "tone": 0.67431195, "border": 1},
-        {"kind": "rect", "bounds": [3, 0, 6, 6], "tone": 0.67431195, "border": 1}
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            3,
+            6,
+            6
+          ],
+          "tone": 0.67431195,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            3,
+            0,
+            6,
+            6
+          ],
+          "tone": 0.67431195,
+          "border": 1
+        }
       ]
     },
     {
-      "index": 8, "operation": "document.newDialog", "name": "新建文档",
+      "index": 8,
+      "operation": "document.newDialog",
+      "name": "新建文档",
       "shapes": [
-        {"kind": "rect", "bounds": [1, 0, 7, 9], "tone": 0.67431195, "border": 1},
-        {"kind": "rect", "bounds": [3, 4, 3, 1], "tone": 0, "radius": 0.5},
-        {"kind": "rect", "bounds": [4, 3, 1, 3], "tone": 0, "radius": 0.5}
+        {
+          "kind": "rect",
+          "bounds": [
+            1,
+            0,
+            7,
+            9
+          ],
+          "tone": 0.67431195,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            3,
+            4,
+            3,
+            1
+          ],
+          "tone": 0,
+          "radius": 0.5
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            4,
+            3,
+            1,
+            3
+          ],
+          "tone": 0,
+          "radius": 0.5
+        }
       ]
     },
     {
-      "index": 0, "operation": "layer.new", "name": "空白图层",
+      "index": 0,
+      "operation": "layer.new",
+      "name": "空白图层",
       "shapes": [
-        {"kind": "rect", "bounds": [0, 0, 9, 9], "tone": 0.67431195, "border": 1},
-        {"kind": "rect", "bounds": [2.5, 4, 4, 1], "tone": 0, "radius": 0.5},
-        {"kind": "rect", "bounds": [4, 2.5, 1, 4], "tone": 0, "radius": 0.5}
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 0.67431195,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            2.5,
+            4,
+            4,
+            1
+          ],
+          "tone": 0,
+          "radius": 0.5
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            4,
+            2.5,
+            1,
+            4
+          ],
+          "tone": 0,
+          "radius": 0.5
+        }
       ]
     },
     {
-      "index": 1, "operation": "layer.solid", "name": "纯色填充",
+      "index": 1,
+      "operation": "layer.solid",
+      "name": "纯色填充",
       "shapes": [
-        {"kind": "rect", "bounds": [0, 0, 9, 9], "tone": 0.67431195, "border": 1},
-        {"kind": "rect", "bounds": [2, 2, 5, 5], "tone": 0}
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 0.67431195,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            2,
+            2,
+            5,
+            5
+          ],
+          "tone": 0
+        }
       ]
     },
     {
-      "index": 2, "operation": "layer.group", "name": "打组",
+      "index": 2,
+      "operation": "layer.group",
+      "name": "打组",
       "adaptation": "Folder silhouette from 749:0, without sort-child marks; inside one-unit border retained.",
       "shapes": [
-        {"kind": "path", "data": "M0 0 L5 0 L6 2 L9 2 L9 9 L0 9 Z", "tone": 0},
-        {"kind": "path", "data": "M1 1 L4.381966 1 L5.381966 3 L8 3 L8 8 L1 8 Z", "tone": 0.67431195}
+        {
+          "kind": "path",
+          "data": "M0 0 L5 0 L6 2 L9 2 L9 9 L0 9 Z",
+          "tone": 0
+        },
+        {
+          "kind": "path",
+          "data": "M1 1 L4.381966 1 L5.381966 3 L8 3 L8 8 L1 8 Z",
+          "tone": 0.67431195
+        }
       ]
     },
     {
-      "index": 3, "operation": "adjustment.curves", "name": "曲线",
+      "index": 3,
+      "operation": "adjustment.curves",
+      "name": "曲线",
       "shapes": [
-        {"kind": "rect", "bounds": [0, 0, 1, 9], "tone": 0},
-        {"kind": "rect", "bounds": [0, 8, 9, 1], "tone": 0},
-        {"kind": "path", "data": "M1.5 7 C6.5 7 3 1 8.5 1", "tone": 0, "stroke": 1},
-        {"kind": "rect", "bounds": [4.3125, 3.5, 1, 1], "tone": 0}
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            1,
+            9
+          ],
+          "tone": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            8,
+            9,
+            1
+          ],
+          "tone": 0
+        },
+        {
+          "kind": "path",
+          "data": "M1.5 7 C6.5 7 3 1 8.5 1",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            4.3125,
+            3.5,
+            1,
+            1
+          ],
+          "tone": 0
+        }
       ]
     },
     {
-      "index": 5, "operation": "adjustment.colorBalance", "name": "色彩平衡",
+      "index": 5,
+      "operation": "adjustment.colorBalance",
+      "name": "色彩平衡",
       "shapes": [
-        {"kind": "rect", "bounds": [4, 0, 1, 9], "tone": 0, "radius": 0.5},
-        {"kind": "rect", "bounds": [0, 2, 9, 1], "tone": 0, "radius": 0.5},
-        {"kind": "rect", "bounds": [2.5, 8, 4, 1], "tone": 0},
-        {"kind": "path", "data": "M0 6.5 L1.75 2.5 L3.5 6.5 Z", "tone": 0},
-        {"kind": "path", "data": "M1.02 5.8 L1.75 4.1 L2.48 5.8 Z", "tone": 0.67431195},
-        {"kind": "path", "data": "M5.5 6.5 L7.25 2.5 L9 6.5 Z", "tone": 0},
-        {"kind": "path", "data": "M6.52 5.8 L7.25 4.1 L7.98 5.8 Z", "tone": 0.67431195}
+        {
+          "kind": "rect",
+          "bounds": [
+            4,
+            0,
+            1,
+            9
+          ],
+          "tone": 0,
+          "radius": 0.5
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            2,
+            9,
+            1
+          ],
+          "tone": 0,
+          "radius": 0.5
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            2.5,
+            8,
+            4,
+            1
+          ],
+          "tone": 0
+        },
+        {
+          "kind": "path",
+          "data": "M0 6.5 L1.75 2.5 L3.5 6.5 Z",
+          "tone": 0
+        },
+        {
+          "kind": "path",
+          "data": "M1.02 5.8 L1.75 4.1 L2.48 5.8 Z",
+          "tone": 0.67431195
+        },
+        {
+          "kind": "path",
+          "data": "M5.5 6.5 L7.25 2.5 L9 6.5 Z",
+          "tone": 0
+        },
+        {
+          "kind": "path",
+          "data": "M6.52 5.8 L7.25 4.1 L7.98 5.8 Z",
+          "tone": 0.67431195
+        }
       ]
     },
     {
-      "index": 6, "operation": "adjustment.blackAndWhite", "name": "黑白",
+      "index": 6,
+      "operation": "adjustment.blackAndWhite",
+      "name": "黑白",
       "shapes": [
-        {"kind": "circle", "centre": [4.5, 4.5], "radius": 4.5, "tone": 0},
-        {"kind": "circle", "centre": [4.5, 4.5], "radius": 3.5, "tone": 0.67431195},
-        {"kind": "path", "data": "M4.5 1 C6.433 1 8 2.567 8 4.5 C8 6.433 6.433 8 4.5 8 Z", "tone": 0}
+        {
+          "kind": "circle",
+          "centre": [
+            4.5,
+            4.5
+          ],
+          "radius": 4.5,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            4.5,
+            4.5
+          ],
+          "radius": 3.5,
+          "tone": 0.67431195
+        },
+        {
+          "kind": "path",
+          "data": "M4.5 1 C6.433 1 8 2.567 8 4.5 C8 6.433 6.433 8 4.5 8 Z",
+          "tone": 0
+        }
+      ]
+    },
+    {
+      "index": 9,
+      "operation": "moveUp",
+      "name": "上移",
+      "adaptation": "Project-authored one-grid-unit directional arrow matching the Figma sorting icon family; omits endpoint bar for one-layer movement.",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M1.5 4.5 L4.5 1.5 L7.5 4.5",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "path",
+          "data": "M4.5 1.5 L4.5 7.5",
+          "tone": 0,
+          "stroke": 1
+        }
+      ]
+    },
+    {
+      "index": 10,
+      "operation": "moveDown",
+      "name": "下移",
+      "adaptation": "Project-authored one-grid-unit directional arrow matching the Figma sorting icon family; omits endpoint bar for one-layer movement.",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M1.5 4.5 L4.5 7.5 L7.5 4.5",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "path",
+          "data": "M4.5 1.5 L4.5 7.5",
+          "tone": 0,
+          "stroke": 1
+        }
       ]
     }
   ]

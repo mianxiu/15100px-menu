@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 source = ROOT / 'native/figma-inspired-icons.json'
 data = json.loads(source.read_text('utf-8'))
 assert data['grid'] == 9 and data['stroke'] == 1
-assert {icon['index'] for icon in data['icons']} == {0, 1, 2, 3, 5, 6, 7, 8}
+assert {icon['index'] for icon in data['icons']} == {0, 1, 2, 3, 5, 6, 7, 8, 9, 10}
 
 
 def number(value):
@@ -139,4 +139,4 @@ metadata['text_action_metrics'] = {'icon_size': 12, 'text_scale': .95, 'left_pad
 metadata['home_procedural_icons'] = {'operations': ['document.recent', 'document.clipboard'], 'max_size': [18, 18], 'style': 'Actual aspect ratio, same grey fill and one grid-unit inside border; clipboard cap uses matching linework'}
 metadata['unmatched_reason'] = 'No original components for these six operations; user authorized matching-style authored extensions.'
 record.write_text(json.dumps(metadata, ensure_ascii=False, indent=2)+'\n', 'utf-8')
-print('Compiled eight Figma-style extensions, home silhouettes and editable SVG assets')
+print('Compiled ten Figma-style extensions, home silhouettes and editable SVG assets')

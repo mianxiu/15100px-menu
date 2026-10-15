@@ -199,11 +199,25 @@
       "asset": "native/figma-inspired-assets/adjustment-blackAndWhite.svg",
       "sha256": "748bf19fcf74feecf22f15a40a49381ef53776d64a27f16846683210c6c69702",
       "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "moveUp",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/moveUp.svg",
+      "sha256": "8053b682843d12257f09d954198c0fd2256753b27f7cd1f70406147de3bb9fca",
+      "adaptation": "Project-authored one-grid-unit directional arrow matching the Figma sorting icon family; omits endpoint bar for one-layer movement."
+    },
+    {
+      "operation": "moveDown",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/moveDown.svg",
+      "sha256": "860a3077beb8ece9286bddca8512a576aa8a6391562f02f3e492bcb637d2d56d",
+      "adaptation": "Project-authored one-grid-unit directional arrow matching the Figma sorting icon family; omits endpoint bar for one-layer movement."
     }
   ],
   "extension_source": {
     "file": "native/figma-inspired-icons.json",
-    "sha256": "f382df86819552cd992d2f2420984775988ad5bce879939f1260aa6c38a47abc",
+    "sha256": "cecb070a1809b3899f47ed304ba7747ab260c851eccf1d15d269cc4962e2e72a",
     "reference_nodes": [
       "809:619",
       "346:6",

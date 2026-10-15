@@ -121,8 +121,11 @@ def panel_bounds(ps_rect, work_rect, cursor, width, height):
 
 def pie_bounds(ps_rect, work_rect, cursor, scale, home=False, color_editor=False):
     width, height = round((920 if color_editor else 820 if home else 620)*scale), round((560 if color_editor else 440 if home else 500)*scale)
+    # The color editor is left of the radial controls. Reserve asymmetric
+    # space instead of forcing the mouse to the middle of the entire window.
+    anchor = round(650*scale) if color_editor else round(270*scale) if home else width//2
     return panel_bounds(ps_rect, work_rect,
-                        (cursor[0]-(round(270*scale) if home else width//2), cursor[1]-height//2), width, height)
+                        (cursor[0]-anchor, cursor[1]-height//2), width, height)
 
 
 def show_popup(gui, hwnd, owner, bounds):

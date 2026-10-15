@@ -52,6 +52,24 @@ static constexpr FigmaPathCommand styledPath6_2[] = {
     {'C', 8.00000000f, 6.43300000f, 6.43300000f, 8.00000000f, 4.50000000f, 8.00000000f},
     {'Z', 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
 };
+static constexpr FigmaPathCommand styledPath9_0[] = {
+    {'M', 1.50000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 4.50000000f, 1.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 7.50000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath9_1[] = {
+    {'M', 4.50000000f, 1.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 4.50000000f, 7.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath10_0[] = {
+    {'M', 1.50000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 4.50000000f, 7.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 7.50000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath10_1[] = {
+    {'M', 4.50000000f, 1.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 4.50000000f, 7.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
 
 static void styledPath(ImDrawList* draw,const FigmaPathCommand* path,int count,ImVec2 at,float unit,ImU32 ink,float stroke) {
     auto point=[&](float x,float y){return ImVec2{at.x+x*unit,at.y+y*unit};};
@@ -122,6 +140,14 @@ static void drawStyledMenuIcon(ImDrawList* draw,int icon,ImVec2 at,float size,Im
         draw->AddCircleFilled(p(4.50000000f,4.50000000f),4.50000000f*unit,color(0.00000000f),32);
         draw->AddCircleFilled(p(4.50000000f,4.50000000f),3.50000000f*unit,color(0.67431195f),32);
         styledPath(draw,styledPath6_2,sizeof(styledPath6_2)/sizeof(*styledPath6_2),at,unit,color(0.00000000f),0.00000000f);
+        break;
+    case 9:
+        styledPath(draw,styledPath9_0,sizeof(styledPath9_0)/sizeof(*styledPath9_0),at,unit,color(0.00000000f),1.00000000f);
+        styledPath(draw,styledPath9_1,sizeof(styledPath9_1)/sizeof(*styledPath9_1),at,unit,color(0.00000000f),1.00000000f);
+        break;
+    case 10:
+        styledPath(draw,styledPath10_0,sizeof(styledPath10_0)/sizeof(*styledPath10_0),at,unit,color(0.00000000f),1.00000000f);
+        styledPath(draw,styledPath10_1,sizeof(styledPath10_1)/sizeof(*styledPath10_1),at,unit,color(0.00000000f),1.00000000f);
         break;
     }
 }

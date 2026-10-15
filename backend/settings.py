@@ -11,7 +11,7 @@ DEFAULTS = {"enabled": True, "menu_width": 360, "menu_height": 300, "render_mode
             "shortcuts": {"toggle": "capslock", "hide": "esc", "select": "capslock+a",
                           "color": "", "moveToTop": "", "moveToBottom": "",
                           "selectAbove":"capslock+w", "selectBelow":"capslock+s",
-                          "moveUp":"ctrl+capslock+w", "moveDown":"ctrl+capslock+s",
+                          "moveUp":"", "moveDown":"",
                           "copyStyle":"capslock+c", "pasteStyle":"capslock+v", "editStyle":"capslock+f"}}
 KEYS = {"tab": 9, "esc": 27, "space": 32, "capslock": 20, "ctrl": 17, "shift": 16, "alt": 18,
         **{f"f{i}": 111+i for i in range(1, 13)},
@@ -61,6 +61,8 @@ def validate(data):
     shortcuts = result["shortcuts"]
     if not isinstance(shortcuts, dict) or set(shortcuts) != set(DEFAULTS["shortcuts"]):
         raise ValueError("快捷键设置不完整")
+    # User removed step movement shortcuts; these remain menu-only commands.
+    shortcuts['moveUp'] = shortcuts['moveDown'] = ''
     parsed = []
     for name, value in shortcuts.items():
         keys = chord(value)

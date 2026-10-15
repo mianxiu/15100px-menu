@@ -11,6 +11,17 @@ class CapsInputTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as folder:
    path=Path(folder)/'settings.json';path.write_text(json.dumps(old),'utf-8');value=Settings(path).get()['shortcuts']
   self.assertEqual(value['copyStyle'],'capslock+c');self.assertEqual(value['color'],'');self.assertEqual(value['selectAbove'],'capslock+w');self.assertEqual(value['moveToTop'],'');self.assertEqual(value['moveToBottom'],'f8')
+ def test_step_shortcuts_removed_from_legacy_load_and_save(self):
+  with tempfile.TemporaryDirectory() as folder:
+   path=Path(folder)/'settings.json';old=copy.deepcopy(DEFAULTS)
+   old['shortcuts'].update(moveUp='ctrl+capslock+w',moveDown='ctrl+capslock+s')
+   path.write_text(json.dumps(old),'utf-8');settings=Settings(path)
+   self.assertEqual(settings.get()['shortcuts']['moveUp'],'')
+   self.assertEqual(settings.get()['shortcuts']['moveDown'],'')
+   saved=settings.save(old)
+   self.assertEqual(saved['shortcuts']['moveUp'],'');self.assertEqual(saved['shortcuts']['moveDown'],'')
+   self.assertEqual(saved['shortcuts']['selectAbove'],'capslock+w')
+   self.assertEqual(saved['shortcuts']['selectBelow'],'capslock+s')
  def ready(self,folder):
   d=Desktop('http://localhost',Mock());d.visible=True;d.hwnd=1;d.menu_epoch=7
   d.menu_context_pending={'id':'test','session':'s','folder':Path(folder),'epoch':7,'deadline':time.monotonic()+3}

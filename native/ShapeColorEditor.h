@@ -180,7 +180,7 @@ static void drawShapeEditor() {
     const float content=2*menuControlPadding*scale+textLine+2*row+(shapeEditor.vector?row:0)+
         (kind=="pattern"?row:textLine+width-2*menuControlPadding*scale+2*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+(shapeEditor.vector?row:0);
     const float height=std::min(content,windowSize.y-24*scale);
-    ImVec2 at={windowPos.x+16*scale,std::max(windowPos.y+12*scale,pieCenter.y-238*scale)};
+    ImVec2 at={std::max(windowPos.x+16*scale,pieCenter.x-65*scale-basicLabelExtent(0).x-basicTextOffset()-figmaBasicRightPadding*scale-30*scale-width),std::max(windowPos.y+12*scale,pieCenter.y-238*scale)};
     shapeEditor.bounds={LONG(at.x),LONG(at.y),LONG(at.x+width),LONG(at.y+height)};
     const auto saved=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos(at);
     ImGui::PushStyleColor(ImGuiCol_ChildBg,ImGui::GetStyle().Colors[ImGuiCol_WindowBg]);
