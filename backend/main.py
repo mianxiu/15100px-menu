@@ -296,7 +296,17 @@ class Application(web.Application):
             raise RuntimeError('服务正在退出，本次操作未接受')
         if getattr(self,'updating',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
             raise RuntimeError('应用正在更新，本次操作未接受')
-        if action=='diagnostics.start':return self.diagnostics.start()
+        if action=='diagnostics.start':
+            result=self.diagnostics.start()
+            desktop=self.desktop
+            if desktop:
+                from collections import deque
+                desktop.trigger_events=deque(maxlen=64);desktop.diagnostic_trace=True;desktop._native_config()
+                self.diagnostics.provider=lambda:{'events':list(desktop.trigger_events),'activation':getattr(desktop,'activation_snapshot',None),'configured_trigger':desktop.settings['shortcuts']['toggle'],'enabled':desktop.settings['enabled']}
+                def finish_trace(_):
+                    desktop.diagnostic_trace=False;desktop._native_config()
+                self.diagnostics.task.add_done_callback(finish_trace)
+            return result
         if action=='diagnostics.status':return self.diagnostics.snapshot()
         if action=='diagnostics.export':return self.diagnostics.export()
         if action=='uxp.auto':

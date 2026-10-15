@@ -12,10 +12,10 @@
 #include <stdexcept>
 #include <utility>
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle };
-static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle"};
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace };
+static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false,colorEditor=false; HWND overlay=nullptr; std::array<Binding,13> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false; HWND overlay=nullptr; std::array<Binding,13> bindings{}; };
 static int alias(int key) {
     if (key==160 || key==161) return 16;
     if (key==162 || key==163) return 17;
@@ -125,6 +125,7 @@ static bool injectRight(DWORD flags) {
     return SendInput(1,&input,sizeof(input))==1;
 }
 static Config config;
+static ULONGLONG diagnosticUntil=0;
 static KeyMachine keys;
 static HWND target=nullptr;
 static bool dismissPending=false;
@@ -198,7 +199,7 @@ struct CallbackTiming {
 // Single producer (hook thread), single consumer (pipe writer).
 struct HookEvent {
     Action action=None; HWND hwnd=nullptr,root=nullptr; POINT cursor{};
-    DWORD pid=0,flags=0,time=0;UINT message=0;
+    DWORD pid=0,flags=0,time=0;UINT message=0; int key=0,modifiers=0,matched=0;
     bool command=false,process=false,enabled=false,repeat=false,owned=false,blocked=false;
     ULONGLONG decisionUs=0,scanUs=0,renewUs=0,gapMs=0,peakUs=0,dropped=0;
     DWORD ageMs=0;
@@ -353,8 +354,8 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
             activationOrigin=foreground;activation.finishSwitch(processScope,lastInputTick);
         }
         bool commandScope=scope(foreground) && activation.allowed;
-        bool repeat=input.vkCode==VK_CAPITAL && keys.physical[VK_CAPITAL];
-        bool owned=input.vkCode==VK_CAPITAL && keys.consumed[VK_CAPITAL];
+        bool repeat=input.vkCode<256 && keys.physical[input.vkCode];
+        bool owned=input.vkCode<256 && keys.consumed[alias(input.vkCode)];
         if (input.vkCode==VK_LWIN && !(input.flags&LLKHF_INJECTED)) {
             DWORD mouse=0;
             if (winRight.event(message==WM_KEYDOWN || message==WM_SYSKEYDOWN,processScope,mouse)) {
@@ -368,10 +369,16 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
         localConfig.colorEditor=config.colorEditor && menuWindow(foreground);
         bool blocked=routeKey(keys,input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
                      commandScope,processScope,localConfig,IsWindowVisible(config.overlay),action,GetTickCount64());
-        if (input.vkCode==VK_CAPITAL) {
+        bool traceConfigured=false;
+        if(config.diagnostic && GetTickCount64()<diagnosticUntil) for(const auto& b:config.bindings)
+            if(b.action==Toggle && b.count && b.keys[b.count-1]==alias(input.vkCode))traceConfigured=true;
+        if (input.vkCode==VK_CAPITAL || traceConfigured) {
             unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
             if (next!=tail.load(std::memory_order_acquire)) {
-                HookEvent event{};event.action=CapsTrace;event.hwnd=foreground;
+                HookEvent event{};event.action=traceConfigured?TriggerTrace:CapsTrace;event.hwnd=foreground;
+                event.key=alias(input.vkCode);event.matched=action;
+                event.modifiers=(keys.held[16]?1:0)|(keys.held[17]?2:0)|(keys.held[18]?4:0)|(keys.held[20]?8:0);
+                event.attempted=config.textInput;
                 GetWindowThreadProcessId(foreground,&event.pid);
                 GetClassNameW(foreground,event.windowClass,64);
                 event.flags=input.flags;event.time=input.time;event.message=static_cast<UINT>(message);
@@ -477,6 +484,7 @@ static Config parse(const std::string& line) {
     next.enabled=field("enabled","(true|false)")=="true";
     if (std::regex_search(line,match,std::regex("\"text_input\"\\s*:\\s*(true|false)"))) next.textInput=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"color_editor\"\\s*:\\s*(true|false)"))) next.colorEditor=match[1]=="true";
+    if (std::regex_search(line,match,std::regex("\"diagnostic_trace\"\\s*:\\s*(true|false)"))) next.diagnostic=match[1]=="true";
     next.overlay=reinterpret_cast<HWND>(std::stoull(field("hwnd","([0-9]+)")));
     const Action actions[]={Toggle,Hide,Select,Color,Top,Bottom,SelectAbove,SelectBelow,MoveUp,MoveDown,CopyStyle,PasteStyle,EditStyle};
     int index=0;
@@ -556,14 +564,14 @@ static void writeActions() {
                 if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) {stop();return;}
                 continue;
             }
-            if (action==CapsTrace) {
+            if (action==CapsTrace || action==TriggerTrace) {
                 std::string windowClass;
                 for (wchar_t c:event.windowClass) {
                     if (!c) break;
                     if (c==L'"' || c==L'\\') windowClass+='\\';
                     windowClass+=c>=32 && c<=126?static_cast<char>(c):'?';
                 }
-                line="{\"type\":\"caps.trace\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
+                line=std::string("{\"type\":\"")+(action==TriggerTrace?"trigger.trace":"caps.trace")+"\",\"key\":"+std::to_string(event.key)+",\"modifiers\":"+std::to_string(event.modifiers)+",\"matched_action\":\""+names[event.matched]+"\",\"text_input\":"+(event.attempted?"true":"false")+",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
                     ",\"pid\":"+std::to_string(event.pid)+",\"window_class\":\""+windowClass+"\",\"message\":"+std::to_string(event.message)+
                     ",\"flags\":"+std::to_string(event.flags)+",\"key_time_ms\":"+std::to_string(event.time)+
                     ",\"command_scope\":"+(event.command?"true":"false")+",\"process_scope\":"+(event.process?"true":"false")+
@@ -705,6 +713,17 @@ static int selfTest() {
             KeyMachine machine;Action result;ref.textInput=guarded==1;ref.colorEditor=guarded==2;
             check(!machine.event(pair.first,true,guarded!=0,ref,true,result,1000) && result==None);
         }
+    }
+    for(int shift:{VK_LSHIFT,VK_RSHIFT}) for(bool releaseShiftFirst:{false,true}) {
+        Config cfg;cfg.enabled=true;cfg.bindings[0]={Toggle,{VK_SHIFT,90},2};KeyMachine machine;Action action;
+        check(!machine.event(shift,true,true,cfg,false,action,1000));
+        check(machine.event(90,true,true,cfg,false,action,1010) && action==HoldBegin);
+        check(machine.event(90,true,true,cfg,false,action,1020) && action==None);
+        if(releaseShiftFirst)check(!machine.event(shift,false,true,cfg,true,action,1030));
+        check(machine.event(90,false,true,cfg,true,action,1100) && action==HoldPin);
+        if(!releaseShiftFirst)check(!machine.event(shift,false,true,cfg,true,action,1110));
+        KeyMachine outside;check(!outside.event(shift,true,false,cfg,false,action));
+        check(!outside.event(90,true,false,cfg,false,action) && action==None);
     }
     Config cfg; cfg.bindings[0]={Toggle,{20},1}; cfg.bindings[1]={Select,{20,65},2};
     KeyMachine state; Action action;
@@ -988,6 +1007,7 @@ int main(int argc,char** argv) {
             sampleCapsState(true);
         } else if (message.message==WM_APP) {
             std::unique_ptr<Config> next(reinterpret_cast<Config*>(message.lParam)); config=*next;
+            diagnosticUntil=config.diagnostic?GetTickCount64()+35000:0;
             if (!IsWindowVisible(config.overlay)) dismissPending=false;
             emit(Configured);
         } else if (message.message==WM_APP+1) emit(Error);

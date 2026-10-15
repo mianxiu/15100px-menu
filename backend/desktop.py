@@ -204,6 +204,7 @@ class Desktop:
         payload = json.dumps({"enabled": self.settings["enabled"],
             "text_input": bool(self.panel_context and (self.panel_context.current['kind'] == 'text' or self.panel_context.current.get('input_focused'))),
             "color_editor": bool(self.visible and getattr(self,'color_editor_active',False)),
+            "diagnostic_trace": bool(getattr(self,"diagnostic_trace",False)),
             "right_click_open": False,
             "hwnd": self.hwnd or 0, "visible": self.visible,
             "bindings": {name: list(chord(value)) for name,value in self.settings["shortcuts"].items()}})
@@ -254,6 +255,11 @@ class Desktop:
                 elif event.get("type") == "action":
                     logging.info('Native hook action: %s cursor=%s', event['action'], event.get('cursor'))
                     self.notify({'action':event['action'],'cursor':event['cursor']} if 'cursor' in event else event['action'])
+                elif event.get('type') == 'trigger.trace':
+                    from collections import deque
+                    if not hasattr(self,'trigger_events'):self.trigger_events=deque(maxlen=64)
+                    if getattr(self,'diagnostic_trace',False):self.trigger_events.append(event)
+                    logging.info('Configured menu trigger decision: %s',event)
                 elif event.get('type') == 'caps.trace':
                     logging.info('CapsLock hook decision: %s', event)
                 elif event.get('type') == 'hook.health':
@@ -263,6 +269,7 @@ class Desktop:
                 elif event.get('type') == 'activation.trace':
                     logging.info('Photoshop activation click: %s', event)
                 elif event.get('type') == 'activation.foreground':
+                    self.activation_snapshot=event
                     logging.info('Photoshop activation foreground: %s', event)
                 elif event.get("type") == "configured":
                     logging.debug("Native hotkey settings acknowledged")

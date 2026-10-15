@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 139 Shift+Z自动测试与分段诊断：原生自测覆盖左右Shift、重复、两种松键顺序、PS范围外；真实热键进程在自建窗口捕获4条当前绑定决定、范围外不弹菜单，原配置／窗口自动恢复（.runtime/shiftz139-native-live.json）。诊断期间记录绑定触发键，原生35秒到期、结束回调关闭，固定队列无钩子IO；报告带事件／激活快照／设置及摘要分段。生产菜单API可见／取消通过，但截屏不完整，不标记视觉验收通过（.runtime/shiftz139-popup-live.json）。PS25端到端仍未通过，不能据本机24自测称已修复。
+
+
 - [x] 138发行已完成：源码／标签与公开Latest138，匿名附件及137生产更新器检查／下载／校验通过，实际入口138；证据.runtime/release-0.4.138-public-verification.json及release138-updater-verification.json。PS25实体触发／调色仍待该机复测。
 
 - [x] 138 PS25图层签名代码与回归：用户报告首次给出完整空标签控件ID，PS25使用6092/6093输入及6094滚动条，旧PS24使用6093/6097及6098。新增独立完整签名；不按2/2/1/1数量放行。输入、画布、PSFloatC及缺项拒绝回归通过。280项完整后台回归、最终EXE烟雾通过，实际入口138与原生组件／前端一致，PS进程／文档／配置保持；证据.runtime/caps138-final-verification.json及tests138-final.log。PS25实体调色与触发仍保持未完成，不据报告匹配推断全部兼容。
