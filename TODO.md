@@ -1,5 +1,9 @@
 # Photoshop Menu TODO
 
+- [x] PS25面板／完全无菜单只读诊断脚本：tools/inspect-panels.ps1支持倒计时及多次采样，记录前台进程名／类／启用与最小化、权限状态、hover和focus父链、root-owner、面板控件ID、后台版本／触发键与MenuHost／HotkeyHost就绪；完整JSON默认桌面CreateNew保存，禁止覆盖已有文件。不读取输入、文档、凭据，不发送输入或UXP命令。Windows PowerShell5真实只读运行及两样本报告结构／隐私字段／本机图层ID核验通过；无Python可用。PS25实机报告仍待提供，此项不等于修复完成；Caps采样不能替代原生键盘事件日志。证据.runtime/panel-trigger-final.json。仅独立脚本更新，136已发布附件保持。
+- [ ] PS25完全不唤出菜单：用户最新确认不是“通用操作”而是完全没有菜单。提供的52行日志前台Chrome_WidgetWin_1、process_scope=false、allowed=false，无Caps按下／松开事件；钩子健康、丢弃0，仅能确认该段没有有效PS触发资格，尚不足以断定PS窗口类或权限原因。随后用户截图显示实际触发键为shift+z，须先按该键或改回capslock验证，不能把按错绑定视为PS25不兼容。需新版诊断确认实际PS前台进程与窗口链，并结合按Caps时的日志定位；不能用面板签名修复代替触发链验收。
+
+
 - [x] 136正式Release：源码／标签、统一ZIP与SHA256已公开，Latest为136；两份附件匿名下载哈希／大小核验通过（.runtime/release-0.4.136-public-verification.json）。dist整理为136，生产更新器以隔离133状态检查／下载／校验136通过，未安装或修改运行服务。旧发行物已保留归档；本机实际后台已切换136，原F已核对取消终态，PS正常重启及UXP14重连通过；PS25.5.1实体确认仍待完成。
 
 - [ ] 136通用操作移除移动功能：代码已隐藏顶部／底部、压缩底部字母栏为c/v/f/w/s并修正收紧后的tooltip分组边界，旧命中及移动请求拦截；图层菜单恢复全移动入口，独立PS组合键保留。272项回归、原生完整显示／输入／焦点／中心取消及通用与图层四主题预览通过（.runtime/tests136-final.log（包含原生自测）、.runtime/generic135-*.png及generic136-tip-*.png）；候选EXE烟雾及隔离统一包通过（.runtime/smoke136-final.log、.runtime/caps136-final-pending.json）；实际入口已切换136并核对组件；完整实体菜单布局／手势验收仍待完成。
