@@ -1,9 +1,19 @@
 import unittest
 from unittest.mock import Mock, patch
-from backend.panel_context import PanelContext, classify_chain, panel_flags, LAYER_CONTROLS
+from backend.panel_context import PanelContext, classify_chain, panel_flags, LAYER_CONTROLS, LAYER_CONTROLS_PS25
 
 
 class PanelContextTests(unittest.TestCase):
+    def test_ps2551_report_signature_and_unrelated_palettes(self):
+        chain=[('PSViewC',''),('OWL.Palette',''),('OWL.Dock',''),('Photoshop','')]
+        self.assertEqual(classify_chain(chain,[],LAYER_CONTROLS_PS25),'layers')
+        for item in LAYER_CONTROLS_PS25:
+            self.assertEqual(classify_chain(chain,[],LAYER_CONTROLS_PS25-{item}),'generic')
+        self.assertEqual(classify_chain(chain,[],{('PSViewC',0),('ScrollBar',6143),*[('Edit',i) for i in range(6316,6321)]}),'generic')
+        self.assertEqual(classify_chain([('Edit',''),*chain],[],LAYER_CONTROLS_PS25),'text')
+        self.assertEqual(classify_chain([('PSViewC',''),('OWL.Document','')],[],LAYER_CONTROLS_PS25),'canvas')
+        self.assertEqual(classify_chain([('PSViewC',''),('PSFloatC','')],[],LAYER_CONTROLS_PS25),'generic')
+
     def test_visible_menu_freezes_hover_even_if_photoshop_keeps_foreground(self):
         from backend.desktop import Desktop
         from types import SimpleNamespace

@@ -15,6 +15,11 @@ PANEL_IDS = {'generic': 0, 'canvas': 1, 'layers': 2, 'text': 3, 'home': 4}
 # counts or empty localized labels alone must never enable layer operations.
 LAYER_CONTROLS = frozenset({('PSViewC',0), ('ComboBox',2490), ('ComboBox',2493),
                             ('Edit',6093), ('Edit',6097), ('ScrollBar',6098)})
+# Complete identity from the user's PS 25.5.1 diagnostic. Keep signatures
+# separate: mixing IDs from different palettes/versions must not match.
+LAYER_CONTROLS_PS25 = frozenset({('PSViewC',0), ('ComboBox',2490), ('ComboBox',2493),
+                               ('Edit',6092), ('Edit',6093), ('ScrollBar',6094)})
+LAYER_SIGNATURES = (LAYER_CONTROLS,LAYER_CONTROLS_PS25)
 
 
 def panel_flags(panel, context=False, hold=False):
@@ -44,7 +49,7 @@ def classify_chain(chain, layer_labels=(), layer_controls=()):
     if 'OWL.Palette' in classes and (
         {'fill', 'lock', 'opacity'} <= labels or
         {'填充', '锁定', '不透明度'} <= labels or
-        LAYER_CONTROLS <= set(layer_controls)
+        any(signature <= set(layer_controls) for signature in LAYER_SIGNATURES)
     ):
         return 'layers'
     return 'generic'

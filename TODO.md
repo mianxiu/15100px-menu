@@ -1,5 +1,9 @@
 # Photoshop Menu TODO
 
+- [x] 138 PS25图层签名代码与回归：用户报告首次给出完整空标签控件ID，PS25使用6092/6093输入及6094滚动条，旧PS24使用6093/6097及6098。新增独立完整签名；不按2/2/1/1数量放行。输入、画布、PSFloatC及缺项拒绝回归通过。280项完整后台回归、最终EXE烟雾通过，实际入口138与原生组件／前端一致，PS进程／文档／配置保持；证据.runtime/caps138-final-verification.json及tests138-final.log。PS25实体调色与触发仍保持未完成，不据报告匹配推断全部兼容。
+- [ ] PS25 Shift+Z不唤出进一步核对：用户确认本次按的是shift+z。报告显示PS前台正常、同权限、后台／UXP14／原生组件就绪、无busy；一次菜单与PSFloatC期间应保护，其余工作区可用。采样仅有Caps状态，缺少Shift+Z的原生按键决定；不能归因旧绑定或单凭图层识别说明整个菜单不出现。需结合按键同时段Native hook action／activation及Desktop action failed日志继续定位。
+
+
 - [x] 137发行：统一包及SHA256已公开为Latest，匿名下载大小／哈希通过；实际入口137及内置诊断资源哈希一致，原PS进程、文档、配置保持。旧版136生产更新器隔离检查／下载／校验137通过，未重复安装。证据.runtime/release-0.4.137-public-verification.json、caps137-final-verification.json。
 
 - [x] 137内置诊断：后台运行状态一键启动只读采集，异步有界子进程及单任务保护，完成后导出完整JSON；打包到EXE并随应用升级，独立脚本继续可用。实际137后台浏览器验证10样本及导出、后台触发键／窗口链／权限／组件状态通过，PS进程与文档保持；证据.runtime/diagnostics137-browser.json及diagnostics137-browser-report.json。该机PS25的触发故障仍待报告定位，未标为修复。
