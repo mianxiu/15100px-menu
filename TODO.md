@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 139交付：已公开Latest，匿名附件／138生产更新器校验通过；实际服务、原生热键组件及资源均139构建，PS进程保持，自动测试结束后无busy／菜单／采集任务，原快捷键恢复。282项回归及最终EXE烟雾通过，证据.runtime/caps139-final-verification.json、shiftz139-native-live.json、release-0.4.139-public-verification.json和release139-updater-verification.json。PS25根因与完整实体视觉未验收。
+
 - [x] 139 Shift+Z自动测试与分段诊断：原生自测覆盖左右Shift、重复、两种松键顺序、PS范围外；真实热键进程在自建窗口捕获4条当前绑定决定、范围外不弹菜单，原配置／窗口自动恢复（.runtime/shiftz139-native-live.json）。诊断期间记录绑定触发键，原生35秒到期、结束回调关闭，固定队列无钩子IO；报告带事件／激活快照／设置及摘要分段。生产菜单API可见／取消通过，但截屏不完整，不标记视觉验收通过（.runtime/shiftz139-popup-live.json）。PS25端到端仍未通过，不能据本机24自测称已修复。
 
 
