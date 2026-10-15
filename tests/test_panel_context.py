@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from backend.panel_context import PanelContext, classify_chain, panel_flags
 
 
@@ -34,6 +34,48 @@ class PanelContextTests(unittest.TestCase):
         self.assertEqual(classify_chain([('PSViewC',''),('OWL.Palette','')], ['Opacity:']), 'generic')
         self.assertEqual(classify_chain([('Edit',''),('OWL.Palette','')],
                                        ['Fill:', 'Lock:', 'Opacity:']), 'text')
+
+    def test_localized_access_keys_and_spacing_keep_strict_signature(self):
+        palette = [('PSViewC',''), ('OWL.Palette','')]
+        for labels in (['填充（F）：', '锁定（L）：', '不透明度（O）：'],
+                       ['&Fill :', 'Loc&k:', '\u200eOpacity\u00a0:'],
+                       ['填 充：', '锁定:', '不透明度 (&O) :']):
+            self.assertEqual(classify_chain(palette, labels), 'layers')
+        for labels in (['填充（F）：', '不透明度（O）：'],
+                       ['填充颜色', '锁定', '不透明度'],
+                       ['Fill opacity:', 'Lock:', 'Opacity:']):
+            self.assertEqual(classify_chain(palette, labels), 'generic')
+        self.assertEqual(classify_chain([('Edit',''), *palette],
+                                       ['填充（F）：', '锁定（L）：', '不透明度（O）：']), 'text')
+
+    def panel_gui(self, dock_owner=100, nested=False):
+        names = {1:'PSViewC', 2:'OWL.Palette', 3:'OWL.Dock', 100:'Photoshop',
+                 4:'Static', 5:'Static', 6:'Static', 7:'Edit', 8:'OWL.Palette'}
+        parents = {1:2, 7:2, 2:8 if nested else 3, 8:3, 3:0, 100:0, 4:2, 5:2, 6:2}
+        gui = Mock()
+        gui.IsWindow.side_effect = lambda h:h in names
+        gui.GetClassName.side_effect = names.__getitem__
+        gui.GetParent.side_effect = parents.__getitem__
+        gui.IsWindowVisible.return_value = True
+        gui.GetWindowText.side_effect = {4:'填充（F）：', 5:'锁定：', 6:'不透明度（O）：'}.__getitem__
+        gui.EnumChildWindows.side_effect = lambda h, callback, _: [callback(c, None) for c in ((4,5,6) if h==2 else ())]
+        return gui
+
+    def test_owned_floating_layers_and_input_are_distinguished(self):
+        gui = self.panel_gui()
+        with patch('backend.panel_context.workspace_root', return_value=100):
+            detector = PanelContext(gui)
+            self.assertEqual(detector.describe(1,100), 'layers')
+            self.assertEqual(detector.describe(7,100), 'text')
+        with patch('backend.panel_context.workspace_root', return_value=0):
+            self.assertEqual(PanelContext(gui).describe(1,100), 'generic')
+
+    def test_nearest_palette_owns_signature_not_outer_dock(self):
+        gui = self.panel_gui(nested=True)
+        with patch('backend.panel_context.workspace_root', return_value=100):
+            self.assertEqual(PanelContext(gui).describe(1,100), 'layers')
+        gui.EnumChildWindows.assert_called_once()
+        self.assertEqual(gui.EnumChildWindows.call_args.args[0], 2)
 
     def detector(self):
         detector = PanelContext(Mock(IsWindow=lambda hwnd: hwnd != 99))

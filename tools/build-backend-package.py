@@ -29,6 +29,7 @@ with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as bundle:
     bundle.write(ROOT/'docs/UPDATES.md','docs/UPDATES.md')
     bundle.write(ROOT/'docs/READ-STRATEGIES.md','docs/READ-STRATEGIES.md')
     bundle.write(ROOT/'docs/UI-GUIDE.md','docs/UI-GUIDE.md')
+    bundle.write(ROOT/'tools/inspect-panels.ps1','tools/inspect-panels.ps1')
     for notice in sorted((ROOT/'licenses').glob('*.txt')):bundle.write(notice,'licenses/'+notice.name)
     for source,target in ((ROOT/'native/fonts/OFL-1.1.txt','licenses/fonts-OFL-1.1.txt'),(ROOT/'native/fonts/COPYRIGHT.txt','licenses/fonts-COPYRIGHT.txt'),(ROOT/'native/vendor/imgui/LICENSE.txt','licenses/imgui.txt'),(ROOT/'native/vendor/json/LICENSE.MIT','licenses/json.txt'),(ROOT/'native/vendor/manifest.json','licenses/native-manifest.json')):bundle.write(source,target)
 output.with_suffix('.zip.sha256').write_text(sha(output)+'  '+output.name+'\n','ascii')

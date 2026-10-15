@@ -3,6 +3,8 @@ import ctypes
 from ctypes import wintypes as W
 import threading
 import logging
+import re
+import unicodedata
 from .photoshop_windows import workspace_root
 
 LABELS = {'generic': '通用操作', 'canvas': '画布', 'layers': '图层', 'home': 'Photoshop 首页',
@@ -15,6 +17,15 @@ def panel_flags(panel, context=False, hold=False):
     return (PANEL_IDS[panel['kind']] & 3) | (32 if panel['kind'] == 'home' else 0) | (int(bool(panel.get('input_focused'))) << 2) | (int(context) << 3) | (int(hold) << 4)
 
 
+def panel_label(text):
+    # Native localized labels can contain full-width punctuation, access keys,
+    # nonbreaking spaces or directional marks. Match labels, never substrings.
+    text = unicodedata.normalize('NFKC', text)
+    text = ''.join(c for c in text if unicodedata.category(c) != 'Cf')
+    text = re.sub(r'\(&?[A-Za-z]\)', '', text).replace('&', '')
+    return ''.join(text.split()).rstrip(':').casefold()
+
+
 def classify_chain(chain, layer_labels=()):
     """Nearest control first; require multiple layer-specific controls."""
     classes = [item[0] for item in chain]
@@ -24,7 +35,7 @@ def classify_chain(chain, layer_labels=()):
         return 'home'
     if 'OWL.Document' in classes:
         return 'canvas'
-    labels = {text.strip().rstrip(':：').casefold() for text in layer_labels}
+    labels = {panel_label(text) for text in layer_labels}
     if 'OWL.Palette' in classes and (
         {'fill', 'lock', 'opacity'} <= labels or
         {'填充', '锁定', '不透明度'} <= labels
@@ -62,8 +73,14 @@ class PanelContext:
             seen.add(hwnd)
             name = gui.GetClassName(hwnd)
             chain.append((name, ''))
-            if name == 'OWL.Palette':
+            if name == 'OWL.Palette' and palette is None:
                 palette = hwnd
+            # A floating dock is owned by Photoshop but its parent is the
+            # desktop. Validate that owner via the same workspace gate as
+            # hover/focus; never accept an arbitrary owned modal dialog.
+            if name == 'OWL.Dock' and workspace_root(gui, hwnd) == root:
+                hwnd = root
+                break
             hwnd = gui.GetParent(hwnd)
         if hwnd != root:
             return 'generic'
