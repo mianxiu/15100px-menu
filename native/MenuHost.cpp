@@ -934,7 +934,7 @@ static int tipFamily(int action) {
     return action;
 }
 static RECT tipGroupRect(int action) {
-    if(action>=40 && action<47)return {capsRows[0].left,capsRows[0].top,capsRows[6].right,capsRows[6].bottom};
+    if(action>=40 && action<47)return {capsRows[0].left,capsRows[0].top,capsRows[capsCount()-1].right,capsRows[capsCount()-1].bottom};
     if(action>=32)return {quickRows[0].left,quickRows[0].top,quickRows[6].right,quickRows[6].bottom};
     if(tipFamily(action)==12)return recentPanelBounds;
     if(action>=12)return recentRows[action-12];
@@ -961,7 +961,7 @@ static ImVec4 actionTipBounds(int action) {
     const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
     RECT anchor=action>=40?capsRows[action-40]:action>=32?quickRows[action-32]:action>=12?recentRows[action-12]:action>=4?labelRows[action-4]:holdRows[action];
     RECT group=anchor;
-    if(action>=40)group={capsRows[0].left,capsRows[0].top,capsRows[6].right,capsRows[6].bottom};
+    if(action>=40)group={capsRows[0].left,capsRows[0].top,capsRows[capsCount()-1].right,capsRows[capsCount()-1].bottom};
     else if(action>=32)group={quickRows[0].left,quickRows[0].top,quickRows[6].right,quickRows[6].bottom};
     if(action>=4 && action<12)group=holdRows[1];
     if(action>=12 && action<32 && shownPresets[action-12].name!="剪贴板")group=recentPanelBounds;
@@ -2368,6 +2368,10 @@ int main() {
                 numberFrame(ImGuiKey_2,true);numberFrame(ImGuiKey_2,false);
                 if(testedActions.size()!=genericCount)throw std::runtime_error("Generic menu reordered layers through hidden input");
                 const RECT lastGeneric=capsRows[4];
+                const RECT genericTipGroup=tipGroupRect(40);
+                if(genericTipGroup.left!=capsRows[0].left || genericTipGroup.right!=lastGeneric.right ||
+                   genericTipGroup.bottom!=lastGeneric.bottom || genericTipGroup.right<=genericTipGroup.left)
+                    throw std::runtime_error("Compact generic Caps tooltip group retained removed segments");
                 if(holdActionAt({lastGeneric.right-LONG(2*scale),(lastGeneric.top+lastGeneric.bottom)/2})!=44)
                     throw std::runtime_error("Compact generic Caps bar lost final segment hit");
                 panelKind=2;holdFinished=false;numberFrame(ImGuiKey_None,false);
