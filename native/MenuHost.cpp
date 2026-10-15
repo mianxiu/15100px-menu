@@ -189,6 +189,7 @@ static const char* capsActions[]={"copyStyle","pasteStyle","editStyle","selectAb
 static const char* capsKeys[]={"c","v","f","w","s","Ctrl+w","Ctrl+s"};
 static const char* capsLabels[]={"复制图层样式","粘贴图层样式","打开图层样式","选择上一个图层","选择下一个图层","上移一层","下移一层"};
 static bool capsReady=false;
+static int capsCount() {return panelKind==0?5:7;}
 
 static constexpr float quickGroupGap=4;
 static float quickGroupY(bool lower);
@@ -198,12 +199,13 @@ static const char* rowShortcut(int i) {return panelKind==4?"Ctrl + N":shortcuts[
 static bool inputFocused=false;
 static bool canExecute() {return (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
 static bool capsEnabled(int i) {
+    if(i>=capsCount())return false;
     if(!capsReady || !canExecute() || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
     if((i==0 || i==2 || i==3 || i==4) && layerCount!=1)return false;
     return !(i==1 || i==2 || i>=5) || (!layerLocked && !layerBackground && !layerCrossParents);
 }
 
-static bool rowEnabled(int i) {return canExecute() && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
+static bool rowEnabled(int i) {return !(panelKind==0 && i>=2) && canExecute() && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
 static bool quickEnabled(int i) {return layerAware && panelKind!=4 && canExecute() && (quickMask & (1u<<i));}
 static std::string layerTitle() {
     const char* names[]={"图层识别待更新","背景图层","像素图层","图层组","文字图层","智能对象","形状／填充图层","调整图层","混合类型","其他图层"};
@@ -215,7 +217,7 @@ static std::string layerTitle() {
 static const char* panelTitle() {
     return panelKind==4?"Photoshop 首页":panelKind==1?"画布操作":panelKind==2?"图层操作":panelKind==3?"输入控件":"通用操作";
 }
-static bool rowVisible(int i) {return panelKind==4?i==0:panelKind!=3 && (panelKind!=1 || i<2);}
+static bool rowVisible(int i) {return panelKind==4?i==0:panelKind!=3 && ((panelKind!=1 && panelKind!=0) || i<2);}
 static float scale=1;
 static std::string uiTheme="dark";
 static std::string uiFontSize="small";
@@ -253,6 +255,8 @@ static std::vector<std::string> testedActions;
 static size_t labelTestActionCount=0;
 static ImVec2 bottomRow;
 static void send(const char* action) {
+    if(panelKind==0 && (std::string(action)=="moveToTop" || std::string(action)=="moveToBottom" ||
+                       std::string(action)=="moveUp" || std::string(action)=="moveDown"))return;
     for(int i=0;i<7;++i)if(std::string(action)==quickActions[i] && !quickEnabled(i))return;
     if(layerAware && panelKind!=4) {
         int row=std::string(action).rfind("label.",0)==0?1:-1;
@@ -489,7 +493,7 @@ static int holdActionAt(POINT point) {
     RECT bounds{};GetWindowRect(window,&bounds);
     if (!PtInRect(&bounds,point)) return -1;
     for(int i=0;i<7;++i)if(capsEnabled(i) && PtInRect(&capsRows[i],point)){
-        if((i && point.x<capsRows[i].left+scale) || (i<6 && point.x>=capsRows[i].right-scale))return -1;
+        if((i && point.x<capsRows[i].left+scale) || (i<capsCount()-1 && point.x>=capsRows[i].right-scale))return -1;
         return 40+i;
     }
     if(shapeEditor.ready() && PtInRect(&shapeEditor.bounds,point))return 100;
@@ -743,7 +747,7 @@ static void contextItems() {
     }
     if (ImGui::MenuItem(rowLabel(0),nullptr,false,rowEnabled(0))) send(actions[0]);
     colorGrid();
-    if (ImGui::BeginMenu("图层排序")) {
+    if ((rowVisible(2) || rowVisible(3)) && ImGui::BeginMenu("图层排序")) {
         for (int i=2;i<4;++i) if (ImGui::MenuItem(rowLabel(i),nullptr,false,rowEnabled(i))) send(rowAction(i));
         ImGui::EndMenu();
     }
@@ -1101,23 +1105,24 @@ static void drawCapsBar() {
     if(!capsReady || panelKind==4 || !layerAware)return;
     auto* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
     float widths[7],total=0;
-    for(int i=0;i<7;++i){widths[i]=std::max(24.f*scale,font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]).x+18*scale);total+=widths[i];}
+    const int count=capsCount();
+    for(int i=0;i<count;++i){widths[i]=std::max(24.f*scale,font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]).x+18*scale);total+=widths[i];}
     auto* d=ImGui::GetWindowDrawList();float x=pieCenter.x-total*.5f,y=pieCenter.y+107*scale;
     const float h=24*scale,r=ImGui::GetStyle().FrameRounding;
     d->AddRectFilled({x,y},{x+total,y+h},tint(ImGuiCol_Button),r);
     POINT cursor{};GetCursorPos(&cursor);
-    for(int i=0;i<7;++i){
+    for(int i=0;i<count;++i){
         const ImVec2 a={x,y},b={x+widths[i],y+h};capsRows[i]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
         const bool enabled=capsEnabled(i);
-        const bool seam=(i && cursor.x<a.x+scale) || (i<6 && cursor.x>=b.x-scale);
+        const bool seam=(i && cursor.x<a.x+scale) || (i<count-1 && cursor.x>=b.x-scale);
         const bool hover=enabled && ((!preview.empty() && previewCapsHover>=0)?previewCapsHover==i:!seam && PtInRect(&capsRows[i],cursor));
-        if(hover)d->AddRectFilled(a,b,tint(ImGuiCol_ButtonHovered),r,i==0?ImDrawFlags_RoundCornersLeft:i==6?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone);
+        if(hover)d->AddRectFilled(a,b,tint(ImGuiCol_ButtonHovered),r,i==0?ImDrawFlags_RoundCornersLeft:i==count-1?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone);
         if(i)d->AddLine(a,{a.x,b.y},tint(ImGuiCol_Border),scale);
         const auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]);
         d->AddText(font,font->FontSize,{a.x+(widths[i]-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),capsKeys[i]);
         if(pinned && !pieAnimating && enabled && !holdFinished){
             ImGui::SetCursorScreenPos({a.x+(i?scale:0),y});ImGui::PushID(450+i);
-            if(ImGui::InvisibleButton("##caps",{widths[i]-(i?scale:0)-(i<6?scale:0),h})){holdFinished=true;send(capsActions[i]);}
+            if(ImGui::InvisibleButton("##caps",{widths[i]-(i?scale:0)-(i<count-1?scale:0),h})){holdFinished=true;send(capsActions[i]);}
             ImGui::PopID();
         }
         x=b.x;
@@ -1746,7 +1751,7 @@ int main() {
             panelKind=1;if (!rowVisible(0) || rowVisible(2)) throw std::runtime_error("Canvas panel routing failed");
             panelKind=3;if (rowVisible(0)) throw std::runtime_error("Text panel routing failed");
             panelKind=2;if (!rowVisible(3)) throw std::runtime_error("Layer panel routing failed");
-            panelKind=0;
+            panelKind=2;
             if (!matches(2,"CapsLock+w") || !matches(0,"组内") || !matches(1,"orange color") || matches(3,"top") || matches(0,"missing"))
                 throw std::runtime_error("Search self-test failed");
         }
@@ -2018,7 +2023,7 @@ int main() {
                 pieCenter=previousPieCenter;
                 SetWindowPos(window,nullptr,100,100,static_cast<int>(620*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
                 holdFinished=false;pieReady=true;renderedHit=-1;
-                panelKind=0;
+                panelKind=2;
                 for (int i=0;i<8;++i) {
                     auto r=labelRows[i];POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
                     if (holdActionAt(middle)!=4+i) throw std::runtime_error("Label swatch hit test failed");
@@ -2353,6 +2358,21 @@ int main() {
                 const auto capsRect=capsRows[0];const auto count=testedActions.size();
                 renderedHit=40;holdFinished=false;finishHold({(capsRect.left+capsRect.right)/2,(capsRect.top+capsRect.bottom)/2});
                 if(testedActions.size()!=count+1 || testedActions.back()!="copyStyle")throw std::runtime_error("Caps bar did not dispatch copy once");
+                holdFinished=false;panelKind=0;numberFrame(ImGuiKey_None,false);
+                if(rowVisible(2) || rowVisible(3) || rowEnabled(2) || rowEnabled(3) || capsEnabled(5) || capsEnabled(6) ||
+                   capsRows[5].right || capsRows[6].right || capsCount()!=5)
+                    throw std::runtime_error("Generic menu retained layer reorder controls");
+                const auto genericCount=testedActions.size();
+                for(const char* action:{"moveToTop","moveToBottom","moveUp","moveDown"})send(action);
+                numberFrame(ImGuiKey_8,true);numberFrame(ImGuiKey_8,false);
+                numberFrame(ImGuiKey_2,true);numberFrame(ImGuiKey_2,false);
+                if(testedActions.size()!=genericCount)throw std::runtime_error("Generic menu reordered layers through hidden input");
+                const RECT lastGeneric=capsRows[4];
+                if(holdActionAt({lastGeneric.right-LONG(2*scale),(lastGeneric.top+lastGeneric.bottom)/2})!=44)
+                    throw std::runtime_error("Compact generic Caps bar lost final segment hit");
+                panelKind=2;holdFinished=false;numberFrame(ImGuiKey_None,false);
+                if(!rowVisible(2) || !rowVisible(3) || !capsEnabled(5) || !capsEnabled(6) || !capsRows[6].right)
+                    throw std::runtime_error("Layers menu lost its reorder controls after generic transition");
                 holdFinished=false;inputFocused=true;numberFrame(ImGuiKey_None,false);
                 if(capsEnabled(0))throw std::runtime_error("Input protection enabled Caps bar");
                 inputFocused=false;capsReady=false;

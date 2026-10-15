@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch
-from backend.panel_context import PanelContext, classify_chain, panel_flags
+from backend.panel_context import PanelContext, classify_chain, panel_flags, LAYER_CONTROLS
 
 
 class PanelContextTests(unittest.TestCase):
@@ -76,6 +76,31 @@ class PanelContextTests(unittest.TestCase):
             self.assertEqual(PanelContext(gui).describe(1,100), 'layers')
         gui.EnumChildWindows.assert_called_once()
         self.assertEqual(gui.EnumChildWindows.call_args.args[0], 2)
+
+    def test_empty_labels_need_complete_native_identity_not_only_counts(self):
+        chain=[('PSViewC',''), ('OWL.Palette','')]
+        self.assertEqual(classify_chain(chain, [], LAYER_CONTROLS), 'layers')
+        for item in LAYER_CONTROLS:
+            self.assertEqual(classify_chain(chain, [], LAYER_CONTROLS-{item}), 'generic')
+        same_counts=[(name,0) for name,_ in LAYER_CONTROLS]
+        self.assertEqual(classify_chain(chain, [], same_counts), 'generic')
+        self.assertEqual(classify_chain([('Edit',''), *chain], [], LAYER_CONTROLS), 'text')
+        self.assertEqual(classify_chain([('PSViewC',''), ('OWL.Document','')], [], LAYER_CONTROLS), 'canvas')
+
+    def test_real_control_signature_is_collected_without_reading_input_text(self):
+        gui=self.panel_gui()
+        classes={1:'PSViewC',2:'OWL.Palette',3:'OWL.Dock',100:'Photoshop',
+                 7:'Edit',10:'ComboBox',11:'ComboBox',12:'Edit',13:'ScrollBar'}
+        parents={1:2,7:2,10:2,11:2,12:2,13:2,2:3,3:0}
+        ids={1:0,7:6093,10:2490,11:2493,12:6097,13:6098}
+        gui.GetClassName.side_effect=classes.__getitem__
+        gui.GetParent.side_effect=parents.__getitem__
+        gui.GetDlgCtrlID.side_effect=ids.__getitem__
+        gui.EnumChildWindows.side_effect=lambda h, cb, _: [cb(c,None) for c in ids]
+        with patch('backend.panel_context.workspace_root', return_value=100):
+            self.assertEqual(PanelContext(gui).describe(1,100), 'layers')
+            self.assertEqual(PanelContext(gui).describe(7,100), 'text')
+        gui.GetWindowText.assert_not_called()
 
     def detector(self):
         detector = PanelContext(Mock(IsWindow=lambda hwnd: hwnd != 99))
@@ -153,6 +178,25 @@ class PanelContextTests(unittest.TestCase):
         desktop.panel_context.current = {'kind':'text'}
         with self.assertRaisesRegex(RuntimeError, '输入'):
             desktop.require_action_focus()
+
+    def test_open_generic_menu_blocks_all_reorders_without_changing_chords(self):
+        from backend.desktop import Desktop
+        desktop = Desktop('http://localhost', lambda action:None)
+        desktop.panel_context = self.detector()
+        desktop.panel_context.current = {'kind':'generic'}
+        desktop.visible = True
+        for action in ('moveToTop','moveToBottom','moveUp','moveDown'):
+            with self.assertRaisesRegex(RuntimeError, '通用操作不提供图层移动'):
+                desktop.require_move_context(action)
+        for action in ('select','selectAbove','selectBelow','copyStyle','pasteStyle','editStyle'):
+            desktop.require_move_context(action)
+        desktop.panel_context.current = {'kind':'layers'}
+        desktop.require_move_context('moveUp')
+        desktop.panel_context.current = {'kind':'canvas'}
+        desktop.require_move_context('moveUp')
+        desktop.visible = False
+        desktop.panel_context.current = {'kind':'generic'}
+        desktop.require_move_context('moveUp')
 
     def test_home_blocks_layer_shortcuts_even_with_open_documents(self):
         from backend.desktop import Desktop

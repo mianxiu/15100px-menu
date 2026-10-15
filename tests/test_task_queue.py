@@ -107,7 +107,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         from backend.main import Application
         with tempfile.TemporaryDirectory() as folder:
             app=Application(15190,bridge=self.bridge,runtime=folder);events=[]
-            app.desktop=SimpleNamespace(require_action_focus=Mock(),hide=Mock(),menu_epoch=1,event=events.append)
+            app.desktop=SimpleNamespace(require_action_focus=Mock(),require_move_context=Mock(),hide=Mock(),menu_epoch=1,event=events.append)
             first=asyncio.create_task(app.dispatch('action.execute',{'name':'color','menu_epoch':1}));self.pending.append(first)
             while not self.started.is_set():await asyncio.sleep(.001)
             for _ in range(10):
@@ -128,7 +128,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         from backend.main import Application
         with tempfile.TemporaryDirectory() as folder:
             app=Application(15190,bridge=self.bridge,runtime=folder)
-            app.desktop=SimpleNamespace(require_action_focus=Mock(),hide=Mock(),menu_epoch=1,event=Mock())
+            app.desktop=SimpleNamespace(require_action_focus=Mock(),require_move_context=Mock(),hide=Mock(),menu_epoch=1,event=Mock())
             broadcast_started=asyncio.Event();broadcast_release=asyncio.Event()
             async def broadcast(event):
                 if event.get('action')=='color' and not broadcast_started.is_set():

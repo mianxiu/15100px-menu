@@ -13,6 +13,7 @@ public static class PhotoshopPanelReadOnly {
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder b, int n);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder b, int n);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
@@ -48,6 +49,7 @@ foreach ($panelRoot in $panelRoots) {
             [PhotoshopPanelReadOnly]::Class($h) -ne 'OWL.Palette' -or
             -not $seen.Add($h.ToInt64())) { return $true }
         $labels = New-Object 'System.Collections.Generic.List[string]'
+        $controls = New-Object 'System.Collections.Generic.List[object]'
         $classes = @{}
         $children = [PhotoshopPanelReadOnly+Callback]{ param($child, $unused)
             if (-not [PhotoshopPanelReadOnly]::IsWindowVisible($child)) { return $true }
@@ -59,6 +61,9 @@ foreach ($panelRoot in $panelRoots) {
             }
             $class = [PhotoshopPanelReadOnly]::Class($child)
             $classes[$class] = 1 + [int]$classes[$class]
+            if ($class -in @('ComboBox','Edit','ScrollBar','PSViewC') -and $controls.Count -lt 128) {
+                $controls.Add([pscustomobject]@{class=$class; id=[PhotoshopPanelReadOnly]::GetDlgCtrlID($child)})
+            }
             if ($class -eq 'Static') {
                 $text = [PhotoshopPanelReadOnly]::Text($child)
                 # Emit only exact known labels, including localized access keys.
@@ -71,7 +76,7 @@ foreach ($panelRoot in $panelRoots) {
             return $true
         }
         [void][PhotoshopPanelReadOnly]::EnumChildWindows($h, $children, [IntPtr]::Zero)
-        $panels.Add([pscustomobject]@{ classes = $classes; labels = @($labels.ToArray()); floating = ([PhotoshopPanelReadOnly]::Class($panelRoot) -eq 'OWL.Dock') })
+        $panels.Add([pscustomobject]@{ classes = $classes; labels = @($labels.ToArray()); controls = @($controls.ToArray()); floating = ([PhotoshopPanelReadOnly]::Class($panelRoot) -eq 'OWL.Dock') })
         return $true
     }
     [void][PhotoshopPanelReadOnly]::EnumChildWindows($panelRoot, $visit, [IntPtr]::Zero)

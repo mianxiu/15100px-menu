@@ -385,6 +385,15 @@ class Desktop:
                 raise RuntimeError('当前为 Photoshop 首页，请进入文档后执行图层操作')
 
     @window_transition
+    def require_move_context(self, name):
+        # The open generic menu deliberately has no reordering operations.
+        # Keep standalone PS chords unchanged; block stale menu/native-hook
+        # dispatches too, rather than just hiding their buttons.
+        if (name in ('moveToTop','moveToBottom','moveUp','moveDown') and self.visible
+                and self.panel_context and self.panel_context.current['kind']=='generic'):
+            raise RuntimeError('通用操作不提供图层移动，请在图层面板重新打开菜单')
+
+    @window_transition
     def outside_click(self, point):
         if not self.visible or not self.hwnd:
             return False

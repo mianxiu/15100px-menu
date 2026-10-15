@@ -417,6 +417,8 @@ class Application(web.Application):
             if not self.desktop:
                 raise RuntimeError("无桌面模式不提供图层操作")
             await asyncio.to_thread(self.desktop.require_action_focus)
+            if name in ('moveToTop','moveToBottom','moveUp','moveDown'):
+                await asyncio.to_thread(self.desktop.require_move_context,name)
             if self.operation_lock.locked() or self.bridge.busy:
                 raise RuntimeError("操作进行中，请等待完成后重新选择；本次操作未接受")
             try:
@@ -435,6 +437,8 @@ class Application(web.Application):
                         await self.broadcast({"type": "operation", "busy": True, "action": name})
                     async def before_dispatch(target):
                         async with self.panel_lock:
+                            if name in ('moveToTop','moveToBottom','moveUp','moveDown'):
+                                await asyncio.to_thread(self.desktop.require_move_context,name)
                             if 'menu_epoch' in args and args['menu_epoch'] != self.desktop.menu_epoch:
                                 raise TaskCancelled('菜单已重新打开，已取消旧操作')
                             if 'menu_epoch' in args and hasattr(self.desktop,'require_menu_layer_target'):

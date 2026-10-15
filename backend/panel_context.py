@@ -10,6 +10,11 @@ from .photoshop_windows import workspace_root
 LABELS = {'generic': '通用操作', 'canvas': '画布', 'layers': '图层', 'home': 'Photoshop 首页',
           'text': '输入控件'}
 PANEL_IDS = {'generic': 0, 'canvas': 1, 'layers': 2, 'text': 3, 'home': 4}
+# Native IDs measured together on the real Layers palette. These distinguish
+# the blend/filter selectors and opacity/fill inputs from similar palettes;
+# counts or empty localized labels alone must never enable layer operations.
+LAYER_CONTROLS = frozenset({('PSViewC',0), ('ComboBox',2490), ('ComboBox',2493),
+                            ('Edit',6093), ('Edit',6097), ('ScrollBar',6098)})
 
 
 def panel_flags(panel, context=False, hold=False):
@@ -26,7 +31,7 @@ def panel_label(text):
     return ''.join(text.split()).rstrip(':').casefold()
 
 
-def classify_chain(chain, layer_labels=()):
+def classify_chain(chain, layer_labels=(), layer_controls=()):
     """Nearest control first; require multiple layer-specific controls."""
     classes = [item[0] for item in chain]
     if classes and classes[0] in ('Edit', 'RichEdit20W', 'RichEdit50W', 'ComboBox'):
@@ -38,7 +43,8 @@ def classify_chain(chain, layer_labels=()):
     labels = {panel_label(text) for text in layer_labels}
     if 'OWL.Palette' in classes and (
         {'fill', 'lock', 'opacity'} <= labels or
-        {'填充', '锁定', '不透明度'} <= labels
+        {'填充', '锁定', '不透明度'} <= labels or
+        LAYER_CONTROLS <= set(layer_controls)
     ):
         return 'layers'
     return 'generic'
@@ -84,13 +90,23 @@ class PanelContext:
             hwnd = gui.GetParent(hwnd)
         if hwnd != root:
             return 'generic'
-        labels = []
+        labels, controls = [], []
         if palette:
             def collect(child, unused):
-                if gui.IsWindowVisible(child) and gui.GetClassName(child) == 'Static':
+                if not gui.IsWindowVisible(child):return
+                parent, visited = gui.GetParent(child), set()
+                while parent and parent != palette and parent not in visited and len(visited)<32:
+                    visited.add(parent)
+                    if gui.GetClassName(parent)=='OWL.Palette':return
+                    parent=gui.GetParent(parent)
+                if parent!=palette:return
+                name=gui.GetClassName(child)
+                if name == 'Static':
                     labels.append(gui.GetWindowText(child))
+                elif name in ('ComboBox','Edit','ScrollBar','PSViewC'):
+                    controls.append((name,gui.GetDlgCtrlID(child)))
             gui.EnumChildWindows(palette, collect, None)
-        return classify_chain(chain, labels)
+        return classify_chain(chain, labels, controls)
 
     def focus_window(self, root):
         import win32process

@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [ ] 135通用操作移除移动功能：代码已隐藏顶部／底部、压缩底部字母栏为c/v/f/w/s，旧命中及移动请求拦截；图层菜单恢复全移动入口，独立PS组合键保留。272项回归、原生完整显示／输入／焦点／中心取消及通用与图层四主题预览通过（.runtime/tests135-final.log、.runtime/MenuHost135-selftest.log、.runtime/generic135-*.png）；候选EXE烟雾及隔离统一包通过（.runtime/smoke135-final.log、.runtime/caps135-final-pending.json）；实际切换及实体验收待完成。
+- [ ] PS25.5.1中文新机无标签面板：用户反馈labels为空、ComboBox/Edit/ScrollBar/PSViewC数量2/2/1/1；文字归一化不足以覆盖。新增完整原生ID签名路径，严格匹配本机测得的图层控件组，不因类名／数量放行；无文本读取、UIA／COM查询或新轮询。只读诊断新增控件ID输出；该机ID与实体结果仍待核对，不能标为兼容已确认。
+
 
 - [ ] 新电脑 PS25.5.1 中文图层面板识别（2026-10-15）：用户确认在图层面板唤出仍为“通用操作”，已确定面板分流未识别，0.3.13本身包含调色功能。源码补充全角／助记键／不可见标记归一化、自有浮动OWL.Dock链及最近Palette选择，严格保留三字段签名和输入／焦点保护。269项后台回归通过；新增无需Python的只读tools/inspect-panels.ps1在本机Windows PowerShell5运行通过，只输出控件类及白名单标签／版本，不读取输入内容或凭据。含修复的候选EXE烟雾及统一ZIP／内嵌UXP14验证通过（.runtime/smoke134-panels.log）；打包工具支持隔离候选输出，避免覆盖正在使用的dist。修复尚未切换实际入口，新机签名和实机效果待核验；不能声称跨机问题已解决。
 - [x] 134源码／标签／发行草稿已推送：269项回归及候选EXE烟雾、隔离统一包通过，GitHub草稿413449016包含ZIP与SHA256两份附件，远端大小／哈希一致（.runtime/release-0.4.134-draft-verification.json）。此项仅表示草稿备妥；实际运行切换／正式发布未完成，原F请求accepted且窗口仍开，未知结果保护保留；公开Latest仍133。
