@@ -205,6 +205,7 @@ class Desktop:
             "text_input": bool(self.panel_context and (self.panel_context.current['kind'] == 'text' or self.panel_context.current.get('input_focused'))),
             "color_editor": bool(self.visible and getattr(self,'color_editor_active',False)),
             "diagnostic_trace": bool(getattr(self,"diagnostic_trace",False)),
+            "remote_compatibility": self.settings.get("remote_compatibility",False),
             "right_click_open": False,
             "hwnd": self.hwnd or 0, "visible": self.visible,
             "bindings": {name: list(chord(value)) for name,value in self.settings["shortcuts"].items()}})

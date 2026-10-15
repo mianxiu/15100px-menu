@@ -15,7 +15,18 @@
 enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace };
 static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false; HWND overlay=nullptr; std::array<Binding,13> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr; std::array<Binding,13> bindings{}; };
+// Opt-in remote clicks qualify only on a matching release in the same verified
+// PS workspace. No hover, taskbar or injected Alt+Tab activation is added.
+struct RemoteClickIntent {
+    uintptr_t workspace=0; ULONGLONG tick=0;
+    bool event(bool down,bool enabled,uintptr_t clicked,uintptr_t foreground,ULONGLONG now) {
+        if(down) {workspace=enabled?clicked:0;tick=now;return false;}
+        auto previous=std::exchange(workspace,0);
+        return enabled && previous && clicked==previous && foreground==previous && now-tick<=2000;
+    }
+};
+static RemoteClickIntent remoteClick;
 static int alias(int key) {
     if (key==160 || key==161) return 16;
     if (key==162 || key==163) return 17;
@@ -290,6 +301,14 @@ static bool photoshopKeyScope(HWND foreground=GetForegroundWindow()) {
     return photoshopProcessWindow(foreground) ||
         (menuWindow(foreground) && photoshopProcessWindow(target));
 }
+static HWND remoteWorkspace(HWND child) {
+    if(!child || !IsWindowVisible(child) || !IsWindowEnabled(child))return nullptr;
+    HWND root=GetAncestor(child,GA_ROOT);
+    if(!photoshop(root) || !photoshopProcessWindow(root))return nullptr;
+    DWORD childPid=0,rootPid=0;
+    GetWindowThreadProcessId(child,&childPid);GetWindowThreadProcessId(root,&rootPid);
+    return childPid && childPid==rootPid?GetAncestor(root,GA_ROOTOWNER):nullptr;
+}
 static bool taskbarWindow(HWND hwnd) {
     if (!hwnd) return false;
     wchar_t name[64]{};GetClassNameW(GetAncestor(hwnd,GA_ROOT),name,64);
@@ -409,6 +428,20 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
                   message==WM_RBUTTONUP || message==WM_RBUTTONDOWN?1:
                   message==WM_MBUTTONUP || message==WM_MBUTTONDOWN?2:-1;
         bool up=message==WM_LBUTTONUP || message==WM_RBUTTONUP || message==WM_MBUTTONUP;
+        const auto& mouse=*reinterpret_cast<const MSLLHOOKSTRUCT*>(data);
+        if(index==0) {
+            if(mouse.flags&LLMHF_INJECTED) {
+                bool enabled=config.enabled && config.remoteCompatibility;
+                HWND clicked=enabled?remoteWorkspace(WindowFromPoint(mouse.pt)):nullptr;
+                HWND current=enabled && photoshop(foreground)?remoteWorkspace(foreground):nullptr;
+                if(remoteClick.event(!up,enabled,reinterpret_cast<uintptr_t>(clicked),
+                    reinterpret_cast<uintptr_t>(current),lastInputTick)) {
+                    activationOrigin=foreground;
+                    activation.clickTarget(true,false,lastInputTick);
+                    activation.finishDirect(true,lastInputTick);
+                }
+            } else remoteClick.workspace=0;
+        }
         // Complete the physical taskbar click before cancellation can consume
         // its up. Win11 can change foreground between down and up; observing
         // only the down loses intent, or never grants an already-active PS.
@@ -451,13 +484,13 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
                 if (scoped && index!=1) { mouseConsumed[index]=true; return 1; }
             }
         }
-        if ((message==WM_LBUTTONDOWN || message==WM_LBUTTONUP) &&
-            !(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->flags&LLMHF_INJECTED)) {
+        if (message==WM_LBUTTONDOWN || message==WM_LBUTTONUP) {
             unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
             if (next!=tail.load(std::memory_order_acquire)) {
                 HookEvent event{};event.action=ActivationTrace;event.hwnd=foreground;
                 event.root=WindowFromPoint(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->pt);
                 event.message=static_cast<UINT>(message);event.time=GetTickCount();
+                event.flags=mouse.flags;
                 event.process=photoshopProcessWindow(event.root);
                 event.activationAllowed=activation.allowed;event.activationActive=activation.active;
                 event.directSwitching=activation.directSwitching;event.taskbarSwitching=activation.taskbarSwitching;
@@ -485,6 +518,7 @@ static Config parse(const std::string& line) {
     if (std::regex_search(line,match,std::regex("\"text_input\"\\s*:\\s*(true|false)"))) next.textInput=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"color_editor\"\\s*:\\s*(true|false)"))) next.colorEditor=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"diagnostic_trace\"\\s*:\\s*(true|false)"))) next.diagnostic=match[1]=="true";
+    if (std::regex_search(line,match,std::regex("\"remote_compatibility\"\\s*:\\s*(true|false)"))) next.remoteCompatibility=match[1]=="true";
     next.overlay=reinterpret_cast<HWND>(std::stoull(field("hwnd","([0-9]+)")));
     const Action actions[]={Toggle,Hide,Select,Color,Top,Bottom,SelectAbove,SelectBelow,MoveUp,MoveDown,CopyStyle,PasteStyle,EditStyle};
     int index=0;
@@ -533,6 +567,7 @@ static void writeActions() {
                 line=std::string("{\"type\":\"")+(event.message?"activation.trace":"activation.foreground")+"\",\"foreground\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
                     ",\"clicked\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+",\"message\":"+std::to_string(event.message)+
                     ",\"pid\":"+std::to_string(event.pid)+",\"window_class\":\""+windowClass+"\",\"taskbar\":"+(event.command?"true":"false")+
+                    ",\"flags\":"+std::to_string(event.flags)+
                     ",\"intent_before\":"+std::to_string(event.gapMs)+
                     ",\"tick_ms\":"+std::to_string(event.time)+",\"clicked_ps\":"+(event.process?"true":"false")+
                     ",\"allowed\":"+(event.activationAllowed?"true":"false")+",\"active\":"+(event.activationActive?"true":"false")+
@@ -622,6 +657,23 @@ static void sampleCapsState(bool force=false) {
     } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
 }
 static int selfTest() {
+    // Complete remote click pairs only: opt-in, same valid workspace and 2s.
+    RemoteClickIntent remote;
+    check(!remote.event(true,false,10,10,100));
+    check(!remote.event(false,false,10,10,101));
+    check(!remote.event(true,true,10,0,200));
+    check(remote.event(false,true,10,10,201));
+    check(!remote.event(false,true,10,10,202)); // release cannot replay
+    for(auto pair:std::array<std::pair<uintptr_t,uintptr_t>,4>{{{0,10},{10,0},{11,10},{10,11}}}) {
+        remote.event(true,true,10,10,300);
+        check(!remote.event(false,true,pair.first,pair.second,301));
+    }
+    remote.event(true,true,10,10,400);
+    check(!remote.event(false,true,10,10,2401));
+    remote.event(true,true,10,10,3000);
+    check(!remote.event(false,false,10,10,3001));
+    remote.event(true,true,0,10,4000); // taskbar/foreign/modal not a workspace
+    check(!remote.event(false,true,10,10,4001));
     ActivationGate gate;
     gate.observe(false,100);gate.observe(true,200);check(!gate.allowed);
     gate.click(true,201);check(gate.allowed);
@@ -898,7 +950,10 @@ int main(int argc,char** argv) {
                 WS_POPUP,-10000,-10000,10,10,nullptr,nullptr,wc.hInstance,nullptr);
             check(hwnd!=nullptr);
             check(photoshopProcessWindow(hwnd)==expected);
+            ShowWindow(hwnd,SW_SHOWNOACTIVATE);
+            check((remoteWorkspace(hwnd)!=nullptr)==(expected && wcscmp(name,L"Photoshop")==0));
             EnableWindow(hwnd,FALSE);check(photoshopProcessWindow(hwnd)==expected);
+            check(remoteWorkspace(hwnd)==nullptr);
             auto previous=photoshopProcesses;
             for (auto& p:photoshopProcesses) p={};
             HANDLE ended=CreateEventW(nullptr,TRUE,TRUE,nullptr);
@@ -1006,7 +1061,9 @@ int main(int argc,char** argv) {
             previousMaintenance=now;
             sampleCapsState(true);
         } else if (message.message==WM_APP) {
-            std::unique_ptr<Config> next(reinterpret_cast<Config*>(message.lParam)); config=*next;
+            std::unique_ptr<Config> next(reinterpret_cast<Config*>(message.lParam));
+            if(!next->enabled || !next->remoteCompatibility)remoteClick.workspace=0;
+            config=*next;
             diagnosticUntil=config.diagnostic?GetTickCount64()+35000:0;
             if (!IsWindowVisible(config.overlay)) dismissPending=false;
             emit(Configured);
