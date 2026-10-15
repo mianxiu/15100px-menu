@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 140发行：源码／标签与公开Latest140，匿名附件大小／SHA256及139生产更新器检查／下载／校验通过；实际入口及dist为140，原PS进程／文档保持，UXP仍14。证据.runtime/caps140-final-verification.json、release-0.4.140-public-verification.json及release140-updater-verification.json。远程兼容开启后的实机验收继续保持未完成，不据发行完成勾选功能整体验收。
+
 - [ ] 140远程兼容交付：用户已明确授权默认关闭的收窄方案，并补充同机RDP模式可唤出。代码已加入菜单设置开关、旧配置默认关闭迁移及两秒内同一有效PS工作区注入左键配对；不修改注入Alt+Tab／任务栏过滤，输入／弹窗及交互保护保持。284项后台及12项前端回归通过；原生窗口范围回归及最终EXE烟雾／重启检查通过，实际入口140、两原生组件／前端资源哈希一致，PS4024及文档／原配置保持。开关关闭的真实注入Shift+Z仍activation_not_qualified（.runtime/remote-0.4.140-off-verification.json）；开启状态的实机自动对照因前台窗口被切换未通过，临时文档／窗口／设置均在finally恢复，不虚报成功。向日葵PS25实机结果尚未验收。
 
 - [ ] 向日葵远程菜单激活兼容：用户确认Shift+Z仅在远程新电脑无法唤出。v0.4.139本机PS24真实热键进程中，Windows注入点击及Shift+Z复现process_scope=true、activation_allowed=false、无hold_begin、菜单不打开，摘要activation_not_qualified；证据.runtime/remote-0.4.139-verification.json。临时文档／窗口、设置、工具及鼠标已自动恢复。尚未取得远程PS25真实事件，不能认定已修复。统一移除注入事件过滤的方案被自动审批拒绝，未改动运行代码；用户已明确授权默认关闭、仅有效PS工作区显式点击的远程兼容选项，140实现见上；不放宽全局Alt+Tab或弹窗／输入保护。
