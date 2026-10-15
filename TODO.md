@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 136源码／标签／候选草稿上传：ZIP和SHA256两份附件已上传GitHub草稿413460018，远端大小／SHA256与本地一致，证据.runtime/release-0.4.136-draft-verification.json。仅表示候选备妥；实际运行仍早期134，原F请求结果未确认，UXP保护保留，未正式发布／未通过中文PS25.5.1实体确认。
+
 - [ ] 136通用操作移除移动功能：代码已隐藏顶部／底部、压缩底部字母栏为c/v/f/w/s并修正收紧后的tooltip分组边界，旧命中及移动请求拦截；图层菜单恢复全移动入口，独立PS组合键保留。272项回归、原生完整显示／输入／焦点／中心取消及通用与图层四主题预览通过（.runtime/tests136-final.log（包含原生自测）、.runtime/generic135-*.png及generic136-tip-*.png）；候选EXE烟雾及隔离统一包通过（.runtime/smoke136-final.log、.runtime/caps136-final-pending.json）；实际切换及实体验收待完成。
 - [ ] PS25.5.1中文新机无标签面板：用户反馈labels为空、ComboBox/Edit/ScrollBar/PSViewC数量2/2/1/1；文字归一化不足以覆盖。新增完整原生ID签名路径，严格匹配本机测得的图层控件组，不因类名／数量放行；无文本读取、UIA／COM查询或新轮询。只读诊断新增控件ID输出；该机ID与实体结果仍待核对，不能标为兼容已确认。
 
