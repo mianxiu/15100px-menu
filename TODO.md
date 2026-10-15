@@ -1,6 +1,6 @@
 # Photoshop Menu TODO
 
-- [x] 142代码／构建／实际入口完成：四段图文、上下移动快捷键移除及宽调色菜单鼠标锚点已实现；验收范围与证据见下项，正式Release发布待完成。
+- [x] 142代码／构建／实际入口完成：四段图文、上下移动快捷键移除及宽调色菜单鼠标锚点已实现；验收范围与证据见下项，源码与v0.4.142标签已推送，GitHub Release已公开为Latest，匿名附件大小／SHA256及141生产更新器隔离检查／下载／校验通过；证据.runtime/release-0.4.142-public-verification.json、release142-updater-verification.json。
 
 - [ ] 142排序／移动四段图文与鼠标锚点（2026-10-16）：按用户最新要求统一置顶／置底／上移／下移四段胶囊，底部仅c/v/f/w/s；上下移动快捷键与后台绑定字段移除，旧绑定归零；宽调色菜单非对称分配空间以贴近鼠标，调色面板跟随定位。289项后台回归、13项前端、原生生产显示／焦点／输入／取消自测、四主题预览及最终EXE烟雾／重启通过；实际入口与dist已切换142，原生组件／前端／PE版本一致，PS进程／文档／配置保留，实际上下移动绑定为空。证据.runtime/caps142-final-verification.json、caps142-final-pending.json、tests142-final.log、smoke142-final.log、move142-previews.json。实体新布局／点击／鼠标锚点验收待确认，不以预览和自动测试勾选。
 
