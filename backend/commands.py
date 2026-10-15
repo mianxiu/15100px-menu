@@ -20,7 +20,13 @@ QUICK_ACTIONS = {
     'adjustment.colorBalance': {'label':'新建色彩平衡调整图层'},
     'adjustment.blackWhite': {'label':'新建黑白调整图层'},
 }
-COMMANDS = {**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS,'shape.paint':{'label':'调整形状填充与描边'}}
+CAPS_ACTIONS = {
+    "selectAbove":{"label":"选择上一个图层"}, "selectBelow":{"label":"选择下一个图层"},
+    "moveUp":{"label":"上移一层"}, "moveDown":{"label":"下移一层"},
+    "copyStyle":{"label":"复制图层样式"}, "pasteStyle":{"label":"粘贴图层样式"},
+    "editStyle":{"label":"打开图层样式"},
+}
+COMMANDS = {**CAPS_ACTIONS,**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS,'shape.paint':{'label':'调整形状填充与描边'}}
 
 
 @dataclass(frozen=True)
@@ -42,10 +48,10 @@ REGISTRY = MappingProxyType({
     **{
     name: Command(name, info["label"],
                   "selected-layer-colors-read-back" if name in LABEL_ACTIONS else "script-returned; document-effect-not-verified")
-    for name, info in COMMANDS.items() if name not in QUICK_ACTIONS
+    for name, info in COMMANDS.items() if name not in QUICK_ACTIONS and name not in CAPS_ACTIONS
     },
-    **{name:Command(name,info['label'],'created-layer-kind-and-group-members-read-back',
-        channel='uxp-local-files') for name,info in QUICK_ACTIONS.items()},
+    **{name:Command(name,info['label'],'selection-style-or-order-read-back' if name in CAPS_ACTIONS else 'created-layer-kind-and-group-members-read-back',
+        channel='uxp-local-files') for name,info in {**QUICK_ACTIONS,**CAPS_ACTIONS}.items()},
     'document.recent': Command('document.recent','按最近预设新建文档','new-document-dimensions-returned',
         channel='uxp-local-files', conditions=('uxp-ready','photoshop-home','action-focus','not-busy'),
         target_document='captured-UXP-session-and-document-set; cancel-if-changed', target_layers='not-applicable'),

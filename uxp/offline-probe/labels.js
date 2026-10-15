@@ -1,5 +1,6 @@
 // Experimental executor: only fixed-target labels, no arbitrary scripts.
 module.exports = function createLabels(ps, session) {
+  const caps=createCapsActions(ps,session,capture,selectionContext);
   const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
   const shapePaint=createShapePaint(ps,session,capture,selectionContext);
   const quickCommands=['layer.new','layer.solid','layer.group','adjustment.curves',
@@ -118,6 +119,7 @@ module.exports = function createLabels(ps, session) {
     return ps.app.activeDocument.id===doc.id && doc.id===value.document_id && ids.join(',')===value.layer_ids.join(',');
   }
   async function setLabel(request) {
+    if(caps.commands.includes(request.command))return caps.execute(request);
     if(request.command==='shape.paint')return shapePaint.apply(request);
     const command = request.command || 'label';
     const quickIndex=quickCommands.indexOf(command);
@@ -520,4 +522,67 @@ function createShapePaint(ps,session,capture,selectionContext) {
     },{commandName:'Menu shape paint',timeOut:0});
   }
   return {observe,apply};
+}
+
+// Fixed reference-Caps actions. No menu letters, synthetic keys or IME changes.
+function createCapsActions(ps,session,capture,selectionContext) {
+  const commands=['selectAbove','selectBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle'];
+  async function execute(request) {
+    const command=request.command,expected=request.target;
+    if(!commands.includes(command) || expected?.session!==session)throw Error('Unsupported Caps command/session');
+    return ps.core.executeAsModal(async context=>{
+      if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+      const actual=await capture();
+      if(actual.document_id!==expected.document_id || actual.active_layer_id!==expected.active_layer_id || actual.layer_ids.join(',')!==expected.layer_ids?.join(','))throw Error('Caps target changed');
+      const doc=ps.app.activeDocument;
+      function walk(layers){return Array.from(layers).flatMap(l=>[l,...(l.kind===ps.constants.LayerKind.GROUP?walk(l.layers):[])]);}
+      const before=walk(doc.layers),order=before.map(l=>l.id),active=before.find(l=>l.id===actual.active_layer_id);
+      const selected=before.filter(l=>actual.layer_ids.includes(l.id));
+      if(!active || selected.length!==actual.layer_ids.length)throw Error('Caps target missing');
+      if(['selectAbove','selectBelow','copyStyle','editStyle'].includes(command) && selected.length!==1)throw Error('此操作需要单选图层');
+      const mutate=!['selectAbove','selectBelow','copyStyle'].includes(command);
+      if(mutate && selected.some(l=>l.isBackgroundLayer || l.allLocked || l.positionLocked))throw Error('请先解锁目标图层');
+      async function batch(descriptors){const values=await ps.action.batchPlay(descriptors,{});if(values.some(v=>v._obj==='error')){const v=values.find(v=>v._obj==='error');const e=Error(v.message || 'Photoshop rejected command');e.cancelled=v.result===-128;throw e;}return values;}
+      async function effects(){const [v]=await batch([{_obj:'get',_target:[{_ref:'layer',_id:active.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}}]);return v.layerEffects;}
+      let history=null;
+      if(mutate && command!=='editStyle')history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu '+command});
+      try {
+        if(command==='selectAbove' || command==='selectBelow') {
+          await batch([{_obj:'select',_target:[{_ref:'layer',_enum:'ordinal',_value:command==='selectAbove'?'forwardEnum':'backwardEnum'}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}}]);
+        } else if(command==='moveUp' || command==='moveDown') {
+          const parent=active.parent,parentId=parent?.id??null;
+          if(selected.some(l=>(l.parent?.id??null)!==parentId))throw Error('请在同一父组内移动');
+          const siblings=Array.from(parent?parent.layers:doc.layers),indices=siblings.map((l,i)=>actual.layer_ids.includes(l.id)?i:-1).filter(i=>i>=0);
+          if(indices.length!==selected.length || indices.at(-1)-indices[0]+1!==indices.length)throw Error('请先选择相邻图层');
+          const up=command==='moveUp',anchor=siblings[up?indices[0]-1:indices.at(-1)+1];
+          if(anchor && !anchor.isBackgroundLayer){const chosen=siblings.filter(l=>actual.layer_ids.includes(l.id));for(const layer of up?chosen:chosen.reverse())await layer.move(anchor,up?ps.constants.ElementPlacement.PLACEBEFORE:ps.constants.ElementPlacement.PLACEAFTER);}
+          const next=Array.from(parent?parent.layers:doc.layers,l=>l.id),expectedOrder=siblings.map(l=>l.id);
+          if(anchor && !anchor.isBackgroundLayer){const chosen=expectedOrder.filter(id=>actual.layer_ids.includes(id)),others=expectedOrder.filter(id=>!actual.layer_ids.includes(id));let at=others.indexOf(anchor.id)+(up?0:1);others.splice(at,0,...chosen);if(next.join(',')!==others.join(','))throw Error('Step order readback mismatch');}
+        } else if(command==='copyStyle') {
+          if(!await effects())throw Error('当前图层没有可复制的样式');
+          await batch([{_obj:'copyEffects',_options:{dialogOptions:'dontDisplay'}}]);
+        } else if(command==='pasteStyle') {
+          await batch([{_obj:'pasteEffects',_options:{dialogOptions:'dontDisplay'}}]);
+          const values=await batch(selected.map(l=>({_obj:'get',_target:[{_ref:'layer',_id:l.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})));
+          if(values.some(v=>!v.layerEffects))throw Error('粘贴样式未通过读回核验');
+        } else {
+          // Photoshop edits the current effects object in its own dialog.
+          // Never replace existing effects with an empty object before showing.
+          const value=await effects() || {_obj:'layerEffects',scale:{_unit:'percentUnit',_value:100}};
+          await batch([{_obj:'set',_target:[{_ref:'property',_property:'layerEffects'},{_ref:'layer',_id:active.id}],to:value,_options:{dialogOptions:'display'}}]);
+        }
+        const after=await capture(),now=walk(doc.layers).map(l=>l.id);
+        if(after.document_id!==actual.document_id || now.length!==order.length || now.some(id=>!order.includes(id)))throw Error('Caps document/layer identity changed');
+        if(!['selectAbove','selectBelow'].includes(command) && after.layer_ids.join(',')!==actual.layer_ids.join(','))throw Error('Caps selection changed');
+        if(!['moveUp','moveDown'].includes(command) && now.join(',')!==order.join(','))throw Error('Caps layer order changed');
+        if(history)await context.hostControl.resumeHistory(history,true);
+        return {verified:true,count:selected.length,command,selection_context:selectionContext()};
+      } catch(error) {
+        if(history){try{await context.hostControl.resumeHistory(history,false);}catch(_){error.resultUnknown=true;}}
+        if(error.cancelled)return {verified:true,cancelled:true,count:0,command,selection_context:selectionContext()};
+        throw error;
+      }
+    },{commandName:'Menu '+command,interactive:command==='editStyle',timeOut:0});
+  }
+  return {commands,execute};
 }

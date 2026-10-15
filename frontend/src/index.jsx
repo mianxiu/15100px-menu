@@ -6,7 +6,7 @@ import {applyMenuTheme} from './theme.mjs';
 import './admin.css';
 
 const pages = [['overview','运行状态'],['settings','菜单设置'],['plugins','插件管理'],['updates','应用更新'],['tasks','最近任务'],['logs','运行日志']];
-const keyLabels = {toggle:'按住唤出 / 松开执行', hide:'收起菜单', select:'选择组内图层', color:'橙色图层标签', moveToTop:'移到顶部', moveToBottom:'移到底部'};
+const keyLabels = {toggle:'按住唤出 / 松开执行', hide:'收起菜单', select:'选择组内图层', color:'橙色图层标签', moveToTop:'移到顶部', moveToBottom:'移到底部',selectAbove:'选择上一个图层',selectBelow:'选择下一个图层',moveUp:'上移一层',moveDown:'下移一层',copyStyle:'复制图层样式',pasteStyle:'粘贴图层样式',editStyle:'打开图层样式'};
 function App() {
   function t(text){return translate(text,state().language || 'zh-CN');}
   const [connection,setConnection] = createSignal('connecting');

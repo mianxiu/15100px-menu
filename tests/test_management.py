@@ -71,7 +71,7 @@ class ManagementTests(unittest.TestCase):
             data=copy.deepcopy(DEFAULTS)
             data['shortcuts'].update(color='tab+a',moveToTop='tab+w',moveToBottom='tab+s')
             path.write_text(json.dumps(data),encoding='utf-8')
-            self.assertEqual(Settings(path).get()['shortcuts']['color'],'capslock+c')
+            self.assertEqual(Settings(path).get()['shortcuts']['color'],'')
             data['shortcuts']['moveToTop']='f8'
             path.write_text(json.dumps(data),encoding='utf-8')
             self.assertEqual(Settings(path).get()['shortcuts']['moveToTop'],'f8')

@@ -107,9 +107,9 @@ class MenuFocusTests(unittest.TestCase):
         notify.assert_not_called()
 
     def test_pie_is_centered_on_invocation_and_clamped_to_work_area(self):
-        self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(960,520),1), (650,300,620,440))
-        self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(1910,1030),1), (1300,600,620,440))
-        self.assertEqual(pie_bounds((-1920,0,0,1080),(-1920,0,0,1040),(-960,520),1.5), (-1425,190,930,660))
+        self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(960,520),1), (650,270,620,500))
+        self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(1910,1030),1), (1300,540,620,500))
+        self.assertEqual(pie_bounds((-1920,0,0,1080),(-1920,0,0,1040),(-960,520),1.5), (-1425,145,930,750))
 
     def test_home_grid_uses_wider_popup_and_clamps_at_monitor_edge(self):
         self.assertEqual(pie_bounds((0,0,1920,1080),(0,0,1920,1040),(960,520),1,home=True),(690,300,820,440))

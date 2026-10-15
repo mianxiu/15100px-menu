@@ -265,7 +265,7 @@ class PhotoshopBridge:
             self._operation_future = future
             dispatched = True
             future.add_done_callback(finished)
-            result = await asyncio.wait_for(asyncio.shield(future), self.operation_timeout)
+            result = await asyncio.wait_for(asyncio.shield(future), None if action=='editStyle' else self.operation_timeout)
             return {"message": self._result_message(action,result), "result": str(result or ""), "target":target, 'task_id':task_id}
         except asyncio.TimeoutError:
             if not dispatched:
@@ -305,6 +305,7 @@ class PhotoshopBridge:
 
     def _result_message(self, action, result):
         message = validate_command(action).label + '已完成'
+        if action in ('editStyle','pasteStyle') and json.loads(result).get('cancelled'):return '已取消图层样式，未提交修改'
         if action == 'label.none':
             details = json.loads(result)
             message = f"已清除 {details['count']} 个图层的标签，并核验为无颜色"

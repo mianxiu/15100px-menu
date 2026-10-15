@@ -1,4 +1,7 @@
 export default {
+  "选择上一个图层":"Select layer above", "选择下一个图层":"Select layer below",
+  "上移一层":"Move up one layer", "下移一层":"Move down one layer",
+  "复制图层样式":"Copy layer style", "粘贴图层样式":"Paste layer style", "打开图层样式":"Open layer style",
   "更新说明":"Update details",
   "关闭 PS 后不会反复重开。":"Closing Photoshop does not cause it to reopen repeatedly.",
   "未连接":"Not connected",

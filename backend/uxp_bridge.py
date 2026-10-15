@@ -85,8 +85,18 @@ class UxpTransport:
                 except Exception:
                     if modifying:self.pending.clear()
                     raise
-                deadline=time.monotonic()+self.response_timeout
-                while time.monotonic()<deadline:
+                interactive=operation=='set_label' and payload.get('command')=='editStyle'
+                deadline=None if interactive else time.monotonic()+self.response_timeout
+                checked=0
+                while deadline is None or time.monotonic()<deadline:
+                    if interactive and time.monotonic()-checked>=1:
+                        checked=time.monotonic()
+                        from .uxp_management import photoshop_running
+                        if not photoshop_running():raise UxpResultUnknown('Photoshop已退出，样式结果待核对；不重发')
+                        try:
+                            current=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
+                            if current.get('session')!=request['session']:raise UxpResultUnknown('PS会话已改变，样式结果待核对；不重发')
+                        except (OSError,ValueError):pass
                     try:
                         response=self.pending.read_result(allow_unknown=True) if modifying else json.loads((folder/'probe-response.json').read_text('utf-8-sig'))
                         if response is None:
@@ -185,6 +195,16 @@ class UxpBridge(PhotoshopBridge):
         if not self.busy:self._recovery_feedback=''
         try:return await super()._execute_task(*args,**kwargs)
         finally:await self.reconcile_result()
+
+    def request_menu_context(self, epoch):
+        from .settings import atomic_json
+        folder=self.transport.folder
+        heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
+        if version(heartbeat.get('probe_version'))<(0,3,14):return None
+        token=json.loads(self.transport.config.read_text('utf-8-sig'))['token']
+        request={'id':secrets.token_hex(16),'session':heartbeat['session'],'token':token,'expires_at_ms':int(time.time()*1000)+3000}
+        atomic_json(folder/'menu-context-request.json',request)
+        return {'id':request['id'],'session':request['session'],'folder':folder,'epoch':epoch,'deadline':time.monotonic()+3}
 
     def read_layer_context(self):
         # Called by the desktop monitor, never by the low-level hook or open().

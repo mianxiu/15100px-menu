@@ -9,7 +9,10 @@ DEFAULTS = {"enabled": True, "menu_width": 360, "menu_height": 300, "render_mode
             "right_click_open": False,
             "right_click_hide": False, "open_control_on_start": False, "update_url": "",
             "shortcuts": {"toggle": "capslock", "hide": "esc", "select": "capslock+a",
-                          "color": "capslock+c", "moveToTop": "capslock+w", "moveToBottom": "capslock+s"}}
+                          "color": "", "moveToTop": "", "moveToBottom": "",
+                          "selectAbove":"capslock+w", "selectBelow":"capslock+s",
+                          "moveUp":"ctrl+capslock+w", "moveDown":"ctrl+capslock+s",
+                          "copyStyle":"capslock+c", "pasteStyle":"capslock+v", "editStyle":"capslock+f"}}
 KEYS = {"tab": 9, "esc": 27, "space": 32, "capslock": 20, "ctrl": 17, "shift": 16, "alt": 18,
         **{f"f{i}": 111+i for i in range(1, 13)},
         **{chr(i).lower(): i for i in range(65, 91)}, **{str(i): 48+i for i in range(10)}}
@@ -20,6 +23,7 @@ ALIASES = {160: 16, 161: 16, 162: 17, 163: 17, 164: 18, 165: 18}
 def chord(value):
     if not isinstance(value, str):
         raise ValueError("快捷键必须为文本")
+    if not value.strip():return ()
     names = value.lower().strip().split("+")
     if not names or any(name not in KEYS for name in names) or len(set(names)) != len(names):
         raise ValueError("快捷键支持 ctrl/alt/shift/capslock/tab 加字母、数字、F1–F12、Space、Esc")
@@ -60,6 +64,9 @@ def validate(data):
     parsed = []
     for name, value in shortcuts.items():
         keys = chord(value)
+        if not keys:
+            if name in ("toggle","hide"):raise ValueError("唤出与收起快捷键不能为空")
+            continue
         normalized = tuple(sorted(keys[:-1])) + keys[-1:]
         if normalized in parsed:
             raise ValueError("快捷键不能重复")
@@ -91,6 +98,15 @@ class Settings:
                 if isinstance(shortcuts, dict) and all(shortcuts.get(k)==v for k,v in legacy.items()):
                     for key in ('color','moveToTop','moveToBottom'):
                         shortcuts[key] = DEFAULTS['shortcuts'][key]
+            shortcuts=data.get('shortcuts',{})
+            if isinstance(shortcuts,dict):
+                # Only replace stock legacy collisions; retain custom chords.
+                for key,old in {'color':'capslock+c','moveToTop':'capslock+w','moveToBottom':'capslock+s'}.items():
+                    if shortcuts.get(key)==old:shortcuts[key]=''
+                for key,value in DEFAULTS['shortcuts'].items():
+                    if key not in shortcuts:
+                        # Existing custom assignments win over new stock keys.
+                        shortcuts[key]=value if not value or value not in shortcuts.values() else ''
             self.data = validate(data)
         else:
             self.data = copy.deepcopy(DEFAULTS)

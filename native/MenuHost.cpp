@@ -184,6 +184,12 @@ static unsigned quickMask=0;
 static const std::array<const char*,7> quickActions={"layer.new","layer.solid","layer.group","adjustment.curves","adjustment.hueSaturation","adjustment.colorBalance","adjustment.blackWhite"};
 static const std::array<const char*,7> quickLabels={"新建空白图层","新建纯色填充图层","选中图层打组","新建曲线调整图层","新建色相饱和度调整图层","新建色彩平衡调整图层","新建黑白调整图层"};
 static std::array<RECT,7> quickRows{};
+static std::array<RECT,7> capsRows{};
+static const char* capsActions[]={"copyStyle","pasteStyle","editStyle","selectAbove","selectBelow","moveUp","moveDown"};
+static const char* capsKeys[]={"c","v","f","w","s","Ctrl+w","Ctrl+s"};
+static const char* capsLabels[]={"复制图层样式","粘贴图层样式","打开图层样式","选择上一个图层","选择下一个图层","上移一层","下移一层"};
+static bool capsReady=false;
+
 static constexpr float quickGroupGap=4;
 static float quickGroupY(bool lower);
 static const char* rowAction(int i) {return panelKind==4?"document.new":actions[i];}
@@ -191,6 +197,12 @@ static const char* rowLabel(int i) {return panelKind==4?"新建文档":i==0 && l
 static const char* rowShortcut(int i) {return panelKind==4?"Ctrl + N":shortcuts[i].c_str();}
 static bool inputFocused=false;
 static bool canExecute() {return (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
+static bool capsEnabled(int i) {
+    if(!capsReady || !canExecute() || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
+    if((i==0 || i==2 || i==3 || i==4) && layerCount!=1)return false;
+    return !(i==1 || i==2 || i>=5) || (!layerLocked && !layerBackground && !layerCrossParents);
+}
+
 static bool rowEnabled(int i) {return canExecute() && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
 static bool quickEnabled(int i) {return layerAware && panelKind!=4 && canExecute() && (quickMask & (1u<<i));}
 static std::string layerTitle() {
@@ -231,7 +243,7 @@ static unsigned renderedFrames=0;
 static std::wstring preview;
 static std::string previewKind="menu";
 static int previewRecentHover=-1;
-static int previewQuickHover=-1,previewActionHover=-1;
+static int previewQuickHover=-1,previewActionHover=-1,previewCapsHover=-1;
 static bool previewLifecycle=false;
 static bool previewLive=false;
 static bool previewShape=false;
@@ -365,6 +377,7 @@ static void resetMenu() {
     feedbackStarted=0;
     renderedHit=pendingHit=-1;
     search[0]=0;selection=0;focusSearch=!contextMode;
+    capsRows={};
     holdRows={};
     labelRows={};
     quickRows={};
@@ -410,6 +423,7 @@ static void accept(const Json& event) {
         if (event.contains("name") && event["name"].is_string()) document=event["name"].get<std::string>();
     } else if (type=="status") {
         const auto& data=event.at("data"); const auto& ps=data.at("photoshop");
+        {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);capsReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=14);}
         recentReady=ps.value("uxp_ready",false) && ps.value("uxp_version",std::string())!="0.3.1";
         if (data.contains("recent_documents")) {
             recentPresets.clear();const auto& recent=data["recent_documents"];
@@ -445,6 +459,7 @@ static void accept(const Json& event) {
             if (action=="shape.paint")taskName="调整形状填充与描边";
             for (const auto& label:labelColors) if (action==std::string("label.")+label.id) taskName=std::string(label.name)+"标签";
             for(int i=0;i<7;++i)if(action==quickActions[i])taskName=quickLabels[i];
+            for(int i=0;i<7;++i)if(action==capsActions[i])taskName=capsLabels[i];
             notice.clear();taskError.clear();taskRecovery.clear();taskFailed=false;taskHasResult=false;
         }
         updateBusy(event.value("busy",false),event.value("queue_ready",false),event.value("queue_count",0));
@@ -473,6 +488,10 @@ static int holdActionAt(POINT point) {
     if (dx*dx+dy*dy<12*12*scale*scale || (!pinned && !holdMoved)) return -1;
     RECT bounds{};GetWindowRect(window,&bounds);
     if (!PtInRect(&bounds,point)) return -1;
+    for(int i=0;i<7;++i)if(capsEnabled(i) && PtInRect(&capsRows[i],point)){
+        if((i && point.x<capsRows[i].left+scale) || (i<6 && point.x>=capsRows[i].right-scale))return -1;
+        return 40+i;
+    }
     if(shapeEditor.ready() && PtInRect(&shapeEditor.bounds,point))return 100;
     for(int i=0;i<7;++i)if(quickEnabled(i) && PtInRect(&quickRows[i],point)) {
         if(quickDividerAt(i,point))return -1;
@@ -519,7 +538,8 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     if(chosen==100){commitShapeDraft();holdFinished=true;pieReady=false;setOpacity(0.f);return;}
     holdFinished=true;pieReady=false;
     setOpacity(0.f);
-    if (chosen>=32 && chosen<39)send(quickActions[chosen-32]);
+    if(chosen>=40 && chosen<47)send(capsActions[chosen-40]);
+    else if (chosen>=32 && chosen<39)send(quickActions[chosen-32]);
     else if (chosen>=12) send((std::string("document.recent.")+shownPresets.at(chosen-12).id).c_str());
     else if (chosen>=4) send((std::string("label.")+labelColors[chosen-4].id).c_str());
     else send(chosen<0?"hide":rowAction(chosen));
@@ -527,8 +547,17 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     if(msg==WM_COPYDATA){
         auto* data=reinterpret_cast<COPYDATASTRUCT*>(lp);
-        if(!data || data->dwData!=0x53485045 || !data->lpData || data->cbData<2 || data->cbData>65536)return FALSE;
-        try {auto* text=static_cast<const char*>(data->lpData);shapeEditor.prepare(Json::parse(text,text+data->cbData-1));}
+        if(!data || (data->dwData!=0x53485045 && data->dwData!=0x4d435458) || !data->lpData || data->cbData<2 || data->cbData>65536)return FALSE;
+        try {auto* text=static_cast<const char*>(data->lpData);const auto value=Json::parse(text,text+data->cbData-1);
+            if(data->dwData==0x4d435458){
+                if(!IsWindowVisible(hwnd) || holdFinished || value.value("epoch",0)!=menuEpoch || shapeEditor.dirty || busyFeedback || taskBusy)return FALSE;
+                const auto flags=value.value("flags",uint64_t(0));
+                layerAware=true;layerMask=(flags>>8)&15;layerKind=(flags>>12)&15;
+                layerBackground=(flags&(1u<<16))!=0;layerCount=(flags>>17)&255;
+                layerLocked=(flags&(1u<<25))!=0;layerCrossParents=(flags&(1u<<26))!=0;quickMask=(flags>>32)&127;
+                shapeEditor.prepare(value.at("shape"));hoverTip.reset();tipVisual.reset();renderedHit=pendingHit=-1;pieReady=false;
+            }else shapeEditor.prepare(value);
+        }
         catch(...) {shapeEditor.prepare(Json{{"available",false}});}
         return TRUE;
     }
@@ -883,6 +912,7 @@ static ImVec4 footerBounds{};
 static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidgetHeight-quickGroupGap;}
 static const char* actionTipText(int action) {
     if(action>=12 && action<12+int(recentTips.size()) && panelKind==4)return recentTips[action-12].c_str();
+    if(action>=40 && action<47)return capsLabels[action-40];
     if(action>=32 && action<39)return quickLabels[action-32];
     if(action>=4 && action<12)return labelColors[action-4].name;
     if(action==0)return panelKind==4?"打开新建文档窗口":layerAware && layerKind!=3?"选择同一父组中的相邻图层":"选择当前组内的图层";
@@ -894,11 +924,13 @@ static bool tipOverlaps(ImVec4 tip,RECT r,float gap=0) {
     return r.right>r.left && r.bottom>r.top && tip.x<r.right+gap && tip.z>r.left-gap && tip.y<r.bottom+gap && tip.w>r.top-gap;
 }
 static int tipFamily(int action) {
+    if(action>=40 && action<47)return 40;
     if(action>=32)return 32;
     if(action>=12 && action<12+int(shownPresets.size()))return shownPresets[action-12].name=="剪贴板"?80+action:12;
     return action;
 }
 static RECT tipGroupRect(int action) {
+    if(action>=40 && action<47)return {capsRows[0].left,capsRows[0].top,capsRows[6].right,capsRows[6].bottom};
     if(action>=32)return {quickRows[0].left,quickRows[0].top,quickRows[6].right,quickRows[6].bottom};
     if(tipFamily(action)==12)return recentPanelBounds;
     if(action>=12)return recentRows[action-12];
@@ -906,10 +938,11 @@ static RECT tipGroupRect(int action) {
     return holdRows[action];
 }
 static bool tipGapAt(int action,POINT cursor) {
-    if(action<0 || (tipFamily(action)!=12 && tipFamily(action)!=32))return false;
+    if(action<0 || (tipFamily(action)!=12 && tipFamily(action)!=32 && tipFamily(action)!=40))return false;
     const RECT group=tipGroupRect(action);
     if(!PtInRect(&group,cursor))return false;
     // Retain through spacing only, never through disabled buttons or centre.
+    for(int i=0;i<7;++i)if(PtInRect(&capsRows[i],cursor))return capsEnabled(i) && ((i && cursor.x<capsRows[i].left+scale) || (i<6 && cursor.x>=capsRows[i].right-scale));
     for(int i=0;i<7;++i)if(PtInRect(&quickRows[i],cursor))return quickEnabled(i) && quickDividerAt(i,cursor);
     for(auto r:recentRows)if(PtInRect(&r,cursor))return false;
     return true;
@@ -922,9 +955,10 @@ static ImVec4 actionTipBounds(int action) {
     auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text);
     const float width=extent.x+2*padding,height=extent.y+2*padding;
     const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
-    RECT anchor=action>=32?quickRows[action-32]:action>=12?recentRows[action-12]:action>=4?labelRows[action-4]:holdRows[action];
+    RECT anchor=action>=40?capsRows[action-40]:action>=32?quickRows[action-32]:action>=12?recentRows[action-12]:action>=4?labelRows[action-4]:holdRows[action];
     RECT group=anchor;
-    if(action>=32)group={quickRows[0].left,quickRows[0].top,quickRows[6].right,quickRows[6].bottom};
+    if(action>=40)group={capsRows[0].left,capsRows[0].top,capsRows[6].right,capsRows[6].bottom};
+    else if(action>=32)group={quickRows[0].left,quickRows[0].top,quickRows[6].right,quickRows[6].bottom};
     if(action>=4 && action<12)group=holdRows[1];
     if(action>=12 && action<32 && shownPresets[action-12].name!="剪贴板")group=recentPanelBounds;
     if(tipFamily(action)==12 || tipFamily(action)==32)anchor=group;
@@ -934,6 +968,7 @@ static ImVec4 actionTipBounds(int action) {
     const RECT centre={LONG(pieCenter.x-std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y-40*scale),LONG(pieCenter.x+std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y+19*scale)};
     auto valid=[&](ImVec4 tip) {
         for(int i=0;i<4;++i)if(rowVisible(i) && tipOverlaps(tip,holdRows[i],2*scale))return false;
+        for(auto r:capsRows)if(tipOverlaps(tip,r,2*scale))return false;
         for(auto r:quickRows)if(tipOverlaps(tip,r,2*scale))return false;
         for(auto r:recentRows)if(tipOverlaps(tip,r,2*scale))return false;
         if(panelKind==4 && tipOverlaps(tip,recentPanelBounds,2*scale))return false;
@@ -1061,6 +1096,44 @@ static void drawQuickGroups(int selected,float fac) {
         for(int v=begin;v<d->VtxBuffer.Size;++v){d->VtxBuffer[v].pos.x+=roundf(offset.x);d->VtxBuffer[v].pos.y+=roundf(offset.y);}
     }
 }
+static void drawCapsBar() {
+    capsRows={};
+    if(!capsReady || panelKind==4 || !layerAware)return;
+    auto* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    float widths[7],total=0;
+    for(int i=0;i<7;++i){widths[i]=std::max(24.f*scale,font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]).x+18*scale);total+=widths[i];}
+    auto* d=ImGui::GetWindowDrawList();float x=pieCenter.x-total*.5f,y=pieCenter.y+107*scale;
+    const float h=24*scale,r=ImGui::GetStyle().FrameRounding;
+    d->AddRectFilled({x,y},{x+total,y+h},tint(ImGuiCol_Button),r);
+    POINT cursor{};GetCursorPos(&cursor);
+    for(int i=0;i<7;++i){
+        const ImVec2 a={x,y},b={x+widths[i],y+h};capsRows[i]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
+        const bool enabled=capsEnabled(i);
+        const bool seam=(i && cursor.x<a.x+scale) || (i<6 && cursor.x>=b.x-scale);
+        const bool hover=enabled && ((!preview.empty() && previewCapsHover>=0)?previewCapsHover==i:!seam && PtInRect(&capsRows[i],cursor));
+        if(hover)d->AddRectFilled(a,b,tint(ImGuiCol_ButtonHovered),r,i==0?ImDrawFlags_RoundCornersLeft:i==6?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone);
+        if(i)d->AddLine(a,{a.x,b.y},tint(ImGuiCol_Border),scale);
+        const auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]);
+        d->AddText(font,font->FontSize,{a.x+(widths[i]-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),capsKeys[i]);
+        if(pinned && !pieAnimating && enabled && !holdFinished){
+            ImGui::SetCursorScreenPos({a.x+(i?scale:0),y});ImGui::PushID(450+i);
+            if(ImGui::InvisibleButton("##caps",{widths[i]-(i?scale:0)-(i<6?scale:0),h})){holdFinished=true;send(capsActions[i]);}
+            ImGui::PopID();
+        }
+        x=b.x;
+    }
+    d->AddRect({pieCenter.x-total*.5f,y},{x,y+h},tint(ImGuiCol_Border),r,0,scale);
+    // The hook leaves letters with the editor so focused RGB/Hex fields keep
+    // normal typing. Only an unfocused editor frame handles these shortcuts.
+    if(shapeEditor.ready() && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput && !holdFinished && !pieAnimating){
+        const ImGuiKey keys[]={ImGuiKey_C,ImGuiKey_V,ImGuiKey_F,ImGuiKey_W,ImGuiKey_S};
+        if(!ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper)
+            for(int i=0;i<5;++i)if(ImGui::IsKeyPressed(keys[i],false)){
+                const int action=ImGui::GetIO().KeyCtrl?(i==3?5:i==4?6:-1):i;
+                if(action>=0 && capsEnabled(action)){holdFinished=true;send(capsActions[action]);break;}
+            }
+    }
+}
 static void drawPie() {
     auto* draw=ImGui::GetWindowDrawList();
     ImVec2 pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
@@ -1115,7 +1188,9 @@ static void drawPie() {
     if(panelKind!=4 && panelKind!=3 && layerAware)for(int i=0;i<7;++i){int group=i>=3,n=group?i-3:i;
         float x=pieCenter.x+(65+figmaDisplayIconWidth*n)*scale,y=pieCenter.y+quickGroupY(group)*scale;
         quickRows[i]={LONG(x),LONG(y),LONG(x+figmaDisplayIconWidth*scale),LONG(y+figmaDisplayWidgetHeight*scale)};}
+    drawCapsBar();
     POINT cursor{};GetCursorPos(&cursor);int selected=holdActionAt(cursor);
+    if(!preview.empty() && previewCapsHover>=0 && previewCapsHover<7 && capsEnabled(previewCapsHover))selected=40+previewCapsHover;
     if(!preview.empty() && previewQuickHover>=0 && previewQuickHover<7 && quickEnabled(previewQuickHover))selected=32+previewQuickHover;
     if(!preview.empty() && previewRecentHover>=0 && previewRecentHover<int(recentRows.size()) && shownPresets[previewRecentHover].available)selected=12+previewRecentHover;
     if(!preview.empty() && previewActionHover>=0 && previewActionHover<4 && rowVisible(previewActionHover) && rowEnabled(previewActionHover))selected=previewActionHover;
@@ -1194,7 +1269,7 @@ static void drawPie() {
     if(shapeEditor.ready() && shapeEditor.dirty)messages.push_back("形状颜色待应用");
     if(shapeEditor.ready() && shapeEditor.copyFailed)messages.push_back("剪贴板暂时不可用，未复制颜色");
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
-    drawFooter(messages,pieCenter.y+116*scale,panelKind==4);
+    drawFooter(messages,pieCenter.y+(capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
     const int tipAction=actionTipText(selected)?selected:-1;
     const bool showTip=!pieAnimating && !holdFinished && canExecute();
     const int displayed=!preview.empty()?(showTip?tipAction:-1):hoverTip.update(tipAction,tipFamily(tipAction),GetTickCount64(),tipGapAt(hoverTip.shown,cursor),showTip);
@@ -1202,7 +1277,7 @@ static void drawPie() {
 }
 static void drawBusyFeedback() {
     hoverTip.reset();tipVisual.reset();
-    busyFeedback=true;quickRows={};
+    busyFeedback=true;quickRows={};capsRows={};
     pieReady=false;pieAnimating=false;holdRows={};labelRows={};renderedHit=pendingHit=-1;
     auto* draw=ImGui::GetWindowDrawList();
     const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
@@ -1444,6 +1519,7 @@ int main() {
         else if (i+1<argc && arg==L"--preview-animation-ms") previewAnimationMs=std::stof(argv[++i]);
         else if (i+1<argc && arg==L"--preview-recent-hover") previewRecentHover=std::stoi(argv[++i]);
         else if (i+1<argc && arg==L"--preview-action-hover") previewActionHover=std::stoi(argv[++i]);
+        else if (i+1<argc && arg==L"--preview-caps-hover") previewCapsHover=std::stoi(argv[++i]);
         else if (i+1<argc && arg==L"--preview-quick-hover") previewQuickHover=std::stoi(argv[++i]);
         else if (i+1<argc && arg==L"--preview-shape") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
@@ -1452,6 +1528,7 @@ int main() {
         }
         else if (i+1<argc && arg==L"--preview-layer-context") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
+            capsReady=data.value("caps_ready",false);
             layerAware=true;layerMask=data.value("mask",0);
             quickMask=data.value("quick_mask",0);
             const std::string kind=data.value("kind","unknown");
@@ -2265,6 +2342,20 @@ int main() {
                 if(!recoverRenderer())throw std::runtime_error("Unable to restore requested benchmark graphics mode");
                 shapeFixture["vector"]=true;
                 benchmarkShapeEditor(shapeFixture);
+                capsReady=true;panelKind=2;layerAware=true;layerKind=2;layerMask=15;layerCount=1;layerLocked=layerBackground=layerCrossParents=false;
+                shapeEditor.prepare(Json{{"available",false}});taskBusy=busyFeedback=false;
+                setHoldMode(true);holdMoved=true;numberFrame(ImGuiKey_None,false);
+                for(int i=0;i<7;++i){
+                    const auto r=capsRows[i];POINT centre={(r.left+r.right)/2,(r.top+r.bottom)/2};
+                    if(r.right<=r.left || holdActionAt(centre)!=40+i || !actionTipText(40+i))throw std::runtime_error("Caps bar geometry/hit/tooltip mismatch");
+                    if(i && holdActionAt({r.left,centre.y})!=-1)throw std::runtime_error("Caps separator gained a hit");
+                }
+                const auto capsRect=capsRows[0];const auto count=testedActions.size();
+                renderedHit=40;holdFinished=false;finishHold({(capsRect.left+capsRect.right)/2,(capsRect.top+capsRect.bottom)/2});
+                if(testedActions.size()!=count+1 || testedActions.back()!="copyStyle")throw std::runtime_error("Caps bar did not dispatch copy once");
+                holdFinished=false;inputFocused=true;numberFrame(ImGuiKey_None,false);
+                if(capsEnabled(0))throw std::runtime_error("Input protection enabled Caps bar");
+                inputFocused=false;capsReady=false;
                 std::cout<<"Dear ImGui self-test passed: original radial/focus/input/cancel matrix; shape local draft, types, single release, stale cursor, pinned commit; production SHOWWINDOW content and 100 hidden frames\n";break;
             }
             if (!preview.empty() && frames==20) {screenshot(preview);if (!previewLive) break;}

@@ -32,7 +32,7 @@ def make_content(raw):
 
 async def main():
  s=json.load(urlopen('http://127.0.0.1:15151/api/status',timeout=5))
- assert s['version']==APP_VERSION and s['photoshop']['uxp_version']=='0.3.13' and not s['photoshop']['busy']
+ assert s['version']==APP_VERSION and s['photoshop']['uxp_version']=='0.3.14' and not s['photoshop']['busy']
  assert not s['menu']['visible']
  app=win32com.client.GetActiveObject('Photoshop.Application');previous=app.ActiveDocument if app.Documents.Count else None
  folder=ROOT/'.runtime'/('shape-live-'+str(time.time_ns()));folder.mkdir()
@@ -109,7 +109,7 @@ async def main():
   except RuntimeError:pass
   else:raise AssertionError('Plain fill accepted a shape-only stroke')
   assert read()==before;checks.append({'case':'plain-fill-rejects-stroke','no_write':True})
-  report={'version':APP_VERSION,'uxp':'0.3.13','checks':checks,'physical_capslock_acceptance':False}
+  report={'version':APP_VERSION,'uxp':'0.3.14','checks':checks,'physical_capslock_acceptance':False}
   (ROOT/f'.runtime/shape-live-{APP_VERSION}.json').write_text(json.dumps(report,indent=2),'utf-8')
   print(json.dumps(report),flush=True)
  finally:

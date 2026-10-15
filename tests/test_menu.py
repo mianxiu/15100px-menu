@@ -149,6 +149,8 @@ class MenuTests(unittest.TestCase):
         menu.move(-1); self.assertEqual(menu.current,'moveToBottom')
         menu.move(1); self.assertEqual(menu.current,'moveToTop')
         menu.filter('CapsLock+w',DEFAULTS['shortcuts'])
+        self.assertIsNone(menu.current)
+        menu.filter('CapsLock+w',{**DEFAULTS['shortcuts'],'moveToTop':'capslock+w'})
         self.assertEqual(menu.current,'moveToTop')
         menu.filter('missing action'); menu.move(1)
         self.assertIsNone(menu.current)

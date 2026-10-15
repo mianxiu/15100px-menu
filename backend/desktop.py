@@ -88,7 +88,7 @@ class KeyState:
         if not scoped or not down:
             return bool(down and key in self.consumed), None
         matches = [(name, keys) for name, keys in self.bindings.items()
-                   if keys[-1] == key and set(keys).issubset(self.held)
+                   if keys and keys[-1] == key and set(keys).issubset(self.held)
                    and (self.held & MODIFIERS) == (set(keys) & MODIFIERS)]
         if matches:
             name, _ = max(matches, key=lambda item: len(item[1]))
@@ -120,7 +120,7 @@ def panel_bounds(ps_rect, work_rect, cursor, width, height):
 
 
 def pie_bounds(ps_rect, work_rect, cursor, scale, home=False, color_editor=False):
-    width, height = round((920 if color_editor else 820 if home else 620)*scale), round((560 if color_editor else 440)*scale)
+    width, height = round((920 if color_editor else 820 if home else 620)*scale), round((560 if color_editor else 440 if home else 500)*scale)
     return panel_bounds(ps_rect, work_rect,
                         (cursor[0]-(round(270*scale) if home else width//2), cursor[1]-height//2), width, height)
 
@@ -144,6 +144,8 @@ class Desktop:
         self.hold_active = False
         self.restore_pending = False
         self.menu_epoch = 0
+        self.menu_context_requester=None
+        self.menu_context_pending=None
         self.document_caption = None
         self.caption_window = 0
         self.stop = threading.Event()
@@ -399,7 +401,9 @@ class Desktop:
         # lookup must not leave the next menu with old selection eligibility.
         from .layer_context import unavailable
         while not self.stop.is_set():
-            try:self.layer_context=self.layer_context_provider()
+            try:
+                self.layer_context=self.layer_context_provider()
+                self._finish_menu_context()
             except Exception:
                 self.layer_context=unavailable()
                 logging.exception('Layer cache monitor failed')
@@ -499,6 +503,13 @@ class Desktop:
         if self.layer_context_provider and panel.get('kind')!='home':
             from .layer_context import fresh,unavailable
             self.menu_layer_context=dict(self.layer_context) if fresh(self.layer_context) else unavailable()
+        self.menu_context_pending=None
+        if hold and panel.get('kind')=='layers' and self.menu_context_requester:
+            try:self.menu_context_pending=self.menu_context_requester(self.menu_epoch+1)
+            except Exception:logging.exception('Fresh menu context request failed')
+            if self.menu_context_pending:
+                from .layer_context import unavailable
+                self.menu_layer_context=unavailable()
         from .shape_paint import metadata
         shape=metadata((self.menu_layer_context or {}).get('shape_editor'))
         self.color_editor_active=shape_editor_allowed(panel,shape,hold,self.menu_layer_context)
@@ -507,7 +518,7 @@ class Desktop:
         height = min(self.settings["menu_height"],240) if context else self.settings["menu_height"]
         bounds = panel_bounds(rect, work, cursor, round(width*scale), round(height*scale))
         if hold:
-            bounds = pie_bounds(rect, work, cursor, scale, home=panel.get('kind')=='home',color_editor=self.color_editor_active)
+            bounds = pie_bounds(rect, work, cursor, scale, home=panel.get('kind')=='home',color_editor=self.color_editor_active or bool(self.menu_context_pending))
         # Recheck after setup: focus can change while a hotkey request is queued.
         if self.gui.GetForegroundWindow() != foreground or not self._is_photoshop(hwnd):
             raise RuntimeError("Photoshop 焦点已改变，已取消唤出")
@@ -541,6 +552,31 @@ class Desktop:
                      (context_ready-open_started)*1000, (time.perf_counter()-context_ready)*1000,
                      (time.perf_counter()-open_started)*1000)
         return {"message": "操作菜单已打开", "panel_context": panel,'layer_context':self.menu_layer_context}
+
+    @window_transition
+    def _finish_menu_context(self):
+        pending=self.menu_context_pending
+        if not pending:return
+        if not self.visible or self.menu_epoch!=pending['epoch'] or time.monotonic()>pending['deadline']:
+            self.menu_context_pending=None;return
+        try:
+            snapshot=json.loads((pending['folder']/'menu-context-result.json').read_text('utf-8-sig'))
+            if snapshot.get('menu_request_id')!=pending['id']:return
+            from .layer_context import validate,flags
+            value=validate(snapshot,pending['session'])
+            if value.get('kind') in ('unknown','none'):return
+            panel=self.panel_context.current
+            if panel.get('kind')!='layers' or panel.get('input_focused') or not self._scope():return
+            from .shape_paint import metadata
+            shape=metadata(value.get('shape_editor'))
+            active=shape_editor_allowed(panel,shape,True,value)
+            payload=json.dumps({'epoch':pending['epoch'],'flags':flags(value),'shape':shape if active else {'available':False}}).encode('utf-8')
+            class CopyData(ctypes.Structure):
+                _fields_=[('tag',ctypes.c_size_t),('size',W.DWORD),('data',ctypes.c_void_p)]
+            buffer=ctypes.create_string_buffer(payload);packet=CopyData(0x4d435458,len(payload)+1,ctypes.cast(buffer,ctypes.c_void_p))
+            if self.gui.SendMessage(self.hwnd,0x4a,0,ctypes.addressof(packet)):
+                self.menu_layer_context=dict(value);self.color_editor_active=active;self.menu_context_pending=None;self._native_config()
+        except (OSError,ValueError,KeyError):return
 
     def require_menu_layer_target(self,name,target):
         if name=='shape.paint' and not getattr(self,'color_editor_active',False):

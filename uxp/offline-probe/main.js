@@ -14,6 +14,18 @@ let contextReadAt=0,contextWriteAt=0,contextSignature='';
 let pendingResponse=null;
 let completedReceipts=[];
 let lastWorkAt=0;
+let menuRefreshId='';
+async function refreshMenuContext(folder,now) {
+  let request;
+  try {request=JSON.parse(await (await folder.getEntry('menu-context-request.json')).read());}catch(_){return false;}
+  if(request.token!==token || request.session!==session || !/^[0-9a-f]{32}$/.test(request.id) || request.id===menuRefreshId || !Number.isFinite(request.expires_at_ms) || request.expires_at_ms<now || request.expires_at_ms>now+5000)return false;
+  const context=labels.selectionContext();
+  const shape=await labels.observeShape(context,true);
+  if(!labels.selectionMatches(context))return true;
+  await record(folder,'menu-context-result.json',{...context,shape_editor:shape,schema:1,plugin_time_ms:Date.now(),menu_request_id:request.id});
+  menuRefreshId=request.id;
+  return true;
+}
 async function finishResponse(folder,response) {
   // Store the final outcome before the compatibility response slot. If storage
   // is temporarily unavailable, retain the outcome in memory and only retry
@@ -74,7 +86,7 @@ async function probe(reason) {
       await record(folder, 'probe-last.json', {
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.13', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.14', session, transport: 'plugin-data-files',
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
@@ -83,6 +95,7 @@ async function probe(reason) {
       });
       lastHeartbeat = now;
     }
+    if(await refreshMenuContext(folder,now))return;
     let request;
     try {
       const file = await folder.getEntry('probe-request.json');
@@ -110,7 +123,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.13', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.14', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

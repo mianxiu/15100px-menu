@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from backend.commands import COMMANDS, REGISTRY, QUICK_ACTIONS, command_contracts, validate_command
+from backend.commands import COMMANDS, REGISTRY, QUICK_ACTIONS, CAPS_ACTIONS, command_contracts, validate_command
 from backend.main import Application
 from backend.photoshop_bridge import PhotoshopBridge
 
@@ -9,9 +9,9 @@ from backend.photoshop_bridge import PhotoshopBridge
 class CommandTests(unittest.IsolatedAsyncioTestCase):
     def test_contracts_cover_every_existing_command(self):
         self.assertEqual(set(REGISTRY), set(COMMANDS)|{'document.recent'})
-        self.assertEqual(len(REGISTRY), 21)
+        self.assertEqual(len(REGISTRY), 28)
         for contract in command_contracts():
-            if contract['id'] in QUICK_ACTIONS or contract['id']=='shape.paint':
+            if contract['id'] in QUICK_ACTIONS or contract['id'] in CAPS_ACTIONS or contract['id']=='shape.paint':
                 self.assertEqual(contract['channel'],'uxp-local-files')
                 self.assertIn('read-back',contract['expected_result'])
                 continue
@@ -37,7 +37,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_registry_can_be_read_without_photoshop(self):
         result = await Application.dispatch(Mock(), 'commands.list', {})
-        self.assertEqual(len(result['commands']), 21)
+        self.assertEqual(len(result['commands']), 28)
 
     async def test_bridge_rejects_unknown_before_com(self):
         bridge = PhotoshopBridge()

@@ -12,10 +12,10 @@
 #include <stdexcept>
 #include <utility>
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace };
-static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin"};
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle };
+static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false,colorEditor=false; HWND overlay=nullptr; std::array<Binding,6> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false; HWND overlay=nullptr; std::array<Binding,13> bindings{}; };
 static int alias(int key) {
     if (key==160 || key==161) return 16;
     if (key==162 || key==163) return 17;
@@ -67,12 +67,12 @@ struct KeyMachine {
         const Binding* match=nullptr;
         bool tabPrefix=false;
         for (const auto& b:cfg.bindings) {
-            if ((cfg.textInput || cfg.colorEditor && visible) && b.action>=Select && b.action<=Bottom) continue;
+            if ((cfg.textInput || (cfg.colorEditor && visible)) && ((b.action>=Select && b.action<=Bottom) || b.action>=SelectAbove)) continue;
             if (!b.count || (!visible && b.action==Hide)) continue;
             for (int i=0;i<b.count-1;++i) if (b.keys[i]==9) tabPrefix=true;
             if (b.keys[b.count-1]!=key) continue;
             bool matches=true;
-            for (int i=0;i<b.count;++i) if (!held[b.keys[i]]) matches=false;
+            for (int i=0;i<b.count;++i) if (!held[b.keys[i]] && !(b.keys[i]==VK_CAPITAL && visible && !cfg.textInput && !cfg.colorEditor)) matches=false;
             for (int m:{16,17,18,91,92}) {
                 bool requested=false;
                 for (int i=0;i<b.count;++i) if (b.keys[i]==m) requested=true;
@@ -478,9 +478,15 @@ static Config parse(const std::string& line) {
     if (std::regex_search(line,match,std::regex("\"text_input\"\\s*:\\s*(true|false)"))) next.textInput=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"color_editor\"\\s*:\\s*(true|false)"))) next.colorEditor=match[1]=="true";
     next.overlay=reinterpret_cast<HWND>(std::stoull(field("hwnd","([0-9]+)")));
-    for (int a=Toggle;a<=Bottom;++a) {
-        auto list=field(names[a],"\\[([^\\]]+)\\]");
-        Binding& b=next.bindings[a-1]; b.action=static_cast<Action>(a);
+    const Action actions[]={Toggle,Hide,Select,Color,Top,Bottom,SelectAbove,SelectBelow,MoveUp,MoveDown,CopyStyle,PasteStyle,EditStyle};
+    int index=0;
+    for (Action a:actions) {
+        Binding& b=next.bindings[index++]; b.action=a;
+        if (!std::regex_search(line,match,std::regex(std::string("\"")+names[a]+"\"\\s*:\\s*\\[([^\\]]*)\\]"))) {
+            if(a>=SelectAbove)continue;
+            throw std::runtime_error("Missing binding");
+        }
+        auto list=match[1].str();
         size_t offset=0;
         while (offset<list.size()) {
             size_t consumed=0; int key=std::stoi(list.substr(offset),&consumed);
@@ -684,6 +690,21 @@ static int selfTest() {
         check(!renewalAllowed(last+600,last,false,true,false));
         check(!renewalAllowed(last+600,last,false,false,true));
         check(renewalAllowed(last+250,last,false,false,false));
+    }
+    for (const auto pair:std::array<std::pair<int,Action>,5>{{{67,CopyStyle},{86,PasteStyle},{70,EditStyle},{87,SelectAbove},{83,SelectBelow}}}) {
+        Config ref;ref.bindings[0]={Toggle,{20},1};ref.bindings[1]={pair.second,{20,pair.first},2};
+        for(bool pinned:{false,true}) {
+            KeyMachine machine;Action result;
+            if(!pinned)check(machine.event(20,true,true,ref,false,result,1000) && result==HoldBegin);
+            check(machine.event(pair.first,true,true,ref,pinned,result,1100) && result==pair.second);
+            check(machine.event(pair.first,true,true,ref,pinned,result,1110) && result==None);
+            check(machine.event(pair.first,false,true,ref,pinned,result,1120) && result==None);
+            if(!pinned)check(machine.event(20,false,true,ref,pinned,result,1200) && result==HoldCancel);
+        }
+        for(int guarded:{0,1,2}) {
+            KeyMachine machine;Action result;ref.textInput=guarded==1;ref.colorEditor=guarded==2;
+            check(!machine.event(pair.first,true,guarded!=0,ref,true,result,1000) && result==None);
+        }
     }
     Config cfg; cfg.bindings[0]={Toggle,{20},1}; cfg.bindings[1]={Select,{20,65},2};
     KeyMachine state; Action action;

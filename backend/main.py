@@ -178,6 +178,7 @@ class Application(web.Application):
         self.control = ControlWindow(f"http://127.0.0.1:{port}", self.runtime)
         self.panel_lock = asyncio.Lock()
         self.operation_lock = asyncio.Lock()
+        self._dialog_tasks=set()
         self.recent_documents = RecentDocuments()
         self.application_updates = ApplicationUpdates(self.runtime)
         self.updating = False
@@ -390,7 +391,26 @@ class Application(web.Application):
             name = args.get("name")
             if name=='document.recent':raise ValueError('请从首页最近预设列表选择尺寸')
             validate_command(name, args.get("params"))
+            from .commands import CAPS_ACTIONS
+            if name in CAPS_ACTIONS and not isinstance(self.bridge,UxpBridge):
+                raise ValueError("参考Caps快捷键需要更新并重载UXP 0.3.14")
             if name=='shape.paint' and not isinstance(self.bridge,UxpBridge):raise ValueError('形状颜色需要UXP执行插件')
+            if name=='editStyle' and not args.get('_wait_for_dialog'):
+                if self._dialog_tasks or self.operation_lock.locked() or self.bridge.busy:
+                    raise RuntimeError('请先结束当前操作或关闭图层样式窗口')
+                worker=asyncio.create_task(self.dispatch('action.execute',{**args,'_wait_for_dialog':True}))
+                self._dialog_tasks.add(worker)
+                def finished(future):
+                    self._dialog_tasks.discard(future)
+                    try:future.result()
+                    except asyncio.CancelledError:pass
+                    except Exception as error:
+                        logging.exception('Native style dialog operation failed')
+                        asyncio.create_task(self.broadcast({'type':'notice','scope':'operation','ok':False,'message':str(error)}))
+                worker.add_done_callback(finished)
+                return {'message':'正在打开原生图层样式；确认或取消后任务结束'}
+            if self._dialog_tasks and not args.get('_wait_for_dialog'):
+                raise RuntimeError('请先关闭图层样式窗口')
             if self.photoshop_launcher.active:raise RuntimeError('Photoshop 正在启动或结果待确认，请等待就绪后重新选择')
             if isinstance(self.bridge,UxpBridge):self.require_uxp_enabled()
             logging.info("Script action requested: %s", name)
@@ -500,6 +520,7 @@ class Application(web.Application):
             await self.broadcast({"type": "status", "data": await self.dispatch("status", {})})
             return {"message": "脚本包已切换并生效", "plugin": result}
         if action == "service.quit":
+            if self.operation_lock.locked() or self.bridge.busy:raise RuntimeError("请先关闭图层样式窗口或等待操作结束，再退出后台")
             # Let the response reach the browser before closing sockets.
             asyncio.get_running_loop().call_later(.2, self.stop_event.set)
             return {"message": "服务正在退出"}
@@ -573,7 +594,9 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             app.desktop, app.tray = Desktop(f"http://127.0.0.1:{port}", notify, app.preferences.get(), app.runtime), Tray(notify)
             app.bridge.focus_guard = app.desktop.require_action_focus
             if isinstance(app.bridge,UxpBridge):app.bridge.document_guard=app.desktop.require_home
-            if isinstance(app.bridge,UxpBridge):app.desktop.layer_context_provider=app.bridge.read_layer_context
+            if isinstance(app.bridge,UxpBridge):
+                app.desktop.layer_context_provider=app.bridge.read_layer_context
+                app.desktop.menu_context_requester=app.bridge.request_menu_context
             await asyncio.to_thread(app.desktop.start)
             await asyncio.to_thread(app.tray.start)
             if app.tray.error:
