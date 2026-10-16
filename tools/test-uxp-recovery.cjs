@@ -31,6 +31,7 @@ function host(files,control) {
       return {count:1,verified:true,...(control.prepared?{selection_context:{session:'prepared',kind:'pixel',layer_ids:[99]}}:{})};
     },selectionMatches:()=>!control.selectionChanged,interfacePreferences:async()=>({ui_theme:'dark',ui_font_size:'small'}),observeShape:async()=>({available:false}),
     createDocument:async()=>{control.created++;return {document_id:99};}};
+  labels.selectionContextFresh=async()=>labels.selectionContext();
   const context={console:{log(){}},setInterval(fn){interval=fn;},module:{exports:{}},require(name){
     if(name==='./probe-config.js')return 'secret';
     if(name==='./labels.js')return ()=>labels;

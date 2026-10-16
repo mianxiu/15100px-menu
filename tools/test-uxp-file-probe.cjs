@@ -20,7 +20,7 @@ async function main() {
     getPluginFolder: async () => ({getEntry:async () => ({read:async () => JSON.stringify(manifest)})})}}};
   const app = {documents: [{title: 'untitled'}], activeDocument: {title: 'untitled'}};
   const context = {module: {exports: {}}, console, Date:Clock,
-    require: name => name === 'photoshop' ? {app,action:{addNotificationListener:(events,callback)=>{dirty=callback;}}} : name === 'uxp' ? uxp : name === './labels.js' ? (()=>({interfacePreferences:async()=>({}),selectionContext:()=>selection,documentTarget:()=>({session:'test',document_ids:[1],active_document_id:1})})) : 'test-token',
+    require: name => name === 'photoshop' ? {app,action:{addNotificationListener:(events,callback)=>{dirty=callback;}}} : name === 'uxp' ? uxp : name === './labels.js' ? (()=>({interfacePreferences:async()=>({}),selectionContext:()=>selection,selectionContextFresh:async()=>selection,documentTarget:()=>({session:'test',document_ids:[1],active_document_id:1})})) : 'test-token',
     setInterval: fn => { tick = fn; }, fetch: () => {throw Error('network must not be used');}};
   vm.runInNewContext(source, context);
   await new Promise(resolve => setImmediate(resolve));

@@ -9,13 +9,14 @@ module.exports = function createLabels(ps, session) {
   // metadata or membership: its exact ID must match in a NEW sibling collection
   // on every read. Reorder/delete/undo simply fall back to the original scan.
   const positionHints=new Map(),positionHintLimit=2048;
+  let nativeHintsRetryAt=0;
   function rememberPosition(key,index) {
     positionHints.delete(key);positionHints.set(key,index);
     if(positionHints.size>positionHintLimit)positionHints.delete(positionHints.keys().next().value);
   }
   // DOM-only, read-only metadata. No batchPlay, executeAsModal, pixels or
   // thumbnails on the menu path. The executor uses this same eligibility rule.
-  function selectionContext(quickOnly=false) {
+  function selectionContext(quickOnly=false,onPositionMiss=null) {
     if (!ps.app.documents.length) return {session,document_id:null,layer_ids:[],kind:'none',mask:0};
     const doc=ps.app.activeDocument,selected=Array.from(doc.activeLayers),k=ps.constants.LayerKind;
     // Host-backed DOM getters are costly. Reuse reads only within this one
@@ -47,6 +48,7 @@ module.exports = function createLabels(ps, session) {
         };
         const prefix=doc.id+':'+(parent?read(parent,'id'):'root')+':';
         siblingLists.set(parent,{length:count,at,original:!!eager,raw:eager,
+          parentId:parent?read(parent,'id'):null,
           idAt(index) {
             const id=read(at(index),'id');rememberPosition(prefix+id,index);return id;
           },
@@ -66,8 +68,13 @@ module.exports = function createLabels(ps, session) {
       const last=order.length-1,edge=order.at(last);
       if(order.idAt(last)===id)return last;
       if(last>0 && read(edge,'isBackgroundLayer') && order.idAt(last-1)===id)return last-1;
+      positionMiss(order);
       for(let i=0;i<order.length;i++)if(order.idAt(i)===id)return i;
       return -1;
+    }
+    function positionMiss(order) {
+      if(onPositionMiss && order.length>=32)onPositionMiss({session,document_id:doc.id,
+        layer_ids:ids,parent_id:order.parentId,sibling_count:order.length});
     }
     const kinds=selected.map(layer=>{
       if(read(layer,'isBackgroundLayer'))return 'background';
@@ -120,6 +127,7 @@ module.exports = function createLabels(ps, session) {
           if(selectedIds.has(first))found.add(first);
           if(selectedIds.has(last))found.add(last);
           for(const id of ids)if(!found.has(id) && order.hintedIndex(id)>=0)found.add(id);
+          if(found.size<ids.length)positionMiss(order);
           const reverse=selectedIds.has(last) && !selectedIds.has(first);
           for(let i=reverse?order.length-1:0;found.size<ids.length && i>=0 && i<order.length;i+=reverse?-1:1) {
             const id=order.idAt(i);if(selectedIds.has(id))found.add(id);
@@ -159,6 +167,53 @@ module.exports = function createLabels(ps, session) {
     return {session,document_id:doc.id,layer_ids:ids,selection_count:ids.length,
       kind:kinds.every(kind=>kind===kinds[0])?(kinds[0] || 'none'):'mixed',
       types:[...new Set(kinds)],background,locked,same_parent:sameParent,mask,quick_mask:quickMask};
+  }
+  async function selectionContextFresh() {
+    // Warm hints, small lists, edges and majority selections keep the original
+    // synchronous DOM path. Only a genuine large-list miss requests native IDs.
+    if(Date.now()<nativeHintsRetryAt)return selectionContext();
+    let missing;const miss={};
+    try {return selectionContext(false,value=>{missing=value;throw miss;});}
+    catch(error) {if(error!==miss)throw error;}
+    let hints=[];
+    try {
+      const target=[{_ref:'document',_id:missing.document_id}];
+      const [size]=await ps.action.batchPlay([{_obj:'get',_target:[
+        {_ref:'property',_property:'numberOfLayers'},...target],_options:{dialogOptions:'dontDisplay'}}],{});
+      // Bound native work before asking for the list, including group markers.
+      // Unsupported, malformed or huge documents safely use the original scan.
+      const count=size && size.numberOfLayers;
+      if(Number.isInteger(count) && count>0 && count<=4096) {
+        const [result]=await ps.action.batchPlay([{_obj:'multiGet',_target:{_ref:target},
+          extendedReference:[['layerID','parentLayerID','layerSection','itemIndex'],{_obj:'layer',index:1,count}],
+          options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'dontDisplay'}}],{});
+        if(!result || !Array.isArray(result.list) || result.list.length>4096)throw Error('Native position hints unavailable');
+        const rows=[],seenIds=new Set(),seenIndices=new Set();
+        for(const row of result.list) {
+          const section=row && row.layerSection && row.layerSection._value;
+          if(section==='layerSectionEnd')continue;
+          if(!row || !['layerSectionContent','layerSectionStart'].includes(section) ||
+              !Number.isInteger(row.layerID) || row.layerID<=0 || !Number.isInteger(row.parentLayerID) ||
+              !Number.isInteger(row.itemIndex) || row.itemIndex<=0 || seenIds.has(row.layerID) || seenIndices.has(row.itemIndex))
+            throw Error('Incomplete native position hints');
+          seenIds.add(row.layerID);seenIndices.add(row.itemIndex);
+          if((row.parentLayerID>0?row.parentLayerID:null)===missing.parent_id)rows.push(row);
+        }
+        rows.sort((a,b)=>b.itemIndex-a.itemIndex);
+        if(rows.length<=missing.sibling_count)hints=rows.map((row,index)=>[row.layerID,index]);
+      }
+    } catch(_) {nativeHintsRetryAt=Date.now()+5000;}
+    // Async read completion may follow a user selection/document change.
+    // Never refresh old capabilities or apply hints to a different identity.
+    if(!selectionMatches(missing))throw Error('Layer context changed during read');
+    const prefix=missing.document_id+':'+(missing.parent_id===null?'root':missing.parent_id)+':';
+    for(const [id,index] of hints)rememberPosition(prefix+id,index);
+    // Large lists can exceed the LRU capacity; retain selected hints last.
+    const selectedIds=new Set(missing.layer_ids);
+    for(const [id,index] of hints)if(selectedIds.has(id))rememberPosition(prefix+id,index);
+    // Fetch NEW DOM objects/properties after the await. Native values are only
+    // candidate indices: hintedIndex still verifies each exact fresh DOM ID.
+    return selectionContext();
   }
   async function capture() {
     if (!ps.app.documents.length) throw Error('No document');
@@ -450,7 +505,7 @@ module.exports = function createLabels(ps, session) {
     } catch(_) {}
     return {...interfaceState};
   }
-  return {capture,setLabel,documentTarget,createDocument,selectionContext,selectionMatches,interfacePreferences,observeShape:shapePaint.observe};
+  return {capture,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:shapePaint.observe};
 };
 
 

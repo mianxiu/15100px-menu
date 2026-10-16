@@ -23,7 +23,7 @@ async function refreshMenuContext(folder,now) {
   if(request.token!==token || request.session!==session || !/^[0-9a-f]{32}$/.test(request.id) || request.id===menuRefreshId || !Number.isFinite(request.expires_at_ms) || request.expires_at_ms<now || request.expires_at_ms>now+10000)return false;
   const started=Date.now();
   let context;
-  try {context=labels.selectionContext();}
+  try {context=await labels.selectionContextFresh();}
   catch(error) {
     menuRefreshId=request.id;
     observation.menu={selection_ms:Date.now()-started,error:String(error).slice(0,200),completed_at_ms:Date.now()};
@@ -47,7 +47,7 @@ async function refreshMenuContext(folder,now) {
     // A slow optional read needs fresh eligibility, not a fresh timestamp on
     // old locks/capabilities. A changed identity never enables the editor.
     if(matches) {
-      const latest=done-readDone>=1000?labels.selectionContext():context;
+      const latest=done-readDone>=1000?await labels.selectionContextFresh():context;
       if(latest.document_id===context.document_id && latest.layer_ids.join(',')===context.layer_ids.join(','))
         await record(folder,'menu-context-result.json',{...basic,...latest,plugin_time_ms:done-readDone>=1000?Date.now():readDone,
           shape_editor:shape,menu_phase:'completed',timings_ms:{...basic.timings_ms,shape_ms:done-readDone}});
@@ -73,7 +73,7 @@ async function updateLayerContext(folder,now,force=false,prepared=null) {
   contextReadAt=now;
   let value;
   let error='';
-  try {value=prepared && labels.selectionMatches(prepared)?prepared:labels.selectionContext();}
+  try {value=prepared && labels.selectionMatches(prepared)?prepared:await labels.selectionContextFresh();}
   catch(e) {error=String(e).slice(0,200);value={session,document_id:null,layer_ids:[],kind:'unknown',mask:0};}
   // Throttle from read completion: if DOM work itself takes over 100ms,
   // measuring from its start would immediately launch another costly read.
@@ -119,7 +119,7 @@ async function probe(reason) {
       await record(folder, 'probe-last.json', {
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.21', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.22', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
@@ -157,7 +157,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.21', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.22', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -167,7 +167,7 @@ async function probe(reason) {
     try {
       if (request.operation === 'inspect') {
         response.target = labels.documentTarget();
-        if(request.shape_inspect)response.shape_editor=await labels.observeShape(labels.selectionContext(),true);
+        if(request.shape_inspect)response.shape_editor=await labels.observeShape(await labels.selectionContextFresh(),true);
       }
       if (request.operation === 'capture') response.target = await labels.capture();
       if (request.operation === 'set_label') response.result = await labels.setLabel(request);
