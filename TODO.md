@@ -1,6 +1,6 @@
 # Photoshop Menu TODO
 
-- [x] 143 Caps选层代码／构建／实际入口（2026-10-16）：Caps+W/S从冻结活动层单选上下图层；Shift+Caps+W/S保留选择并从选区边缘追加多选，原生顺序及边界循环保留。旧配置迁移加入Shift绑定，上移／下移快捷键仍禁用。291项后台、13项前端、原生左右Shift／顺序／重复／释放／输入保护及最终EXE烟雾／重启通过；实际后台与dist143，UXP16正常重启加载，已保存文档重开。真实PS普通层／组内／多选及全选收敛／旧目标拒绝，顺序与历史不变；生产API四命令成功，完成快照与PS选中ID一致。证据.runtime/selection143-live.json、selection143-production.json、restart143-verification.json、tests143-final.log、smoke143-final.log。正式Release发布待完成。
+- [x] 143 Caps选层代码／构建／实际入口（2026-10-16）：Caps+W/S从冻结活动层单选上下图层；Shift+Caps+W/S保留选择并从选区边缘追加多选，原生顺序及边界循环保留。旧配置迁移加入Shift绑定，上移／下移快捷键仍禁用。291项后台、13项前端、原生左右Shift／顺序／重复／释放／输入保护及最终EXE烟雾／重启通过；实际后台与dist143，UXP16正常重启加载，已保存文档重开。真实PS普通层／组内／多选及全选收敛／旧目标拒绝，顺序与历史不变；生产API四命令成功，完成快照与PS选中ID一致。证据.runtime/selection143-live.json、selection143-production.json、restart143-verification.json、tests143-final.log、smoke143-final.log。源码与v0.4.143标签已推送，Release公开为Latest；匿名附件大小／SHA256与142生产更新器检查／下载／校验143通过，证据.runtime/release-0.4.143-public-verification.json、release143-updater-verification.json。
 - [ ] 143完整实体Caps+W/S及Shift组合验收：真实键盘按法／快速连按、输入编辑／跨应用焦点、菜单重开与取消矩阵待确认；原生状态机和生产API测试不代替该项。
 
 - [x] 142代码／构建／实际入口完成：四段图文、上下移动快捷键移除及宽调色菜单鼠标锚点已实现；验收范围与证据见下项，源码与v0.4.142标签已推送，GitHub Release已公开为Latest，匿名附件大小／SHA256及141生产更新器隔离检查／下载／校验通过；证据.runtime/release-0.4.142-public-verification.json、release142-updater-verification.json。
