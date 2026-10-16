@@ -1,9 +1,52 @@
 import asyncio,json,tempfile,unittest,time
 from pathlib import Path
 from unittest.mock import Mock,patch
-from backend.uxp_bridge import UxpBridge,UxpResultUnknown,UxpTransport,publish_request
+from backend.uxp_bridge import UxpBridge,UxpResultUnknown,UxpTransport,publish_request,read_heartbeat
 
 class UxpPublicationTests(unittest.TestCase):
+    def test_partial_heartbeat_recovers_before_single_menu_publication(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as base:
+            root=Path(base);bridge=UxpBridge(root/'tasks.json',root/'config.json')
+            bridge.transport=SimpleNamespace(folder=root,config=root/'config.json')
+            bridge.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+            heartbeat=root/'probe-last.json';heartbeat.write_text('','utf-8')
+            def finish_overwrite(_):heartbeat.write_text('{"session":"new-session","probe_version":"0.3.21"}','utf-8')
+            try:
+                with patch('backend.uxp_bridge.time.sleep',side_effect=finish_overwrite) as pause,patch('backend.uxp_bridge.publish_request',wraps=publish_request) as publish:
+                    result=bridge.request_menu_context(9)
+                request=json.loads((root/'menu-context-request.json').read_text('utf-8'))
+                self.assertEqual(request['session'],'new-session');self.assertEqual(result['session'],'new-session')
+                self.assertEqual(result['id'],request['id']);self.assertEqual(publish.call_count,1)
+                self.assertEqual(pause.call_count,1);self.assertFalse((root/'uxp-pending.json').exists())
+            finally:bridge.executor.shutdown(wait=True)
+
+    def test_persistent_partial_heartbeat_is_bounded_and_does_not_publish(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as base:
+            root=Path(base);bridge=UxpBridge(root/'tasks.json',root/'config.json')
+            bridge.transport=SimpleNamespace(folder=root,config=root/'config.json')
+            (root/'probe-last.json').write_text('{','utf-8')
+            request=root/'menu-context-request.json';request.write_text('previous','utf-8')
+            try:
+                with patch('backend.uxp_bridge.time.sleep') as pause,patch('backend.uxp_bridge.publish_request') as publish:
+                    with self.assertRaises(json.JSONDecodeError):bridge.request_menu_context(9)
+                self.assertEqual(pause.call_count,7);publish.assert_not_called()
+                self.assertEqual(request.read_text('utf-8'),'previous');self.assertFalse((root/'uxp-pending.json').exists())
+            finally:bridge.executor.shutdown(wait=True)
+
+    def test_heartbeat_valid_has_no_delay_and_only_sharing_errors_retry(self):
+        with tempfile.TemporaryDirectory() as base:
+            root=Path(base);(root/'probe-last.json').write_text('{"session":"s"}','utf-8')
+            with patch('backend.uxp_bridge.time.sleep') as pause:
+                self.assertEqual(read_heartbeat(root),{'session':'s'});pause.assert_not_called()
+            error=PermissionError('sharing');error.winerror=32
+            with patch.object(Path,'read_text',side_effect=[error,'{"session":"current"}']),patch('backend.uxp_bridge.time.sleep') as pause:
+                self.assertEqual(read_heartbeat(root),{'session':'current'});pause.assert_called_once_with(.004)
+            with patch.object(Path,'read_text',side_effect=PermissionError('denied')),patch('backend.uxp_bridge.time.sleep') as pause:
+                with self.assertRaises(PermissionError):read_heartbeat(root)
+                pause.assert_not_called()
+
     def test_menu_request_sharing_retry_keeps_identity_expiry_and_deadline(self):
         from types import SimpleNamespace
         import os

@@ -1,8 +1,11 @@
 # Photoshop Menu TODO
 
-2026-10-17同步：当前实际入口／dist为150；正式Latest为150，内置／本机安装／PS加载UXP20。下方版本记录中的“实际”“Latest”“已发布”和测试数量属于当时证据；旧Release已清理，Git标签和本地回退保留。profile146文件是145测量的实验代号，146正式版另有统一诊断交付记录。
+2026-10-17同步：当前实际入口／dist为151，内置／本机安装／PS加载UXP21；正式下载以GitHub Latest为准。下方版本记录中的“实际”“Latest”“已发布”和测试数量属于当时证据；旧Release已清理，Git标签和本地回退保留。profile146文件是145测量的实验代号，146正式版另有统一诊断交付记录。
 
 ## 当前优先事项
+
+- [x] 151中部重复读取与提交前心跳窗口：最多2048条纯位置提示，每次新集合精确ID核验，未命中回退原扫描，小列表／多数选择保留原路径；不缓存类型／锁定／顺序、不改变轮询、到期或事务。心跳仅在提交前遇到JSON覆盖或Windows共享冲突时有界重读，正常零等待，不重发修改。330后台、26前端、12份插件回归、最终EXE烟雾／重启与实际原生组件自测通过；真实同宿主13场景各20对完整字段相等、19种真实变化对照、最终生产13场景、25次自然刷新、100／300层16次标签执行／读回／一次撤销、连续创建／选层／调色回归通过。实际入口与dist151／UXP21及组件匹配，正常重启PS已加载21，临时探针移除。证据.runtime/read151-paired.json、position151-mutations.json、read151-production.json、refresh151-live.json、execution151-live.json、read151-runtime-verification.json、tests151-final.log、smoke151-final.log。
+- [ ] 151跨配置及实体键鼠验收：本轮真实事务和原生自测不替代i5集显／PS24.2故障机、完整实体Caps／鼠标验收；首次未知位置或提示失效仍可能扫描。
 
 - [x] 150形状羽化／密度代码、构建及本机运行：面板底部两条滑条，羽化0–1000px／密度0–100%，本地草稿、松Caps一次提交、固定后再次Caps提交与原取消保持。只对矢量形状读取两项，普通填充不增加读取或显示；仅改蒙版不写shapeStyle，颜色与蒙版共用一次历史事务，读回失败回滚，旧蒙版／旧选择／UXP19拒绝。327后台、21前端、16原生主题／类型导出、实际组件生产SHOWWINDOW与命中／取消自测、最终EXE烟雾／重启通过；实际150／UXP20，本机PS24.0.1羽化、密度、边界、与颜色合并、一次撤销、路径与独立像素蒙版保持及旧状态拒绝通过。证据.runtime/shape-live-0.4.150.json、mask150-runtime-verification.json、mask150-previews.json、native150-delivered-selftest.log、tests150-final.log、smoke150-final.log、reload150-final.log。
 - [ ] 150实体滑条拖动与Caps提交：Windows交互工具0x80070020不可用；原生模拟拖动／四主题导出与真实PS事务读回分别通过，不能代替完整实体键鼠、不同DPI及故障电脑验收。
@@ -11,7 +14,7 @@
 - [ ] 149实体长按跟手与屏幕显示验收：Windows工具初始化失败0x80070020，未完成真实按键到首帧、图层／画布／输入／焦点／取消矩阵，不把管道计时或夹具渲染当实机验收。用户优先恢复立即展开，第二键较晚按下可能闪现，已在说明明确。
 
 - [x] 148读取优化代码／测试／构建／本机运行与真实PS事务：新鲜集合按需构造对象、单次快照内复用；小列表／多数选择沿用原宿主路径。10,584项完整字段模拟对照、真实同宿主520次旧／新字段一致，9个大列表场景P95改善；322后台、21前端与最终EXE烟雾／重启通过。实际148／UXP19，原生组件匹配；真实图层识别／选择／排序／标签、10次连续原生创建、形状及普通填充调色、一次撤销／旧目标拒绝及25次自然刷新通过。原文档／配置保留，临时探针已移除。证据.runtime/read148-paired-accepted.json、read148-production.json、refresh148-live.json、layer-context-0.4.148-live.json、consecutive-creation-0.4.148.json、shape-live-0.4.148.json、selection148-live.json、read148-runtime-verification.json。实体键鼠和故障i5电脑另列未验收。
-- [ ] 中部进一步定位优化：评估原生索引提示，仅在新鲜同级集合中核验精确图层ID后使用；覆盖嵌套组、背景、重排、撤销和提示失效回退，不能直接把原生全局索引当同级位置。当前148中部仍按需扫描前缀，尚未实现新定位。
+- [ ] 首次未命中定位优化：151已实现经新鲜集合精确ID核验的位置提示，重复读取和已扫描位置可复用查找提示；首次未知位置仍扫描。原生索引辅助冷查找继续评估，必须覆盖嵌套组、背景及撤销，不能把全局索引当同级位置。
 
 - [x] 147加载登记修复的代码／测试／实际入口与本机宿主验收：复现已有用户PluginsInfo索引抑制External兜底，Windows反斜杠路径补齐本插件后两个插件均实际加载。安装／语言同步／卸载／回退仅合并本插件条目，其他插件与未知字段保留；损坏／冲突拒绝覆盖。后台登记状态及主动修复已接通，默认跟随可处理同版本缺失登记；禁用、busy、未知结果及PS运行保护保留。320后台、14前端、最终EXE烟雾／重启通过；实际入口及dist147，自动／手动生产API、正常重启加载UXP18、诊断登记状态及真实标签写入／读回／一次撤销通过，原已保存文档重开、配置保持。证据.runtime/registration147-live-verification.json、registration147-runtime-verification.json、registration147/after-windows-path.json、tests147-final.log、smoke147-final.log。
 - [ ] 147故障Win10／PS25.5复测及实体后台界面：本机真实PS24.0.1验证同型索引失败和修复，不能代替用户故障电脑；界面工具不可用，按钮点击／四主题视觉未验收。
@@ -22,7 +25,7 @@
 
 - [ ] Win10／PS25.5完全无插件条目：已取得用户索引只登记151500PX、未扫描用户External的报告；147已修复并本机复现验证，故障机需升级复测。与已确认可用的PS25菜单问题分开。
 - [ ] i5集显／PS24.2连续使用和长按调色：旧诊断实际142／UXP14，需要新版故障机实测，未确认唯一根因。
-- [ ] 当前150所含Caps／F5、四段排序／鼠标锚点及完整输入／焦点／取消矩阵；自动测试和真实事务读回均不代替实体交互。
+- [ ] 当前151所含Caps／F5、四段排序／鼠标锚点及完整输入／焦点／取消矩阵；自动测试和真实事务读回均不代替实体交互。
 - [ ] 后台快捷键下拉选择只记录未实现；Tab仅测试并保留当前绑定；自动ENG仅评估，下一阶段只读观察未完成。
 
 - [x] 图层读取数量基线与本轮优化：145／UXP18的4／100层基线48.5／280ms保留历史；148／UXP19已完成新算法与本机验收，详见上项和PERFORMANCE.md。不同PS会话性能波动大，提升结论仅用同会话交替旧／新对照；1000层旧建样本心跳失效不计成功。跨硬件与下一阶段中部定位仍未完成。
@@ -30,7 +33,7 @@
 
 ## 已交付与按版本验收记录
 
-- [x] 150正式发行与仅留最新版：源码／v0.4.150标签推送，统一包／SHA256／备用清单匿名下载核验；最终EXE内更新器强制API403后真实下载／校验150通过。新包验证后移除149 Release，远程Git标签前后相同，149本地回退保留；dist与实际运行150／UXP19。证据.runtime/release-0.4.150-public-verification.json、manifest150-verification.json、fallback150-live.json、release150-cleanup.json、runtime150-delivered.json。故障机与实体键鼠仍另列未验收。
+- [x] 150正式发行与仅留最新版：源码／v0.4.150标签推送，统一包／SHA256／备用清单匿名下载核验；最终EXE内更新器强制API403后真实下载／校验150通过。新包验证后移除149 Release，远程Git标签前后相同，149本地回退保留；dist与实际运行150／UXP20。证据.runtime/release-0.4.150-public-verification.json、manifest150-verification.json、fallback150-live.json、release150-cleanup.json、runtime150-delivered.json。故障机与实体键鼠仍另列未验收。
 
 - [x] 149正式发行与仅留最新版：源码／v0.4.149标签推送，统一包／SHA256／备用清单匿名下载核验；最终EXE内更新器强制API403后真实下载／校验149通过。新包验证后移除148 Release，远程Git标签前后相同，148本地回退保留；dist与实际运行149／UXP19。证据.runtime/release-0.4.149-public-verification.json、manifest149-verification.json、fallback149-live.json、release149-cleanup.json、runtime149-delivered.json。故障机与实体键鼠仍另列未验收。
 

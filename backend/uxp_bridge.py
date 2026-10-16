@@ -15,6 +15,21 @@ def compatible(value):
     try:return version(value)[:2]==(0,3)
     except ValueError:return False
 
+def read_heartbeat(folder):
+    """Read current metadata through UXP's brief in-place overwrite window.
+
+    No cached heartbeat, request publication or mutation retry. Callers still
+    validate the returned session/version/lease. Never wait on missing files
+    or ordinary permission failures; seven 4ms gaps bound transient retries.
+    """
+    for attempt in range(8):
+        try:return json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
+        except json.JSONDecodeError:
+            if attempt==7:raise
+        except PermissionError as error:
+            if getattr(error,'winerror',None) not in (5,32) or attempt==7:raise
+        time.sleep(.004)
+
 class UxpResultUnknown(RuntimeError):
     result_unknown = True
 
@@ -46,7 +61,7 @@ class UxpTransport:
         candidates=[]
         for folder in self.storage.glob('*/External/com.15100px.menu.offline-probe/PluginData'):
             try:
-                heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
+                heartbeat=read_heartbeat(folder)
                 age=time.time()*1000-heartbeat.get('plugin_time_ms',0)
                 if compatible(heartbeat.get('probe_version')) and 0<=age<15000:
                     require_version(heartbeat.get('photoshop_version'))
@@ -68,7 +83,7 @@ class UxpTransport:
             try:msvcrt.locking(lease.fileno(),msvcrt.LK_NBLCK,1)
             except OSError:raise RuntimeError('UXP 正在执行其他请求，未排队') from None
             try:
-                heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
+                heartbeat=read_heartbeat(folder)
                 if not compatible(heartbeat.get('probe_version')) or time.time()*1000-heartbeat.get('plugin_time_ms',0)>15000:
                     raise RuntimeError('UXP 未就绪，请正常启动 Photoshop 并加载 0.3.x 插件')
                 identity=secrets.token_hex(16)
@@ -204,7 +219,7 @@ class UxpBridge(PhotoshopBridge):
 
     def request_menu_context(self, epoch):
         folder=self.transport.folder
-        heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
+        heartbeat=read_heartbeat(folder)
         if version(heartbeat.get('probe_version'))<(0,3,14):return None
         token=json.loads(self.transport.config.read_text('utf-8-sig'))['token']
         # New plugins publish basic eligibility before optional paint metadata.

@@ -1,8 +1,8 @@
 {
   "manifestVersion": 5,
   "id": "com.15100px.menu.offline-probe",
-  "name": "Photoshop 快捷菜单 v0.3.20",
-  "version": "0.3.20",
+  "name": "Photoshop 快捷菜单 v0.3.21",
+  "version": "0.3.21",
   "main": "main.js",
   "host": {
     "app": "PS",

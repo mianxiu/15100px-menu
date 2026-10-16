@@ -4,6 +4,7 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
 const current=require('../../uxp/offline-probe/labels.js');
 const reference=require('../../tools/fixtures/selection-context-0.3.18.cjs');
+const previous=require('../../tools/fixtures/selection-context-0.3.20.cjs');
 const k={NORMAL:'pixel',GROUP:'group',TEXT:'text',SMARTOBJECT:'smart',SOLIDFILL:'fill',GRADIENTFILL:'gradient',PATTERNFILL:'pattern',CURVES:'curves',LEVELS:'levels',VIDEO:'video'};
 function host(layers){
  const doc={id:10,layers,activeLayers:[],mode:'RGB',bitsPerChannel:8};
@@ -86,5 +87,73 @@ test('tiny lists and majority selections retain the original ordered host proper
   const h=host(layers);h.doc.activeLayers=layers.slice(1,selected+1);
   const expected=h.old.selectionContext(),before=trace;trace=[];
   assert.deepEqual(h.next.selectionContext(),expected);assert.deepEqual(trace,before);
+ }
+});
+
+test('warm middle lookup uses fresh collections and bounded object construction for single and multi selection',()=>{
+ for(const selection of [[150],[149,150,151]]) {
+  const layers=Array.from({length:300},(_,i)=>({id:i+1,kind:'pixel',parent:null}));
+  let materialized=0,collections=0;
+  const h=host([]);Object.defineProperty(h.doc,'layers',{get(){collections++;return new Proxy(layers,{get(t,key){
+   if(typeof key==='string' && /^\d+$/.test(key))materialized++;
+   return Reflect.get(t,key);
+  }});}});
+  h.doc.activeLayers=selection.map(i=>layers[i]);
+  h.next.selectionContext();materialized=0;collections=0;
+  const actual=h.next.selectionContext();assert.equal(collections,1);assert.ok(materialized<=8,materialized);
+  assert.deepEqual(actual,h.old.selectionContext());
+  // The same identity must expose changed properties immediately on a hit.
+  layers[150].positionLocked=true;equal(h);layers[150].positionLocked=false;
+  layers[150].kind='text';equal(h);h.doc.bitsPerChannel=32;equal(h);
+ }
+});
+
+test('stale position hints survive reorders, deletion, insertion, undo, groups and backgrounds without stale capabilities',()=>{
+ const layers=Array.from({length:80},(_,i)=>({id:100+i,kind:'pixel',parent:null,isBackgroundLayer:i===79}));
+ const group={id:900,kind:'group',parent:null,layers:[]};
+ const h=host([...layers,group]);h.doc.activeLayers=[layers[40]];equal(h);
+ for(const selected of [[layers[40]],[layers[39],layers[40]]]) {
+  h.doc.activeLayers=selected;equal(h);
+  for(const change of [
+   ()=>h.doc.layers.reverse(),
+   ()=>h.doc.layers.splice(10,0,{id:999,kind:'smart'}),
+   ()=>h.doc.layers.splice(h.doc.layers.indexOf(layers[40]),1),
+   ()=>h.doc.layers=[...layers,group],
+   ()=>{group.layers=layers.slice(20,60);for(const l of group.layers)l.parent=group;h.doc.layers=[...layers.slice(0,20),group,...layers.slice(60)];},
+   ()=>group.layers.reverse(),()=>group.allLocked=true,()=>group.allLocked=false,
+   ()=>{for(const l of layers)l.parent=null;h.doc.layers=[...layers,group];},
+  ]){change();equal(h);equal(h,true);}
+ }
+});
+
+test('position hints remain advisory through thousands of selections and document identities',()=>{
+ const layers=Array.from({length:70},(_,i)=>({id:i+1,kind:'pixel',parent:null})),h=host(layers);
+ let seed=151;
+ const random=n=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed%n;};
+ for(let i=0;i<2300;i++) {
+  if(i%70===0)h.doc.id++;
+  if(i%3===0){const a=random(70),b=random(70);[layers[a],layers[b]]=[layers[b],layers[a]];}
+  h.doc.activeLayers=[layers[random(70)]];
+  if(i%5===0)h.doc.activeLayers.push(layers[(layers.indexOf(h.doc.activeLayers[0])+1)%70]);
+  equal(h);
+ }
+});
+
+test('a selection change during a warm hint read still fails the final identity check',()=>{
+ const layers=Array.from({length:100},(_,i)=>({id:i+1,kind:'pixel',parent:null})),h=host(layers);
+ h.doc.activeLayers=[layers[50]];h.next.selectionContext();
+ let calls=0;Object.defineProperty(h.doc,'activeLayers',{get(){return ++calls===1?[layers[50]]:[layers[51]];}});
+ assert.throws(()=>h.next.selectionContext(),/changed during read/);
+});
+
+
+test('warm hints preserve complete UXP20 fields across large selections and repeated reorder mutations',()=>{
+ const layers=Array.from({length:100},(_,i)=>({id:200+i,kind:i%11===0?'group':'pixel',layers:[],parent:null,isBackgroundLayer:i===99}));
+ const h=host(layers),old=previous(h.ps,'s');
+ for(let round=0;round<120;round++) {
+  h.doc.activeLayers=round%3===0?[layers[40],layers[41]]:[layers[50]];
+  if(round%4===0)layers.reverse();
+  layers[50].allLocked=round%7===0;
+  assert.deepEqual(h.next.selectionContext(),old.selectionContext());
  }
 });

@@ -5,6 +5,14 @@ module.exports = function createLabels(ps, session) {
   const shapePaint=createShapePaint(ps,session,capture,selectionContext);
   const quickCommands=['layer.new','layer.solid','layer.group','adjustment.curves',
     'adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite'];
+  // Scalar lookup hints only, bounded for long sessions. A hint never supplies
+  // metadata or membership: its exact ID must match in a NEW sibling collection
+  // on every read. Reorder/delete/undo simply fall back to the original scan.
+  const positionHints=new Map(),positionHintLimit=2048;
+  function rememberPosition(key,index) {
+    positionHints.delete(key);positionHints.set(key,index);
+    if(positionHints.size>positionHintLimit)positionHints.delete(positionHints.keys().next().value);
+  }
   // DOM-only, read-only metadata. No batchPlay, executeAsModal, pixels or
   // thumbnails on the menu path. The executor uses this same eligibility rule.
   function selectionContext(quickOnly=false) {
@@ -12,6 +20,7 @@ module.exports = function createLabels(ps, session) {
     const doc=ps.app.activeDocument,selected=Array.from(doc.activeLayers),k=ps.constants.LayerKind;
     // Host-backed DOM getters are costly. Reuse reads only within this one
     // snapshot, never across requests or the final selection identity check.
+    // Cross-read position hints are separately revalidated against fresh IDs.
     const properties=new Map(),siblingLists=new Map();
     function read(layer,key) {
       let values=properties.get(layer);
@@ -36,7 +45,15 @@ module.exports = function createLabels(ps, session) {
           if(!objects.has(index))objects.set(index,source[index]);
           return objects.get(index);
         };
+        const prefix=doc.id+':'+(parent?read(parent,'id'):'root')+':';
         siblingLists.set(parent,{length:count,at,original:!!eager,raw:eager,
+          idAt(index) {
+            const id=read(at(index),'id');rememberPosition(prefix+id,index);return id;
+          },
+          hintedIndex(id) {
+            const index=positionHints.get(prefix+id);
+            return Number.isInteger(index) && index>=0 && index<count && this.idAt(index)===id?index:-1;
+          },
           findIndex(predicate){for(let i=0;i<count;i++)if(predicate(at(i)))return i;return -1;}});
       }
       return siblingLists.get(parent);
@@ -44,11 +61,13 @@ module.exports = function createLabels(ps, session) {
     function singlePosition(order,id) {
       if(order.original)return order.findIndex(layer=>read(layer,'id')===id);
       if(!order.length)return -1;
-      if(read(order.at(0),'id')===id)return 0;
+      const hinted=order.hintedIndex(id);if(hinted>=0)return hinted;
+      if(order.idAt(0)===id)return 0;
       const last=order.length-1,edge=order.at(last);
-      if(read(edge,'id')===id)return last;
-      if(last>0 && read(edge,'isBackgroundLayer') && read(order.at(last-1),'id')===id)return last-1;
-      return order.findIndex(layer=>read(layer,'id')===id);
+      if(order.idAt(last)===id)return last;
+      if(last>0 && read(edge,'isBackgroundLayer') && order.idAt(last-1)===id)return last-1;
+      for(let i=0;i<order.length;i++)if(order.idAt(i)===id)return i;
+      return -1;
     }
     const kinds=selected.map(layer=>{
       if(read(layer,'isBackgroundLayer'))return 'background';
@@ -97,12 +116,13 @@ module.exports = function createLabels(ps, session) {
         let chosenCount=singleIndex===undefined?0:(singleIndex<0?0:1);
         if(order.original)chosenCount=order.raw.filter(layer=>ids.includes(read(layer,'id'))).length;
         else if(singleIndex===undefined && order.length) {
-          const found=new Set(),first=read(order.at(0),'id'),last=read(order.at(order.length-1),'id');
+          const found=new Set(),first=order.idAt(0),last=order.idAt(order.length-1);
           if(selectedIds.has(first))found.add(first);
           if(selectedIds.has(last))found.add(last);
+          for(const id of ids)if(!found.has(id) && order.hintedIndex(id)>=0)found.add(id);
           const reverse=selectedIds.has(last) && !selectedIds.has(first);
           for(let i=reverse?order.length-1:0;found.size<ids.length && i>=0 && i<order.length;i+=reverse?-1:1) {
-            const id=read(order.at(i),'id');if(selectedIds.has(id))found.add(id);
+            const id=order.idAt(i);if(selectedIds.has(id))found.add(id);
           }
           chosenCount=found.size;
         }
