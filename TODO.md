@@ -1,6 +1,6 @@
 # Photoshop Menu TODO
 
-2026-10-16同步：当前实际入口／dist为147；正式下载以GitHub Latest为准，内置／本机安装／PS加载UXP18。下方版本记录中的“实际”“Latest”“已发布”和测试数量属于当时证据；旧Release已清理，Git标签和本地回退保留。profile146文件是145测量的实验代号，146正式版另有统一诊断交付记录。
+2026-10-16同步：当前实际入口／dist为147；正式Latest为147，内置／本机安装／PS加载UXP18。下方版本记录中的“实际”“Latest”“已发布”和测试数量属于当时证据；旧Release已清理，Git标签和本地回退保留。profile146文件是145测量的实验代号，146正式版另有统一诊断交付记录。
 
 ## 当前优先事项
 
@@ -20,6 +20,8 @@
 - [x] UXP未加载独立采集脚本：tools/inspect-uxp.ps1在Windows PowerShell5实际运行，采集当前用户安装路径、manifest／脚本哈希、宿主UXP存在性、最近两份受限加载日志与后台安装／加载状态；不读凭据／文档，不修改安装、设置或PS，不覆盖报告。本机正常加载及路径匹配、日志过滤、已有文件保护核验通过；故障机结果待提供，不等同修复。证据.runtime/uxp-startup-local146-final.json。独立脚本更新，实际145及发布附件保持。
 
 ## 已交付与按版本验收记录
+
+- [x] 147正式发行与仅留最新版：源码／v0.4.147标签推送，统一包／SHA256／备用清单匿名下载核验，最终EXE内更新器强制API403后真实清单与147包下载校验通过。新包验证后移除146 Release，Git标签前后相同，146本地回退保留；dist及实际服务147／UXP18。证据.runtime/release-0.4.147-public-verification.json、manifest147-verification.json、fallback147-live.json、release147-cleanup.json、runtime147-delivered.json。故障Win10／PS25.5复测仍未勾选。
 
 - [x] 146正式发行与仅留最新版：源码／v0.4.146标签已推送；公开ZIP／SHA256／备用清单匿名下载核验，最终EXE内更新器强制API403后真实清单及146包下载／校验通过。145 Release在新包验证后清理，Git远程标签前后相同，145本地回退保留；dist仅当前146。证据.runtime/release-0.4.146-public-verification.json、manifest146-verification.json、fallback146-live.json、release146-cleanup.json、runtime146-delivered.json。
 

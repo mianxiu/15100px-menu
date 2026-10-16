@@ -6,7 +6,7 @@
 | --- | --- |
 | 主程序／dist／本机运行入口 | v0.4.147，EXE及原生菜单／热键组件属于同次构建 |
 | 内置／安装／PS实际加载插件 | 本机均为UXP0.3.18，三个版本分别核对 |
-| 当前下载 | [最新正式版](https://github.com/mianxiu/15100px-menu/releases/latest)，新发行物下载核验后仅保留最新版 |
+| 当前下载 | [v0.4.147 Release](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.147)，公开包／备用清单和生产更新器核验通过，发行页仅147 |
 | 验证 | 320后台、14前端、最终EXE烟雾／重启通过；实际147自动／手动修复、正常重启加载、诊断及真实PS标签写入／读回／撤销通过，故障机和实体界面另列 |
 
 安装和加载见[离线管理](OFFLINE-INSTALL.md)，默认按键见[操作菜单](#photoshop-操作菜单)，在线升级见[应用更新](docs/UPDATES.md)，待办见[TODO](TODO.md)。当前147修复已有用户PluginsInfo索引遗漏本插件导致的不加载；图层读取算法没有新增优化。
