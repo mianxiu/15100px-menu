@@ -450,7 +450,7 @@ class Application(web.Application):
             validate_command(name, args.get("params"))
             from .commands import CAPS_ACTIONS
             if name in CAPS_ACTIONS and not isinstance(self.bridge,UxpBridge):
-                raise ValueError("参考Caps快捷键需要更新并重载UXP 0.3.14")
+                raise ValueError("参考Caps快捷键需要更新并重载UXP 0.3.16")
             if name=='shape.paint' and not isinstance(self.bridge,UxpBridge):raise ValueError('形状颜色需要UXP执行插件')
             if name=='editStyle' and not args.get('_wait_for_dialog'):
                 if self._dialog_tasks or self.operation_lock.locked() or self.bridge.busy:

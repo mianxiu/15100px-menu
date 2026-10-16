@@ -86,7 +86,7 @@ async function probe(reason) {
       await record(folder, 'probe-last.json', {
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.14', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.16', session, transport: 'plugin-data-files',
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
@@ -123,7 +123,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.14', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.16', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

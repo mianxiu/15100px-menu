@@ -37,5 +37,5 @@ class FollowTests(unittest.TestCase):
         manifest=json.loads((old/'manifest.json').read_text('utf-8'));manifest['version']='0.3.13';(old/'manifest.json').write_text(json.dumps(manifest),'utf-8')
         m=UxpManager(self.root/'runtime',old,self.root/'roaming',running=lambda:False,hosts=lambda _:None)
         m.install();credential=m.config.read_bytes();m.builtin=ROOT/'uxp/offline-probe'
-        self.assertEqual(self.auto.step(m)['phase'],'updated');self.assertEqual(m.status()['version'],'0.3.14');self.assertEqual(m.config.read_bytes(),credential)
+        self.assertEqual(self.auto.step(m)['phase'],'updated');self.assertEqual(m.status()['version'],m.status()['bundled_version']);self.assertEqual(m.config.read_bytes(),credential)
         self.auto.set_enabled(False);m.rollback();self.auto.step(m);self.assertEqual(m.status()['version'],'0.3.13')

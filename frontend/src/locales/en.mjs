@@ -13,6 +13,8 @@ export default {
   "远程兼容（默认关闭）":"Remote compatibility (off by default)",
   "通过向日葵等远程软件操作时可开启。保存后先在PS工作区内点击一次，再按菜单快捷键；不增加任务栏、Alt+Tab或悬停激活，输入框和弹窗保护保留。":"Enable when using Sunlogin or similar remote software. After saving, click inside the Photoshop workspace before using the menu shortcut. Taskbar, Alt+Tab and hover activation are not added; input and dialog protection remain.",
   "选择上一个图层":"Select layer above", "选择下一个图层":"Select layer below",
+  "单选上一个图层":"Select only layer above", "单选下一个图层":"Select only layer below",
+  "向上扩展图层多选":"Extend layer selection upward", "向下扩展图层多选":"Extend layer selection downward",
   "上移一层":"Move up one layer", "下移一层":"Move down one layer",
   "复制图层样式":"Copy layer style", "粘贴图层样式":"Paste layer style", "打开图层样式":"Open layer style",
   "更新说明":"Update details",

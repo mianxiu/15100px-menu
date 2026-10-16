@@ -11,6 +11,7 @@ DEFAULTS = {"enabled": True, "menu_width": 360, "menu_height": 300, "render_mode
             "shortcuts": {"toggle": "capslock", "hide": "esc", "select": "capslock+a",
                           "color": "", "moveToTop": "", "moveToBottom": "",
                           "selectAbove":"capslock+w", "selectBelow":"capslock+s",
+                          "extendAbove":"shift+capslock+w", "extendBelow":"shift+capslock+s",
                           "moveUp":"", "moveDown":"",
                           "copyStyle":"capslock+c", "pasteStyle":"capslock+v", "editStyle":"capslock+f"}}
 KEYS = {"tab": 9, "esc": 27, "space": 32, "capslock": 20, "ctrl": 17, "shift": 16, "alt": 18,

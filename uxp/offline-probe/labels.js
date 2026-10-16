@@ -526,7 +526,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
 
 // Fixed reference-Caps actions. No menu letters, synthetic keys or IME changes.
 function createCapsActions(ps,session,capture,selectionContext) {
-  const commands=['selectAbove','selectBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle'];
+  const commands=['selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle'];
   async function execute(request) {
     const command=request.command,expected=request.target;
     if(!commands.includes(command) || expected?.session!==session)throw Error('Unsupported Caps command/session');
@@ -539,16 +539,26 @@ function createCapsActions(ps,session,capture,selectionContext) {
       const before=walk(doc.layers),order=before.map(l=>l.id),active=before.find(l=>l.id===actual.active_layer_id);
       const selected=before.filter(l=>actual.layer_ids.includes(l.id));
       if(!active || selected.length!==actual.layer_ids.length)throw Error('Caps target missing');
-      if(['selectAbove','selectBelow','copyStyle','editStyle'].includes(command) && selected.length!==1)throw Error('此操作需要单选图层');
-      const mutate=!['selectAbove','selectBelow','copyStyle'].includes(command);
+      if(['copyStyle','editStyle'].includes(command) && selected.length!==1)throw Error('此操作需要单选图层');
+      const selecting=['selectAbove','selectBelow','extendAbove','extendBelow'].includes(command);
+      const mutate=!selecting && command!=='copyStyle';
       if(mutate && selected.some(l=>l.isBackgroundLayer || l.allLocked || l.positionLocked))throw Error('请先解锁目标图层');
       async function batch(descriptors){const values=await ps.action.batchPlay(descriptors,{});if(values.some(v=>v._obj==='error')){const v=values.find(v=>v._obj==='error');const e=Error(v.message || 'Photoshop rejected command');e.cancelled=v.result===-128;throw e;}return values;}
       async function effects(){const [v]=await batch([{_obj:'get',_target:[{_ref:'layer',_id:active.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}}]);return v.layerEffects;}
       let history=null;
       if(mutate && command!=='editStyle')history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu '+command});
       try {
-        if(command==='selectAbove' || command==='selectBelow') {
-          await batch([{_obj:'select',_target:[{_ref:'layer',_enum:'ordinal',_value:command==='selectAbove'?'forwardEnum':'backwardEnum'}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}}]);
+        if(selecting) {
+          const descriptor={_obj:'select',_target:[{_ref:'layer',_enum:'ordinal',_value:command.endsWith('Above')?'forwardEnum':'backwardEnum'}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}};
+          if(command.startsWith('extend'))descriptor.selectionModifier={_enum:'selectionModifierType',_value:'addToSelection'};
+          // Ordinal selection over a full multi-selection may keep every layer.
+          // Collapse to the verified active ID before stepping, in this same
+          // modal request and batch. Shift extension never collapses the range.
+          const descriptors=[];
+          if(!command.startsWith('extend') && selected.length>1)
+            descriptors.push({_obj:'select',_target:[{_ref:'layer',_id:active.id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}});
+          descriptors.push(descriptor);
+          await batch(descriptors);
         } else if(command==='moveUp' || command==='moveDown') {
           const parent=active.parent,parentId=parent?.id??null;
           if(selected.some(l=>(l.parent?.id??null)!==parentId))throw Error('请在同一父组内移动');
@@ -573,7 +583,8 @@ function createCapsActions(ps,session,capture,selectionContext) {
         }
         const after=await capture(),now=walk(doc.layers).map(l=>l.id);
         if(after.document_id!==actual.document_id || now.length!==order.length || now.some(id=>!order.includes(id)))throw Error('Caps document/layer identity changed');
-        if(!['selectAbove','selectBelow'].includes(command) && after.layer_ids.join(',')!==actual.layer_ids.join(','))throw Error('Caps selection changed');
+        if(!selecting && after.layer_ids.join(',')!==actual.layer_ids.join(','))throw Error('Caps selection changed');
+        if(selecting && (command.startsWith('extend')?actual.layer_ids.some(id=>!after.layer_ids.includes(id)):after.layer_ids.length!==1))throw Error('Layer selection readback mismatch');
         if(!['moveUp','moveDown'].includes(command) && now.join(',')!==order.join(','))throw Error('Caps layer order changed');
         if(history)await context.hostControl.resumeHistory(history,true);
         return {verified:true,count:selected.length,command,selection_context:selectionContext()};

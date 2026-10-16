@@ -22,6 +22,22 @@ class CapsInputTests(unittest.TestCase):
    self.assertEqual(saved['shortcuts']['moveUp'],'');self.assertEqual(saved['shortcuts']['moveDown'],'')
    self.assertEqual(saved['shortcuts']['selectAbove'],'capslock+w')
    self.assertEqual(saved['shortcuts']['selectBelow'],'capslock+s')
+ def test_shift_selection_bindings_migrate_without_restoring_move_shortcuts(self):
+  with tempfile.TemporaryDirectory() as folder:
+   path=Path(folder)/'settings.json';old=copy.deepcopy(DEFAULTS)
+   del old['shortcuts']['extendAbove'];del old['shortcuts']['extendBelow']
+   path.write_text(json.dumps(old),'utf-8');value=Settings(path).get()['shortcuts']
+   self.assertEqual(value['extendAbove'],'shift+capslock+w');self.assertEqual(value['extendBelow'],'shift+capslock+s')
+   self.assertEqual(value['moveUp'],'');self.assertEqual(value['moveDown'],'')
+ def test_multi_selection_menu_allows_single_and_shift_navigation_but_not_style_single_commands(self):
+  from backend.layer_context import require_menu_target
+  from backend.tasks import TaskCancelled
+  context={'session':'s','document_id':1,'layer_ids':[2,3],'kind':'mixed'}
+  for name in ('selectAbove','selectBelow','extendAbove','extendBelow'):
+   require_menu_target(context,name,dict(context))
+  for name in ('copyStyle','editStyle'):
+   with self.assertRaises(TaskCancelled):require_menu_target(context,name,dict(context))
+  with self.assertRaises(TaskCancelled):require_menu_target(context,'extendAbove',{**context,'layer_ids':[3]})
  def ready(self,folder):
   d=Desktop('http://localhost',Mock());d.visible=True;d.hwnd=1;d.menu_epoch=7
   d.menu_context_pending={'id':'test','session':'s','folder':Path(folder),'epoch':7,'deadline':time.monotonic()+3}

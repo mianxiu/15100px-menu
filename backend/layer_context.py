@@ -58,7 +58,7 @@ def require_menu_target(value,name,target):
     if name in CAPS_ACTIONS:
         if not value or not value.get('layer_ids') or value.get('kind') in ('unknown','none'):
             raise TaskCancelled('图层状态待确认，请重新打开菜单')
-        if name in ('copyStyle','editStyle','selectAbove','selectBelow') and len(value['layer_ids'])!=1:
+        if name in ('copyStyle','editStyle') and len(value['layer_ids'])!=1:
             raise TaskCancelled('此操作需要单选图层')
         if any(value.get(k)!=target.get(k) for k in ('session','document_id','layer_ids')):
             raise TaskCancelled('菜单目标已改变；本次未修改')

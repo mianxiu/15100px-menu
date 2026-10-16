@@ -21,7 +21,8 @@ QUICK_ACTIONS = {
     'adjustment.blackWhite': {'label':'新建黑白调整图层'},
 }
 CAPS_ACTIONS = {
-    "selectAbove":{"label":"选择上一个图层"}, "selectBelow":{"label":"选择下一个图层"},
+    "selectAbove":{"label":"单选上一个图层"}, "selectBelow":{"label":"单选下一个图层"},
+    "extendAbove":{"label":"向上扩展图层多选"}, "extendBelow":{"label":"向下扩展图层多选"},
     "moveUp":{"label":"上移一层"}, "moveDown":{"label":"下移一层"},
     "copyStyle":{"label":"复制图层样式"}, "pasteStyle":{"label":"粘贴图层样式"},
     "editStyle":{"label":"打开图层样式"},

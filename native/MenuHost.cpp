@@ -188,7 +188,7 @@ static std::array<RECT,7> quickRows{};
 static std::array<RECT,7> capsRows{};
 static const char* capsActions[]={"copyStyle","pasteStyle","editStyle","selectAbove","selectBelow","moveUp","moveDown"};
 static const char* capsKeys[]={"c","v","f","w","s","上移","下移"};
-static const char* capsLabels[]={"复制图层样式","粘贴图层样式","打开图层样式","选择上一个图层","选择下一个图层","上移一层","下移一层"};
+static const char* capsLabels[]={"复制图层样式","粘贴图层样式","打开图层样式","单选上一个图层（Shift扩展多选）","单选下一个图层（Shift扩展多选）","上移一层","下移一层"};
 static bool capsReady=false;
 static int capsCount() {return panelKind==0?5:7;}
 static int capsBottomCount() {return panelKind==2?5:capsCount();}
@@ -203,7 +203,7 @@ static bool canExecute() {return (panelKind==4?homepageCapable && !taskBusy:allo
 static bool capsEnabled(int i) {
     if(i>=capsCount())return false;
     if(!capsReady || !canExecute() || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
-    if((i==0 || i==2 || i==3 || i==4) && layerCount!=1)return false;
+    if((i==0 || i==2) && layerCount!=1)return false;
     return !(i==1 || i==2 || i>=5) || (!layerLocked && !layerBackground && !layerCrossParents);
 }
 
@@ -437,7 +437,7 @@ static void accept(const Json& event) {
         if (event.contains("name") && event["name"].is_string()) document=event["name"].get<std::string>();
     } else if (type=="status") {
         const auto& data=event.at("data"); const auto& ps=data.at("photoshop");
-        {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);capsReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=14);}
+        {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);capsReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=16);}
         recentReady=ps.value("uxp_ready",false) && ps.value("uxp_version",std::string())!="0.3.1";
         if (data.contains("recent_documents")) {
             recentPresets.clear();const auto& recent=data["recent_documents"];
@@ -474,6 +474,8 @@ static void accept(const Json& event) {
             for (const auto& label:labelColors) if (action==std::string("label.")+label.id) taskName=std::string(label.name)+"标签";
             for(int i=0;i<7;++i)if(action==quickActions[i])taskName=quickLabels[i];
             for(int i=0;i<7;++i)if(action==capsActions[i])taskName=capsLabels[i];
+            if(action=="extendAbove")taskName="向上扩展图层多选";
+            if(action=="extendBelow")taskName="向下扩展图层多选";
             notice.clear();taskError.clear();taskRecovery.clear();taskFailed=false;taskHasResult=false;
         }
         updateBusy(event.value("busy",false),event.value("queue_ready",false),event.value("queue_count",0));
@@ -1160,10 +1162,12 @@ static void drawCapsBar() {
     // normal typing. Only an unfocused editor frame handles these shortcuts.
     if(shapeEditor.ready() && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput && !holdFinished && !pieAnimating){
         const ImGuiKey keys[]={ImGuiKey_C,ImGuiKey_V,ImGuiKey_F,ImGuiKey_W,ImGuiKey_S};
-        if(!ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper)
+        if(!ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeySuper)
             for(int i=0;i<5;++i)if(ImGui::IsKeyPressed(keys[i],false)){
                 const int action=ImGui::GetIO().KeyCtrl?-1:i;
-                if(action>=0 && capsEnabled(action)){holdFinished=true;send(capsActions[action]);break;}
+                if(action>=0 && capsEnabled(action) && (!ImGui::GetIO().KeyShift || i>=3)){
+                    holdFinished=true;send(ImGui::GetIO().KeyShift?(i==3?"extendAbove":"extendBelow"):capsActions[action]);break;
+                }
             }
     }
 }

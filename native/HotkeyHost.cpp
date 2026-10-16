@@ -12,10 +12,10 @@
 #include <stdexcept>
 #include <utility>
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace };
-static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace"};
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow };
+static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr; std::array<Binding,13> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr; std::array<Binding,15> bindings{}; };
 // Opt-in remote clicks qualify only on a matching release in the same verified
 // PS workspace. No hover, taskbar or injected Alt+Tab activation is added.
 struct RemoteClickIntent {
@@ -520,7 +520,7 @@ static Config parse(const std::string& line) {
     if (std::regex_search(line,match,std::regex("\"diagnostic_trace\"\\s*:\\s*(true|false)"))) next.diagnostic=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"remote_compatibility\"\\s*:\\s*(true|false)"))) next.remoteCompatibility=match[1]=="true";
     next.overlay=reinterpret_cast<HWND>(std::stoull(field("hwnd","([0-9]+)")));
-    const Action actions[]={Toggle,Hide,Select,Color,Top,Bottom,SelectAbove,SelectBelow,MoveUp,MoveDown,CopyStyle,PasteStyle,EditStyle};
+    const Action actions[]={Toggle,Hide,Select,Color,Top,Bottom,SelectAbove,SelectBelow,MoveUp,MoveDown,CopyStyle,PasteStyle,EditStyle,ExtendAbove,ExtendBelow};
     int index=0;
     for (Action a:actions) {
         Binding& b=next.bindings[index++]; b.action=a;
@@ -765,6 +765,22 @@ static int selfTest() {
             KeyMachine machine;Action result;ref.textInput=guarded==1;ref.colorEditor=guarded==2;
             check(!machine.event(pair.first,true,guarded!=0,ref,true,result,1000) && result==None);
         }
+    }
+    for(int shift:{VK_LSHIFT,VK_RSHIFT}) for(int key:{87,83}) for(bool shiftFirst:{false,true}) {
+        Config cfg;cfg.bindings[0]={Toggle,{20},1};
+        cfg.bindings[1]={key==87?SelectAbove:SelectBelow,{20,key},2};
+        cfg.bindings[2]={key==87?ExtendAbove:ExtendBelow,{16,20,key},3};
+        KeyMachine machine;Action result;
+        machine.event(shiftFirst?shift:20,true,true,cfg,false,result,1000);
+        machine.event(shiftFirst?20:shift,true,true,cfg,false,result,1010);
+        check(machine.event(key,true,true,cfg,false,result,1020) && result==(key==87?ExtendAbove:ExtendBelow));
+        check(machine.event(key,true,true,cfg,false,result,1030) && result==None);
+        check(machine.event(key,false,true,cfg,false,result,1040) && result==None);
+        machine.event(shift,false,true,cfg,false,result,1050);
+        check(machine.event(20,false,true,cfg,false,result,1060) && result!=HoldRelease && result!=HoldPin);
+        cfg.textInput=true;KeyMachine guarded;
+        guarded.event(shift,true,true,cfg,true,result);guarded.event(20,true,true,cfg,true,result);
+        check(!guarded.event(key,true,true,cfg,true,result) && result==None);
     }
     for(int shift:{VK_LSHIFT,VK_RSHIFT}) for(bool releaseShiftFirst:{false,true}) {
         Config cfg;cfg.enabled=true;cfg.bindings[0]={Toggle,{VK_SHIFT,90},2};KeyMachine machine;Action action;
