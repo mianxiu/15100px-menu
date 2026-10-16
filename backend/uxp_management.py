@@ -12,6 +12,7 @@ from .settings import atomic_json
 from .photoshop_version import MIN_PHOTOSHOP_TEXT, check_install_hosts, installed_paths
 from .plugins import version, MAX_PACKAGE
 from .language import read_language, localized_manifest, plugin_name
+from .uxp_registration import UxpRegistration
 
 PLUGIN_ID = 'com.15100px.menu.offline-probe'
 FILES = ('manifest.json', 'main.js', 'labels.js')
@@ -66,6 +67,7 @@ class UxpManager:
         self.root=self.runtime/'uxp-management'
         self.builtin=Path(builtin)
         self.plugin=Path(roaming or os.environ.get('APPDATA', str(Path.home()/'AppData/Roaming')))/'Adobe/UXP/Plugins/External'/ (PLUGIN_ID+'_PS')
+        self.registration=UxpRegistration(self.plugin.parents[2]/'PluginsInfo/v1/PS.json',self.plugin,PLUGIN_ID)
         self.state_path=self.root/'state.json'
         self.config=self.runtime/'uxp-config.json'
         self.running=running or photoshop_running
@@ -104,6 +106,7 @@ class UxpManager:
                     if changed:result['error']='插件文件被外部修改：'+', '.join(changed)
                     else:result['installation']='installed'
         except (OSError,ValueError,KeyError) as error:result['error']=str(error)
+        result['registration']=self.registration.status(data if result['installed'] else None)
         return result
 
     def set_enabled(self, enabled):
@@ -166,18 +169,21 @@ class UxpManager:
             raise RuntimeError('插件文件被外部修改，已保留；请检查后再更新')
 
     def snapshot(self):
+        raw,registration=self.registration.snapshot()
         token=uuid.uuid4().hex;folder=self.root/'backups'/token;folder.mkdir(parents=True)
         present=[]
         for n in OWNED:
             if (self.plugin/n).exists():shutil.copy2(self.plugin/n,folder/n);present.append(n)
         for n in ('uxp-config.json','offline-install.json'):
             if (self.runtime/n).exists():shutil.copy2(self.runtime/n,folder/n);present.append(n)
-        atomic_json(folder/'snapshot.json',{'present':present,'state':self.state()})
+        if raw is not None:(folder/'PS-index-recovery.json').write_bytes(raw)
+        atomic_json(folder/'snapshot.json',{'present':present,'state':self.state(),'registration':registration})
         return token
 
-    def restore(self, token):
+    def restore(self, token, *, registration=True):
         if len(token)!=32 or any(c not in '0123456789abcdef' for c in token):raise ValueError('无效回退标识')
         folder=self.root/'backups'/token;data=json.loads((folder/'snapshot.json').read_text('utf-8'))
+        plan=self.registration.prepare(restore=data['registration']) if registration and 'registration' in data else None
         for name in (*OWNED,'uxp-config.json','offline-install.json'):
             target=(self.plugin if name in OWNED else self.runtime)/name
             if name in data['present']:
@@ -185,6 +191,7 @@ class UxpManager:
             elif target.exists():target.unlink()
         if self.plugin.exists() and not any(self.plugin.iterdir()):self.plugin.rmdir()
         atomic_json(self.state_path,data['state'])
+        if plan is not None:self.registration.commit(plan)
 
     def sync_receipt(self):
         path=self.runtime/'offline-install.json'
@@ -202,6 +209,7 @@ class UxpManager:
         if current['version'] and version(data['version'])<version(current['version']):raise ValueError('内置插件比当前版本旧，请使用回退')
         self.hosts(photoshop_exe)
         if self.running():raise RuntimeError('请先保存并正常关闭 Photoshop，再安装或更新；后台会继续运行')
+        plan=self.registration.prepare(localized_manifest(data,read_language(self.runtime)))
         self.assert_owned();backup=self.snapshot()
         try:
             credential=secrets.token_hex(32)
@@ -218,7 +226,8 @@ class UxpManager:
             else:atomic_json(self.plugin/'manifest.json',localized)
             state=self.state();state.update(enabled=True,history=state['history']+[backup],owned={n:digest(self.plugin/n) for n in OWNED})
             atomic_json(self.state_path,state);self.sync_receipt()
-        except Exception:self.restore(backup);raise
+            self.registration.commit(plan)
+        except Exception:self.restore(backup,registration=False);raise
         return {'message':'UXP 插件已安装并启用；正常启动 Photoshop 后自动加载','uxp':self.status()}
 
     def apply_language(self):
@@ -226,16 +235,19 @@ class UxpManager:
         current=self.status()
         if not current['installed'] or current['error']:raise RuntimeError('请先安装可用的 UXP 插件')
         self.assert_owned();backup=self.snapshot()
+        plan=self.registration.prepare(localized_manifest(validate(self.plugin),read_language(self.runtime)))
         try:
             data=validate(self.plugin)
             atomic_json(self.plugin/'manifest.json',localized_manifest(data,read_language(self.runtime)))
             state=self.state();state.update(history=state['history']+[backup],owned={n:digest(self.plugin/n) for n in OWNED})
             atomic_json(self.state_path,state);self.sync_receipt()
-        except Exception:self.restore(backup);raise
+            self.registration.commit(plan)
+        except Exception:self.restore(backup,registration=False);raise
         return {'message':'插件名称语言已应用；下次启动 Photoshop 后生效','uxp':self.status()}
 
     def uninstall(self):
         if self.running():raise RuntimeError('请先保存并正常关闭 Photoshop，再卸载 UXP 插件')
+        plan=self.registration.prepare()
         self.assert_owned();backup=self.snapshot()
         try:
             for name in OWNED:
@@ -244,23 +256,41 @@ class UxpManager:
             if self.plugin.exists():self.plugin.rmdir()
             state=self.state();state.update(enabled=False,owned={},history=state['history']+[backup])
             atomic_json(self.state_path,state);self.sync_receipt()
-        except Exception:self.restore(backup);raise
+            self.registration.commit(plan)
+        except Exception:self.restore(backup,registration=False);raise
         return {'message':'UXP 插件已卸载；菜单程序、设置、凭据和任务记录保留','uxp':self.status()}
+
+    def repair_registration(self):
+        if self.running():raise RuntimeError('请先保存并正常关闭 Photoshop，再修复加载登记')
+        current=self.status()
+        if not current['installed'] or current['error']:raise RuntimeError('请先安装可用的 UXP 插件')
+        self.assert_owned()
+        plan=self.registration.prepare(validate(self.plugin),enable=True)
+        backup=self.snapshot()
+        try:
+            state=self.state();state['history'].append(backup);atomic_json(self.state_path,state)
+            self.registration.commit(plan)
+        except Exception:self.restore(backup,registration=False);raise
+        return {'message':'UXP 加载登记已修复；下次启动 Photoshop 后核对连接','uxp':self.status()}
 
     def rollback(self):
         if self.running():raise RuntimeError('请先保存并正常关闭 Photoshop，再回退 UXP 插件')
         self.assert_owned();history=self.state()['history']
         if not history:raise ValueError('没有可回退的 UXP 安装')
         safety=self.snapshot()
+        saved=json.loads((self.root/'backups'/history[-1]/'snapshot.json').read_text('utf-8'))
+        old_folder=self.root/'backups'/history[-1]
+        plan=self.registration.prepare(restore=saved['registration']) if 'registration' in saved else self.registration.prepare(validate(old_folder) if 'manifest.json' in saved['present'] else None)
         receipt=self.runtime/'offline-install.json'
         current_receipt=json.loads(receipt.read_text('utf-8')) if receipt.exists() else None
         try:
-            self.restore(history[-1])
+            self.restore(history[-1],registration=False)
             # Plugin rollback must not rewind ownership/version of a newer app.
             if current_receipt is not None:atomic_json(receipt,current_receipt)
             elif receipt.exists():receipt.unlink()
             self.sync_receipt()
-        except Exception:self.restore(safety);raise
+            self.registration.commit(plan)
+        except Exception:self.restore(safety,registration=False);raise
         return {'message':'已恢复上次 UXP 安装状态；正常启动 Photoshop 后加载','uxp':self.status()}
 
     def export(self):

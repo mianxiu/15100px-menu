@@ -257,7 +257,10 @@ class Application(web.Application):
             self.uxp_auto.phase='disabled';return
         # Read-only discovery does not occupy the interactive operation lock.
         current=await asyncio.to_thread(self.uxp.status)
-        if current['installed'] and current['enabled'] and not current['error'] and version(current['version'])<version(current['bundled_version']):
+        registration=current.get('registration',{})
+        if current['installed'] and current['enabled'] and not current['error'] and registration.get('state') in ('invalid','disabled'):
+            self.uxp_auto.phase='blocked';self.uxp_auto.message='加载登记需要检查，请在插件管理中修复';return
+        if current['installed'] and current['enabled'] and not current['error'] and (version(current['version'])<version(current['bundled_version']) or registration.get('auto_repair')):
             if await asyncio.to_thread(self.uxp.running):
                 self.uxp_auto.phase='waiting';self.uxp_auto.message='UXP 待更新；保存并关闭 PS 后自动安装';return
         else:
@@ -368,13 +371,14 @@ class Application(web.Application):
             await self.broadcast({'type':'status','data':await self.dispatch('status',{})})
             return result
         if action=='uxp.status':return await asyncio.to_thread(self.uxp.status)
-        if action in ('uxp.install','uxp.enable','uxp.disable','uxp.uninstall','uxp.rollback','uxp.apply-language'):
+        if action in ('uxp.install','uxp.enable','uxp.disable','uxp.uninstall','uxp.rollback','uxp.apply-language','uxp.repair-registration'):
             if self.photoshop_launcher.active or self.operation_lock.locked() or self.bridge.busy or getattr(self.bridge,'_queue',[]):
                 raise RuntimeError('请等待图层操作结束后再管理 UXP 插件；本次请求未排队')
             async with self.operation_lock:
                 if action=='uxp.install':result=await asyncio.to_thread(self.uxp.install,args.get('token'),args.get('photoshop_exe') or None)
                 elif action in ('uxp.enable','uxp.disable'):result=await asyncio.to_thread(self.uxp.set_enabled,action=='uxp.enable')
                 elif action=='uxp.apply-language':result=await asyncio.to_thread(self.uxp.apply_language)
+                elif action=='uxp.repair-registration':result=await asyncio.to_thread(self.uxp.repair_registration)
                 else:result=await asyncio.to_thread(getattr(self.uxp,action.split('.')[1]))
             if action in ('uxp.rollback','uxp.uninstall'):self.uxp_auto.set_enabled(False)
             if action=='uxp.install':

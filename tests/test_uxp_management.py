@@ -120,6 +120,8 @@ class UxpExecutionGateTests(unittest.IsolatedAsyncioTestCase):
             bridge=Mock();bridge.busy=True;bridge._queue=[];bridge.tasks=None
             app=Application(15159,bridge=bridge,runtime=Path(tmp));app.uxp=Mock()
             with self.assertRaisesRegex(RuntimeError,'未排队'):await app.dispatch('uxp.disable',{})
+            with self.assertRaisesRegex(RuntimeError,'未排队'):await app.dispatch('uxp.repair-registration',{})
+            app.uxp.repair_registration.assert_not_called()
             app.uxp.set_enabled.assert_not_called()
             bridge.busy=False
             app.uxp.set_enabled.return_value={'message':'disabled'}
@@ -157,6 +159,18 @@ class UxpManagementApiTests(AsyncHTTPTestCase):
         self.assertTrue(json.loads(preview.body)['ok'])
         self.assertEqual(self.fetch('/api/uxp/export',headers={'Origin':'https://example.com'}).code,403)
     @gen_test
+    async def test_production_follow_repairs_same_version_index_and_respects_startup_protection(self):
+        app=self._app;app.uxp.install();index=app.uxp.registration.path
+        index.parent.mkdir(parents=True);index.write_text('{"plugins":[{"pluginId":"foreign"}]}','utf-8')
+        app.photoshop_launcher.state={'phase':'unknown'}
+        await app.sync_uxp_auto(force=True)
+        self.assertEqual(app.uxp.status()['registration']['state'],'missing')
+        app.photoshop_launcher.state={'phase':'idle'}
+        await app.sync_uxp_auto(force=True)
+        self.assertEqual(app.uxp.status()['registration']['state'],'registered')
+        self.assertEqual(json.loads(index.read_text('utf-8'))['plugins'][0],{'pluginId':'foreign'})
+
+    @gen_test
     async def test_websocket_install_disable_enable_update_rollback_uninstall(self):
         ws=await websocket_connect(HTTPRequest(self.get_url('/websocket').replace('http:','ws:'),headers={'Origin':self.get_url('/').rstrip('/')}))
         await ws.read_message()
@@ -172,6 +186,7 @@ class UxpManagementApiTests(AsyncHTTPTestCase):
             self.assertFalse(blocked['ok']);self.assertIn('禁用',blocked['error'])
             self.assertFalse(self.bridge.tasks.snapshot()['items'])
             self.assertTrue((await request('uxp.enable'))['ok'])
+            self.assertTrue((await request('uxp.repair-registration'))['ok'])
             preview=self._app.uxp.prepare(self._app.uxp.export())
             self.assertTrue((await request('uxp.install',{'token':preview['token']}))['ok'])
             self.assertTrue((await request('uxp.rollback'))['ok'])

@@ -36,6 +36,7 @@ $report.photoshop=$hosts
 try {
     $s=Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/api/status" -TimeoutSec 5
     $report.backend=[ordered]@{version=$s.version;installed=$s.uxp.installed;installed_version=$s.uxp.version;bundled_version=$s.uxp.bundled_version;installation=$s.uxp.installation;install_error=(Protect-Text ([string]$s.uxp.error));plugin_path=(Protect-Text ([string]$s.uxp.plugin_dir));same_user_plugin_path=([string]$s.uxp.plugin_dir -ieq $plugin);loaded_version=$s.photoshop.uxp_version;ready=$s.photoshop.uxp_ready;busy=$s.photoshop.busy}
+    $report.backend.registration=[ordered]@{state=$s.uxp.registration.state;needs_repair=$s.uxp.registration.needs_repair;error_present=([bool]$s.uxp.registration.error)}
 } catch {$report.backend=[ordered]@{error='Backend unavailable'}}
 $logs=@()
 $adobe=Join-Path $env:APPDATA 'Adobe'

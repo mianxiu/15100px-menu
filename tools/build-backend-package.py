@@ -36,6 +36,7 @@ with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as bundle:
     for p in (exe,exe_checksum,ROOT/'OFFLINE-INSTALL.md',ROOT/'PERFORMANCE.md',ROOT/'RELEASES.md',ROOT/'LICENSE',ROOT/'THIRD_PARTY_NOTICES.md',plugin):bundle.write(p,p.name)
     bundle.write(ROOT/'docs/CONTEXT-COVERAGE.md','docs/CONTEXT-COVERAGE.md')
     bundle.write(ROOT/'docs/UPDATES.md','docs/UPDATES.md')
+    bundle.write(ROOT/'docs/UXP-LOADING.md','docs/UXP-LOADING.md')
     bundle.write(ROOT/'docs/READ-STRATEGIES.md','docs/READ-STRATEGIES.md')
     bundle.write(ROOT/'docs/UI-GUIDE.md','docs/UI-GUIDE.md')
     bundle.write(ROOT/'tools/inspect-panels.ps1','tools/inspect-panels.ps1')

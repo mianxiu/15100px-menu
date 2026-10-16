@@ -34,6 +34,8 @@ def uxp_findings(report):
     backend=report.get('backend',{})
     if backend.get('ready'):return ['uxp_loaded']
     if not report.get('plugin_exists'):return ['uxp_files_missing']
+    registration=backend.get('registration',{}).get('state')
+    if registration in ('missing','disabled','invalid','outdated'):return ['uxp_registration_'+registration]
     logs=[l for l in report.get('logs',[]) if l.get('matches_running_host') and l.get('after_host_start')]
     if not logs:return ['uxp_current_host_logs_unavailable']
     lines='\n'.join(line for log in logs for line in log.get('loader_lines',[]))

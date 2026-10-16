@@ -32,17 +32,22 @@ class UxpAutoUpdate:
             self.phase='inactive';self.message='未安装或已禁用；保留当前选择';return self.snapshot()
         if s['error']:
             self.phase='blocked';self.message='安装异常，请在插件管理中检查';return self.snapshot()
-        if version(s['version'])>=version(s['bundled_version']):
+        registration=s.get('registration',{})
+        if registration.get('state') in ('invalid','disabled'):
+            self.phase='blocked';self.message='加载登记需要检查，请在插件管理中修复';return self.snapshot()
+        repair=registration.get('auto_repair',False)
+        if not repair and version(s['version'])>=version(s['bundled_version']):
             self.phase='current';self.message='已安装版本已跟随内置插件';return self.snapshot()
         if blocked:
             self.phase='waiting';self.message='操作或结果待核对，稍后更新 UXP';return self.snapshot()
         if manager.running():
             self.phase='waiting';self.message='UXP 待更新；保存并关闭 PS 后自动安装';return self.snapshot()
-        key=(s['version'],s['bundled_version'])
+        key=(s['version'],s['bundled_version'],registration.get('state'))
         if self.failed_key==key:return self.snapshot()
         try:
-            manager.install()
-            self.phase='updated';self.message='内置 UXP 已自动安装，下次启动 PS 生效'
+            if repair and version(s['version'])>=version(s['bundled_version']):manager.repair_registration()
+            else:manager.install()
+            self.phase='updated';self.message='UXP 加载登记已自动修复，下次启动 PS 生效' if repair else '内置 UXP 已自动安装，下次启动 PS 生效'
         except Exception:
             self.failed_key=key;self.phase='error';self.message='自动安装失败，旧版已按安装流程保留；请检查插件管理后重新启用跟随更新'
         return self.snapshot()

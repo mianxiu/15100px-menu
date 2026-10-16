@@ -1,8 +1,8 @@
 # GitHub 应用更新
 
-从 v0.4.120 起后台可检查本仓库 GitHub Releases；当前v0.4.146入口为主导航中的“应用更新”。
+从 v0.4.120 起后台可检查本仓库 GitHub Releases；当前v0.4.147入口为主导航中的“应用更新”。
 
-早于120的版本需正常退出后手动替换一次；120起可在后台更新。本机实际运行146，正式Latest为[v0.4.146](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.146)，内置／本机已加载UXP0.3.18。公开146统一ZIP、SHA256和备用清单匿名下载核验通过；直接执行最终EXE内更新器代码，强制API403后真实下载／校验146通过。当前版本不重复安装自身，后台只提示更高的正式版本，不降级。
+早于120的版本需正常退出后手动替换一次；120起可在后台更新。本机实际运行147，正式下载以[GitHub Latest](https://github.com/mianxiu/15100px-menu/releases/latest)为准，内置／本机已加载UXP0.3.18。公开146统一ZIP、SHA256和备用清单匿名下载核验通过；直接执行最终EXE内更新器代码，强制API403后真实下载／校验146通过。当前版本不重复安装自身，后台只提示更高的正式版本，不降级。
 
 1. 默认每24小时自动检查正式版本，可关闭；不会自动下载或安装。手动检查不受每日间隔限制。
 2. 新版可用时点击“下载并校验”，下载在线程中完成、显示进度；断网或校验失败不改变现有程序，可重新下载。
@@ -29,3 +29,5 @@ v0.4.144起，GitHub API返回403／429时读取同一仓库最新Release中的`
 发布统一ZIP和SHA256，不覆盖已发布附件。发布后用`tools/build-update-manifest.py --release-json <正式Release记录>`生成并上传`PhotoshopMenu-update.json`，匿名核验清单及安装包下载。按用户2026-10-16决定，核验新版完成后删除其他Release与其附件，发行页只保留最新版；保留Git标签、源码历史和本地回退副本。后续EXE须保持`--apply-update <job.json>`的schema 1兼容，供已安装版使用。不要把预览版、草稿、源码或独立UXP ZIP当作应用更新附件。
 
 参考[GitHub Releases API](https://docs.github.com/en/rest/releases/releases)、[附件API](https://docs.github.com/en/rest/releases/assets)和[REST最佳实践](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api)。使用ETag条件请求；匿名请求仍可能限流，显示错误，不高频重试。
+
+147增加[UXP加载登记修复](UXP-LOADING.md)：主程序更新后，保存并正常关闭PS，默认跟随会维护已有用户索引中的本插件登记；关闭跟随时可手动修复。UXP仍18，较旧插件同时更新；本次修复需要重新启动PS验证实际加载。文件校验／登记成功不代替加载心跳。

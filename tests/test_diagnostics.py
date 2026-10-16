@@ -44,6 +44,13 @@ class DiagnosticTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(report['runtime']['photoshop']['busy']);self.assertEqual(len(report['panels']),1)
             self.assertEqual(report['components']['menu']['phase'],'completed')
 
+    def test_index_findings_prefer_explicit_registration_state_to_scan_absence(self):
+        for state in ('missing','disabled','invalid','outdated'):
+            value={'plugin_exists':True,'backend':{'ready':False,'registration':{'state':state}}}
+            self.assertEqual(uxp_findings(value),['uxp_registration_'+state])
+            value['backend']['ready']=True
+            self.assertEqual(uxp_findings(value),['uxp_loaded'])
+
     async def test_uxp_only_has_no_delay_menu_sampling_or_trigger_trace(self):
         with tempfile.TemporaryDirectory() as folder:
             d=Diagnostics(folder,'panel.ps1',15153);d.provider=lambda:self.fail('No trigger trace for UXP-only')
