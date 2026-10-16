@@ -66,6 +66,14 @@ class UxpPublicationTests(unittest.TestCase):
             self.assertEqual(destination.read_bytes(),b'old');self.assertFalse(source.exists())
 
 class UxpDiscoveryTests(unittest.TestCase):
+    def test_mask_edit_rejects_old_plugin_before_publication(self):
+        folder=self.heartbeat(24)
+        heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.19',session='s')
+        (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+        self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        with self.assertRaisesRegex(RuntimeError,'0.3.20'):
+            self.transport.call('set_label',command='shape.paint',paint={'mask':{'feather':0,'density':100}},target={'session':'s'})
+        self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
     def test_smart_conversion_rejects_old_plugin_before_publication(self):
         folder=self.heartbeat(24)
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.17',session='s')

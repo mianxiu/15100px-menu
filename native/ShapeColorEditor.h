@@ -8,11 +8,11 @@ struct ShapeColorEditor {
     std::string hexKey;
     ULONGLONG copiedAt=0;
     bool copyFailed=false;
-    RECT bounds{},copyBounds{},gradientBounds{};
+    RECT bounds{},copyBounds{},gradientBounds{},featherBounds{},densityBounds{};
     bool gradientDragging=false;
     float gradientDragOffset=0;
     void prepare(const Json& data) {
-        available=false;dirty=false;bounds=copyBounds=gradientBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
+        available=false;dirty=false;bounds=copyBounds=gradientBounds=featherBounds=densityBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
         if(!data.value("available",false))return;
         if(!data.at("revision").is_string() || !data.at("fill").is_object() || !data.at("stroke").is_object())return;
         original=draft=Json{{"revision",data.at("revision")},{"fill",data.at("fill")},{"stroke",data.at("stroke")}};
@@ -20,6 +20,7 @@ struct ShapeColorEditor {
         for(const auto& item:patterns)if(item.is_string())requireText(item.get<std::string>());
         for(int i=0;i<2;++i){const auto& p=draft.at(i?"stroke":"fill");modes[i]=Json::object();modes[i][p.at("kind").get<std::string>()]=p;}
         vector=data.value("vector",true);available=true;
+        if(vector && data.contains("mask") && data["mask"].is_object())original["mask"]=draft["mask"]=data["mask"];
     }
     Json& current(){return draft.at(channel?"stroke":"fill");}
     bool ready() const {return available && holdMode && panelKind==2 && layerAware && layerKind==6 && layerCount==1
@@ -45,6 +46,7 @@ struct ShapeColorEditor {
         for(const char* name:{"fill","stroke"})if(draft.at(name).value("kind","")=="pattern" && draft.at(name).value("name","").empty())return false;
         return true;
     }
+    bool hasMask() const {return vector && draft.contains("mask");}
 };
 static ShapeColorEditor shapeEditor;
 static Json testedShapePaint;
@@ -169,7 +171,7 @@ static void drawGradientBar(float width) {
     ImGui::SetCursorScreenPos({at.x,at.y+menuGradientEditorHeight*scale+menuPanelGap*scale});
 }
 static void drawShapeEditor() {
-    shapeEditor.bounds=shapeEditor.copyBounds=shapeEditor.gradientBounds={};if(!shapeEditor.ready())return;
+    shapeEditor.bounds=shapeEditor.copyBounds=shapeEditor.gradientBounds=shapeEditor.featherBounds=shapeEditor.densityBounds={};if(!shapeEditor.ready())return;
     const auto windowPos=ImGui::GetWindowPos(),windowSize=ImGui::GetWindowSize();
     const float available=pieCenter.x-windowPos.x-65*scale-basicLabelExtent(0).x-basicTextOffset()-figmaBasicRightPadding*scale-30*scale;
     if(available<140*scale)return;
@@ -178,9 +180,10 @@ static void drawShapeEditor() {
     const float row=menuControlHeight*scale+gap,textLine=panelFont->FontSize+gap;
     const auto kind=shapeEditor.current().value("kind",std::string("solid"));
     const float content=2*menuControlPadding*scale+textLine+2*row+(shapeEditor.vector?row:0)+
-        (kind=="pattern"?row:textLine+width-2*menuControlPadding*scale+2*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+(shapeEditor.vector?row:0);
+        (kind=="pattern"?row:textLine+width-2*menuControlPadding*scale+2*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+(shapeEditor.vector?row:0)+(shapeEditor.hasMask()?2*row:0);
     const float height=std::min(content,windowSize.y-24*scale);
     ImVec2 at={std::max(windowPos.x+16*scale,pieCenter.x-65*scale-basicLabelExtent(0).x-basicTextOffset()-figmaBasicRightPadding*scale-30*scale-width),std::max(windowPos.y+12*scale,pieCenter.y-238*scale)};
+    at.y=std::max(windowPos.y+12*scale,std::min(at.y,windowPos.y+windowSize.y-height-12*scale));
     shapeEditor.bounds={LONG(at.x),LONG(at.y),LONG(at.x+width),LONG(at.y+height)};
     const auto saved=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos(at);
     ImGui::PushStyleColor(ImGuiCol_ChildBg,ImGui::GetStyle().Colors[ImGuiCol_WindowBg]);
@@ -225,7 +228,7 @@ static void drawShapeEditor() {
         Json& c=paintKind=="solid"?p["rgb"]:p["stops"][shapeEditor.stop]["rgb"];
         float color[]={c[0].get<float>()/255,c[1].get<float>()/255,c[2].get<float>()/255,1};
         ImGui::TextUnformatted("RGB");
-        const float reserve=(shapeEditor.vector?3:2)*ImGui::GetFrameHeightWithSpacing()+gap;
+        const float reserve=((shapeEditor.vector?3:2)+(shapeEditor.hasMask()?2:0))*ImGui::GetFrameHeightWithSpacing()+gap;
         ImGui::SetNextItemWidth(std::min(inner,std::max(90*scale,ImGui::GetContentRegionAvail().y-reserve)));
         if(ImGui::ColorPicker4("##paint",color,ImGuiColorEditFlags_NoAlpha|ImGuiColorEditFlags_NoSidePreview|ImGuiColorEditFlags_NoSmallPreview|
             ImGuiColorEditFlags_NoOptions|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_DisplayRGB|ImGuiColorEditFlags_Uint8)){
@@ -255,6 +258,19 @@ static void drawShapeEditor() {
         fill["width"]=widthValue;shapeEditor.draft["fill"]=stroke;shapeEditor.draft["stroke"]=fill;
         shapeEditor.modes={};for(int i=0;i<2;++i){const auto& v=shapeEditor.draft[i?"stroke":"fill"];shapeEditor.modes[i]=Json::object();shapeEditor.modes[i][v.at("kind").get<std::string>()]=v;}
         shapeEditor.stop=0;shapeEditor.changed();
+    }
+    if(shapeEditor.hasMask()) {
+        const float labelWidth=std::max(ImGui::CalcTextSize("羽化").x,ImGui::CalcTextSize("密度").x);
+        auto slider=[&](const char* label,const char* id,const char* key,float maximum,const char* format,ImGuiSliderFlags flags,RECT& bounds){
+            const auto at=ImGui::GetCursorScreenPos();
+            ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(label);
+            ImGui::SameLine();ImGui::SetCursorScreenPos({at.x+labelWidth+gap,at.y});
+            float value=shapeEditor.draft["mask"][key].get<float>();ImGui::SetNextItemWidth(inner-labelWidth-gap);
+            if(ImGui::SliderFloat(id,&value,0.f,maximum,format,flags|ImGuiSliderFlags_AlwaysClamp)){shapeEditor.draft["mask"][key]=value;shapeEditor.changed();}
+            const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();bounds={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
+        };
+        slider("羽化","##mask-feather","feather",1000.f,"%.1f px",ImGuiSliderFlags_Logarithmic,shapeEditor.featherBounds);
+        slider("密度","##mask-density","density",100.f,"%.1f%%",ImGuiSliderFlags_None,shapeEditor.densityBounds);
     }
     ImGui::EndDisabled();ImGui::EndChild();ImGui::PopStyleVar(6);ImGui::PopFont();ImGui::PopStyleColor();ImGui::SetCursorScreenPos(saved);
 }

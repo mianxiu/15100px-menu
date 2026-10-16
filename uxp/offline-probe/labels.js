@@ -474,7 +474,20 @@ function createShapePaint(ps,session,capture,selectionContext) {
     const actualStroke=vector?(stroke || defaultStroke):defaultStroke;
     if(actualStroke.strokeStyleLineWidth && !['pixelsUnit','pointsUnit'].includes(actualStroke.strokeStyleLineWidth._unit))return null;
     if(!paint(actualStroke.strokeStyleContent))return null;
-    return {fill,stroke:actualStroke,vector};
+    const raw={fill,stroke:actualStroke,vector};
+    if(vector) {
+      // Read only while enriching an eligible shape, never on the basic
+      // snapshot path or ordinary fill layers. Unknown values stay unavailable.
+      const layer=doc.activeLayers[0];
+      if(!layer || layer.id!==id)return null;
+      try {
+        const feather=layer.vectorMaskFeather,density=layer.vectorMaskDensity;
+        if(typeof feather==='number' && Number.isFinite(feather) && feather>=0 && feather<=1000 &&
+           typeof density==='number' && Number.isFinite(density) && density>=0 && density<=100)
+          raw.mask={feather,density};
+      } catch(_) {}
+    }
+    return raw;
   }
   async function observe(context,force=false) {
     if(context.kind!=='shape-fill' || context.layer_ids?.length!==1 || context.locked || !ps.app.documents.length)
@@ -492,6 +505,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
     const stroke={...paint(raw.stroke.strokeStyleContent),enabled:!!raw.stroke.strokeEnabled,
       width:Number(raw.stroke.strokeStyleLineWidth?._value ?? 1)*(raw.stroke.strokeStyleLineWidth?._unit==='pointsUnit'?doc.resolution/72:1)};
     const data={available:true,vector:raw.vector,revision,fill,stroke,patterns:await patterns(),pattern_catalog:catalogInfo};
+    if(raw.mask)data.mask=clone(raw.mask);
     cache={key,at:Date.now(),signature,raw,data};return data;
   }
   function validatePaint(value) {
@@ -531,17 +545,24 @@ function createShapePaint(ps,session,capture,selectionContext) {
     if(!params || typeof params.revision!=='string' || params.revision.length>128)throw Error('Missing shape revision');
     validatePaint(params.fill);validatePaint(params.stroke);
     if(typeof params.stroke.width!=='number' || !Number.isFinite(params.stroke.width) || params.stroke.width<0 || params.stroke.width>1000)throw Error('Invalid stroke width');
+    if(Object.prototype.hasOwnProperty.call(params,'mask') && (!params.mask || typeof params.mask!=='object' ||
+      Object.keys(params.mask).sort().join(',')!=='density,feather' ||
+      typeof params.mask.feather!=='number' || !Number.isFinite(params.mask.feather) || params.mask.feather<0 || params.mask.feather>1000 ||
+      typeof params.mask.density!=='number' || !Number.isFinite(params.mask.density) || params.mask.density<0 || params.mask.density>100))throw Error('Invalid vector mask');
     return ps.core.executeAsModal(async context=>{
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
       const actual=await capture(),expected=request.target;
       if(expected?.session!==session || actual.document_id!==expected.document_id || actual.active_layer_id!==expected.active_layer_id || actual.layer_ids.join(',')!==expected.layer_ids?.join(','))throw Error('Document or layer target changed');
       const eligibility=selectionContext(),before=await observe(eligibility,true);
       if(!before.available || before.revision!==params.revision)throw Error('填充／描边已改变，请重新打开菜单；本次未修改');
+      if(params.mask && (!before.vector || !before.mask))throw Error('当前图层不支持矢量蒙版羽化／密度；本次未修改');
       if(!before.vector && params.fill.kind!==before.fill.kind)throw Error('普通填充层保持PS原生类型；本次未修改');
       if(!before.vector && (!params.fill.enabled || params.stroke.kind!==before.stroke.kind || params.stroke.enabled!==before.stroke.enabled
           || params.stroke.width!==before.stroke.width || JSON.stringify(params.stroke.rgb)!==JSON.stringify(before.stroke.rgb)))
         throw Error('普通填充层不支持形状描边或禁用填充；本次未修改');
       const original=cache.raw,doc=ps.app.activeDocument,anchor=doc.activeLayers[0];
+      const paintKey=p=>JSON.stringify([p.kind,p.enabled,p.rgb,p.stops?.map(s=>[s.location,...s.rgb]),p.name,p.width]);
+      const paintChanged=paintKey(params.fill)!==paintKey(before.fill) || paintKey(params.stroke)!==paintKey(before.stroke);
       const parent=anchor.parent,parentId=parent?.id ?? null,order=Array.from(parent?parent.layers:doc.layers,l=>l.id);
       const to=before.vector?{_obj:'shapeStyle',fillContents:build(params.fill,original.fill),strokeStyle:{...clone(original.stroke),
         strokeStyleVersion:2,fillEnabled:params.fill.enabled,strokeEnabled:params.stroke.enabled,
@@ -550,15 +571,25 @@ function createShapePaint(ps,session,capture,selectionContext) {
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
       const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu shape paint'});
       try {
-        const [response]=await ps.action.batchPlay([{_obj:'set',_target:[{_ref:'contentLayer',_enum:'ordinal',_value:'targetEnum'}],
-          to,_options:{dialogOptions:'dontDisplay'}}],{});
-        if(response?._obj==='error')throw Error(response.message || 'Photoshop 拒绝修改形状颜色');
+        if(paintChanged) {
+          const [response]=await ps.action.batchPlay([{_obj:'set',_target:[{_ref:'contentLayer',_enum:'ordinal',_value:'targetEnum'}],
+            to,_options:{dialogOptions:'dontDisplay'}}],{});
+          if(response?._obj==='error')throw Error(response.message || 'Photoshop 拒绝修改形状颜色');
+        }
+        if(params.mask) {
+          if(params.mask.feather!==before.mask.feather)anchor.vectorMaskFeather=params.mask.feather;
+          if(params.mask.density!==before.mask.density)anchor.vectorMaskDensity=params.mask.density;
+        }
         const after=await observe(selectionContext(),true);
+        const wantedMask=params.mask || before.mask;
+        if(wantedMask && (!after.mask || Math.abs(after.mask.feather-wantedMask.feather)>.01 ||
+          Math.abs(after.mask.density-wantedMask.density)>100/255+.001))throw Error('矢量蒙版羽化／密度读回不符，已回滚');
         if(!after.available || after.vector!==before.vector || !samePaint(after.fill,params.fill) || !samePaint(after.stroke,params.stroke) || Math.abs(after.stroke.width-params.stroke.width)>.01 ||
           doc.activeLayers.length!==1 || doc.activeLayers[0].id!==anchor.id || (anchor.parent?.id ?? null)!==parentId ||
           Array.from(parent?parent.layers:doc.layers,l=>l.id).join(',')!==order.join(','))throw Error('形状颜色／图层身份读回不符，已回滚');
         await context.hostControl.resumeHistory(history,true);
-        return {count:1,verified:true,placement_moves:0,fill_kind:after.fill.kind,stroke_kind:after.stroke.kind,selection_context:selectionContext()};
+        return {count:1,verified:true,placement_moves:0,fill_kind:after.fill.kind,stroke_kind:after.stroke.kind,
+          ...(after.mask?{mask:after.mask}:{}),selection_context:selectionContext()};
       } catch(error) {
         try {await context.hostControl.resumeHistory(history,false);cache=null;}
         catch(_) {error.resultUnknown=true;}

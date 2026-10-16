@@ -31,17 +31,24 @@ def paint(value,stroke=False):
     return result
 
 def parameters(value):
-    if not isinstance(value,dict) or set(value)!={'revision','fill','stroke'}:raise ValueError('形状颜色参数不完整')
+    if not isinstance(value,dict) or set(value) not in ({'revision','fill','stroke'},{'revision','fill','stroke','mask'}):raise ValueError('形状颜色参数不完整')
     revision=value['revision']
     if not isinstance(revision,str) or not 1<=len(revision)<=128:raise ValueError('形状状态已失效，请重新打开菜单')
-    return {'revision':revision,'fill':paint(value['fill']),'stroke':paint(value['stroke'],True)}
+    result={'revision':revision,'fill':paint(value['fill']),'stroke':paint(value['stroke'],True)}
+    if 'mask' in value:
+        mask=value['mask']
+        if not isinstance(mask,dict) or set(mask)!={'feather','density'} or not number(mask['feather'],0,1000) or not number(mask['density'],0,100):
+            raise ValueError('无效矢量蒙版羽化／密度')
+        result['mask']=dict(mask)
+    return result
 
 def metadata(value):
     if not isinstance(value,dict) or value.get('available') is not True:return {'available':False}
     try:
-        result=parameters({k:value.get(k) for k in ('revision','fill','stroke')})
+        result=parameters({k:value.get(k) for k in ('revision','fill','stroke')+ (('mask',) if 'mask' in value else ())})
         vector=value.get('vector',True)
         if type(vector) is not bool:raise ValueError()
+        if 'mask' in result and not vector:raise ValueError()
         patterns=value.get('patterns',[])
         if not isinstance(patterns,list) or len(patterns)>128 or any(not isinstance(x,str) or not x or len(x)>128 for x in patterns):raise ValueError()
         return {'available':True,'vector':vector,**result,'patterns':list(patterns)}

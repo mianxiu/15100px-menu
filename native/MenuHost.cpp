@@ -1644,7 +1644,7 @@ int main() {
     io.ConfigFlags|=ImGuiConfigFlags_NoMouseCursorChange;
     scale=ImGui_ImplWin32_GetDpiScaleForHwnd(window);theme();
     if (!preview.empty() || selfTest) SetWindowPos(window,nullptr,100,100,
-        static_cast<int>((previewShape?920:contextMode?260:360)*scale),static_cast<int>((previewShape?560:contextMode?240:300)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+        static_cast<int>((previewShape?920:contextMode?260:360)*scale),static_cast<int>((previewShape?menuShapeWindowHeight:contextMode?240:300)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
     io.ConfigViewportsNoTaskBarIcon=true;
     std::wstring fontPath; wchar_t windowsPath[MAX_PATH];GetWindowsDirectoryW(windowsPath,MAX_PATH);fontPath=std::wstring(windowsPath)+L"/Fonts/msyh.ttc";
     int size=WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,nullptr,0,nullptr,nullptr);std::string font(size,0);WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,font.data(),size,nullptr,nullptr);
@@ -1825,7 +1825,7 @@ int main() {
     if (!selfTest) {ShowWindow(window,SW_SHOWNORMAL);UpdateWindow(window);}
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
-            SetWindowPos(window,nullptr,100,100,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?560:440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowPos(window,nullptr,100,100,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?menuShapeWindowHeight:440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);
             if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
         }
@@ -2321,15 +2321,32 @@ int main() {
                     throw std::runtime_error("Explicit reopen did not restore idle menu");
                 const auto shapeCount=testedActions.size();
                 Json shapeFixture={{"available",true},{"revision","test:1"},
+                    {"mask",{{"feather",0},{"density",100}}},
                     {"fill",{{"kind","solid"},{"enabled",true},{"rgb",{12,34,56}}}},
                     {"stroke",{{"kind","solid"},{"enabled",false},{"rgb",{0,0,0}},{"width",1}}},
                     {"patterns",{"Test Pattern"}}};
                 shapeEditor.prepare(shapeFixture);setHoldMode(true);panelKind=2;layerAware=true;layerKind=6;layerCount=1;layerLocked=layerBackground=false;
-                SetWindowPos(window,nullptr,0,0,int(920*scale),int(560*scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+                SetWindowPos(window,nullptr,0,0,int(920*scale),int(menuShapeWindowHeight*scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
                 ImGui_ImplWin32_NewFrame();
                 numberFrame(ImGuiKey_None,false);holdMoved=true;
                 if(!shapeEditor.ready() || shapeEditor.bounds.right<=shapeEditor.bounds.left || ImGui::GetDrawData()->TotalVtxCount<=0)
                     throw std::runtime_error("Shape editor did not render through production window path");
+                const auto featherRect=shapeEditor.featherBounds,densityRect=shapeEditor.densityBounds;
+                if(featherRect.right<=featherRect.left || densityRect.right<=densityRect.left || densityRect.bottom>shapeEditor.bounds.bottom)
+                    throw std::runtime_error("Vector mask sliders are clipped or have no hit bounds");
+                auto maskMouse=[&](const RECT& r,float portion,bool down){io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);
+                    io.AddMousePosEvent(r.left+(r.right-r.left)*portion,(r.top+r.bottom)*.5f);
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left,down);numberFrame(ImGuiKey_None,false);};
+                maskMouse(featherRect,.6f,false);maskMouse(featherRect,.6f,true);maskMouse(featherRect,.7f,true);maskMouse(featherRect,.7f,false);
+                maskMouse(densityRect,.35f,false);maskMouse(densityRect,.35f,true);maskMouse(densityRect,.4f,true);maskMouse(densityRect,.4f,false);
+                if(!shapeEditor.dirty || shapeEditor.draft["mask"]["feather"].get<float>()<=0 ||
+                    shapeEditor.draft["mask"]["density"].get<float>()>=100 || testedActions.size()!=shapeCount)
+                    throw std::runtime_error("Mask sliders must change the local draft without submitting");
+                POINT maskPoint={(densityRect.left+densityRect.right)/2,(densityRect.top+densityRect.bottom)/2};
+                const auto maskDraft=shapeEditor.draft;renderedHit=100;finishHold(maskPoint,true,&maskPoint);const auto maskSubmitted=testedActions.size();finishHold(maskPoint);
+                if(testedShapePaint!=maskDraft || testedActions.back()!="shape.paint" || testedActions.size()!=maskSubmitted)
+                    throw std::runtime_error("Mask slider release must submit its exact draft once");
+                testedActions.resize(shapeCount);shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;
                 shapeEditor.mode(1);shapeEditor.mode(2);shapeEditor.mode(0);
                 if(testedActions.size()!=shapeCount || shapeEditor.dirty)throw std::runtime_error("Local type switching wrote or lost original draft");
                 Json parsed;

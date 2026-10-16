@@ -17,7 +17,7 @@ function desc(d){var o={};for(var i=0;i<d.count;i++){var k=d.getKey(i);o[name(k)
 function quote(v){return '"'+String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\r/g,'\\r').replace(/\n/g,'\\n')+'"';}
 function json(v){if(v===null)return 'null';if(v instanceof Array){var a=[];for(var i=0;i<v.length;i++)a.push(json(v[i]));return '['+a.join(',')+']';}if(typeof v==='object'){var a=[];for(var k in v)a.push(quote(k)+':'+json(v[k]));return '{'+a.join(',')+'}';}return typeof v==='string'?quote(v):String(v);}
 var s=stringIDToTypeID,r=new ActionReference();r.putEnumerated(s('layer'),s('ordinal'),s('targetEnum'));var d=executeActionGet(r),out={};
-var keys=['layerID','layerKind','hasVectorMask','adjustment','AGMStrokeStyleInfo'];for(var i=0;i<keys.length;i++)if(d.hasKey(s(keys[i])))out[keys[i]]=value(d,s(keys[i]));
+var keys=['layerID','layerKind','hasVectorMask','adjustment','AGMStrokeStyleInfo','vectorMaskFeather','vectorMaskDensity','hasUserMask','userMaskFeather','userMaskDensity'];for(var i=0;i<keys.length;i++)if(d.hasKey(s(keys[i])))out[keys[i]]=value(d,s(keys[i]));
 out.path=null;if(out.hasVectorMask){var p=new ActionReference();p.putEnumerated(s('path'),s('path'),s('vectorMask'));var raw=executeActionGet(p).toStream(),hex='';for(var i=0;i<raw.length;i++){var c=raw.charCodeAt(i).toString(16);hex+=('0000'+c).slice(-4);}out.path=hex;}
 out.order=[];for(var i=0;i<app.activeDocument.layers.length;i++)out.order.push(app.activeDocument.layers[i].id);out.history=app.activeDocument.historyStates.length;out.historyCursor=-1;for(var i=0;i<out.history;i++)if(app.activeDocument.historyStates[i]==app.activeDocument.activeHistoryState){out.historyCursor=i;break;}return json(out);
 })();'''
@@ -47,7 +47,7 @@ async def main():
   data=response['shape_editor'];assert data['available'],data
   return data
  async def execute(case,alter):
-  data=await inspect();params={k:copy.deepcopy(data[k]) for k in ('revision','fill','stroke')};alter(params,data)
+  data=await inspect();params={k:copy.deepcopy(data[k]) for k in ('revision','fill','stroke')+ (('mask',) if 'mask' in data else ())};alter(params,data)
   target=await asyncio.to_thread(bridge._capture_target);before=read();start=time.perf_counter()
   if case=='long-lived-solid-draft':
    print('Holding a local paint draft for 35 seconds before submission',flush=True)
@@ -56,15 +56,40 @@ async def main():
   result=await bridge.execute_shape(params,frozen_target=target);elapsed=(time.perf_counter()-start)*1000;after=read()
   assert after['layerID']==before['layerID'] and after['order']==before['order'] and after['path']==before['path']
   assert after.get('hasVectorMask',False)==before.get('hasVectorMask',False) and after['layerKind']==before['layerKind']
+  for key in ('hasUserMask','userMaskFeather','userMaskDensity'):assert after.get(key)==before.get(key),(case,key)
+  if 'mask' in params:
+   def number(value):return value['_value'] if isinstance(value,dict) else value
+   assert abs(number(after['vectorMaskFeather'])-params['mask']['feather'])<=.01,(case,after)
+   assert abs(number(after['vectorMaskDensity'])*100/255-params['mask']['density'])<=100/255+.001,(case,after)
+   if params['fill']==data['fill'] and params['stroke']==data['stroke']:
+    for key in ('adjustment','AGMStrokeStyleInfo'):assert after.get(key)==before.get(key),(case,'mask-only rewrote paint',key)
   assert after['historyCursor']==before['historyCursor']+1,(case,before['historyCursor'],after['historyCursor'])
   confirmed=await inspect();assert confirmed['fill']['kind']==params['fill']['kind'] and confirmed['stroke']['kind']==params['stroke']['kind']
   app.DoJavaScript('var d=app.activeDocument;d.activeHistoryState=d.historyStates[d.historyStates.length-2];')
   restored=read()
-  for key in ('layerID','adjustment','AGMStrokeStyleInfo','path','order'):assert restored.get(key)==before.get(key),(case,key)
+  for key in ('layerID','adjustment','AGMStrokeStyleInfo','path','order','vectorMaskDensity','vectorMaskFeather','userMaskDensity','userMaskFeather'):assert restored.get(key)==before.get(key),(case,key)
   checks.append({'case':case,'execute_ms':round(elapsed,2),'task_id':result['task_id'],'one_undo':True,'path_and_order_unchanged':True,'placement_moves':0})
   print(case,'passed',flush=True)
  try:
   app.DoJavaScript(fixture('shape',4));scratch=app.ActiveDocument
+  data=await inspect();assert data.get('mask')=={'feather':0,'density':100},data
+  # A separate pixel mask must retain its own independent properties.
+  app.DoJavaScript("var s=stringIDToTypeID,d=new ActionDescriptor(),r=new ActionReference();d.putClass(s('new'),s('channel'));r.putEnumerated(s('channel'),s('channel'),s('mask'));d.putReference(s('at'),r);d.putEnumerated(s('using'),s('userMaskEnabled'),s('revealAll'));executeAction(s('make'),d,DialogModes.NO);")
+  await execute('vector-feather-only',lambda p,d:p['mask'].update(feather=7.5))
+  await execute('vector-density-only',lambda p,d:p['mask'].update(density=63))
+  await execute('vector-mask-maximum',lambda p,d:p['mask'].update(feather=1000,density=0))
+  def mask_color(p,d):p['mask'].update(feather=12.5,density=42);p['fill']['rgb']=[25,75,160]
+  await execute('vector-mask-and-color-one-undo',mask_color)
+  old=await inspect();params={k:copy.deepcopy(old[k]) for k in ('revision','fill','stroke','mask')}
+  target=await asyncio.to_thread(bridge._capture_target)
+  app.DoJavaScript("var s=stringIDToTypeID,d=new ActionDescriptor(),r=new ActionReference(),v=new ActionDescriptor();r.putEnumerated(s('layer'),s('ordinal'),s('targetEnum'));d.putReference(s('null'),r);v.putInteger(s('vectorMaskDensity'),128);d.putObject(s('to'),s('layer'),v);executeAction(s('set'),d,DialogModes.NO);")
+  after_external=read()
+  try:await bridge.execute_shape(params,frozen_target=target)
+  except Exception as error:assert '已改变' in str(error),str(error)
+  else:raise AssertionError('Stale mask revision was accepted')
+  assert read()==after_external
+  checks.append({'case':'stale-mask-revision','no_write':True})
+  app.DoJavaScript('var d=app.activeDocument;d.activeHistoryState=d.historyStates[d.historyStates.length-2];')
   def solid(p,d):p['fill']['rgb']=[20,80,170];p['stroke'].update(enabled=True,width=3,rgb=[255,20,0])
   await execute('solid-fill-and-stroke',solid)
   await execute('long-lived-solid-draft',solid)

@@ -49,6 +49,19 @@ class ShapePaintTests(unittest.TestCase):
         self.assertEqual(self.value['fill']['rgb'][0],12)
         self.assertEqual(result['stroke']['width'],1)
 
+    def test_vector_mask_ranges_and_metadata_scope(self):
+        self.value['mask']={'feather':12.5,'density':62.5}
+        value=parameters(self.value);value['mask']['density']=0
+        self.assertEqual(self.value['mask']['density'],62.5)
+        self.assertTrue(metadata({'available':True,'vector':True,**self.value})['available'])
+        self.assertFalse(metadata({'available':True,'vector':False,**self.value})['available'])
+        for key,bad in [('feather',-1),('feather',1001),('feather',True),('feather',math.nan),('density',-1),('density',101),('density',False),('density',math.inf)]:
+            value=copy.deepcopy(self.value);value['mask'][key]=bad
+            with self.assertRaises(ValueError):parameters(value)
+        for mask in (None,{}, {'feather':0,'density':100,'script':'no'}):
+            value={**self.value,'mask':mask}
+            with self.assertRaises(ValueError):parameters(value)
+
     def test_invalid_color_width_fields_and_identity_rejected(self):
         for bad in (True,-1,256,math.nan,math.inf,'12'):
             value=copy.deepcopy(self.value);value['fill']['rgb'][0]=bad
