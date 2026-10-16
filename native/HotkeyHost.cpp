@@ -228,14 +228,13 @@ static bool directCommand(Action a) {
     return a==Select || a==Color || a==Top || a==Bottom || a==SelectAbove || a==SelectBelow ||
         a==ExtendAbove || a==ExtendBelow || a==MoveUp || a==MoveDown || a==CopyStyle || a==PasteStyle || a==EditStyle || a==ConvertSmartObject;
 }
-// Only the pipe writer waits for intent. Hook ownership and shortcut execution
-// remain immediate. Drain queued input before revealing a timed-out prefix.
+// Coalesce only input already queued together; never wait for a future chord.
+// Drain the queue before revealing the prefix so Caps alone opens immediately.
 struct InvocationGate {
     bool active=false,shown=false;
     HookEvent begin{};
-    ULONGLONG deadline=0;
     std::vector<HookEvent> feed(const HookEvent& e) {
-        if(e.action==HoldBegin){active=true;shown=false;begin=e;deadline=e.gapMs+220;return {};}
+        if(e.action==HoldBegin){active=true;shown=false;begin=e;return {};}
         if(e.action==HoldReveal){if(active && !shown){shown=true;return {begin};}return {};}
         if(e.action==HoldPin || e.action==HoldRelease){
             if(!active)return {};
@@ -249,9 +248,9 @@ struct InvocationGate {
         if(e.action==Hide || e.action==Dismiss)active=false;
         return {e};
     }
-    bool due(ULONGLONG now) const {return active && !shown && now>=deadline;}
+    bool due() const {return active && !shown;}
     HookEvent reveal(){shown=true;return begin;}
-    DWORD wait(ULONGLONG now) const {return active && !shown?DWORD(now>=deadline?0:std::min<ULONGLONG>(250,deadline-now)):250;}
+    DWORD wait() const {return due()?0:250;}
 };
 static void emit(Action action,HWND hwnd=nullptr,HWND root=nullptr) {
     if (action==None) return;
@@ -598,7 +597,7 @@ static void writeActions() {
     std::vector<HookEvent> outgoing;size_t nextOutput=0;
     while (!closing.load() || tail.load()!=head.load()) {
         unsigned cursor=tail.load(std::memory_order_relaxed);
-        while (cursor!=head.load(std::memory_order_acquire) || nextOutput<outgoing.size() || (!closing.load() && intent.due(GetTickCount64()))) {
+        while (cursor!=head.load(std::memory_order_acquire) || nextOutput<outgoing.size() || (!closing.load() && intent.due())) {
             if(nextOutput==outgoing.size()) {
                 if(cursor!=head.load(std::memory_order_acquire)) {
                     auto input=queue[cursor];cursor=(cursor+1)%queue.size();tail.store(cursor,std::memory_order_release);
@@ -679,7 +678,7 @@ static void writeActions() {
             DWORD written=0;
             if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) { stop(); return; }
         }
-        if (!closing.load()) WaitForSingleObject(available,intent.wait(GetTickCount64()));
+        if (!closing.load()) WaitForSingleObject(available,intent.wait());
     }
 }
 static void check(bool value) { if (!value) throw std::runtime_error("Native hook self-test failed"); }
@@ -709,9 +708,9 @@ static int selfTest() {
         for(int i=0;i<1000;++i){
             InvocationGate gate;HookEvent begin{},action{},up{};
             begin.action=HoldBegin;begin.gapMs=1000;action.action=command;up.action=HoldCancel;
-            check(gate.feed(begin).empty() && !gate.due(1219));
+            check(gate.feed(begin).empty() && gate.due() && gate.wait()==0);
             auto result=gate.feed(action);check(result.size()==1 && result[0].action==command);
-            check(gate.feed(up).empty() && !gate.due(2000));
+            check(gate.feed(up).empty() && !gate.due());
         }
     }
     {
@@ -719,11 +718,11 @@ static int selfTest() {
         begin.action=HoldBegin;begin.gapMs=1000;begin.cursor={-400,200};up.action=HoldPin;move.action=HoldReveal;command.action=CopyStyle;
         check(gate.feed(begin).empty());auto tap=gate.feed(up);
         check(tap.size()==2 && tap[0].action==HoldBegin && tap[0].cursor.x==-400 && tap[1].action==HoldPin);
-        gate.feed(begin);check(gate.due(1220) && gate.reveal().action==HoldBegin && !gate.due(5000));
+        gate.feed(begin);check(gate.due() && gate.wait()==0 && gate.reveal().action==HoldBegin && !gate.due());
         auto selected=gate.feed(command);check(selected.size()==2 && selected[0].action==HoldCancel && selected[1].action==CopyStyle);
         gate.feed(begin);auto moved=gate.feed(move);check(moved.size()==1 && moved[0].action==HoldBegin);
         up.action=HoldRelease;auto released=gate.feed(up);check(released.size()==1 && released[0].action==HoldRelease);
-        gate.feed(begin);up.action=HoldCancel;check(gate.feed(up).empty() && !gate.due(5000));
+        gate.feed(begin);up.action=HoldCancel;check(gate.feed(up).empty() && !gate.due());
     }
     {
         Config c;c.bindings[0]={ConvertSmartObject,{VK_F5},1};KeyMachine state;Action a;

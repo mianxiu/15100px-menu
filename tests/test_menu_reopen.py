@@ -25,11 +25,18 @@ class MenuFocusTests(unittest.TestCase):
             GetWindowRect=lambda h:(0,0,1000,1000), WindowFromPoint=lambda p:4,
             SetWindowLong=Mock(), SetWindowPos=Mock(), SendMessage=Mock(),
             SetForegroundWindow=lambda h:foreground.__setitem__(0,h), ShowWindow=Mock())
+        desktop.panel_context=SimpleNamespace(snapshot=lambda h:{'kind':'layers'},current={'kind':'layers'})
+        desktop.menu_context_requester=Mock()
         with patch('win32process.GetWindowThreadProcessId',side_effect=lambda h:(1,20 if h==2 else 10)), \
              patch('win32api.GetCursorPos',return_value=(500,500)), \
              patch('win32api.GetMonitorInfo',return_value={'Work':(0,0,1000,1000)}), \
              patch('win32api.MonitorFromPoint',return_value=1):
             desktop._open(hold=True)
+            # The production SWP_SHOWWINDOW path has completed before any UXP
+            # publication; the layer worker owns sharing retries, never open().
+            desktop.gui.SetWindowPos.assert_called_once()
+            desktop.menu_context_requester.assert_not_called()
+            self.assertTrue(desktop.menu_context_pending['unpublished'])
             self.assertEqual(desktop.target,1)
             self.assertEqual(desktop.gui.SetWindowLong.call_args.args[2],1)
             visible.remove(4)  # PS hides/replaces the original floating editor.
@@ -49,6 +56,61 @@ class MenuFocusTests(unittest.TestCase):
             self.assertFalse(desktop._scope())
             foreground[0]=2
             self.assertFalse(desktop._scope(), 'Foreign app revokes the hidden session')
+
+    def test_menu_publication_wait_does_not_lock_input_or_replace_a_reopened_menu(self):
+        import threading,time
+        desktop=Desktop('http://localhost',Mock());desktop.visible=True;desktop.menu_epoch=7
+        old={'epoch':7,'unpublished':True,'deadline':time.monotonic()+10}
+        desktop.menu_context_pending=old
+        entered,release=threading.Event(),threading.Event()
+        def publish(epoch):
+            entered.set()
+            if not release.wait(2):raise TimeoutError('test barrier')
+            return {'id':'old','epoch':epoch,'deadline':time.monotonic()+10}
+        desktop.menu_context_requester=Mock(side_effect=publish)
+        worker=threading.Thread(target=desktop._publish_menu_context);worker.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            acquired=desktop.window_lock.acquire(blocking=False)
+            self.assertTrue(acquired,'UXP publication must not hold the input/window lock')
+            if acquired:
+                try:
+                    desktop.visible=False
+                    desktop._finish_menu_context()
+                    self.assertIsNone(desktop.menu_context_pending)
+                    desktop.visible=True;desktop.menu_epoch=8
+                    reopened={'epoch':8,'unpublished':True,'deadline':time.monotonic()+10}
+                    desktop.menu_context_pending=reopened
+                finally:desktop.window_lock.release()
+        finally:release.set();worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertIs(desktop.menu_context_pending,reopened)
+        desktop.menu_context_requester.assert_called_once_with(7)
+
+    def test_deferred_publication_is_once_and_keeps_original_deadline(self):
+        import time
+        desktop=Desktop('http://localhost',Mock());desktop.visible=True;desktop.menu_epoch=7
+        deadline=time.monotonic()+8
+        desktop.menu_context_pending={'epoch':7,'unpublished':True,'deadline':deadline}
+        desktop._finish_menu_context()  # No result ID exists while unpublished.
+        desktop.menu_context_requester=Mock(return_value={'id':'one','epoch':7,'deadline':deadline+2})
+        desktop._publish_menu_context();desktop._publish_menu_context()
+        desktop.menu_context_requester.assert_called_once_with(7)
+        self.assertEqual(desktop.menu_context_pending['deadline'],deadline)
+
+    def test_closed_or_expired_menu_never_publishes_and_failure_never_retries(self):
+        import time
+        for visible,deadline in [(False,time.monotonic()+10),(True,time.monotonic()-1)]:
+            desktop=Desktop('http://localhost',Mock());desktop.visible=visible;desktop.menu_epoch=7
+            desktop.menu_context_pending={'epoch':7,'unpublished':True,'deadline':deadline}
+            desktop.menu_context_requester=Mock();desktop._publish_menu_context()
+            desktop.menu_context_requester.assert_not_called();self.assertIsNone(desktop.menu_context_pending)
+        desktop.visible=True
+        desktop.menu_context_pending={'epoch':7,'unpublished':True,'deadline':time.monotonic()+10}
+        desktop.menu_context_requester=Mock(side_effect=PermissionError('read sharing'))
+        with self.assertLogs(level='ERROR'):desktop._publish_menu_context()
+        desktop._publish_menu_context();desktop.menu_context_requester.assert_called_once_with(7)
+        self.assertIsNone(desktop.menu_context_pending)
 
     def test_hidden_owned_foreground_is_scoped_but_foreign_window_is_not(self):
         desktop = Desktop('http://localhost', lambda action:None)

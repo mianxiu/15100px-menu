@@ -423,6 +423,7 @@ class Desktop:
         while not self.stop.is_set():
             try:
                 self.layer_context=self.layer_context_provider()
+                self._publish_menu_context()
                 self._finish_menu_context()
             except Exception:
                 self.layer_context=unavailable()
@@ -526,11 +527,12 @@ class Desktop:
             self.menu_layer_context=dict(self.layer_context) if fresh(self.layer_context) else unavailable()
         self.menu_context_pending=None
         if hold and panel.get('kind')=='layers' and self.menu_context_requester:
-            try:self.menu_context_pending=self.menu_context_requester(self.menu_epoch+1)
-            except Exception:logging.exception('Fresh menu context request failed')
-            if self.menu_context_pending:
-                from .layer_context import unavailable
-                self.menu_layer_context=unavailable()
+            # Reserve an identity-protected refresh, but do not touch UXP files
+            # before showing. Windows read-sharing retries run on the existing
+            # layer monitor, outside the window/input lock.
+            self.menu_context_pending={'epoch':self.menu_epoch+1,'unpublished':True,'deadline':time.monotonic()+10}
+            from .layer_context import unavailable
+            self.menu_layer_context=unavailable()
         from .shape_paint import metadata
         shape=metadata((self.menu_layer_context or {}).get('shape_editor'))
         self.color_editor_active=shape_editor_allowed(panel,shape,hold,self.menu_layer_context)
@@ -575,12 +577,30 @@ class Desktop:
                      (time.perf_counter()-open_started)*1000)
         return {"message": "操作菜单已打开", "panel_context": panel,'layer_context':self.menu_layer_context}
 
+    def _publish_menu_context(self):
+        with self.window_lock:
+            pending=self.menu_context_pending
+            if not pending or not pending.get('unpublished'):return
+            if not self.visible or self.menu_epoch!=pending['epoch'] or self.stop.is_set() or time.monotonic()>pending['deadline']:
+                self.menu_context_pending=None;return
+            pending['unpublished']=False  # Exactly one publication per menu.
+        try:request=self.menu_context_requester(pending['epoch'])
+        except Exception:
+            logging.exception('Fresh menu context request failed');request=None
+        with self.window_lock:
+            if self.menu_context_pending is not pending:return
+            if request and self.visible and self.menu_epoch==pending['epoch'] and not self.stop.is_set():
+                request['deadline']=min(request['deadline'],pending['deadline'])
+                self.menu_context_pending=request
+            else:self.menu_context_pending=None
+
     @window_transition
     def _finish_menu_context(self):
         pending=self.menu_context_pending
         if not pending:return
         if not self.visible or self.menu_epoch!=pending['epoch'] or time.monotonic()>pending['deadline']:
             self.menu_context_pending=None;return
+        if 'id' not in pending:return
         try:
             snapshot=json.loads((pending['folder']/'menu-context-result.json').read_text('utf-8-sig'))
             if snapshot.get('menu_request_id')!=pending['id']:return
