@@ -1,15 +1,16 @@
 # 目录与本地归档
 
-2026-10-16同步：当前实际程序与dist为v0.4.147／内置UXP0.3.18。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
+2026-10-16同步：当前实际程序与dist为v0.4.148／内置UXP0.3.19。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
 
 | 路径 | 用途 |
 | --- | --- |
+| `tools/benchmark-layer-snapshots.py`、`tools/fixtures/selection-context-0.3.18.cjs` | 新鲜生产读取测量、冻结旧算法语义对照；不随运行入口加载 |
 | `main.py`、`start.ps1`、`build-exe.ps1` | 当前启动／构建入口 |
 | `backend/`、`frontend/`、`native/`、`uxp/`、`jsx/` | 当前实现与内置资源 |
 | `photoshop_action/` 与根目录 COM 兼容模块 | 后端仍引用的兼容代码 |
 | `tools/`、`tests/` | 维护工具与自动回归 |
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
-| `dist/` | 当前v0.4.147 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
+| `dist/` | 当前v0.4.148 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |
@@ -41,3 +42,5 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 146同时内置tools/inspect-panels.ps1与tools/inspect-uxp.ps1，默认从后台统一诊断调用；综合报告及分项原始采集写入实际数据目录diagnostics/，不含凭据配置。145运行入口回退位于.local/recovery/releases/0.4.145-before146/。
 
 147用户索引维护的私有恢复副本位于数据目录uxp-management/backups/<标识>/PS-index-recovery.json；共享PS.json不纳入整文件所有权或覆盖式回退，安装快照只合并恢复本插件条目。146运行入口回退位于.local/recovery/releases/0.4.146-before147/。
+
+148交付：147回退位于.local/recovery/releases/0.4.147-before148及.local/archive/dist/v0.4.147-before148。临时读取探针已从External和用户加载索引移除；.runtime仅保留测试来源与报告，不分发Adobe内部SDK摘录。

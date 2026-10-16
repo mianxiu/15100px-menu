@@ -109,8 +109,11 @@ async def main():
         (ROOT/('.runtime/layer-context-'+APP_VERSION+'-live.json')).write_text(json.dumps(report,ensure_ascii=False,indent=2),'utf-8')
         print('PASS real PS cache/types, labels/order/selection, disabled atomic rejection, frozen target protection')
     finally:
+        unresolved=bool(bridge.transport.pending.value or bridge.transport.pending.error)
         await bridge.close()
-        if scratch is not None:app.ActiveDocument=scratch;assert scratch.Name==name;scratch.Close(2)
-        if previous is not None:app.ActiveDocument=previous
+        if unresolved:print('Original result unresolved; scratch retained, no further Photoshop control')
+        else:
+            if scratch is not None:app.ActiveDocument=scratch;assert scratch.Name==name;scratch.Close(2)
+            if previous is not None:app.ActiveDocument=previous
 
 if __name__=='__main__':asyncio.run(main())

@@ -45,7 +45,11 @@ async def main():
         (ROOT/f'.runtime/consecutive-creation-{APP_VERSION}.json').write_text(json.dumps(report,indent=2),'utf-8')
         print(json.dumps(report),flush=True)
     finally:
-        await bridge.close();app.ActiveDocument=scratch;scratch.Close(2)
-        if previous is not None:app.ActiveDocument=previous
+        unresolved=bool(bridge.transport.pending.value or bridge.transport.pending.error)
+        await bridge.close()
+        if unresolved:print('Original result unresolved; scratch retained, no further Photoshop control')
+        else:
+            app.ActiveDocument=scratch;scratch.Close(2)
+            if previous is not None:app.ActiveDocument=previous
 
 asyncio.run(main())

@@ -20,8 +20,35 @@ module.exports = function createLabels(ps, session) {
       return values[key];
     }
     function siblings(parent) {
-      if(!siblingLists.has(parent))siblingLists.set(parent,Array.from(parent?read(parent,'layers'):doc.layers));
+      if(!siblingLists.has(parent)) {
+        const source=parent?read(parent,'layers'):doc.layers;
+        // This fresh Photoshop Layers collection captures the ordered sibling
+        // IDs. Indexing constructs a host-backed Layer, so materialize only
+        // the indices required by membership, adjacency and edge checks.
+        // The source and objects live for this snapshot only, never across
+        // requests; every selected member and the final identity are verified.
+        const count=source.length,objects=new Map();
+        // Tiny lists and large selections keep the original host-read path:
+        // materialization has little avoidable cost in those cases.
+        const eager=count<=8 || selected.length>count/2?Array.from(source):null;
+        const at=index=>{
+          if(eager)return eager[index];
+          if(!objects.has(index))objects.set(index,source[index]);
+          return objects.get(index);
+        };
+        siblingLists.set(parent,{length:count,at,original:!!eager,raw:eager,
+          findIndex(predicate){for(let i=0;i<count;i++)if(predicate(at(i)))return i;return -1;}});
+      }
       return siblingLists.get(parent);
+    }
+    function singlePosition(order,id) {
+      if(order.original)return order.findIndex(layer=>read(layer,'id')===id);
+      if(!order.length)return -1;
+      if(read(order.at(0),'id')===id)return 0;
+      const last=order.length-1,edge=order.at(last);
+      if(read(edge,'id')===id)return last;
+      if(last>0 && read(edge,'isBackgroundLayer') && read(order.at(last-1),'id')===id)return last-1;
+      return order.findIndex(layer=>read(layer,'id')===id);
     }
     const kinds=selected.map(layer=>{
       if(read(layer,'isBackgroundLayer'))return 'background';
@@ -47,29 +74,47 @@ module.exports = function createLabels(ps, session) {
         if(depth>0 && allLocked)parentLocked=true;
       }
     }
-    let mask=0;
+    let mask=0,singleIndex;
     if(!quickOnly && selected.length && !kinds.includes('unknown')) {
       if(!background)mask|=2;
       if(selected.length===1) {
         const active=selected[0],order=siblings(parents[0]);
         if(read(active,'kind')===k.GROUP) {if(read(active,'layers').length)mask|=1;}
         else {
-          const index=order.findIndex(l=>read(l,'id')===ids[0]);
-          if(index>=0 && ((index>0 && read(order[index-1],'kind')!==k.GROUP) ||
-              (index+1<order.length && read(order[index+1],'kind')!==k.GROUP)))mask|=1;
+          const index=singlePosition(order,ids[0]);
+          singleIndex=index;
+          if(index>=0 && ((index>0 && read(order.at(index-1),'kind')!==k.GROUP) ||
+              (index+1<order.length && read(order.at(index+1),'kind')!==k.GROUP)))mask|=1;
         }
       }
       if(!background && !locked && sameParent) {
-        const order=siblings(parents[0]),chosen=order.filter(l=>ids.includes(read(l,'id')));
-        if(chosen.length===ids.length) {
+        const order=siblings(parents[0]),selectedIds=new Set(ids);
+        // Photoshop sibling IDs are unique. A single ordinary layer was
+        // already located for adjacency above; do not read every remaining
+        // sibling ID again just to establish membership. Groups/multi-select
+        // still establish membership, stopping once every selected ID is found.
+        if(!order.original && singleIndex===undefined && ids.length===1)singleIndex=singlePosition(order,ids[0]);
+        let chosenCount=singleIndex===undefined?0:(singleIndex<0?0:1);
+        if(order.original)chosenCount=order.raw.filter(layer=>ids.includes(read(layer,'id'))).length;
+        else if(singleIndex===undefined && order.length) {
+          const found=new Set(),first=read(order.at(0),'id'),last=read(order.at(order.length-1),'id');
+          if(selectedIds.has(first))found.add(first);
+          if(selectedIds.has(last))found.add(last);
+          const reverse=selectedIds.has(last) && !selectedIds.has(first);
+          for(let i=reverse?order.length-1:0;found.size<ids.length && i>=0 && i<order.length;i+=reverse?-1:1) {
+            const id=read(order.at(i),'id');if(selectedIds.has(id))found.add(id);
+          }
+          chosenCount=found.size;
+        }
+        if(chosenCount===ids.length) {
           // To establish an edge, stop at the first unselected non-background
           // layer. There is no need to query every sibling's expensive
           // isBackgroundLayer getter; unusual background positions still work.
           function atEdge(bottom) {
             let count=0;
             for(let i=bottom?order.length-1:0;i>=0 && i<order.length;i+=bottom?-1:1) {
-              const layer=order[i];
-              if(ids.includes(read(layer,'id'))) {if(++count===ids.length)return true;}
+              const layer=order.at(i);
+              if(selectedIds.has(read(layer,'id'))) {if(++count===ids.length)return true;}
               else if(!read(layer,'isBackgroundLayer'))return false;
             }
             return false;

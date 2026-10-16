@@ -4,6 +4,43 @@ from unittest.mock import Mock,patch
 from backend.uxp_bridge import UxpBridge,UxpResultUnknown,UxpTransport,publish_request
 
 class UxpPublicationTests(unittest.TestCase):
+    def test_menu_request_sharing_retry_keeps_identity_expiry_and_deadline(self):
+        from types import SimpleNamespace
+        import os
+        with tempfile.TemporaryDirectory() as base:
+            root=Path(base);bridge=UxpBridge(root/'tasks.json',root/'config.json')
+            bridge.transport=SimpleNamespace(folder=root,config=root/'config.json')
+            bridge.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+            (root/'probe-last.json').write_text('{"session":"s","probe_version":"0.3.18"}','utf-8')
+            original=os.replace;attempts=[];error=PermissionError('read handle');error.winerror=32
+            def replace(a,b):
+                attempts.append(Path(a).read_bytes())
+                if len(attempts)<3:raise error
+                return original(a,b)
+            try:
+                with patch('backend.uxp_bridge.os.replace',side_effect=replace),patch('backend.uxp_bridge.time.monotonic',return_value=10),patch('backend.uxp_bridge.time.time',return_value=100):
+                    result=bridge.request_menu_context(7)
+                request=json.loads((root/'menu-context-request.json').read_text('utf-8'))
+                self.assertEqual(result['id'],request['id']);self.assertEqual(result['deadline'],20)
+                self.assertEqual(request['expires_at_ms'],110000)
+                self.assertEqual(len(set(attempts)),1);self.assertEqual(result['epoch'],7)
+                self.assertFalse(list(root.glob('*.tmp')))
+            finally:bridge.executor.shutdown(wait=True)
+
+    def test_failed_menu_request_preserves_previous_and_removes_temp(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as base:
+            root=Path(base);bridge=UxpBridge(root/'tasks.json',root/'config.json')
+            bridge.transport=SimpleNamespace(folder=root,config=root/'config.json')
+            bridge.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+            (root/'probe-last.json').write_text('{"session":"s","probe_version":"0.3.18"}','utf-8')
+            request=root/'menu-context-request.json';request.write_bytes(b'previous request')
+            try:
+                with patch('backend.uxp_bridge.os.replace',side_effect=PermissionError('denied')):
+                    with self.assertRaises(PermissionError):bridge.request_menu_context(1)
+                self.assertEqual(request.read_bytes(),b'previous request');self.assertFalse(list(root.glob('*.tmp')))
+            finally:bridge.executor.shutdown(wait=True)
+
     def test_read_lock_retry_keeps_same_request_bytes(self):
         with tempfile.TemporaryDirectory() as base:
             source=Path(base)/'one-id.tmp';destination=Path(base)/'probe-request.json'

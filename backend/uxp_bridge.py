@@ -201,7 +201,6 @@ class UxpBridge(PhotoshopBridge):
         finally:await self.reconcile_result()
 
     def request_menu_context(self, epoch):
-        from .settings import atomic_json
         folder=self.transport.folder
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
         if version(heartbeat.get('probe_version'))<(0,3,14):return None
@@ -210,9 +209,18 @@ class UxpBridge(PhotoshopBridge):
         # Allow a slow host to finish this read-only request without relaxing
         # snapshot freshness, request identity, or any mutation target checks.
         lifetime=10 if version(heartbeat.get('probe_version'))>=(0,3,17) else 3
+        deadline=time.monotonic()+lifetime
         request={'id':secrets.token_hex(16),'session':heartbeat['session'],'token':token,'expires_at_ms':int(time.time()*1000)+lifetime*1000}
-        atomic_json(folder/'menu-context-request.json',request)
-        return {'id':request['id'],'session':request['session'],'folder':folder,'epoch':epoch,'deadline':time.monotonic()+lifetime}
+        temporary=folder/(request['id']+'.menu.tmp')
+        try:
+            temporary.write_text(json.dumps(request),'utf-8')
+            # UXP briefly holds its read handle without delete sharing. Retry
+            # only publication of this same, not-yet-accepted request; no new
+            # ID, request replay, longer expiry or keyboard-hook wait.
+            publish_request(temporary,folder/'menu-context-request.json')
+        finally:
+            if temporary.exists():temporary.unlink()
+        return {'id':request['id'],'session':request['session'],'folder':folder,'epoch':epoch,'deadline':deadline}
 
     def read_layer_context(self):
         # Called by the desktop monitor, never by the low-level hook or open().
