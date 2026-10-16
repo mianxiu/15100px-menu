@@ -526,10 +526,47 @@ function createShapePaint(ps,session,capture,selectionContext) {
 
 // Fixed reference-Caps actions. No menu letters, synthetic keys or IME changes.
 function createCapsActions(ps,session,capture,selectionContext) {
-  const commands=['selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle'];
+  const commands=['selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle','convertSmartObject'];
+  async function convert(request) {
+    return ps.core.executeAsModal(async context=>{
+      if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+      const expected=request.target,actual=await capture();
+      if(expected?.session!==session || actual.document_id!==expected.document_id || actual.active_layer_id!==expected.active_layer_id || actual.layer_ids.join(',')!==expected.layer_ids?.join(','))
+        throw Error('Smart object target changed');
+      const doc=ps.app.activeDocument,k=ps.constants.LayerKind;
+      function tree(layers,parent=null) {return Array.from(layers).flatMap(l=>[{layer:l,id:l.id,parent},...(l.kind===k.GROUP?tree(l.layers,l.id):[])]);}
+      const before=tree(doc.layers),selected=before.filter(l=>actual.layer_ids.includes(l.id));
+      if(selected.length!==actual.layer_ids.length)throw Error('Smart object target missing');
+      const parent=selected[0].parent;
+      if(selected.some(l=>l.parent!==parent))throw Error('请在同一父组内选择要转换的图层');
+      if(selected.length===1 && selected[0].layer.kind===k.SMARTOBJECT)
+        return {verified:true,unchanged:true,count:1,command:'convertSmartObject',selection_context:selectionContext()};
+      const removed=new Set();
+      function packed(l){removed.add(l.id);if(l.kind===k.GROUP)for(const child of l.layers)packed(child);}
+      for(const item of selected)packed(item.layer);
+      const unchanged=before.filter(l=>!removed.has(l.id)).map(l=>[l.id,l.parent]);
+      if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+      const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu convert smart object'});
+      try {
+        const results=await ps.action.batchPlay([{_obj:'newPlacedLayer',_options:{dialogOptions:'dontDisplay'}}],{});
+        if(results.some(v=>v._obj==='error'))throw Error('Photoshop 拒绝转换智能对象');
+        const after=await capture(),now=tree(doc.layers),made=now.find(l=>l.id===after.active_layer_id);
+        if(after.document_id!==actual.document_id || after.layer_ids.length!==1 || !made || made.layer.kind!==k.SMARTOBJECT || made.parent!==parent ||
+           JSON.stringify(now.filter(l=>l.id!==made.id).map(l=>[l.id,l.parent]))!==JSON.stringify(unchanged))
+          throw Error('智能对象类型／选择／原图层顺序读回不符，已回滚');
+        const selection=selectionContext();
+        await context.hostControl.resumeHistory(history,true);
+        return {verified:true,count:selected.length,command:'convertSmartObject',smart_object_id:made.id,selection_context:selection};
+      } catch(error) {
+        try {await context.hostControl.resumeHistory(history,false);}catch(_){error.resultUnknown=true;}
+        throw error;
+      }
+    },{commandName:'Menu convert smart object',timeOut:0});
+  }
   async function execute(request) {
     const command=request.command,expected=request.target;
     if(!commands.includes(command) || expected?.session!==session)throw Error('Unsupported Caps command/session');
+    if(command==='convertSmartObject')return convert(request);
     return ps.core.executeAsModal(async context=>{
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
       const actual=await capture();

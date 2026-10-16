@@ -476,6 +476,7 @@ static void accept(const Json& event) {
             for(int i=0;i<7;++i)if(action==capsActions[i])taskName=capsLabels[i];
             if(action=="extendAbove")taskName="向上扩展图层多选";
             if(action=="extendBelow")taskName="向下扩展图层多选";
+            if(action=="convertSmartObject")taskName="转换为智能对象";
             notice.clear();taskError.clear();taskRecovery.clear();taskFailed=false;taskHasResult=false;
         }
         updateBusy(event.value("busy",false),event.value("queue_ready",false),event.value("queue_count",0));
@@ -561,6 +562,7 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     else send(chosen<0?"hide":rowAction(chosen));
 }
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    if(msg==WM_APP+23){holdOrigin={static_cast<LONG>(wp),static_cast<LONG>(lp)};holdMoved=false;return 0;}
     if(msg==WM_COPYDATA){
         auto* data=reinterpret_cast<COPYDATASTRUCT*>(lp);
         if(!data || (data->dwData!=0x53485045 && data->dwData!=0x4d435458) || !data->lpData || data->cbData<2 || data->cbData>65536)return FALSE;

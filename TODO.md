@@ -1,5 +1,10 @@
 # Photoshop Menu TODO
 
+- [x] 145 Caps组合键／F5代码与本机交付（2026-10-16）：输出线程区分Caps前缀意图，快速组合键不输出hold_begin；短按松开、220ms长按及鼠标移动提前显示保留，按下坐标贯穿到原生菜单。F5迁移为转换智能对象，旧插件在发布请求前拒绝，保留输入／焦点／busy／未知结果保护。300后台、13前端、原生状态机及真实生产管道序列、最终EXE烟雾通过；实际入口／dist145，已正常重启加载UXP18，组件与资源哈希匹配。真实PS24.0.1单层／多层／不相邻／组／组内／背景／生产API及一次撤销通过；撤销选择遵循原生历史。证据.runtime/caps145-wire.log、smart145-live.json、caps145-final-verification.json、restart145-verification.json、tests145-final.log。
+- [ ] 145实体Caps／F5及闪现视觉验收：键鼠工具不可用；生产管道证实快速组合键无菜单消息，不替代实体按键到屏幕观察。既有选择命令生产回归本轮因PS前台保护被拒绝，未标为通过；原生输入／焦点／取消和UXP选层回归通过。
+- [ ] 145发行核验与仅保留最新版：待公开附件、备用清单和生产更新器核验完成后清理144 Release；保留标签及本地回退。
+- [ ] Win10／PS2024已安装但未加载（2026-10-16）：已区分文件安装成功与宿主加载；版本检查与生命周期22项测试通过。待故障电脑完整25.x版本、PS重启后的诊断及增效工具内本插件可见性，尚无根因或修复结论。
+
 - [x] 144慢读取修复／本机交付（2026-10-16）：基础图层能力先于形状颜色发布，后台不再持续读颜色／图案；慢读取按耗时限频，只读请求10秒，仍拒绝陈旧快照、旧菜单／会话／目标。实际EXE及dist144／UXP17、组件哈希匹配；297后台、13前端、原生及EXE验收通过。真实PS24.0.1切换24轮，35秒草稿及颜色／渐变／图案应用、一次撤销、旧目标拒绝通过。证据.runtime/caps144-final-verification.json、shape-switch144.json、shape-live-0.4.144.json、tests144-final.log。
 - [ ] 144故障电脑实机验收：用户诊断实际142／UXP14／PS24.2.0，热键发出、layers识别、busy=false；报告缺少快照耗时，尚不能确认故障唯一根因。需在i5集显电脑验证连续使用和长按Caps后填充／描边选色松键；本机键鼠工具因CreateProcessSecurityEnvironment 0x80070020不可用，真实PS执行和原生120秒草稿自测不替代实体键鼠验收。
 - [x] 144 GitHub更新／发行清理：源码和v0.4.144标签已推送；统一包与校验附件、更新清单公开并匿名下载核验；直接执行最终EXE内更新器代码，强制API403后读取真实清单并下载／校验144通过。其余14条旧Release及草稿已删除，发行页仅144；前后远程标签集合相同，143本地备份保留。证据.runtime/release-0.4.144-public-verification.json、manifest144-verification.json、fallback144-live.json、release144-cleanup.json、runtime144-delivered.json。

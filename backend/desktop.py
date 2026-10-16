@@ -459,12 +459,12 @@ class Desktop:
             self.hide(restore=False)
         self._native_config()
 
-    def open(self, context=False, hold=False):
+    def open(self, context=False, hold=False, origin=None):
         u = ctypes.WinDLL("user32", use_last_error=True)
         u.SetThreadDpiAwarenessContext.argtypes, u.SetThreadDpiAwarenessContext.restype = [W.HANDLE], W.HANDLE
         previous = u.SetThreadDpiAwarenessContext(W.HANDLE(-4))
         try:
-            return self._open(context, hold)
+            return self._open(context, hold, origin) if origin is not None else self._open(context, hold)
         finally:
             if previous:
                 u.SetThreadDpiAwarenessContext(previous)
@@ -487,7 +487,7 @@ class Desktop:
             logging.debug('Document caption unavailable', exc_info=True)
 
     @window_transition
-    def _open(self, context=False, hold=False):
+    def _open(self, context=False, hold=False, origin=None):
         open_started = time.perf_counter()
         import win32api
         import win32con as c
@@ -508,6 +508,7 @@ class Desktop:
                     max(rect[2], floating[2]), max(rect[3], floating[3]))
         if not (rect[0] <= cursor[0] < rect[2] and rect[1] <= cursor[1] < rect[3]):
             raise RuntimeError("鼠标需要位于 Photoshop 窗口内")
+        if hold and origin is not None:cursor=tuple(origin)
         self.target = root
         self.caption_window = hwnd
         self._refresh_document_name()
@@ -554,6 +555,7 @@ class Desktop:
             from .layer_context import flags as layer_flags
             flags |= layer_flags(self.menu_layer_context)
         self.gui.SendMessage(self.hwnd, 0x8011, flags, self.menu_epoch)
+        if hold and origin is not None:self.gui.SendMessage(self.hwnd,0x8017,origin[0],origin[1])
         class CopyData(ctypes.Structure):
             _fields_=[('tag',ctypes.c_size_t),('size',W.DWORD),('data',ctypes.c_void_p)]
         payload=json.dumps(shape,ensure_ascii=False).encode('utf-8')
@@ -634,10 +636,10 @@ class Desktop:
         return open_new_dialog(self.gui, root)
 
     @window_transition
-    def hold_begin(self):
+    def hold_begin(self, cursor=None):
         if self.visible:
             self.hide()
-        result = self.open(hold=True)
+        result = self.open(hold=True,origin=cursor) if cursor is not None else self.open(hold=True)
         self.hold_active = True
         return result
 

@@ -13,7 +13,8 @@ DEFAULTS = {"enabled": True, "menu_width": 360, "menu_height": 300, "render_mode
                           "selectAbove":"capslock+w", "selectBelow":"capslock+s",
                           "extendAbove":"shift+capslock+w", "extendBelow":"shift+capslock+s",
                           "moveUp":"", "moveDown":"",
-                          "copyStyle":"capslock+c", "pasteStyle":"capslock+v", "editStyle":"capslock+f"}}
+                          "copyStyle":"capslock+c", "pasteStyle":"capslock+v", "editStyle":"capslock+f",
+                          "convertSmartObject":"f5"}}
 KEYS = {"tab": 9, "esc": 27, "space": 32, "capslock": 20, "ctrl": 17, "shift": 16, "alt": 18,
         **{f"f{i}": 111+i for i in range(1, 13)},
         **{chr(i).lower(): i for i in range(65, 91)}, **{str(i): 48+i for i in range(10)}}
@@ -103,6 +104,11 @@ class Settings:
                         shortcuts[key] = DEFAULTS['shortcuts'][key]
             shortcuts=data.get('shortcuts',{})
             if isinstance(shortcuts,dict):
+                if 'convertSmartObject' not in shortcuts:
+                    # F5 now belongs to conversion. Later explicit edits keep
+                    # their saved assignments, including disabling this key.
+                    for key,value in list(shortcuts.items()):
+                        if isinstance(value,str) and value.strip().lower()=='f5':shortcuts[key]=''
                 # Only replace stock legacy collisions; retain custom chords.
                 for key,old in {'color':'capslock+c','moveToTop':'capslock+w','moveToBottom':'capslock+s'}.items():
                     if shortcuts.get(key)==old:shortcuts[key]=''

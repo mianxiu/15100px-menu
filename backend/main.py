@@ -532,11 +532,11 @@ class Application(web.Application):
                     return {"message":"已忽略旧菜单事件"}
                 if action in ("panel.open","panel.context") or action=="panel.toggle" and not self.desktop.visible:
                     await self.broadcast({"type":"popup.prepare","mode":"context" if action=="panel.context" else "quick"})
-                if action=="panel.hold_release" and 'cursor' in args:
+                if action in ("panel.hold_begin","panel.hold_release") and 'cursor' in args:
                     cursor=args['cursor']
                     if not isinstance(cursor,list) or len(cursor)!=2 or any(type(v) is not int or not -2147483648<=v<=2147483647 for v in cursor):
                         raise ValueError('无效的松键鼠标坐标')
-                    return await asyncio.to_thread(self.desktop.hold_release,cursor=cursor)
+                    return await asyncio.to_thread(getattr(self.desktop,action.split('.')[1]),cursor=cursor)
                 return await asyncio.to_thread(getattr(self.desktop, action.split(".")[1]))
         if action == "overlay.ready":
             if not self.desktop:

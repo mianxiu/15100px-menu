@@ -77,6 +77,8 @@ class UxpTransport:
                     raise RuntimeError('请更新并重新加载 UXP 0.3.8，以支持结果核对；未提交修改')
                 if payload.get('command') in ('selectAbove','selectBelow','extendAbove','extendBelow') and version(heartbeat.get('probe_version'))<(0,3,16):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.16，以支持单选与Shift多选；未提交操作')
+                if payload.get('command')=='convertSmartObject' and version(heartbeat.get('probe_version'))<(0,3,18):
+                    raise RuntimeError('请更新并重新加载 UXP 0.3.18，以支持转换智能对象；未提交操作')
                 request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
                 encoded=json.dumps(request)
                 if len(encoded.encode('utf-8'))>4096:raise ValueError('UXP 请求超出本地协议长度，未提交操作')

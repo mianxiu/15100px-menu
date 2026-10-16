@@ -11,11 +11,12 @@
 #include <memory>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow };
-static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow"};
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal };
+static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr; std::array<Binding,15> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr; std::array<Binding,16> bindings{}; };
 // Opt-in remote clicks qualify only on a matching release in the same verified
 // PS workspace. No hover, taskbar or injected Alt+Tab activation is added.
 struct RemoteClickIntent {
@@ -221,6 +222,37 @@ struct HookEvent {
 };
 static std::array<HookEvent,1024> queue{};
 static std::atomic<unsigned> head{0}, tail{0};
+static POINT intentOrigin{};
+static bool intentRevealed=false;
+static bool directCommand(Action a) {
+    return a==Select || a==Color || a==Top || a==Bottom || a==SelectAbove || a==SelectBelow ||
+        a==ExtendAbove || a==ExtendBelow || a==MoveUp || a==MoveDown || a==CopyStyle || a==PasteStyle || a==EditStyle || a==ConvertSmartObject;
+}
+// Only the pipe writer waits for intent. Hook ownership and shortcut execution
+// remain immediate. Drain queued input before revealing a timed-out prefix.
+struct InvocationGate {
+    bool active=false,shown=false;
+    HookEvent begin{};
+    ULONGLONG deadline=0;
+    std::vector<HookEvent> feed(const HookEvent& e) {
+        if(e.action==HoldBegin){active=true;shown=false;begin=e;deadline=e.gapMs+220;return {};}
+        if(e.action==HoldReveal){if(active && !shown){shown=true;return {begin};}return {};}
+        if(e.action==HoldPin || e.action==HoldRelease){
+            if(!active)return {};
+            active=false;if(!shown)return {begin,e};return {e};
+        }
+        if(e.action==HoldCancel){bool close=active && shown;active=false;return close?std::vector<HookEvent>{e}:std::vector<HookEvent>{};}
+        if(directCommand(e.action)){
+            bool close=active && shown;active=false;
+            if(close){HookEvent hide{};hide.action=HoldCancel;return {hide,e};}
+        }
+        if(e.action==Hide || e.action==Dismiss)active=false;
+        return {e};
+    }
+    bool due(ULONGLONG now) const {return active && !shown && now>=deadline;}
+    HookEvent reveal(){shown=true;return begin;}
+    DWORD wait(ULONGLONG now) const {return active && !shown?DWORD(now>=deadline?0:std::min<ULONGLONG>(250,deadline-now)):250;}
+};
 static void emit(Action action,HWND hwnd=nullptr,HWND root=nullptr) {
     if (action==None) return;
     unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
@@ -228,6 +260,7 @@ static void emit(Action action,HWND hwnd=nullptr,HWND root=nullptr) {
     POINT cursor{};
     if (action==HoldRelease && !GetCursorPos(&cursor)) action=HoldCancel;
     queue[head.load(std::memory_order_relaxed)]={action,hwnd,root,cursor};
+    if(action==HoldBegin){queue[head.load(std::memory_order_relaxed)].gapMs=GetTickCount64();GetCursorPos(&intentOrigin);queue[head.load(std::memory_order_relaxed)].cursor=intentOrigin;intentRevealed=false;}
     head.store(next,std::memory_order_release); SetEvent(available);
 }
 static bool photoshop(HWND hwnd) {
@@ -386,6 +419,7 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
         }
         Config localConfig=config;
         localConfig.colorEditor=config.colorEditor && menuWindow(foreground);
+        bool unusedPrefix=keys.pending!=-1 && !keys.used;
         bool blocked=routeKey(keys,input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
                      commandScope,processScope,localConfig,IsWindowVisible(config.overlay),action,GetTickCount64());
         bool traceConfigured=false;
@@ -415,6 +449,7 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
         if (blocked) {
             emit(action); return 1;
         }
+        if(unusedPrefix && keys.used && action==None)emit(HoldCancel);
     }
     return CallNextHookEx(nullptr,code,message,data);
 }
@@ -429,6 +464,10 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
                   message==WM_MBUTTONUP || message==WM_MBUTTONDOWN?2:-1;
         bool up=message==WM_LBUTTONUP || message==WM_RBUTTONUP || message==WM_MBUTTONUP;
         const auto& mouse=*reinterpret_cast<const MSLLHOOKSTRUCT*>(data);
+        if(message==WM_MOUSEMOVE && keys.pending!=-1 && !keys.used && !intentRevealed && !(mouse.flags&LLMHF_INJECTED)) {
+            const long long dx=mouse.pt.x-intentOrigin.x,dy=mouse.pt.y-intentOrigin.y;
+            if(dx*dx+dy*dy>=144){intentRevealed=true;emit(HoldReveal);}
+        }
         if(index==0) {
             if(mouse.flags&LLMHF_INJECTED) {
                 bool enabled=config.enabled && config.remoteCompatibility;
@@ -520,7 +559,7 @@ static Config parse(const std::string& line) {
     if (std::regex_search(line,match,std::regex("\"diagnostic_trace\"\\s*:\\s*(true|false)"))) next.diagnostic=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"remote_compatibility\"\\s*:\\s*(true|false)"))) next.remoteCompatibility=match[1]=="true";
     next.overlay=reinterpret_cast<HWND>(std::stoull(field("hwnd","([0-9]+)")));
-    const Action actions[]={Toggle,Hide,Select,Color,Top,Bottom,SelectAbove,SelectBelow,MoveUp,MoveDown,CopyStyle,PasteStyle,EditStyle,ExtendAbove,ExtendBelow};
+    const Action actions[]={Toggle,Hide,Select,Color,Top,Bottom,SelectAbove,SelectBelow,MoveUp,MoveDown,CopyStyle,PasteStyle,EditStyle,ExtendAbove,ExtendBelow,ConvertSmartObject};
     int index=0;
     for (Action a:actions) {
         Binding& b=next.bindings[index++]; b.action=a;
@@ -555,10 +594,19 @@ static void readSettings() {
 }
 static void writeActions() {
     HANDLE output=GetStdHandle(STD_OUTPUT_HANDLE);
+    InvocationGate intent;
+    std::vector<HookEvent> outgoing;size_t nextOutput=0;
     while (!closing.load() || tail.load()!=head.load()) {
         unsigned cursor=tail.load(std::memory_order_relaxed);
-        while (cursor!=head.load(std::memory_order_acquire)) {
-            auto event=queue[cursor];Action action=event.action; cursor=(cursor+1)%queue.size(); tail.store(cursor,std::memory_order_release);
+        while (cursor!=head.load(std::memory_order_acquire) || nextOutput<outgoing.size() || (!closing.load() && intent.due(GetTickCount64()))) {
+            if(nextOutput==outgoing.size()) {
+                if(cursor!=head.load(std::memory_order_acquire)) {
+                    auto input=queue[cursor];cursor=(cursor+1)%queue.size();tail.store(cursor,std::memory_order_release);
+                    outgoing=intent.feed(input);nextOutput=0;continue;
+                }
+                outgoing={intent.reveal()};nextOutput=0;
+            }
+            auto event=outgoing[nextOutput++];Action action=event.action;
             const char* type=action==Ready?"ready":action==Error?"error":action==Configured?"configured":"action";
             std::string line;
             if (action==ActivationTrace) {
@@ -625,13 +673,13 @@ static void writeActions() {
             if (action==PanelClick) line="{\"type\":\"panel.click\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+"}\n";
             else {
                 line=std::string("{\"type\":\"")+type+"\",\"action\":\""+names[action]+"\"";
-                if (action==HoldRelease) line+=",\"cursor\":["+std::to_string(event.cursor.x)+","+std::to_string(event.cursor.y)+"]";
+                if (action==HoldRelease || action==HoldBegin) line+=",\"cursor\":["+std::to_string(event.cursor.x)+","+std::to_string(event.cursor.y)+"]";
                 line+="}\n";
             }
             DWORD written=0;
             if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) { stop(); return; }
         }
-        if (!closing.load()) WaitForSingleObject(available,250);
+        if (!closing.load()) WaitForSingleObject(available,intent.wait(GetTickCount64()));
     }
 }
 static void check(bool value) { if (!value) throw std::runtime_error("Native hook self-test failed"); }
@@ -657,6 +705,35 @@ static void sampleCapsState(bool force=false) {
     } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
 }
 static int selfTest() {
+    for(Action command:{CopyStyle,PasteStyle,EditStyle,SelectAbove,SelectBelow,ExtendAbove,ExtendBelow,ConvertSmartObject}) {
+        for(int i=0;i<1000;++i){
+            InvocationGate gate;HookEvent begin{},action{},up{};
+            begin.action=HoldBegin;begin.gapMs=1000;action.action=command;up.action=HoldCancel;
+            check(gate.feed(begin).empty() && !gate.due(1219));
+            auto result=gate.feed(action);check(result.size()==1 && result[0].action==command);
+            check(gate.feed(up).empty() && !gate.due(2000));
+        }
+    }
+    {
+        InvocationGate gate;HookEvent begin{},up{},move{},command{};
+        begin.action=HoldBegin;begin.gapMs=1000;begin.cursor={-400,200};up.action=HoldPin;move.action=HoldReveal;command.action=CopyStyle;
+        check(gate.feed(begin).empty());auto tap=gate.feed(up);
+        check(tap.size()==2 && tap[0].action==HoldBegin && tap[0].cursor.x==-400 && tap[1].action==HoldPin);
+        gate.feed(begin);check(gate.due(1220) && gate.reveal().action==HoldBegin && !gate.due(5000));
+        auto selected=gate.feed(command);check(selected.size()==2 && selected[0].action==HoldCancel && selected[1].action==CopyStyle);
+        gate.feed(begin);auto moved=gate.feed(move);check(moved.size()==1 && moved[0].action==HoldBegin);
+        up.action=HoldRelease;auto released=gate.feed(up);check(released.size()==1 && released[0].action==HoldRelease);
+        gate.feed(begin);up.action=HoldCancel;check(gate.feed(up).empty() && !gate.due(5000));
+    }
+    {
+        Config c;c.bindings[0]={ConvertSmartObject,{VK_F5},1};KeyMachine state;Action a;
+        check(state.event(VK_F5,true,true,c,false,a,1000) && a==ConvertSmartObject);
+        check(state.event(VK_F5,true,true,c,false,a,1010) && a==None);
+        check(state.event(VK_F5,false,true,c,false,a,1020) && a==None);
+        c.textInput=true;check(!state.event(VK_F5,true,true,c,false,a,1030) && a==None);
+        state.event(VK_F5,false,true,c,false,a,1040);c.textInput=false;
+        check(!routeKey(state,VK_F5,true,false,true,c,false,a,1050) && a==None);
+    }
     // Complete remote click pairs only: opt-in, same valid workspace and 2s.
     RemoteClickIntent remote;
     check(!remote.event(true,false,10,10,100));

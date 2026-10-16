@@ -6,6 +6,14 @@ from backend.desktop import Desktop
 from backend.settings import Settings,DEFAULTS
 
 class CapsInputTests(unittest.TestCase):
+ def test_f5_migrates_to_conversion_and_later_custom_settings_survive(self):
+  with tempfile.TemporaryDirectory() as folder:
+   path=Path(folder)/'settings.json';old=copy.deepcopy(DEFAULTS)
+   del old['shortcuts']['convertSmartObject'];old['shortcuts']['color']='f5'
+   path.write_text(json.dumps(old),'utf-8');settings=Settings(path);value=settings.get()
+   self.assertEqual(value['shortcuts']['convertSmartObject'],'f5');self.assertEqual(value['shortcuts']['color'],'')
+   value['shortcuts']['convertSmartObject']='f6';settings.save(value)
+   self.assertEqual(Settings(path).get()['shortcuts']['convertSmartObject'],'f6')
  def test_stock_collisions_migrate_and_custom_chords_survive(self):
   old=copy.deepcopy(DEFAULTS);old['shortcuts']={k:old['shortcuts'][k] for k in ('toggle','hide','select','color','moveToTop','moveToBottom')};old['shortcuts'].update(color='capslock+c',moveToTop='capslock+w',moveToBottom='f8')
   with tempfile.TemporaryDirectory() as folder:

@@ -1,4 +1,5 @@
 export default {
+  "转换为智能对象":"Convert to Smart Object",
   "GitHub HTTPS证书校验失败，请检查系统日期、Windows根证书及代理的证书配置":"GitHub HTTPS certificate verification failed. Check the system date, Windows root certificates and proxy certificate configuration.",
   "GitHub HTTPS连接失败（SSL），请检查代理或网络拦截；也可从GitHub Releases手动下载":"GitHub HTTPS connection failed (SSL). Check your proxy or network filtering, or download manually from GitHub Releases.",
   "连接GitHub超时，请检查网络及系统代理，稍后重试":"GitHub connection timed out. Check the network and system proxy, then retry.",

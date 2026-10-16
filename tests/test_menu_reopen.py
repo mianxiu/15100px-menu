@@ -167,6 +167,10 @@ class MenuFocusTests(unittest.TestCase):
         desktop.gui.SendMessage.assert_called_once_with(2, 0x8015, -250, 730)
         desktop.hold_release(cursor=[-100, 900])
         self.assertEqual(desktop.gui.SendMessage.call_count, 1)
+    def test_deferred_begin_keeps_the_original_physical_press_position(self):
+        desktop=Desktop('http://localhost',lambda action:None);desktop.open=Mock(return_value={'message':'opened'})
+        desktop.hold_begin(cursor=[-400,200])
+        desktop.open.assert_called_once_with(hold=True,origin=[-400,200])
 
     def test_hold_release_after_focus_change_cancels_without_execution(self):
         desktop = Desktop('http://localhost', lambda action:None)
