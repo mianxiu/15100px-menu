@@ -1,6 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {diagnosticClock} from '../src/diagnostics.mjs';
+import {diagnosticClock,diagnosticScopes,diagnosticFinding} from '../src/diagnostics.mjs';
+
+test('scoped checks and uncertain loader evidence are explicit',()=>{
+ assert.deepEqual(diagnosticScopes.map(row=>row[0]),['all','menu','uxp','runtime']);
+ assert.match(diagnosticFinding('uxp_user_external_scan_not_observed'),/尚非故障根因/);
+ assert.equal(diagnosticFinding('untrusted secret'),'检测结果待核对');
+ assert.equal(diagnosticClock({phase:'collecting',stage:'uxp',message:'uxp',remaining_ms:0},10).label,'uxp');
+});
 test('countdown advances locally and zero never claims completion',()=>{
  const d={phase:'collecting',stage:'prepare',remaining_ms:5000,received_at:1000,message:'prepare'};
  assert.equal(diagnosticClock(d,1000).seconds,5);

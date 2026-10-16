@@ -1,6 +1,6 @@
 # 目录与本地归档
 
-2026-10-16同步：当前实际程序与dist为v0.4.145／内置UXP0.3.18。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
+2026-10-16同步：当前实际程序与dist为v0.4.146／内置UXP0.3.18。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
 
 | 路径 | 用途 |
 | --- | --- |
@@ -9,12 +9,12 @@
 | `photoshop_action/` 与根目录 COM 兼容模块 | 后端仍引用的兼容代码 |
 | `tools/`、`tests/` | 维护工具与自动回归 |
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
-| `dist/` | 当前v0.4.145 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
+| `dist/` | 当前v0.4.146 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |
 | `.local/archive/runtime/` | 历史诊断、预览、配置备份、浏览器数据及恢复资料 |
-| `.local/recovery/releases/` | 实际运行入口及配置的版本回退副本（当前保留144-before145） |
+| `.local/recovery/releases/` | 实际运行入口及配置的版本回退副本（保留144-before145及145-before146） |
 | `.local/recovery/sample-documents/` | 原实验 PSD |
 | `.local/recovery/git-history/private-history-backup.git` | 公开前的原始 Git 历史备份 |
 
@@ -34,6 +34,8 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 
 ## 当前交付和维护工具
 
-145公开ZIP不因后续文档同步重打包。旧144发行物归档`.local/archive/dist/v0.4.144-before145/`，运行入口及用户配置回退在`.local/recovery/releases/0.4.144-before145/`。GitHub发行页仅保留145，Git标签／源码历史和本地备份保留。
+145公开ZIP不因后续文档同步重打包。旧144发行物归档`.local/archive/dist/v0.4.144-before145/`，运行入口及用户配置回退在`.local/recovery/releases/0.4.144-before145/`。GitHub发行页仅保留最新版，Git标签／源码历史和本地备份保留。
 
 `tools/inspect-panels.ps1`采集窗口／面板／触发链；`tools/inspect-uxp.ps1`采集安装及宿主加载记录，二者用途不同。最新独立脚本从源码获取，不以旧公开包内容推断最新脚本版本。`.runtime/profile146-*`中的146是实验代号，实际受测程序仍为145，不代表发布了146。用户未跟踪的设计原稿目录继续原位保留，不纳入发行物。
+
+146同时内置tools/inspect-panels.ps1与tools/inspect-uxp.ps1，默认从后台统一诊断调用；综合报告及分项原始采集写入实际数据目录diagnostics/，不含凭据配置。145运行入口回退位于.local/recovery/releases/0.4.145-before146/。

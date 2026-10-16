@@ -298,12 +298,17 @@ class Application(web.Application):
             raise RuntimeError('应用正在更新，本次操作未接受')
         if action=='diagnostics.start':
             desktop=self.desktop
+            scope=args.get('scope','all')
             def diagnostic_progress(snapshot):
-                if desktop:desktop.event({'type':'diagnostic.progress',**snapshot,'trigger':desktop.settings['shortcuts']['toggle'],'language':read_language(self.runtime)})
+                if desktop and scope in ('all','menu'):desktop.event({'type':'diagnostic.progress',**snapshot,'trigger':desktop.settings['shortcuts']['toggle'],'language':read_language(self.runtime)})
                 asyncio.create_task(self.broadcast({'type':'diagnostics','data':snapshot}))
             self.diagnostics.listener=diagnostic_progress
-            result=self.diagnostics.start()
-            if desktop:
+            self.diagnostics.runtime_provider=lambda:{'application':service_identity(),
+                'photoshop':self.bridge._status_snapshot(),'tasks':self.tasks.snapshot(),
+                'application_update':self.application_updates.snapshot(),
+                'graphics':getattr(self.desktop,'graphics',{}) if self.desktop else {}}
+            result=self.diagnostics.start(scope)
+            if desktop and scope in ('all','menu'):
                 from collections import deque
                 desktop.trigger_events=deque(maxlen=64);desktop.diagnostic_trace=True;desktop._native_config()
                 self.diagnostics.provider=lambda:{'events':list(desktop.trigger_events),'activation':getattr(desktop,'activation_snapshot',None),'configured_trigger':desktop.settings['shortcuts']['toggle'],'enabled':desktop.settings['enabled']}

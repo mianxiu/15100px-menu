@@ -1,6 +1,6 @@
 # 读取策略与特殊图层数量实测
 
-2026-10-16状态：当前生产为145／UXP0.3.18；下面是2026-10-13的受控历史实验，回退0.3.10只表示当时恢复，不能据此安装旧插件。144／UXP17已另行交付分阶段读取、停止空闲颜色读取及按耗时限频。最新4／100同级图层只读基线为48.5／280ms，进一步读取算法尚未替换；见[性能](../PERFORMANCE.md)和[待办](../TODO.md)。
+2026-10-16状态：当前生产为146／UXP0.3.18；下面是2026-10-13的受控历史实验，回退0.3.10只表示当时恢复，不能据此安装旧插件。144／UXP17已另行交付分阶段读取、停止空闲颜色读取及按耗时限频。最新4／100同级图层只读基线为48.5／280ms，进一步读取算法尚未替换；见[性能](../PERFORMANCE.md)和[待办](../TODO.md)。
 
 2026-10-13，本机Photoshop24.0.1／UXP6.3.3，181×181px、72ppi临时文档。结论：保留已发布v0.4.120／UXP0.3.10的快照内DOM缓存与现有刷新方式。定向get、异步multiGet没有达到跨场景稳定提速门槛；事件＋1秒兜底刷新降低空闲读取，但脚本变化反馈明显变慢。实验0.3.11已通过后台同一UxpManager所有权回退流程恢复内置0.3.10，实际入口、原生菜单／热键及发行物哈希核验；未发行新实验版本。
 
@@ -83,3 +83,5 @@ Adobe说明默认modal区间会限制事件通知，自己的创建仍必须主�
 本机原始证据保留在`.runtime/read-strategies121-results.json`、`special-reading121-types-completed.json`、`special-reading121-shape10-completed.json`、`special-reading121-counts-five-completed.json`与`special-reading121-counts-last.json`、`special-reading121-audit.json`与`special-reading121-masked-audit.json`、`read-refresh121-strict.json`、`read-benchmark-production-restored.json`及`installed-0.4.120-final-verification.json`。`121`是实验文件代号，未发布v0.4.121。原始路径／凭据／恢复PSD不随公开仓库分发。
 
 恢复后生产0.3.10再次通过真实十次连续创建（含打组后组内创建）与三项模拟丢失结果读取／桥重建核对；修改每项仅发布一次，原请求槽不改。证据`.runtime/consecutive-creation120-after-reading.log`、`.runtime/recovery120-after-reading.log`。不是物理断网或实体菜单按键测试。
+
+2026-10-16：当前146／UXP18新增的是统一后台诊断，读取已有缓存、观测耗时和受限加载日志，不运行创建／修改文档的开发基准；本报告145及更早的时序数据保留原受测版本。图层读取下一阶段优化、自动ENG与跨机稳定性没有因检测整合而标为通过。

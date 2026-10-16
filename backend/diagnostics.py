@@ -1,6 +1,45 @@
-"""Opt-in, bounded native-window diagnostic. No Photoshop requests or input."""
+"""Opt-in, bounded read-only diagnostics. No Photoshop requests or input."""
 import asyncio,json,os,uuid,time,math
 from pathlib import Path
+
+SCOPES={'all','menu','uxp','runtime'}
+
+def runtime_report(value):
+    """Export cached counters only, never documents, credentials or raw errors."""
+    def pick(source,keys):
+        return {k:source[k] for k in keys if k in source and isinstance(source[k],(str,int,float,bool,type(None)))}
+    ps=value.get('photoshop',{});layer=ps.get('layer_context') or {}
+    observed={}
+    for name in ('background','menu'):
+        row=(ps.get('layer_observation') or {}).get(name,{})
+        observed[name]={**pick(row,('selection_ms','shape_ms','interval_ms','completed_at_ms','phase','selection_changed')),
+                        'error_present':bool(row.get('error') or row.get('shape_error'))}
+    tasks=[]
+    for row in value.get('tasks',{}).get('items',[])[:64]:
+        tasks.append({**pick(row,('id','state','channel','elapsed_ms','created_at')),
+            'error_present':bool(row.get('error')),
+            'timeline':[pick(p,('state','start_elapsed_ms','duration_ms','active')) for p in row.get('timeline',[])[:32]]})
+    updates=value.get('application_update',{})
+    context=pick(layer,('kind','mask','quick_mask','plugin_time_ms','locked','background','same_parent'))
+    context['selection_count']=len(layer.get('layer_ids',[]))
+    context['age_ms']=max(0,round(time.time()*1000-layer['plugin_time_ms'])) if layer.get('plugin_time_ms') else None
+    return {'schema':1,'read_only':True,'source':'cached-state-no-photoshop-request',
+        'application':pick(value.get('application',{}),('version','pid','frozen')),
+        'photoshop':pick(ps,('connected','busy','uxp_ready','uxp_version','photoshop_version','status_fresh','status_age_ms','status_wait_reason')),
+        'layer_context':context,'layer_observation':observed,'tasks':tasks,
+        'application_update':{**pick(updates,('phase','current','available','last_checked','last_attempt')),'error_present':bool(updates.get('error'))},
+        'graphics':pick(value.get('graphics',{}),('requested','active','actual','adapter','requested_mode','actual_mode','adapter_name','backend','software'))}
+
+def uxp_findings(report):
+    backend=report.get('backend',{})
+    if backend.get('ready'):return ['uxp_loaded']
+    if not report.get('plugin_exists'):return ['uxp_files_missing']
+    logs=[l for l in report.get('logs',[]) if l.get('matches_running_host') and l.get('after_host_start')]
+    if not logs:return ['uxp_current_host_logs_unavailable']
+    lines='\n'.join(line for log in logs for line in log.get('loader_lines',[]))
+    # Absence is an observation in the captured logs, never a proven root cause.
+    if 'user fallback plugins folder:' not in lines.lower():return ['uxp_user_external_scan_not_observed']
+    return ['uxp_load_unconfirmed']
 
 def trigger_summary(evidence):
     if evidence.get('enabled') is False:return 'menu_disabled'
@@ -14,8 +53,10 @@ def trigger_summary(evidence):
     return 'key_received_without_open_match'
 
 class Diagnostics:
-    def __init__(self,runtime,script,port):
+    def __init__(self,runtime,script,port,uxp_script=None):
         self.folder=Path(runtime)/'diagnostics';self.script=Path(script);self.port=port
+        self.uxp_script=Path(uxp_script) if uxp_script else self.script.with_name('inspect-uxp.ps1')
+        self.runtime_provider=None
         self.provider=None;self.listener=None;self.deadline=0;self.task=None;self.report=None;self.state={'phase':'idle','message':'尚未采集诊断'}
 
     def snapshot(self):
@@ -39,37 +80,81 @@ class Diagnostics:
             self.progress(stage,'正在采集：请在PS中按菜单唤出键' if stage=='sampling' else '采集结束，正在整理报告',remaining,samples_done=completed,samples_total=10)
 
 
-    def start(self):
+    def start(self,scope='menu'):
+        if not isinstance(scope,str) or scope not in SCOPES:raise ValueError('无效的诊断范围')
         if self.task and not self.task.done():raise RuntimeError('诊断正在采集，请稍候')
-        self.report=None;self.state={'phase':'collecting'};self.progress('prepare','准备：请切回PS并点击图层列表',5000,samples_done=0,samples_total=10)
+        self.scope=scope;self.report=None;self.state={'phase':'collecting','scope':scope,'components':{}}
+        if scope in ('all','menu'):self.progress('prepare','准备：请切回PS并点击图层列表',5000,samples_done=0,samples_total=10)
+        else:self.progress('starting','正在准备只读检测')
         self.task=asyncio.create_task(self.collect());return self.snapshot()
 
-    async def collect(self):
+    async def run_script(self,kind):
         process=None
         try:
-            await asyncio.sleep(5)
-            self.progress('starting','正在启动只读检测，请保持PS前台')
             self.folder.mkdir(parents=True,exist_ok=True)
             path=self.folder/(uuid.uuid4().hex+'.json')
             exe=Path(os.environ['SystemRoot'])/'System32/WindowsPowerShell/v1.0/powershell.exe'
-            process=await asyncio.create_subprocess_exec(str(exe),'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(self.script),'-BackendPort',str(self.port),'-OutputPath',str(path),'-DelaySeconds','0','-ProgressStream',stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL,creationflags=0x08000000)
-            await asyncio.wait_for(asyncio.gather(process.wait(),self.read_progress(process)),35)
+            script=self.script if kind=='menu' else self.uxp_script
+            args=[str(exe),'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(script),'-BackendPort',str(self.port),'-OutputPath',str(path)]
+            if kind=='menu':args+=['-DelaySeconds','0','-ProgressStream']
+            process=await asyncio.create_subprocess_exec(*args,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL,creationflags=0x08000000)
+            await asyncio.wait_for(asyncio.gather(process.wait(),self.read_progress(process)),35 if kind=='menu' else 20)
             if process.returncode!=0 or not path.is_file():raise RuntimeError('native diagnostic failed')
             if path.stat().st_size>2*1024*1024:raise ValueError('report too large')
             report=json.loads(path.read_text('utf-8-sig'))
-            if report.get('schema')!=2 or report.get('read_only') is not True:raise ValueError('invalid report')
-            if self.provider:
+            if report.get('schema')!=(2 if kind=='menu' else 1) or report.get('read_only') is not True:raise ValueError('invalid report')
+            return report
+        finally:
+            if process and process.returncode is None:
+                process.kill();await process.wait() # Only our read-only diagnostic child.
+
+    async def collect(self):
+        try:
+            scope=self.scope
+            if scope in ('all','menu'):
+                await asyncio.sleep(5)
+                self.progress('starting','正在启动只读检测，请保持PS前台')
+            report={'schema':2,'read_only':True,'diagnostic_scope':scope,'components':{},'findings':[]}
+            kinds=('menu','uxp','runtime') if scope=='all' else (scope,)
+            for kind in kinds:
+                self.state['components'][kind]='collecting'
+                if kind=='uxp':self.progress('uxp','正在检查UXP安装与加载日志')
+                if kind=='runtime':self.progress('runtime','正在整理运行状态与图层读取耗时')
+                started=time.monotonic()
+                reason=''
+                try:
+                    if kind=='runtime':
+                        if not self.runtime_provider:raise RuntimeError('runtime provider unavailable')
+                        report['runtime']=runtime_report(self.runtime_provider())
+                    else:
+                        part=await self.run_script(kind)
+                        if kind=='menu':report.update(part)
+                        else:
+                            report['uxp_startup']=part
+                            report['findings']=uxp_findings(part)
+                    self.state['components'][kind]='completed'
+                except asyncio.CancelledError:raise
+                except Exception as error:
+                    self.state['components'][kind]='failed'
+                    reason='timed_out' if isinstance(error,TimeoutError) else 'tool_unavailable' if isinstance(error,OSError) else 'invalid_report' if isinstance(error,ValueError) else 'collection_failed'
+                report['components'][kind]={'phase':self.state['components'][kind],'elapsed_ms':round((time.monotonic()-started)*1000),'reason':reason}
+            if not any(v['phase']=='completed' for v in report['components'].values()):raise RuntimeError('No diagnostic section completed')
+            if self.provider and scope in ('all','menu'):
                 report['trigger_decisions']=self.provider()
                 report['trigger_summary']=trigger_summary(report['trigger_decisions'])
-            path.write_text(json.dumps(report,ensure_ascii=False,indent=2),'utf-8')
-            self.report=report;self.state={'phase':'completed'};self.progress('completed','诊断采集完成，可导出报告')
+            partial=any(v['phase']=='failed' for v in report['components'].values())
+            report['partial']=partial
+            encoded=json.dumps(report,ensure_ascii=False,indent=2)
+            if len(encoded.encode('utf-8'))>2*1024*1024:raise ValueError('combined report too large')
+            self.folder.mkdir(parents=True,exist_ok=True)
+            path=self.folder/(uuid.uuid4().hex+'-combined.json')
+            path.write_text(encoded,'utf-8')
+            self.report=report;self.state.update(phase='completed',partial=partial,findings=report['findings'])
+            self.progress('completed','部分检测未完成，可导出已有报告' if partial else '诊断采集完成，可导出报告')
         except asyncio.CancelledError:
             self.state={'phase':'cancelled'};self.progress('cancelled','诊断采集已取消');raise
         except Exception:
             self.state={'phase':'failed'};self.progress('failed','诊断采集失败，请检查运行日志或使用独立检测脚本')
-        finally:
-            if process and process.returncode is None:
-                process.kill();await process.wait() # Only our read-only diagnostic child.
 
     def export(self):
         if self.report is None:raise RuntimeError('请先完成一次诊断采集')

@@ -4,7 +4,7 @@ from pathlib import Path
 root = Path(SPECPATH)
 a = Analysis(
     [str(root / 'main.py')], pathex=[str(root)], binaries=[],
-    datas=[(str(root / 'tools/inspect-panels.ps1'), 'tools'),(str(root / 'frontend/dist'), 'frontend/dist'),
+    datas=[(str(root / 'tools/inspect-panels.ps1'), 'tools'),(str(root / 'tools/inspect-uxp.ps1'), 'tools'),(str(root / 'frontend/dist'), 'frontend/dist'),
                       (str(root / 'frontend/public/icon.ico'), 'frontend/public'),
                       (str(root / 'native/HotkeyHost.exe'), 'native'),
                       (str(root / 'native/MenuHost.exe'), 'native'),

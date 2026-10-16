@@ -2,9 +2,67 @@ import asyncio,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch,AsyncMock
 from backend.diagnostics import Diagnostics
-from backend.diagnostics import trigger_summary
+from backend.diagnostics import trigger_summary,runtime_report,uxp_findings
 
 class DiagnosticTests(unittest.IsolatedAsyncioTestCase):
+    def test_runtime_export_excludes_documents_credentials_and_raw_errors(self):
+        report=runtime_report({'application':{'version':'146','executable':'SECRET_PATH'},
+            'photoshop':{'document':'SECRET_DOCUMENT','layer_context':{'layer_ids':[1,2],'document_name':'SECRET_DOCUMENT','kind':'pixel'},
+                'layer_observation':{'background':{'selection_ms':900,'error':'SECRET_ERROR'}}},
+            'tasks':{'items':[{'id':'a','state':'failed','target':{'name':'SECRET_DOCUMENT'},'error':'SECRET_ERROR','timeline':[{'state':'running','duration_ms':40,'token':'SECRET_TOKEN'}]}]},
+            'application_update':{'phase':'error','error':'SECRET_PROXY','release':{'body':'SECRET_BODY'}},
+            'graphics':{'requested':'auto','active':'gpu','adapter':'test adapter','private':'SECRET_GPU'},'token':'SECRET_TOKEN'})
+        import json
+        self.assertNotIn('SECRET',json.dumps(report))
+        self.assertEqual(report['layer_context']['selection_count'],2)
+        self.assertEqual(report['layer_observation']['background']['selection_ms'],900)
+        self.assertTrue(report['tasks'][0]['error_present'])
+        self.assertEqual(report['graphics'],{'requested':'auto','active':'gpu','adapter':'test adapter'})
+        self.assertEqual(runtime_report({'photoshop':{'layer_observation':None,'layer_context':None}})['layer_context']['selection_count'],0)
+
+    def test_loader_findings_ignore_old_host_and_pre_start_logs(self):
+        value={'plugin_exists':True,'backend':{'ready':False},'logs':[{'loader_lines':['system fallback plugins folder: x']}]}
+        self.assertEqual(uxp_findings(value),['uxp_current_host_logs_unavailable'])
+        value['logs'][0].update(matches_running_host=True,after_host_start=False)
+        self.assertEqual(uxp_findings(value),['uxp_current_host_logs_unavailable'])
+        value['logs'][0]['after_host_start']=True
+        self.assertEqual(uxp_findings(value),['uxp_user_external_scan_not_observed'])
+        value['logs'][0]['loader_lines'].append('Loading plugins from user fallback plugins folder: x')
+        self.assertEqual(uxp_findings(value),['uxp_load_unconfirmed'])
+        value['backend']['ready']=True;self.assertEqual(uxp_findings(value),['uxp_loaded'])
+
+    async def test_combined_report_preserves_sections_when_one_tool_times_out(self):
+        with tempfile.TemporaryDirectory() as folder:
+            d=Diagnostics(folder,'panel.ps1',15153);d.runtime_provider=lambda:{'photoshop':{'busy':True}}
+            async def run(kind):
+                if kind=='uxp':raise TimeoutError('PRIVATE_ERROR')
+                return {'schema':2,'read_only':True,'panels':[{'floating':False}]}
+            with patch.object(d,'run_script',side_effect=run),patch('backend.diagnostics.asyncio.sleep',new=AsyncMock()):
+                d.start('all');await d.task
+            self.assertTrue(d.snapshot()['ready']);self.assertTrue(d.snapshot()['partial'])
+            report=d.export();self.assertEqual(report['components']['uxp']['reason'],'timed_out')
+            self.assertTrue(report['runtime']['photoshop']['busy']);self.assertEqual(len(report['panels']),1)
+            self.assertEqual(report['components']['menu']['phase'],'completed')
+
+    async def test_uxp_only_has_no_delay_menu_sampling_or_trigger_trace(self):
+        with tempfile.TemporaryDirectory() as folder:
+            d=Diagnostics(folder,'panel.ps1',15153);d.provider=lambda:self.fail('No trigger trace for UXP-only')
+            with patch.object(d,'run_script',new=AsyncMock(return_value={'schema':1,'read_only':True,'backend':{'ready':True}})) as run,patch('backend.diagnostics.asyncio.sleep',new=AsyncMock()) as sleep:
+                d.start('uxp');await d.task
+            run.assert_awaited_once_with('uxp');sleep.assert_not_awaited()
+            self.assertEqual(d.export()['findings'],['uxp_loaded'])
+            self.assertNotIn('trigger_decisions',d.export())
+
+    async def test_runtime_only_launches_no_subprocess_and_invalid_scope_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            d=Diagnostics(folder,'panel.ps1',15153);d.runtime_provider=lambda:{'photoshop':{'uxp_ready':False}}
+            with self.assertRaises(ValueError):d.start('arbitrary.ps1')
+            with self.assertRaises(ValueError):d.start(['all'])
+            with patch('asyncio.create_subprocess_exec',new=AsyncMock()) as spawn:
+                d.start('runtime');await d.task
+            spawn.assert_not_awaited();self.assertTrue(d.snapshot()['ready'])
+            self.assertEqual(d.export()['runtime']['photoshop']['uxp_ready'],False)
+
     def test_summary_does_not_infer_a_keypress_from_sampling(self):
         self.assertEqual(trigger_summary({'enabled':False}),'menu_disabled')
         self.assertEqual(trigger_summary({'events':[]}),'no_trigger_keydown_observed')
