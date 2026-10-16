@@ -1,5 +1,14 @@
 # Photoshop Menu TODO
 
+- [x] 144慢读取修复／本机交付（2026-10-16）：基础图层能力先于形状颜色发布，后台不再持续读颜色／图案；慢读取按耗时限频，只读请求10秒，仍拒绝陈旧快照、旧菜单／会话／目标。实际EXE及dist144／UXP17、组件哈希匹配；297后台、13前端、原生及EXE验收通过。真实PS24.0.1切换24轮，35秒草稿及颜色／渐变／图案应用、一次撤销、旧目标拒绝通过。证据.runtime/caps144-final-verification.json、shape-switch144.json、shape-live-0.4.144.json、tests144-final.log。
+- [ ] 144故障电脑实机验收：用户诊断实际142／UXP14／PS24.2.0，热键发出、layers识别、busy=false；报告缺少快照耗时，尚不能确认故障唯一根因。需在i5集显电脑验证连续使用和长按Caps后填充／描边选色松键；本机键鼠工具因CreateProcessSecurityEnvironment 0x80070020不可用，真实PS执行和原生120秒草稿自测不替代实体键鼠验收。
+- [ ] 144 GitHub更新／发行清理：403／429切换小型正式Release清单的测试通过；最终构建已运行。待发布并核验清单、匿名包下载、生产更新器后，仅保留最新Release，保留标签和本地回退。
+
+- [ ] 后台快捷键下拉选键（2026-10-16，仅记录）：后台快捷键设置改为可下拉选择按键，保留组合键配置及现有冲突校验。尚未实施。
+
+- [x] Tab／Caps+Tab基础评估（2026-10-16，仅测试）：复用生产routeKey的真实隔离钩子，100组Tab及重复／抬起无泄漏；Caps+Tab单次与带标记Tab单次转发通过，作用域外／对话框Tab放行。PS24.0.1独立togglePalettes显隐5→0→5通过，文档／选择／历史保持，当前143／UXP16与Caps绑定未改。证据.runtime/tab-assessment143.json、tab-isolation-result.json、tab-panels-ps-readback.json。
+- [ ] Tab完整PS联动／迁移：用户明确仅测试，暂不切换。当前Tab唤出配置在textInput=true时仍吞Tab，需要补输入导航保护；实际PS拦截阶段因前台不稳定未验收，连续两次失败后停止，最后一次未发送按键。Caps+Tab实际集成、实体按键／输入／焦点／取消／钩子重装矩阵均未完成；不据隔离零泄漏承诺任何状态下绝不漏键。
+
 - [x] 143 Caps选层代码／构建／实际入口（2026-10-16）：Caps+W/S从冻结活动层单选上下图层；Shift+Caps+W/S保留选择并从选区边缘追加多选，原生顺序及边界循环保留。旧配置迁移加入Shift绑定，上移／下移快捷键仍禁用。291项后台、13项前端、原生左右Shift／顺序／重复／释放／输入保护及最终EXE烟雾／重启通过；实际后台与dist143，UXP16正常重启加载，已保存文档重开。真实PS普通层／组内／多选及全选收敛／旧目标拒绝，顺序与历史不变；生产API四命令成功，完成快照与PS选中ID一致。证据.runtime/selection143-live.json、selection143-production.json、restart143-verification.json、tests143-final.log、smoke143-final.log。源码与v0.4.143标签已推送，Release公开为Latest；匿名附件大小／SHA256与142生产更新器检查／下载／校验143通过，证据.runtime/release-0.4.143-public-verification.json、release143-updater-verification.json。
 - [ ] 143完整实体Caps+W/S及Shift组合验收：真实键盘按法／快速连按、输入编辑／跨应用焦点、菜单重开与取消矩阵待确认；原生状态机和生产API测试不代替该项。
 

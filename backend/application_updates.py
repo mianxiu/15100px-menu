@@ -13,11 +13,13 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import socket
+import ssl
 import subprocess
 import sys
 import threading
 import time
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 import uuid
@@ -29,6 +31,7 @@ from .version import APP_VERSION
 REPO = 'mianxiu/15100px-menu'
 API = 'https://api.github.com/repos/' + REPO + '/releases/latest'
 RELEASES = 'https://github.com/' + REPO + '/releases'
+MANIFEST = RELEASES+'/latest/download/PhotoshopMenu-update.json'
 MAX_DOWNLOAD = 128 * 1024 * 1024
 CHECK_INTERVAL = 24 * 60 * 60
 HASH = re.compile(r'[0-9a-f]{64}')
@@ -67,6 +70,22 @@ def opener():
     # urllib uses the configured system/environment proxy, never a bundled proxy
     # or Git credential. All endpoints are public and no token is requested.
     return build_opener(ReleaseRedirects())
+
+
+def update_error(error):
+    """Actionable network messages; retain HTTPS/certificate verification."""
+    reason=error.reason if isinstance(error,URLError) else error
+    if isinstance(reason,ssl.SSLCertVerificationError):
+        return 'GitHub HTTPS证书校验失败，请检查系统日期、Windows根证书及代理的证书配置'
+    if isinstance(reason,ssl.SSLError) or 'SSL' in str(reason).upper():
+        return 'GitHub HTTPS连接失败（SSL），请检查代理或网络拦截；也可从GitHub Releases手动下载'
+    if isinstance(reason,(TimeoutError,socket.timeout)):
+        return '连接GitHub超时，请检查网络及系统代理，稍后重试'
+    if isinstance(reason,socket.gaierror):
+        return '无法解析GitHub地址，请检查网络、DNS及系统代理'
+    if isinstance(error,URLError) and not isinstance(error,HTTPError):
+        return '无法连接GitHub，请检查网络及系统代理；也可从GitHub Releases手动下载'
+    return str(error)[:600]
 
 
 def select_release(data, current):
@@ -209,7 +228,7 @@ class ApplicationUpdates:
         async def work():
             try:await asyncio.to_thread(self.check if operation=='check' else self.download)
             except Exception as error:
-                self.change(phase='error',message='更新检查或下载失败；当前应用未更改',error=str(error)[:600])
+                self.change(phase='error',message='更新检查或下载失败；当前应用未更改',error=update_error(error))
         self.worker=asyncio.create_task(work())
         return {'message':self.data['message']}
 
@@ -225,7 +244,17 @@ class ApplicationUpdates:
         except HTTPError as error:
             if error.code==304 and self.data.get('release'):
                 release=select_release(self._release_document(self.data['release']),self.current);etag=self.data.get('etag','')
-            elif error.code in (403,429):raise RuntimeError('GitHub 请求受限，请稍后检查') from None
+            elif error.code in (403,429):
+                # This small public Release asset does not use the REST API.
+                # Validate the same repo/version/asset identities as API data.
+                try:
+                    with opener().open(Request(MANIFEST,headers={'User-Agent':'PhotoshopMenu/'+self.current,'Accept':'application/json'}),timeout=20) as response:
+                        body=response.read(65537)
+                        if len(body)>65536:raise ValueError('更新清单过大')
+                        release=select_release(json.loads(body),self.current);etag=''
+                except Exception as fallback:
+                    detail=update_error(fallback)
+                    raise RuntimeError('GitHub API请求受限，Release备用清单也未能读取：'+detail) from None
             else:raise
         self.change(release=release,etag=etag,last_checked=time.time(),phase='available' if release['available'] else 'current',
                     message='发现新版，可以下载更新' if release['available'] else '当前已是最新版本',error='')

@@ -1,4 +1,9 @@
 export default {
+  "GitHub HTTPS证书校验失败，请检查系统日期、Windows根证书及代理的证书配置":"GitHub HTTPS certificate verification failed. Check the system date, Windows root certificates and proxy certificate configuration.",
+  "GitHub HTTPS连接失败（SSL），请检查代理或网络拦截；也可从GitHub Releases手动下载":"GitHub HTTPS connection failed (SSL). Check your proxy or network filtering, or download manually from GitHub Releases.",
+  "连接GitHub超时，请检查网络及系统代理，稍后重试":"GitHub connection timed out. Check the network and system proxy, then retry.",
+  "无法解析GitHub地址，请检查网络、DNS及系统代理":"GitHub DNS resolution failed. Check the network, DNS and system proxy.",
+  "无法连接GitHub，请检查网络及系统代理；也可从GitHub Releases手动下载":"Cannot connect to GitHub. Check the network and system proxy, or download manually from GitHub Releases.",
   "点击开始后有5秒准备时间。请切回PS、点击图层列表，再按下面的菜单快捷键；PS前方的小提示会显示采集倒计时。":"You have 5 seconds to switch to Photoshop, click the Layers panel and use the menu shortcut below. A non-activating hint shows the countdown over Photoshop.",
   "准备：请切回PS并点击图层列表":"Get ready: switch to Photoshop and click the Layers panel",
   "正在启动只读检测，请保持PS前台":"Starting read-only checks; keep Photoshop in front",

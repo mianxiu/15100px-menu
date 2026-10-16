@@ -11,6 +11,8 @@ let lastRequest = null;
 let lastHeartbeat = 0;
 let pluginManifest = null;
 let contextReadAt=0,contextWriteAt=0,contextSignature='';
+let contextInterval=100;
+let observation={};
 let pendingResponse=null;
 let completedReceipts=[];
 let lastWorkAt=0;
@@ -18,12 +20,39 @@ let menuRefreshId='';
 async function refreshMenuContext(folder,now) {
   let request;
   try {request=JSON.parse(await (await folder.getEntry('menu-context-request.json')).read());}catch(_){return false;}
-  if(request.token!==token || request.session!==session || !/^[0-9a-f]{32}$/.test(request.id) || request.id===menuRefreshId || !Number.isFinite(request.expires_at_ms) || request.expires_at_ms<now || request.expires_at_ms>now+5000)return false;
-  const context=labels.selectionContext();
-  const shape=await labels.observeShape(context,true);
-  if(!labels.selectionMatches(context))return true;
-  await record(folder,'menu-context-result.json',{...context,shape_editor:shape,schema:1,plugin_time_ms:Date.now(),menu_request_id:request.id});
+  if(request.token!==token || request.session!==session || !/^[0-9a-f]{32}$/.test(request.id) || request.id===menuRefreshId || !Number.isFinite(request.expires_at_ms) || request.expires_at_ms<now || request.expires_at_ms>now+10000)return false;
+  const started=Date.now();
+  let context;
+  try {context=labels.selectionContext();}
+  catch(error) {
+    menuRefreshId=request.id;
+    observation.menu={selection_ms:Date.now()-started,error:String(error).slice(0,200),completed_at_ms:Date.now()};
+    return true;
+  }
+  const readDone=Date.now();contextReadAt=readDone;
+  const needsShape=context.kind==='shape-fill' && context.layer_ids.length===1 && !context.locked;
+  const basic={...context,shape_editor:{available:false},schema:1,plugin_time_ms:readDone,
+    menu_request_id:request.id,menu_phase:needsShape?'basic':'completed',timings_ms:{selection_ms:readDone-started}};
+  // Publish ordinary capabilities before optional vector/pattern metadata.
+  // A slow or failed color read must not leave every layer action disabled.
+  await record(folder,'menu-context-result.json',basic);
+  await record(folder,'layer-context.json',basic);
   menuRefreshId=request.id;
+  observation.menu={selection_ms:readDone-started,completed_at_ms:readDone,phase:basic.menu_phase};
+  if(needsShape) {
+    let shape={available:false},error='';
+    try {shape=await labels.observeShape(context,true);}catch(e){error=String(e).slice(0,200);}
+    const matches=labels.selectionMatches(context),done=Date.now();
+    observation.menu={...observation.menu,shape_ms:done-readDone,shape_error:error,selection_changed:!matches,phase:'completed'};
+    // A slow optional read needs fresh eligibility, not a fresh timestamp on
+    // old locks/capabilities. A changed identity never enables the editor.
+    if(matches) {
+      const latest=done-readDone>=1000?labels.selectionContext():context;
+      if(latest.document_id===context.document_id && latest.layer_ids.join(',')===context.layer_ids.join(','))
+        await record(folder,'menu-context-result.json',{...basic,...latest,plugin_time_ms:done-readDone>=1000?Date.now():readDone,
+          shape_editor:shape,menu_phase:'completed',timings_ms:{...basic.timings_ms,shape_ms:done-readDone}});
+    }
+  }
   return true;
 }
 async function finishResponse(folder,response) {
@@ -40,16 +69,20 @@ async function finishResponse(folder,response) {
   }
 }
 async function updateLayerContext(folder,now,force=false,prepared=null) {
-  if(!force && now-contextReadAt<100)return;
+  if(!force && now-contextReadAt<contextInterval)return;
   contextReadAt=now;
   let value;
+  let error='';
   try {value=prepared && labels.selectionMatches(prepared)?prepared:labels.selectionContext();}
-  catch(_) {value={session,document_id:null,layer_ids:[],kind:'unknown',mask:0};}
+  catch(e) {error=String(e).slice(0,200);value={session,document_id:null,layer_ids:[],kind:'unknown',mask:0};}
   // Throttle from read completion: if DOM work itself takes over 100ms,
   // measuring from its start would immediately launch another costly read.
   const readDone=Date.now();contextReadAt=readDone;
-  let shape={available:false};
-  try {shape=await labels.observeShape(value);}catch(_) {} // Disable paint without losing ordinary menu metadata.
+  contextInterval=Math.max(error?1000:100,Math.min(1000,readDone-now));
+  observation.background={selection_ms:readDone-now,interval_ms:contextInterval,completed_at_ms:readDone,error};
+  // Vector properties and the pattern catalog are only needed for an opened
+  // layer menu. Do not continuously reread them while Photoshop is idle.
+  const shape={available:false};
   const signature=JSON.stringify([value,shape]);
   const snapshot={...value,shape_editor:shape,schema:1,plugin_time_ms:Date.now()};
   if(force || signature!==contextSignature || now-contextWriteAt>=1000) {
@@ -86,7 +119,8 @@ async function probe(reason) {
       await record(folder, 'probe-last.json', {
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.16', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.17', session, transport: 'plugin-data-files',
+        layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
@@ -123,7 +157,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.16', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.17', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

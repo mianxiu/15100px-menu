@@ -32,7 +32,8 @@ def make_content(raw):
 
 async def main():
  s=json.load(urlopen('http://127.0.0.1:15151/api/status',timeout=5))
- assert s['version']==APP_VERSION and s['photoshop']['uxp_version']=='0.3.14' and not s['photoshop']['busy']
+ plugin_version=json.loads((ROOT/'uxp/offline-probe/manifest.json').read_text('utf-8'))['version']
+ assert s['version']==APP_VERSION and s['photoshop']['uxp_version']==plugin_version and not s['photoshop']['busy']
  assert not s['menu']['visible']
  app=win32com.client.GetActiveObject('Photoshop.Application');previous=app.ActiveDocument if app.Documents.Count else None
  folder=ROOT/'.runtime'/('shape-live-'+str(time.time_ns()));folder.mkdir()
@@ -48,6 +49,10 @@ async def main():
  async def execute(case,alter):
   data=await inspect();params={k:copy.deepcopy(data[k]) for k in ('revision','fill','stroke')};alter(params,data)
   target=await asyncio.to_thread(bridge._capture_target);before=read();start=time.perf_counter()
+  if case=='long-lived-solid-draft':
+   print('Holding a local paint draft for 35 seconds before submission',flush=True)
+   await asyncio.sleep(35)
+   start=time.perf_counter()
   result=await bridge.execute_shape(params,frozen_target=target);elapsed=(time.perf_counter()-start)*1000;after=read()
   assert after['layerID']==before['layerID'] and after['order']==before['order'] and after['path']==before['path']
   assert after.get('hasVectorMask',False)==before.get('hasVectorMask',False) and after['layerKind']==before['layerKind']
@@ -62,6 +67,7 @@ async def main():
   app.DoJavaScript(fixture('shape',4));scratch=app.ActiveDocument
   def solid(p,d):p['fill']['rgb']=[20,80,170];p['stroke'].update(enabled=True,width=3,rgb=[255,20,0])
   await execute('solid-fill-and-stroke',solid)
+  await execute('long-lived-solid-draft',solid)
   gradient={'kind':'gradient','enabled':True,'stops':[{'rgb':[10,20,30],'location':0},{'rgb':[60,100,220],'location':1800},{'rgb':[240,230,200],'location':4096}]}
   await execute('gradient-fill',lambda p,d:p.update(fill=copy.deepcopy(gradient)))
   await execute('gradient-stroke',lambda p,d:p.update(stroke={**copy.deepcopy(gradient),'width':4}))
@@ -109,7 +115,7 @@ async def main():
   except RuntimeError:pass
   else:raise AssertionError('Plain fill accepted a shape-only stroke')
   assert read()==before;checks.append({'case':'plain-fill-rejects-stroke','no_write':True})
-  report={'version':APP_VERSION,'uxp':'0.3.14','checks':checks,'physical_capslock_acceptance':False}
+  report={'version':APP_VERSION,'uxp':plugin_version,'checks':checks,'physical_capslock_acceptance':False}
   (ROOT/f'.runtime/shape-live-{APP_VERSION}.json').write_text(json.dumps(report,indent=2),'utf-8')
   print(json.dumps(report),flush=True)
  finally:

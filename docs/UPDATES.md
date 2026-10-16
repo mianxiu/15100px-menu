@@ -11,6 +11,8 @@
 
 只有检查和下载需要网络；菜单、任务核对和插件执行仍离线。无需GitHub账号、token、git或Adobe下载工具。使用系统代理，不附带本机代理地址，不改变PS防火墙规则。断网仍可使用统一ZIP：正常退出后台后替换EXE，按需更新内置插件。
 
+v0.4.144起，GitHub API返回403／429时读取同一仓库最新Release中的`PhotoshopMenu-update.json`小型清单，仍校验正式版本、仓库、标签、附件身份及下载摘要。备用清单不可用时明确报错，不把缓存版本宣称为最新；不关闭HTTPS证书验证。受限的旧版142需要手动下载新版，或等待GitHub解除限制。
+
 ## 校验与恢复
 
 - 固定源为`mianxiu/15100px-menu`的`/releases/latest`，只接受已发布、非预览版本且版本号高于当前；不自动降级。
@@ -22,6 +24,6 @@
 
 ## 维护约定
 
-发布统一ZIP和SHA256，保留已发布附件，不覆盖内容。后续EXE须保持`--apply-update <job.json>`的schema 1兼容，供已安装版使用。不要把预览版、草稿、源码或独立UXP ZIP当作应用更新附件。
+发布统一ZIP和SHA256，不覆盖已发布附件。发布后用`tools/build-update-manifest.py --release-json <正式Release记录>`生成并上传`PhotoshopMenu-update.json`，匿名核验清单及安装包下载。按用户2026-10-16决定，核验新版完成后删除其他Release与其附件，发行页只保留最新版；保留Git标签、源码历史和本地回退副本。后续EXE须保持`--apply-update <job.json>`的schema 1兼容，供已安装版使用。不要把预览版、草稿、源码或独立UXP ZIP当作应用更新附件。
 
 参考[GitHub Releases API](https://docs.github.com/en/rest/releases/releases)、[附件API](https://docs.github.com/en/rest/releases/assets)和[REST最佳实践](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api)。使用ETag条件请求；匿名请求仍可能限流，显示错误，不高频重试。

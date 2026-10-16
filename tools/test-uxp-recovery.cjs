@@ -74,7 +74,7 @@ async function main(){
   const completedReads=control.contextReads;
   await plugin.poll();await settle();
   assert.equal(control.contextReads,completedReads,'A slow completed snapshot must not immediately trigger another refresh');
-  control.now+=101;await plugin.poll();await settle();
+  control.now+=141;await plugin.poll();await settle();
   assert.equal(control.contextReads,completedReads+1,'Refresh resumes after its bounded interval');
   for(const changed of [false,true]) {
     files=new Map();control={executed:0,created:0,failFinal:0,prepared:true,selectionChanged:changed};

@@ -204,9 +204,13 @@ class UxpBridge(PhotoshopBridge):
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
         if version(heartbeat.get('probe_version'))<(0,3,14):return None
         token=json.loads(self.transport.config.read_text('utf-8-sig'))['token']
-        request={'id':secrets.token_hex(16),'session':heartbeat['session'],'token':token,'expires_at_ms':int(time.time()*1000)+3000}
+        # New plugins publish basic eligibility before optional paint metadata.
+        # Allow a slow host to finish this read-only request without relaxing
+        # snapshot freshness, request identity, or any mutation target checks.
+        lifetime=10 if version(heartbeat.get('probe_version'))>=(0,3,17) else 3
+        request={'id':secrets.token_hex(16),'session':heartbeat['session'],'token':token,'expires_at_ms':int(time.time()*1000)+lifetime*1000}
         atomic_json(folder/'menu-context-request.json',request)
-        return {'id':request['id'],'session':request['session'],'folder':folder,'epoch':epoch,'deadline':time.monotonic()+3}
+        return {'id':request['id'],'session':request['session'],'folder':folder,'epoch':epoch,'deadline':time.monotonic()+lifetime}
 
     def read_layer_context(self):
         # Called by the desktop monitor, never by the low-level hook or open().
@@ -241,6 +245,7 @@ class UxpBridge(PhotoshopBridge):
             value['uxp_ready']=compatible(heartbeat.get('probe_version')) and time.time()*1000-heartbeat.get('plugin_time_ms',0)<15000
             value['uxp_version']=heartbeat.get('probe_version')
             value['photoshop_version']=heartbeat.get('photoshop_version')
+            value['layer_observation']=heartbeat.get('layer_observation',{})
         except (OSError,ValueError,RuntimeError):value['uxp_ready']=False
         return value
 

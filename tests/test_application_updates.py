@@ -27,6 +27,39 @@ def release(v='0.4.120'):
 
 
 class UpdateValidationTests(unittest.TestCase):
+    def test_rate_limit_uses_small_release_manifest_with_identical_asset_validation(self):
+        from urllib.error import HTTPError
+        from backend.application_updates import MANIFEST
+        for status in (403,429):
+            with self.subTest(status=status),tempfile.TemporaryDirectory() as directory:
+                updater=ApplicationUpdates(directory,'0.4.119')
+                stream=io.BytesIO(json.dumps(release()).encode());stream.headers={}
+                client=SimpleNamespace(open=Mock(side_effect=[HTTPError(API,status,'rate limited',{},None),stream]))
+                with patch('backend.application_updates.opener',return_value=client):updater.check()
+                self.assertEqual(updater.snapshot()['phase'],'available')
+                self.assertEqual(client.open.call_count,2)
+                req=client.open.call_args.args[0];self.assertEqual(req.full_url,MANIFEST)
+                self.assertIsNone(req.get_header('Authorization'))
+                self.assertEqual(updater.data['etag'],'')
+        with tempfile.TemporaryDirectory() as directory:
+            updater=ApplicationUpdates(directory,'0.4.119')
+            bad=release();bad['assets'][0]['browser_download_url']='https://evil.com/payload.zip'
+            stream=io.BytesIO(json.dumps(bad).encode());stream.headers={}
+            client=SimpleNamespace(open=Mock(side_effect=[HTTPError(API,403,'rate limited',{},None),stream]))
+            with patch('backend.application_updates.opener',return_value=client),self.assertRaises(RuntimeError):updater.check()
+            self.assertNotIn('release',updater.data)
+    def test_network_errors_explain_ssl_timeout_and_dns_without_disabling_tls(self):
+        import socket,ssl
+        from urllib.error import URLError
+        from backend.application_updates import update_error
+        for reason,expected in ((ssl.SSLCertVerificationError('certificate verify failed'),'证书'),
+                                (ssl.SSLError('UNEXPECTED_EOF_WHILE_READING'),'SSL'),
+                                (TimeoutError(),'超时'),(socket.gaierror('dns'),'DNS'),
+                                (ConnectionRefusedError('secret-proxy-user:password'),'系统代理')):
+            with self.subTest(reason=type(reason).__name__):
+                message=update_error(URLError(reason));self.assertIn(expected,message)
+                self.assertNotIn('password',message)
+        self.assertEqual(update_error(ValueError('bad checksum')),'bad checksum')
     def test_only_higher_stable_release_and_exact_repo_assets(self):
         self.assertTrue(select_release(release(),'0.4.119')['available'])
         for current in ('0.4.120','0.4.121','0.5.0'):

@@ -198,6 +198,9 @@ try {
     $result.menu = [ordered]@{ready=$status.menu.ready;visible=$status.menu.visible;native_hotkeys=$status.menu.native_hotkeys;pid=$status.menu.pid;hotkey_pid=$status.menu.hotkey_pid;panel_kind=$status.menu.panel_context.kind;panel_source=$status.menu.panel_context.source;input_focused=$status.menu.panel_context.input_focused}
     $result.trigger = $status.settings.shortcuts.toggle
     $result.busy = $status.photoshop.busy
+    $result.layer_observation = $status.photoshop.layer_observation
+    $result.layer_context = [ordered]@{kind=$status.photoshop.layer_context.kind;plugin_time_ms=$status.photoshop.layer_context.plugin_time_ms;selection_count=$status.photoshop.layer_context.selection_count}
+    $result.application_update = [ordered]@{phase=$status.application_update.phase;message=$status.application_update.message;error=$status.application_update.error;last_attempt=$status.application_update.last_attempt;last_checked=$status.application_update.last_checked}
 } catch { $result.backend = 'unavailable' }
 $json = $result | ConvertTo-Json -Depth 10
 if (-not $OutputPath) {

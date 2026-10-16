@@ -59,6 +59,29 @@ class CapsInputTests(unittest.TestCase):
    d=self.ready(folder);d.menu_layer_context={'layer_ids':[99],'kind':'pixel'}
    shape={'available':True,'vector':True,'revision':'s:1','fill':{'kind':'solid','enabled':True,'rgb':[1,2,3]},'stroke':{'kind':'solid','enabled':False,'rgb':[0,0,0],'width':1},'patterns':[]}
    self.result(folder,kind='shape-fill',shape_editor=shape);d._finish_menu_context();self.assertTrue(d.color_editor_active);self.assertEqual(d.menu_layer_context['layer_ids'],[3])
+ def test_basic_capabilities_apply_once_then_matching_paint_can_finish(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.menu_context_pending['deadline']=time.monotonic()+10
+   self.result(folder,kind='shape-fill',menu_phase='basic');d._finish_menu_context()
+   self.assertEqual(d.menu_layer_context['mask'],15);self.assertFalse(d.color_editor_active)
+   d._finish_menu_context();self.assertEqual(d.gui.SendMessage.call_count,1)
+   self.result(folder,kind='shape-fill',menu_phase='completed');d._finish_menu_context()
+   self.assertIsNone(d.menu_context_pending);self.assertEqual(d.gui.SendMessage.call_count,2)
+ def test_enrichment_cannot_switch_the_already_frozen_identity(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);self.result(folder,menu_phase='basic');d._finish_menu_context()
+   self.result(folder,menu_phase='completed',layer_ids=[4]);d._finish_menu_context()
+   self.assertEqual(d.menu_layer_context['layer_ids'],[3]);self.assertIsNone(d.menu_context_pending)
+   self.assertEqual(d.gui.SendMessage.call_count,1)
+ def test_slow_current_request_finishes_after_the_old_three_second_limit(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.menu_context_pending['deadline']=time.monotonic()+6
+   self.result(folder);d._finish_menu_context();self.assertEqual(d.menu_layer_context['layer_ids'],[3])
+ def test_long_lived_shape_draft_is_validated_by_identity_not_menu_age(self):
+  from backend.layer_context import require_menu_target
+  context={'session':'s','document_id':2,'layer_ids':[3],'kind':'shape-fill','shape_editor':{'available':True},'plugin_time_ms':(time.time()-120)*1000}
+  require_menu_target(context,'shape.paint',dict(context))
+  with self.assertRaisesRegex(RuntimeError,'已改变'):require_menu_target(context,'shape.paint',{**context,'layer_ids':[4]})
 
 class NativeDialogWaitTests(unittest.IsolatedAsyncioTestCase):
  async def test_style_wait_has_no_generic_write_timeout_and_never_replays(self):

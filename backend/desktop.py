@@ -582,9 +582,14 @@ class Desktop:
         try:
             snapshot=json.loads((pending['folder']/'menu-context-result.json').read_text('utf-8-sig'))
             if snapshot.get('menu_request_id')!=pending['id']:return
+            phase=snapshot.get('menu_phase','completed')
+            if phase not in ('basic','completed') or pending.get('applied_phase')==phase:return
             from .layer_context import validate,flags
             value=validate(snapshot,pending['session'])
             if value.get('kind') in ('unknown','none'):return
+            if pending.get('applied_phase')=='basic' and any(
+                    value.get(key)!=(self.menu_layer_context or {}).get(key) for key in ('session','document_id','layer_ids')):
+                self.menu_context_pending=None;return
             panel=self.panel_context.current
             if panel.get('kind')!='layers' or panel.get('input_focused') or not self._scope():return
             from .shape_paint import metadata
@@ -595,7 +600,10 @@ class Desktop:
                 _fields_=[('tag',ctypes.c_size_t),('size',W.DWORD),('data',ctypes.c_void_p)]
             buffer=ctypes.create_string_buffer(payload);packet=CopyData(0x4d435458,len(payload)+1,ctypes.cast(buffer,ctypes.c_void_p))
             if self.gui.SendMessage(self.hwnd,0x4a,0,ctypes.addressof(packet)):
-                self.menu_layer_context=dict(value);self.color_editor_active=active;self.menu_context_pending=None;self._native_config()
+                self.menu_layer_context=dict(value);self.color_editor_active=active
+                if phase=='completed':self.menu_context_pending=None
+                else:pending['applied_phase']=phase
+                self._native_config()
         except (OSError,ValueError,KeyError):return
 
     def require_menu_layer_target(self,name,target):

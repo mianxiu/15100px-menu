@@ -2382,6 +2382,16 @@ int main() {
                 renderedHit=100;finishHold(paintPoint,true,&paintPoint);auto paintSubmitted=testedActions.size();finishHold(paintPoint);
                 if(testedActions.back()!="shape.paint" || testedShapePaint["fill"]["rgb"]!=Json({200,30,10}) || testedActions.size()!=paintSubmitted)
                     throw std::runtime_error("Paint release payload or single submission failed");
+                resetShape();shapeEditor.current()["rgb"]={17,81,191};shapeEditor.changed();
+                pieStarted=GetTickCount64()-120000;pieAnimating=false;
+                const auto longDraft=shapeEditor.draft;
+                const auto delayed=Json{{"epoch",menuEpoch},{"flags",uint64_t(0)},{"shape",Json{{"available",false}}}}.dump();
+                COPYDATASTRUCT delayedPacket{0x4d435458,DWORD(delayed.size()+1),const_cast<char*>(delayed.c_str())};
+                if(SendMessageW(window,WM_COPYDATA,0,reinterpret_cast<LPARAM>(&delayedPacket)) || shapeEditor.draft!=longDraft)
+                    throw std::runtime_error("Delayed metadata replaced a dirty long-held paint draft");
+                renderedHit=100;const auto longCount=testedActions.size();finishHold(paintPoint,true,&paintPoint);finishHold(paintPoint);
+                if(testedActions.size()!=longCount+1 || testedActions.back()!="shape.paint" || testedShapePaint!=longDraft)
+                    throw std::runtime_error("Long-held paint draft did not dispatch exactly once");
                 resetShape();shapeEditor.current()["rgb"]={200,30,10};shapeEditor.changed();
                 POINT neutral={LONG(pieCenter.x),LONG(pieCenter.y)};renderedHit=100;finishHold(paintPoint,true,&neutral);
                 if(testedActions.back()!="hide")throw std::runtime_error("Paint stale cursor bypassed centre cancellation");
