@@ -2,7 +2,7 @@
 
 - [x] 144慢读取修复／本机交付（2026-10-16）：基础图层能力先于形状颜色发布，后台不再持续读颜色／图案；慢读取按耗时限频，只读请求10秒，仍拒绝陈旧快照、旧菜单／会话／目标。实际EXE及dist144／UXP17、组件哈希匹配；297后台、13前端、原生及EXE验收通过。真实PS24.0.1切换24轮，35秒草稿及颜色／渐变／图案应用、一次撤销、旧目标拒绝通过。证据.runtime/caps144-final-verification.json、shape-switch144.json、shape-live-0.4.144.json、tests144-final.log。
 - [ ] 144故障电脑实机验收：用户诊断实际142／UXP14／PS24.2.0，热键发出、layers识别、busy=false；报告缺少快照耗时，尚不能确认故障唯一根因。需在i5集显电脑验证连续使用和长按Caps后填充／描边选色松键；本机键鼠工具因CreateProcessSecurityEnvironment 0x80070020不可用，真实PS执行和原生120秒草稿自测不替代实体键鼠验收。
-- [ ] 144 GitHub更新／发行清理：403／429切换小型正式Release清单的测试通过；最终构建已运行。待发布并核验清单、匿名包下载、生产更新器后，仅保留最新Release，保留标签和本地回退。
+- [x] 144 GitHub更新／发行清理：源码和v0.4.144标签已推送；统一包与校验附件、更新清单公开并匿名下载核验；直接执行最终EXE内更新器代码，强制API403后读取真实清单并下载／校验144通过。其余14条旧Release及草稿已删除，发行页仅144；前后远程标签集合相同，143本地备份保留。证据.runtime/release-0.4.144-public-verification.json、manifest144-verification.json、fallback144-live.json、release144-cleanup.json、runtime144-delivered.json。
 
 - [ ] 后台快捷键下拉选键（2026-10-16，仅记录）：后台快捷键设置改为可下拉选择按键，保留组合键配置及现有冲突校验。尚未实施。
 
