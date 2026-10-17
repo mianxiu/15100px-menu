@@ -9,7 +9,9 @@ from .photoshop_bridge import PhotoshopBridge
 from .photoshop_version import require_version, version_tuple
 from .plugins import version
 from .layer_context import unavailable,validate,fresh
-from .uxp_recovery import PendingUxp
+from .uxp_recovery import PendingUxp,captured_target
+
+DIRECT_CAPS=frozenset(('selectAbove','selectBelow','extendAbove','extendBelow','copyStyle','pasteStyle'))
 
 def compatible(value):
     try:return version(value)[:2]==(0,3)
@@ -90,6 +92,11 @@ class UxpTransport:
                 modifying=operation in ('set_label','new_document')
                 if modifying and version(heartbeat.get('probe_version'))<(0,3,8):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.8，以支持结果核对；未提交修改')
+                if 'capture_current' in payload:
+                    if operation!='set_label' or payload['capture_current'] is not True or payload.get('command') not in DIRECT_CAPS or 'target' in payload:
+                        raise ValueError('Invalid direct Caps request')
+                    if version(heartbeat.get('probe_version'))<(0,3,34) or payload.get('capture_session')!=heartbeat.get('session'):
+                        raise RuntimeError('UXP 版本或会话已改变，未提交快捷键操作')
                 if payload.get('command') in ('selectAbove','selectBelow','extendAbove','extendBelow') and version(heartbeat.get('probe_version'))<(0,3,16):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.16，以支持单选与Shift多选；未提交操作')
                 if payload.get('command')=='convertSmartObject' and version(heartbeat.get('probe_version'))<(0,3,18):
@@ -229,7 +236,8 @@ class UxpBridge(PhotoshopBridge):
             except (ValueError,KeyError,TypeError):return pending.snapshot()
             self.tasks.confirm_uxp_result(task_id,'succeeded' if success else 'failed',message=message,
                 error='' if success else response['error'],reconciled=True,
-                uxp_request_id=response['id'],uxp_session=response['session'])
+                uxp_request_id=response['id'],uxp_session=response['session'],
+                **({'target':captured_target(response,response['session'])} if success and pending.value.get('capture_current') else {}))
             await self.tasks.flush()
             await asyncio.to_thread(pending.clear)
             self.busy=False
@@ -320,7 +328,8 @@ class UxpBridge(PhotoshopBridge):
     def _execute(self, action):
         if self.focus_guard:self.focus_guard()
         if not self._captured_target:raise RuntimeError('未固定 UXP 目标')
-        payload={'target':self._captured_target}
+        direct=self._captured_target.get('capture_current') is True
+        payload={'capture_current':True,'capture_session':self._captured_app} if direct else {'target':self._captured_target}
         if action.startswith('label.') or action=='color':
             payload.update(command='label',color=action.split('.',1)[1] if '.' in action else 'orange')
         else:payload['command']=action
@@ -328,13 +337,34 @@ class UxpBridge(PhotoshopBridge):
         self._uxp_worker_active=True
         try:
             response=self.transport.call('set_label',**payload)
+            if direct:
+                try:bound=captured_target(response,self._captured_app)
+                except ValueError as error:raise UxpResultUnknown('快捷键目标收据待核对；不重发') from error
             # The plugin captured this selection after the mutation, before its
             # final receipt. Hand it to the desktop before completion feedback;
             # do not reuse the pre-creation cache in a freshly opened menu.
             context=validate(response.get('layer_context'),self._captured_app)
             self.layer_context=context if fresh(context) else unavailable()
-            return json.dumps(response['result'])
+            return json.dumps({**response['result'],**({'captured_target':bound} if direct else {})})
         finally:self._uxp_worker_active=False
+
+    def _prepare_direct_caps(self):
+        if self.focus_guard:self.focus_guard()
+        heartbeat=read_heartbeat(self.transport.folder)
+        if version(heartbeat.get('probe_version'))<(0,3,34):return self._capture_target()
+        session=heartbeat.get('session')
+        if not isinstance(session,str) or not session:raise RuntimeError('UXP 会话不可用，未提交操作')
+        # No cached layer is treated as a target. The same UXP request will
+        # capture, durably record, then revalidate the fresh selection in PS.
+        self._captured_app=session
+        self._captured_target={'session':session,'capture_current':True}
+        return {**self._captured_target,'instance_binding':session}
+
+    def _direct_caps_result_target(self,result):
+        if self._captured_target.get('capture_current'):
+            try:return captured_target(json.loads(result),self._captured_app)
+            except ValueError as error:raise UxpResultUnknown('快捷键目标收据待核对；不重发') from error
+        return {**self._captured_target,'instance_binding':self._captured_app}
 
     def _bind_menu_target(self,target):
         if self.focus_guard:self.focus_guard()
@@ -349,7 +379,7 @@ class UxpBridge(PhotoshopBridge):
         self._captured_app=target['session']
         return {**self._captured_target,'instance_binding':target['session']}
 
-    async def execute(self, action, before_dispatch=None, enqueue=False, frozen_target=None):
+    async def execute(self, action, before_dispatch=None, enqueue=False, frozen_target=None, capture_current=False):
         if action=='document.recent':raise ValueError('请从首页最近预设列表选择尺寸')
         if self.execution_guard:self.execution_guard()
         if frozen_target is not None:
@@ -358,6 +388,8 @@ class UxpBridge(PhotoshopBridge):
             # another capture IPC would only rediscover the same identity.
             frozen={**frozen_target,'layer_ids':list(frozen_target.get('layer_ids',[]))}
             return await self._execute_task(action,before_dispatch,capture=lambda:self._bind_menu_target(frozen))
+        if capture_current and action in DIRECT_CAPS:
+            return await self._execute_task(action,before_dispatch,capture=self._prepare_direct_caps,result_target=self._direct_caps_result_target)
         return await super().execute(action,before_dispatch,enqueue=False)
 
     async def execute_shape(self, params, before_dispatch=None, frozen_target=None, preview=None):

@@ -169,7 +169,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.33', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.34', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
@@ -217,7 +217,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.33', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.34', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -230,6 +230,16 @@ async function probe(reason) {
       await executionStage('dispatch');
     }
     try {
+      if(request.capture_current!==undefined) {
+        if(request.capture_current!==true || request.capture_session!==session || request.operation!=='set_label' || request.target!==undefined ||
+            !['selectAbove','selectBelow','extendAbove','extendBelow','copyStyle','pasteStyle'].includes(request.command))throw Error('Invalid direct Caps binding');
+        // Keep both fresh captures: bind here, then the existing executor
+        // checks the exact target again inside its modal before any write.
+        const captured=await labels.capture();
+        response.captured_target=captured;
+        await record(folder,'result-'+request.id+'.json',{...response,phase:'accepted'});
+        request={...request,target:captured};
+      }
       if (request.operation === 'inspect') {
         response.target = labels.documentTarget();
         if(request.shape_inspect)response.shape_editor=await labels.observeShape(await labels.selectionContextFresh(),true);

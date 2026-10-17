@@ -141,6 +141,15 @@ class UxpPublicationTests(unittest.TestCase):
             self.assertEqual(destination.read_bytes(),b'old');self.assertFalse(source.exists())
 
 class UxpDiscoveryTests(unittest.TestCase):
+    def test_direct_caps_rejects_old_session_unsupported_or_conflicting_binding(self):
+        folder=self.heartbeat(24);self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.34',session='s')
+        (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+        for extra in ({'capture_session':'old'},{'command':'layer.new'},{'target':{}},{'capture_current':'true'}):
+            payload={'capture_current':True,'capture_session':'s','command':'selectAbove',**extra}
+            with self.assertRaises((ValueError,RuntimeError)):self.transport.call('set_label',**payload)
+            self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
+
     def test_mask_edit_rejects_old_plugin_before_publication(self):
         folder=self.heartbeat(24)
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.19',session='s')
@@ -236,6 +245,37 @@ class UxpDiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'24.0.1'):_ = self.transport.folder
 
 class UxpBridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_direct_caps_one_request_preserves_actual_bound_target_in_history(self):
+        root=Path(self.temp.name);self.bridge.transport.folder=root
+        (root/'probe-last.json').write_text(json.dumps({'probe_version':'0.3.34','session':'test'}),'utf-8')
+        self.bridge.transport.call.side_effect=None
+        self.bridge.transport.call.return_value={'result':{'verified':True,'count':1},'captured_target':self.target}
+        for action in ('selectAbove','selectBelow','extendAbove','extendBelow','copyStyle','pasteStyle'):
+            self.bridge.transport.call.reset_mock()
+            result=await self.bridge.execute(action,capture_current=True)
+            self.bridge.transport.call.assert_called_once_with('set_label',capture_current=True,capture_session='test',command=action)
+            self.assertEqual(result['target']['document_id'],1)
+            self.assertEqual(self.bridge.tasks.get(result['task_id'])['target']['layer_ids'],[2])
+            self.assertNotIn('capture_current',self.bridge.tasks.get(result['task_id'])['target'])
+
+    async def test_direct_caps_older_plugin_uses_original_capture_and_menu_never_rebinds(self):
+        root=Path(self.temp.name);self.bridge.transport.folder=root
+        (root/'probe-last.json').write_text(json.dumps({'probe_version':'0.3.33','session':'test'}),'utf-8')
+        await self.bridge.execute('selectAbove',capture_current=True)
+        self.assertEqual([call.args[0] for call in self.bridge.transport.call.call_args_list],['capture','set_label'])
+        self.bridge.transport.call.reset_mock()
+        await self.bridge.execute('selectAbove',capture_current=True,frozen_target=self.target)
+        self.bridge.transport.call.assert_called_once_with('set_label',target=self.target,command='selectAbove')
+
+    async def test_direct_caps_missing_target_fails_closed_without_replay(self):
+        root=Path(self.temp.name);self.bridge.transport.folder=root
+        (root/'probe-last.json').write_text(json.dumps({'probe_version':'0.3.34','session':'test'}),'utf-8')
+        self.bridge.transport.call.side_effect=None;self.bridge.transport.call.return_value={'result':{'verified':True}}
+        with self.assertRaises(UxpResultUnknown):await self.bridge.execute('selectAbove',capture_current=True)
+        self.assertTrue(self.bridge.busy);self.assertEqual(self.bridge.transport.call.call_count,1)
+        with self.assertRaises(RuntimeError):await self.bridge.execute('selectBelow',capture_current=True)
+        self.assertEqual(self.bridge.transport.call.call_count,1)
+
     async def asyncSetUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.bridge=UxpBridge(task_history=Path(self.temp.name)/'tasks.json')

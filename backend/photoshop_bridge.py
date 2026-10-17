@@ -216,7 +216,7 @@ class PhotoshopBridge:
         self._captured_app, self._captured_target = app, actual
         return dict(expected)
 
-    async def _execute_task(self, action, before_dispatch=None, task_id=None, binding=None, capture=None, execute=None, interactive=False):
+    async def _execute_task(self, action, before_dispatch=None, task_id=None, binding=None, capture=None, execute=None, interactive=False, result_target=None):
         command = validate_command(action)
         if self.closed:
             raise RuntimeError("服务正在退出")
@@ -228,14 +228,17 @@ class PhotoshopBridge:
         self._active_task_id = task_id
         future = None
         dispatched = False
+        target = None
         def finished(completed):
+            nonlocal target
             self.busy = False
             error = completed.exception() if not completed.cancelled() else None
             if dispatched:
                 try:
                     if error:raise error
+                    if result_target:target=result_target(completed.result())
                     message = self._result_message(action, completed.result())
-                    self.tasks.update(task_id, 'succeeded', message=message, error='')
+                    self.tasks.update(task_id, 'succeeded', message=message, error='',target=target)
                 except Exception as exc:
                     error = exc
                     if getattr(exc,'result_unknown',False):
@@ -266,6 +269,7 @@ class PhotoshopBridge:
             dispatched = True
             future.add_done_callback(finished)
             result = await asyncio.wait_for(asyncio.shield(future), None if action=='editStyle' or interactive else self.operation_timeout)
+            if result_target:target=result_target(result)
             return {"message": self._result_message(action,result), "result": str(result or ""), "target":target, 'task_id':task_id}
         except asyncio.TimeoutError:
             if not dispatched:

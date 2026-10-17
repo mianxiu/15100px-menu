@@ -22,6 +22,7 @@ from .settings import Settings
 from .plugins import Plugins, MAX_PACKAGE
 from .paths import ROOT, runtime_dir
 from .tasks import TaskStore, TaskCancelled
+from .broadcasts import StatusDelivery
 from .uxp_management import UxpManager
 from .photoshop_launch import PhotoshopLauncher
 from .language import read_language, save_language
@@ -116,6 +117,7 @@ class WSHandler(websocket.WebSocketHandler):
 
     def on_close(self):
         self.application.clients.discard(self)
+        if hasattr(self.application,'status_delivery'):self.application.status_delivery.forget(self)
 
 
 class StaticHandler(web.StaticFileHandler):
@@ -202,11 +204,8 @@ class Application(web.Application):
     async def broadcast(self, event):
         if self.desktop:
             self.desktop.event(event)
-        for client in tuple(self.clients):
-            try:
-                await client.write_message(event)
-            except websocket.WebSocketClosedError:
-                self.clients.discard(client)
+        if not hasattr(self,'status_delivery'):self.status_delivery=StatusDelivery(self.clients)
+        self.status_delivery.send(event)
 
     def task_changed(self, task):
         # COM completion callbacks run on the asyncio thread. The read-only
@@ -523,12 +522,14 @@ class Application(web.Application):
                             if 'menu_epoch' in args and hasattr(self.desktop,'require_menu_layer_target'):
                                 await asyncio.to_thread(self.desktop.require_menu_layer_target,name,target)
                             await asyncio.to_thread(self.desktop.hide)
-                    # Capture before hiding; the PS-side check and write
-                    # share one JSX call on the original COM connection.
+                    # Frozen menu targets stay bound; direct UXP Caps actions capture
+                    # in their single request and revalidate inside the write transaction.
                     if name=='shape.paint':
                         result=await self.bridge.execute_shape(args.get('params'),before_dispatch=before_dispatch,frozen_target=frozen_target)
                     elif frozen_target is not None:
                         result=await self.bridge.execute(name,before_dispatch=before_dispatch,frozen_target=frozen_target)
+                    elif isinstance(self.bridge,UxpBridge) and 'menu_epoch' not in args:
+                        result=await self.bridge.execute(name,before_dispatch=before_dispatch,capture_current=True)
                     else:result = await self.bridge.execute(name, before_dispatch=before_dispatch)
                     if isinstance(self.bridge,UxpBridge):
                         self.desktop.layer_context=dict(self.bridge.layer_context)

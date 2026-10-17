@@ -4,6 +4,14 @@ import os
 from pathlib import Path
 import re
 import time
+from .operation_target import validate_target
+
+
+def captured_target(response, session):
+    value=response.get('captured_target')
+    if not isinstance(value,dict) or value.get('session')!=session:
+        raise ValueError('Missing captured target/session')
+    return {**validate_target(value),'session':session,'instance_binding':session}
 
 
 class PendingUxp:
@@ -31,11 +39,14 @@ class PendingUxp:
             raise ValueError('Invalid plugin data folder')
         if value.get('operation') not in ('set_label', 'new_document'):
             raise ValueError('Not a modifying request')
+        if 'capture_current' in value and value['capture_current'] is not True:
+            raise ValueError('Invalid target binding mode')
 
     def begin(self, request, folder, task_id):
         if self.value or self.error:
             raise RuntimeError('上一项 UXP 操作结果待核对，未提交新任务')
         value = {key: request[key] for key in ('id', 'session', 'operation')}
+        if request.get('capture_current') is True:value['capture_current']=True
         value.update(schema=1, folder=str(Path(folder).resolve()), task_id=task_id,
                      submitted_at_ms=int(time.time()*1000))
         self.validate(value)
@@ -74,6 +85,11 @@ class PendingUxp:
             # not verified. Preserve the receipt bytes and fail closed locally.
             uncertain = result.get('result_unknown') or (result.get('phase') == 'failed' and
                 result.get('error') in ('预览回滚结果待核对', 'Error: 预览回滚结果待核对'))
+            if value.get('capture_current') and result.get('phase')=='completed':
+                try:captured_target(result,value['session'])
+                except ValueError:
+                    uncertain=True
+                    result={**result,'error':'UXP 原操作已返回，但固定目标收据不完整；结果待核对'}
             if uncertain:
                 if not allow_unknown: return None
                 result = {**result, 'result_unknown':True}

@@ -12,6 +12,26 @@ from backend.uxp_recovery import PendingUxp
 
 
 class RecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_direct_caps_late_receipt_requires_bound_target_before_releasing_busy(self):
+        self.heartbeat()
+        heartbeat=json.loads((self.folder/'probe-last.json').read_text('utf-8'));heartbeat['probe_version']='0.3.34'
+        (self.folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+        with patch('backend.uxp_bridge.publish_request',wraps=publish_request) as publish:
+            with self.assertRaises(UxpResultUnknown):await self.bridge.execute('selectAbove',capture_current=True)
+            task=self.bridge.tasks.snapshot()['items'][0]['id'];original=(self.folder/'probe-request.json').read_bytes()
+            self.assertTrue(self.bridge.transport.pending.value['capture_current'])
+            self.receipt()
+            self.assertTrue((await self.bridge.reconcile_result())['active'])
+            self.assertEqual(self.bridge.tasks.get(task)['state'],'result-unknown')
+            for target in ({'session':'other','document_id':1,'active_layer_id':2,'layer_ids':[2]},
+                           {'session':'one','document_id':1,'active_layer_id':2,'layer_ids':[3]}):
+                self.receipt(captured_target=target);self.assertTrue((await self.bridge.reconcile_result())['active'])
+            self.receipt(captured_target={'session':'one','document_id':1,'active_layer_id':2,'layer_ids':[2]})
+            self.assertFalse((await self.bridge.reconcile_result())['active'])
+            self.assertEqual(self.bridge.tasks.get(task)['target']['layer_ids'],[2])
+            self.assertEqual(self.bridge.tasks.get(task)['state'],'succeeded')
+            self.assertEqual(publish.call_count,1);self.assertEqual(original,(self.folder/'probe-request.json').read_bytes())
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
