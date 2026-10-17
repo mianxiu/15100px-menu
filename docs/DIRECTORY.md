@@ -12,7 +12,7 @@
 | `photoshop_action/` 与根目录 COM 兼容模块 | 后端仍引用的兼容代码 |
 | `tools/`、`tests/` | 维护工具与自动回归 |
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
-| `dist/` | 当前v0.4.155 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
+| `dist/` | 当前v0.4.157 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |
@@ -56,3 +56,5 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 155：新增frontend/src/shortcuts.mjs及对应测试，使用说明docs/SHORTCUTS.md／Wiki；原生组件与UXP23不变。154回退位于.local/recovery/releases/0.4.154-before155和.local/archive/dist/v0.4.154-before155；dist当前仅155发行物。
 
 156：backend/mask_preview.py为单请求控制快照发布与会话生命周期；tools/verify-mask-preview.py为自建文档受限CPU／正常对照，文档docs/MASK-PREVIEW.md／Wiki。私有证据在.runtime/mask-preview-live-*，不公开本机凭据。正式运行入口与发行物仍分别核验，155回退预留于.local/recovery/releases/0.4.155-before156和.local/archive/dist/v0.4.155-before156。
+
+157最终公开交付：dist仅157 EXE／ZIP／UXP ZIP／SHA256／更新清单六项。155发行物仍在.local/archive/dist/v0.4.155-before156，156未公开候选及包在.local/archive/dist/v0.4.156-before157；实际156入口／配置回退在.local/recovery/releases/0.4.156-before157，155稳定入口回退另存保留。所有Git标签保留。
