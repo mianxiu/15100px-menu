@@ -21,6 +21,6 @@
 
 实现位置：`backend/panel_context.py`、`backend/photoshop_windows.py`、桌面焦点保护及原生热键组件。
 
-默认Caps意图、上下单选／Shift多选和F5行为见[当前按键](../README.md#photoshop-操作菜单)；画布／通用菜单不显示图层排序，图层菜单上方四段图文，下方c/v/f/w/s。Tab／Caps+Tab仅测试未迁移，自动ENG未启用。面板／触发采集用[inspect-panels](../tools/inspect-panels.ps1)，安装成功未加载用[inspect-uxp](../tools/inspect-uxp.ps1)。
+默认Caps意图、上下单选／Shift多选和F5行为见[当前按键](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide)；画布／通用菜单不显示图层排序，图层菜单上方四段图文，下方c/v/f/w/s。Tab／Caps+Tab仅测试未迁移，自动ENG未启用。面板／触发采集用[inspect-panels](../tools/inspect-panels.ps1)，安装成功未加载用[inspect-uxp](../tools/inspect-uxp.ps1)。
 
 146通过后台统一诊断收集面板／热键、UXP加载及已有运行耗时；UXP日志优先当前运行宿主，早于本次PS启动的记录不用于推断扫描路径。未记录用户External扫描仅为线索，不代表已确认加载失败根因；实体矩阵继续单列待验收。
