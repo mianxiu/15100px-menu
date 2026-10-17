@@ -1,0 +1,1 @@
+{"manifestVersion":5,"id":"com.15100px.tree-study","name":"Disposable read-only tree study","version":"0.0.1","main":"main.js","host":{"app":"PS","minVersion":"24.0.1","data":{"apiVersion":2,"loadEvent":"startup"}},"requiredPermissions":{"localFileSystem":"plugin"},"entrypoints":[{"type":"command","id":"noop","label":"Disposable read-only tree study"}]}

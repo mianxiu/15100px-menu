@@ -4,6 +4,7 @@
 
 | 路径 | 用途 |
 | --- | --- |
+| `tools/verify-diverse-layers.py`、`tools/benchmark-tree-snapshots.py`、`tools/fixtures/tree-snapshot-study` | 自建PS样本的类型／样式／智能对象／4K事务验证和只读整树算法研究；独立临时插件，不进入EXE或发行ZIP |
 | `tools/benchmark-layer-snapshots.py`、`tools/fixtures/selection-context-0.3.18.cjs` | 新鲜生产读取测量、冻结旧算法语义对照；不随运行入口加载 |
 | `tools/test-hotkey-opening.py` | 无输入钩子的生产输出队列时序对照；不代表实体按键到屏幕 |
 | `main.py`、`start.ps1`、`build-exe.ps1` | 当前启动／构建入口 |
