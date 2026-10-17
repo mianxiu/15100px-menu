@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 159双面板与填充Set报错：颜色在上、羽化／密度在下，同宽、6单位间隔，空隙取消与共用事务保持；UXP26撤回矢量直接纯色setter。340后台、37前端、13份插件脚本（30组预览事务）、实际组件四主题与32份两字号／四内容预览、最终EXE启动／重启通过。真实PS24.0.1颜色低CPU31项／正常8项、蒙版低CPU10项／正常6项，再加实际恢复文档独立副本低CPU2项，共57项事务通过；取消恢复、末值、路径／独立像素蒙版和一次撤销分别核验。 实际159入口／dist／组件与内置／安装／加载UXP26一致，配置与文档保留。证据.runtime/caps159-final-pending.json、runtime159-verification.json、live159-reports.json、additional159-reports.json、panels159-previews.json、native159-themes.json。原报错匹配终态确认失败后才重载；未保存内容恢复副本在.local/recovery/documents/panels159-1792227890664024000。一次正常对照因前台变化安全停止并清理，最终稳定后6项收尾通过，未强行恢复焦点；主动路径继承样本未复现，另用真实恢复文档独立副本2项验证。
-- [ ] 159公开Release附件、备用清单／限流回退与Wiki发布核验，尚不以本地代码／文档代替公开交付。
+- [x] 159公开交付：ZIP／SHA256及最新备用清单匿名下载核验、最终冻结更新器强制API403后的实网下载与校验通过；Wiki八页面和首页／图片匿名核验。发行页仅159，旧158 Release／附件已清理，全部源码标签与本地回退保留；dist仅159六项文件，实际入口与UXP26匹配。证据.runtime/runtime159-delivered.json、release-0.4.159-public-verification.json、manifest159-verification.json、fallback159-live.json、release159-cleanup.json。
 - [ ] 159双面板实体Caps／鼠标命中、空隙取消及真实画布流畅度、跨DPI和故障集显电脑验收。
 
 - [x] 158颜色实时预览代码／测试／构建／实际入口：340后台、37前端、13份插件脚本（含30组实时预览事务）、原生四主题生产显示／命中／输入／取消与最终EXE启动／重启通过。最终UXP25在真实PS24.0.1通过颜色低CPU27项／正常8项及蒙版低CPU10项／正常6项，共51项事务；取消恢复、一次撤销、末值、交叉编辑、普通纯色／渐变、路径／像素蒙版和未编辑属性保留分别核验。 本机158 EXE／dist／原生组件与内置／安装／加载UXP25匹配，文档／配置／主屏前台保持，资源已恢复。证据.runtime/live158-reports.json、caps158-final-pending.json、runtime158-verification.json、native158-themes.json。首轮渐变失败仅根据原请求匹配终态核对；最终批次没有重发或COM写入回退。

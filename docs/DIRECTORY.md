@@ -64,3 +64,5 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 158公开交付：dist仅当前六项；旧157发行包、实际EXE与配置已按上述目录保留，所有Git标签与源码历史保持。
 
 159回退：.local/archive/dist/v0.4.158-before159保留158完整发行包，.local/recovery/releases/0.4.158-before159保留实际入口与配置；文档恢复副本在.local/recovery/documents/panels159-1792227890664024000，原稿与所有源码标签保留。
+
+159公开交付：dist仅当前六项；旧158发行包、实际EXE与配置已按上述目录保留，所有Git标签与源码历史保持。
