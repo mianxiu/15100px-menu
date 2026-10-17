@@ -1,9 +1,10 @@
 import {render} from 'solid-js/web';
-import {createSignal, createEffect, onMount, onCleanup, For, Show} from 'solid-js';
+import {createSignal, createMemo, createEffect, onMount, onCleanup, For, Show} from 'solid-js';
 import {Client} from './client.mjs';
 import {translate} from './i18n.mjs';
 import {diagnosticClock,diagnosticScopes,diagnosticComponents,diagnosticFinding} from './diagnostics.mjs';
 import {applyMenuTheme} from './theme.mjs';
+import {prefixOptions,triggerKeys,keyLabel,shortcutParts,triggerAllowed,changePrefix,changeTrigger,shortcutErrors} from './shortcuts.mjs';
 import './admin.css';
 
 const pages = [['overview','运行状态'],['settings','菜单设置'],['plugins','插件管理'],['updates','应用更新'],['tasks','最近任务'],['logs','运行日志']];
@@ -80,7 +81,12 @@ function App() {
   </section>;}
   function edit(key,value){setDirty(true);setForm({...form(),[key]:value});}
   function shortcut(key,value){setDirty(true);setForm({...form(),shortcuts:{...form().shortcuts,[key]:value}});}
-  async function save(){try{const result=await call('settings.save',{settings:form()});setForm(result.settings);setDirty(false);}catch{}}
+  const shortcutIssues=createMemo(()=>shortcutErrors(form()?.shortcuts));
+  const invalidShortcuts=()=>Object.keys(shortcutIssues()).length>0;
+  async function save(){
+    if(invalidShortcuts()){setNotice({ok:false,message:t('请先修正快捷键设置')});return;}
+    try{const result=await call('settings.save',{settings:form()});setForm(result.settings);setDirty(false);}catch{}
+  }
   async function readLogs(){try{setLogs((await call('logs.read')).text);}catch{}}
   function ZipUpload(props){
     let input;
@@ -149,7 +155,26 @@ function App() {
     <UxpFollow/><details class="help"><summary>{t("安装说明")}</summary><p>{t("主程序自带离线插件，安装、更新和回退均在此管理，无需单独安装器或 Adobe 工具。安装／更换／卸载前请先保存并正常关闭 Photoshop。已有用户索引时同步本插件登记，没有索引时保留目录扫描；重启 PS 后以实际连接为准。")}</p><p>{t("禁用立即生效并保留插件文件；已加载的插件仍驻留 PS，卸载才会移除。运行中的任务结束前不能禁用或更换。")}</p></details>
     <details class="help"><summary>{t("安装详情与维护")}</summary><p>{t('安装检测：')}{t(({missing:'未安装',invalid:'安装不完整或凭据异常',installed:'文件与凭据校验通过'})[state().uxp?.installation] || '检查中…')}</p><p>{t('检测目录：')}{state().uxp?.plugin_dir || '—'}</p><div class="buttons"><button disabled={managedBusy()} onClick={()=>installUxp(null)}>{t("安装／更新为内置版本")}</button><button disabled={managedBusy() || !state().uxp?.can_rollback} onClick={()=>perform('uxp.rollback')}>{t("回退上次安装")}</button><button class="danger" disabled={managedBusy() || !state().uxp?.installed} onClick={()=>perform('uxp.uninstall')}>{t("卸载 UXP 插件")}</button></div><label class="advanced-field">{t("Photoshop.exe 完整路径")}<input value={photoshopExe()} placeholder={t("留空自动检测")} onInput={e=>setPhotoshopExe(e.target.value)}/></label></details>
   </section></div>;}
-  function KeySettings(){return <div class="panel-scroll"><section><h2>{t("菜单快捷键")}</h2><div class="checks"><label><input type="checkbox" checked={form().remote_compatibility} onChange={e=>edit("remote_compatibility",e.target.checked)}/>{t("远程兼容（默认关闭）")}</label></div><p class="caption">{t("通过向日葵等远程软件操作时可开启。保存后先在PS工作区内点击一次，再按菜单快捷键；不增加任务栏、Alt+Tab或悬停激活，输入框和弹窗保护保留。")}</p><div class="fields"><For each={Object.entries(keyLabels).filter(([key])=>['toggle','hide'].includes(key))}>{([key,label])=><label>{t(label)}<input disabled={disabled()} value={form().shortcuts[key]} onInput={e=>shortcut(key,e.target.value)}/></label>}</For></div><details class="help"><summary>{t("使用说明")}</summary><p>{t("支持 CapsLock、Tab、Esc、Space、F1–F12，或 ctrl / alt / shift / capslock / tab 组合键。")}</p></details></section><section><h2>{t("图层操作快捷键")}</h2><div class="fields"><For each={Object.entries(keyLabels).filter(([key])=>!['toggle','hide'].includes(key))}>{([key,label])=><label>{t(label)}<input disabled={disabled()} value={form().shortcuts[key]} onInput={e=>shortcut(key,e.target.value)}/></label>}</For></div></section><Show when={state().photoshop.execution_backend!=='uxp-local-files'}><section><label>{t("更新清单 HTTPS 地址")}<input type="url" placeholder="https://…/updates.json" value={form().update_url} onInput={e=>edit('update_url',e.target.value)}/></label></section></Show></div>;}
+  function ShortcutPicker(props){
+    const value=createMemo(()=>form().shortcuts[props.name] || '');
+    const parts=createMemo(()=>shortcutParts(value()));
+    const required=()=>['toggle','hide'].includes(props.name);
+    const issue=()=>shortcutIssues()[props.name];
+    return <div class="shortcut-field" data-shortcut={props.name}>
+      <span class="shortcut-title">{t(props.label)}</span>
+      <div class="shortcut-controls">
+        <select aria-label={`${t(props.label)} · ${t('组合键')}`} aria-invalid={!!issue()} disabled={disabled()} value={parts().prefix} onChange={e=>shortcut(props.name,changePrefix(value(),e.target.value))}>
+          <For each={prefixOptions}>{option=><option value={option.value}>{t(option.label)}</option>}</For>
+        </select>
+        <select aria-label={`${t(props.label)} · ${t('按键')}`} aria-invalid={!!issue()} disabled={disabled()} value={parts().key} onChange={e=>shortcut(props.name,changeTrigger(value(),e.target.value))}>
+          <option value="">{t(required() || parts().prefix?'请选择按键':'未绑定')}</option>
+          <For each={triggerKeys}>{key=><option value={key} disabled={!triggerAllowed(parts().prefix,key)}>{keyLabel(key)}</option>}</For>
+        </select>
+      </div>
+      <Show when={issue()}><p class="field-error" role="alert">{t(issue())}</p></Show>
+    </div>;
+  }
+  function KeySettings(){return <div class="panel-scroll"><section><h2>{t("菜单快捷键")}</h2><div class="checks"><label><input type="checkbox" checked={form().remote_compatibility} onChange={e=>edit("remote_compatibility",e.target.checked)}/>{t("远程兼容（默认关闭）")}</label></div><p class="caption">{t("通过向日葵等远程软件操作时可开启。保存后先在PS工作区内点击一次，再按菜单快捷键；不增加任务栏、Alt+Tab或悬停激活，输入框和弹窗保护保留。")}</p><div class="fields shortcut-fields"><For each={Object.entries(keyLabels).filter(([key])=>['toggle','hide'].includes(key))}>{([key,label])=><ShortcutPicker name={key} label={label}/>}</For></div><details class="help"><summary>{t("使用说明")}</summary><p>{t("先选组合键，再选按键；图层快捷键可选择未绑定。唤出与收起必须保留，重复或未完成的组合不能保存。")}</p></details></section><section><h2>{t("图层操作快捷键")}</h2><div class="fields shortcut-fields"><For each={Object.entries(keyLabels).filter(([key])=>!['toggle','hide'].includes(key))}>{([key,label])=><ShortcutPicker name={key} label={label}/>}</For></div></section><Show when={state().photoshop.execution_backend!=='uxp-local-files'}><section><label>{t("更新清单 HTTPS 地址")}<input type="url" placeholder="https://…/updates.json" value={form().update_url} onInput={e=>edit('update_url',e.target.value)}/></label></section></Show></div>;}
   async function installUxp(token){try{await call('uxp.install',{token,photoshop_exe:photoshopExe()});setUxpPreview(null);}catch{}}
   function exportTasks() {
     const report={exported_at:new Date().toISOString(),version:state().version,connection:connection(),service:state().service,tasks:state().tasks};
@@ -169,7 +194,7 @@ function App() {
     const next=event.key==='ArrowRight'?(index+1)%ids.length:event.key==='ArrowLeft'?(index+ids.length-1)%ids.length:event.key==='Home'?0:event.key==='End'?ids.length-1:-1;
     if(next<0)return;event.preventDefault();selectTab(ids[next]);event.currentTarget.querySelectorAll('[role=tab]')[next].focus();
   }
-  function SaveBar(){return <Show when={dirty()}><footer class="save-bar"><span>{dirty()?t("有未保存的修改"):t("设置已同步")}</span><div class="buttons"><button class="primary" disabled={disabled() || !dirty()} onClick={save}>{t("保存并立即生效")}</button><button disabled={!dirty()} onClick={()=>{setForm(structuredClone(state().settings));setDirty(false);}}>{t("放弃修改")}</button></div></footer></Show>;}
+  function SaveBar(){return <Show when={dirty()}><footer class="save-bar"><span>{invalidShortcuts()?t("请先修正快捷键设置"):dirty()?t("有未保存的修改"):t("设置已同步")}</span><div class="buttons"><button class="primary" disabled={disabled() || !dirty() || invalidShortcuts()} onClick={save}>{t("保存并立即生效")}</button><button disabled={!dirty()} onClick={()=>{setForm(structuredClone(state().settings));setDirty(false);}}>{t("放弃修改")}</button></div></footer></Show>;}
   function choose(name){setPage(name);if(name==='logs')readLogs();}
   onMount(()=>client.connect());onCleanup(()=>client.close());
   return <div class="shell">
