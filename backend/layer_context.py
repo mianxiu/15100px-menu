@@ -34,8 +34,9 @@ def validate(value,session,now_ms=None):
         return unavailable()
     result={**value,'label':LABELS[kind]}
     if 'shape_editor' in value:
-        from .shape_paint import metadata
-        result['shape_editor']=metadata(value['shape_editor']) if kind=='shape-fill' and len(ids)==1 and not value.get('locked') else {'available':False}
+        from .shape_paint import metadata,editor_matches
+        shape=metadata(value['shape_editor'])
+        result['shape_editor']=shape if editor_matches(shape,value) and not value.get('locked') and not value.get('background') else {'available':False}
     return result
 
 def flags(value):
@@ -50,9 +51,10 @@ def flags(value):
 
 def require_menu_target(value,name,target):
     if name=='shape.paint':
-        if (not value or value.get('kind')!='shape-fill' or len(value.get('layer_ids',[]))!=1 or value.get('locked')
+        from .shape_paint import editor_matches
+        if (not value or not editor_matches(value.get('shape_editor',{}),value) or value.get('locked')
                 or value.get('background') or not value.get('shape_editor',{}).get('available')):
-            raise TaskCancelled('颜色调整仅用于单选未锁定的形状／填充图层，请重新打开菜单')
+            raise TaskCancelled('颜色／蒙版调整目标不可用，请重新打开菜单')
         if any(value.get(k)!=target.get(k) for k in ('session','document_id','layer_ids')):raise TaskCancelled('文档或图层选择已改变，请重新打开菜单；本次未修改图层')
         return
     if name in CAPS_ACTIONS:

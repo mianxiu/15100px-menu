@@ -31,6 +31,13 @@ def paint(value,stroke=False):
     return result
 
 def parameters(value):
+    if isinstance(value,dict) and value.get('mask_batch') is True:
+        if set(value)!={'revision','mask_batch','mask'} or not isinstance(value['revision'],str) or not 1<=len(value['revision'])<=128:
+            raise ValueError('批量蒙版状态已失效')
+        mask=value['mask']
+        if not isinstance(mask,dict) or not mask or not set(mask)<={'feather','density'} or any(not number(v,0,1000 if k=='feather' else 100) for k,v in mask.items()):
+            raise ValueError('无效批量羽化／密度')
+        return {'revision':value['revision'],'mask_batch':True,'mask':dict(mask)}
     if not isinstance(value,dict) or set(value) not in ({'revision','fill','stroke'},{'revision','fill','stroke','mask'}):raise ValueError('形状颜色参数不完整')
     revision=value['revision']
     if not isinstance(revision,str) or not 1<=len(revision)<=128:raise ValueError('形状状态已失效，请重新打开菜单')
@@ -45,6 +52,15 @@ def parameters(value):
 def metadata(value):
     if not isinstance(value,dict) or value.get('available') is not True:return {'available':False}
     try:
+        if value.get('mask_batch') is True:
+            result=parameters({k:value.get(k) for k in ('revision','mask_batch','mask')})
+            ids=value.get('layer_ids');active=value.get('active_layer_id');mixed=value.get('mixed')
+            if (set(result['mask'])!={'feather','density'} or not isinstance(ids,list) or not 2<=len(ids)<=128
+                    or any(type(i) is not int or i<=0 for i in ids) or ids!=sorted(set(ids)) or type(active) is not int or active not in ids
+                    or not isinstance(mixed,dict) or set(mixed)!={'feather','density'} or any(type(v) is not bool for v in mixed.values())
+                    or type(value.get('live_preview')) is not bool or value.get('preview_engine') not in (None,'legacy-com')):raise ValueError()
+            return {'available':True,**result,'vector':True,'layer_ids':list(ids),'active_layer_id':active,'mixed':dict(mixed),
+                    'live_preview':value['live_preview'],**({'preview_engine':value['preview_engine']} if value.get('preview_engine') else {})}
         result=parameters({k:value.get(k) for k in ('revision','fill','stroke')+ (('mask',) if 'mask' in value else ())})
         vector=value.get('vector',True)
         if type(vector) is not bool:raise ValueError()
@@ -58,3 +74,10 @@ def metadata(value):
         return {'available':True,'vector':vector,'live_preview':live,**result,'patterns':list(patterns),
                 **({'preview_engine':engine} if engine and live else {})}
     except ValueError:return {'available':False}
+
+
+def editor_matches(shape,context):
+    ids=context.get('layer_ids',[])
+    if shape.get('mask_batch') is True:
+        return (2<=len(ids)<=128 and shape.get('layer_ids')==ids and shape.get('active_layer_id') in ids)
+    return context.get('kind')=='shape-fill' and len(ids)==1

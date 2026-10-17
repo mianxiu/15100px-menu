@@ -27,7 +27,7 @@ class MaskPreview:
 
     def update(self, paint, commit=False):
         value = parameters(paint)
-        if value['revision'] != self.revision or ('mask' in value) != self.has_mask:
+        if value['revision'] != self.revision or ('mask' in value) != self.has_mask or value.get('mask_batch')!=self.paint.get('mask_batch'):
             raise ValueError('预览草稿身份已改变')
         with self.lock:
             if self.closed or self.phase != 'preview':
@@ -101,8 +101,14 @@ async def dispatch_preview(app, action, args):
         raise RuntimeError('当前PS使用本地草稿，请确认后一次提交')
     preview=MaskPreview(epoch,args.get('params'))
     target={key:snapshot.get(key) for key in ('session','document_id','layer_ids')}
-    if len(target.get('layer_ids') or [])!=1:raise ValueError('预览需要冻结的单选形状')
-    target['active_layer_id']=target['layer_ids'][0]
+    shape=snapshot.get('shape_editor',{})
+    if preview.paint.get('mask_batch'):
+        from .shape_paint import editor_matches
+        if not shape.get('mask_batch') or not editor_matches(shape,snapshot):raise ValueError('批量蒙版选择已改变')
+        target['active_layer_id']=shape['active_layer_id']
+    else:
+        if len(target.get('layer_ids') or [])!=1:raise ValueError('预览需要冻结的单选形状')
+        target['active_layer_id']=target['layer_ids'][0]
     # Reserve synchronously before starting the worker. Subsequent slider
     # events replace this same session while focus/target checks are pending.
     await app.operation_lock.acquire()

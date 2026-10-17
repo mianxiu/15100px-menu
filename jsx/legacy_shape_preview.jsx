@@ -215,7 +215,86 @@
     var commit=false,leaseUntil=new Date().getTime()+4000;
     function invariants() { target();var d=layerDescriptor();if(parentID()!==originalParent || order().join(',')!==originalOrder.join(',') || pathStream()!==originalPath || !same(pixelMask(d),originalPixel))throw Error('Document structure or pixel mask changed');return d; }
     function rollback() { target();var current=layerDescriptor(),dirty=changed || !same(raw(current),raw(baseline)) || prepared.raw.vector && !maskClose(mask(current),originalMask);doc.activeHistoryState=originalHistory;if(dirty){app.refresh();redraws++;}var d=invariants();if(!same(raw(d),raw(baseline)) || prepared.raw.vector && !maskClose(mask(d),originalMask))throw Error('Legacy rollback readback mismatch'); }
-    try {
+    function batchRun() {
+        var records=[],batchHistory=null,batchStarted=false,batchChanged=false,batchCommit=false,batchSeq=0,batchUpdates=0,batchRedraws=0,batchLatest=request.paint;
+        var keys=['layerKind','adjustment','AGMStrokeStyleInfo','hasVectorMask','hasUserMask','userMaskFeather','userMaskDensity'];
+        var ids=request.target.layer_ids.slice().sort(function(a,b){return a-b;}),lease=new Date().getTime()+4000;
+        function batchIdentity() {
+            if(!app.documents.length || app.activeDocument.id!==request.target.document_id || doc.activeLayer.id!==request.target.active_layer_id || selected().sort(function(a,b){return a-b;}).join(',')!==ids.join(','))throw Error('Batch selection changed');
+        }
+        function unlocked(l){while(l.typename==='ArtLayer'||l.typename==='LayerSet'){if(l.allLocked || l.typename==='ArtLayer' && (l.pixelsLocked||l.positionLocked||l.transparentPixelsLocked||l.isBackgroundLayer))throw Error('Batch layer locked');l=l.parent;}}
+        function batchTarget(){batchIdentity();for(var i=0;i<records.length;i++)unlocked(records[i].layer);}
+        function batchValidate(p) {
+            if(!p || p.mask_batch!==true || p.revision!==request.paint.revision || !p.mask || p.fill || p.stroke)throw Error('Invalid batch parameters');
+            var n=0;for(var k in p.mask)if(p.mask.hasOwnProperty(k)){if(k!=='feather'&&k!=='density' || !range(p.mask[k],0,k==='feather'?1000:100))throw Error('Invalid batch mask');n++;}if(!n)throw Error('Empty batch mask');
+        }
+        function desc(id){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);return executeActionGet(r);}
+        function batchPath(id){var r=new ActionReference();r.putProperty(s('property'),s('pathContents'));r.putEnumerated(s('path'),s('path'),s('vectorMask'));r.putIdentifier(c('Lyr '),id);var p=executeActionGet(r);return item(p,s('pathContents'));}
+        function contents(d){var v={};for(var j=0;j<keys.length;j++){var k=s(keys[j]);v[keys[j]]=d.hasKey(k)?item(d,k):null;}return v;}
+        function membersOrder(layer){var v=[],ls=layer.parent.layers;for(var j=0;j<ls.length;j++)v.push(ls[j].id);return v;}
+        function readMember(layer,orders){var parent=layer.parent.typename==='LayerSet'?layer.parent.id:null,key='p'+parent;if(!orders.hasOwnProperty(key))orders[key]=membersOrder(layer);var d=desc(layer.id);if(!d.hasKey(s('hasVectorMask'))||!d.getBoolean(s('hasVectorMask')))throw Error('Vector mask missing');return {id:layer.id,mask:mask(d),content:contents(d),path:batchPath(layer.id),parent_id:parent,order:orders[key]};}
+        function sameMember(a,b,wanted){return a.id===b.id && maskClose(a.mask,wanted) && same(a.content,b.content) && same(a.path,b.path) && a.parent_id===b.parent_id && same(a.order,b.order);}
+        function verify(wanted){batchTarget();var orders={};for(var j=0;j<records.length;j++)if(!sameMember(readMember(records[j].layer,orders),records[j].original,wanted[j]))throw Error('Batch mask/content/path/order mismatch');}
+        function set(id,key,value){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);var d=new ActionDescriptor(),v=new ActionDescriptor();d.putReference(c('null'),r);v.putUnitDouble(s(key==='feather'?'vectorMaskFeather':'vectorMaskDensity'),c(key==='feather'?'#Pxl':'#Prc'),value);d.putObject(c('T   '),c('Lyr '),v);executeAction(c('setd'),d,DialogModes.NO);}
+        function applyBatch(p){
+            batchValidate(p);stage='batch-verify-frame';verify(records.mapMask);var wanted=[],changedFrame=false;
+            for(var j=0;j<records.length;j++){var base=records[j].original.mask;wanted.push({feather:p.mask.hasOwnProperty('feather')?p.mask.feather:base.feather,density:p.mask.hasOwnProperty('density')?p.mask.density:base.density});}
+            for(var j=0;j<records.length;j++)for(var k=0;k<2;k++){var key=k?'density':'feather';if(Math.abs(wanted[j][key]-records.mapMask[j][key])>(k?100/255+.001:.00001)){stage='batch-write-'+key;batchIdentity();unlocked(records[j].layer);batchChanged=true;records[j].touched=true;set(records[j].layer.id,key,wanted[j][key]);changedFrame=true;}}
+            stage='batch-readback';verify(wanted);records.mapMask=wanted;batchLatest=p;batchUpdates++;
+            if(changedFrame){stage='batch-redraw';app.refresh();batchRedraws++;verify(wanted);}
+        }
+        function batchAck(seq){
+            // Opt-in diagnostics only: publish after native readback and redraw.
+            if(request.preview_trace!==true)return;
+            var f=new File(folder+'/mask-preview-status-'+request.id+'.json');
+            try{f.encoding='UTF-8';if(f.open('w')){try{f.write(encode({id:request.id,session:request.session,seq:seq,phase:'preview',mask_batch:true,count:records.length,mask:batchLatest.mask,updates:batchUpdates,redraw_completed:true,redraw_method:'standalone-app.refresh'}));}finally{f.close();}}}catch(_){}
+        }
+        function batchLoop(){
+            while(true){var packet=null,now=new Date().getTime();try{packet=readControl();}catch(_){}
+                if(packet && packet.id===request.id && packet.session===request.session && packet.token===request.token && range(packet.seq,1,2147483647) && Math.floor(packet.seq)===packet.seq && range(packet.lease_until_ms,now,now+5000)){
+                    if(packet.seq<batchSeq)throw Error('Batch sequence regressed');lease=packet.lease_until_ms;
+                    if(packet.phase==='cancel')return;
+                    if(packet.phase!=='preview'&&packet.phase!=='commit')throw Error('Invalid batch phase');
+                    if(packet.seq>batchSeq){applyBatch(packet.paint);batchSeq=packet.seq;batchAck(batchSeq);}
+                    if(packet.phase==='commit'){batchCommit=true;return;}
+                }
+                if(now>lease)return;$.sleep(20);
+            }
+        }
+        function originals(){var out=[];for(var j=0;j<records.length;j++)out.push(records[j].original.mask);return out;}
+        function restoreBatchSelection(){
+            if(!app.documents.length || app.activeDocument.id!==request.target.document_id)throw Error('Batch document changed during rollback');
+            // History restoration may restore a pre-selection single layer. Rebuild
+            // the frozen selection, active ID last, without changing visibility.
+            var current=selected().sort(function(a,b){return a-b;});
+            if(same(current,ids) && doc.activeLayer.id===request.target.active_layer_id)return;
+            var ordered=[];for(var j=0;j<ids.length;j++)if(ids[j]!==request.target.active_layer_id)ordered.push(ids[j]);ordered.push(request.target.active_layer_id);
+            for(var j=0;j<ordered.length;j++){var r=new ActionReference(),d=new ActionDescriptor();r.putIdentifier(c('Lyr '),ordered[j]);d.putReference(c('null'),r);d.putBoolean(s('makeVisible'),false);if(j)d.putEnumerated(s('selectionModifier'),s('selectionModifierType'),s('addToSelection'));executeAction(s('select'),d,DialogModes.NO);}
+        }
+        function rollbackBatch(){batchTarget();doc.activeHistoryState=batchHistory;restoreBatchSelection();if(batchChanged){app.refresh();batchRedraws++;}verify(originals());}
+        function envelope(value){return {schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'completed',result:value};}
+        try {
+            if(!app.documents.length || ids.length<2 || ids.length>128)throw Error('Invalid batch selection');doc=app.activeDocument;batchTarget();batchValidate(request.paint);
+            if(prepared.before.revision!==request.paint.revision || !same(prepared.identity,request.target))throw Error('Prepared batch identity changed');
+            var wantedIDs={};for(var j=0;j<ids.length;j++)wantedIDs[ids[j]]=true;
+            var found={};function walk(layers){for(var j=0;j<layers.length;j++){var l=layers[j];if(wantedIDs[l.id])found[l.id]=l;if(l.typename==='LayerSet')walk(l.layers);}}walk(doc.layers);
+            stage='batch-baseline';var baselineOrders={};for(var j=0;j<ids.length;j++){
+                var l=found[ids[j]];if(!l)throw Error('Batch target missing');var baseline=readMember(l,baselineOrders);
+                if(!sameMember(baseline,prepared.members[j],prepared.members[j].mask))throw Error('Batch changed before native dispatch');records.push({layer:l,original:baseline,touched:false});
+            }
+            batchTarget();records.mapMask=originals();batchHistory=doc.activeHistoryState;
+            var key='__psMenuBatch_'+request.id;if($.global[key])throw Error('Batch request already active');$.global[key]=batchLoop;batchStarted=true;
+            stage='batch-history';try{doc.suspendHistory('批量羽化／密度','$.global['+encode(key)+']()');}finally{delete $.global[key];}
+            if(!batchCommit)rollbackBatch();else verify(records.mapMask);
+            var finalMasks=[],count=0;for(var j=0;j<records.length;j++){finalMasks.push({id:records[j].layer.id,mask:batchCommit?records.mapMask[j]:records[j].original.mask});if(batchCommit&&records[j].touched)count++;}
+            var value={verified:true,mask_batch:true,count:count,placement_moves:0,layer_ids:ids,paint:batchLatest,masks:finalMasks,preview:{updates:batchUpdates,redraws:batchRedraws,last_seq:batchSeq,engine:'standalone-extendscript'}};
+            if(!batchCommit){value.cancelled=true;value.rollback_verified=true;}return envelope(value);
+        }catch(error){var unknown=false;if(batchStarted){try{rollbackBatch();}catch(_){unknown=true;}}
+            return {schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'failed',error:String(error),stage:stage,result_unknown:unknown};}
+    }
+
+    if(request.paint && request.paint.mask_batch===true)result=batchRun();
+    else try {
         if(!app.documents.length)throw Error('Preview document closed');doc=app.activeDocument;anchor=doc.activeLayer;originalHistory=doc.activeHistoryState;
         target();validate(request.paint);if(prepared.before.revision!==request.paint.revision)throw Error('Prepared revision changed');stage='read-baseline';baseline=layerDescriptor();
         if(!same(raw(baseline),{fill:prepared.raw.fill,stroke:prepared.raw.stroke,vector:prepared.raw.vector}) || prepared.before.mask && !maskClose(mask(baseline),prepared.before.mask))throw Error('Prepared style changed before native dispatch');

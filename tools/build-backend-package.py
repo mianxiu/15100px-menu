@@ -45,6 +45,7 @@ with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as bundle:
     bundle.write(ROOT/'docs/MENU-RECOVERY.md','docs/MENU-RECOVERY.md')
     bundle.write(ROOT/'docs/SHORTCUTS.md','docs/SHORTCUTS.md')
     bundle.write(ROOT/'docs/MASK-PREVIEW.md','docs/MASK-PREVIEW.md')
+    bundle.write(ROOT/'docs/BATCH-MASKS.md','docs/BATCH-MASKS.md')
     bundle.write(ROOT/'docs/LEGACY-PREVIEW.md','docs/LEGACY-PREVIEW.md')
     bundle.write(ROOT/'docs/VERSION-HEALTH.md','docs/VERSION-HEALTH.md')
     bundle.write(ROOT/'tools/inspect-panels.ps1','tools/inspect-panels.ps1')

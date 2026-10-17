@@ -506,9 +506,9 @@ class Application(web.Application):
                             return {"message":"已忽略旧菜单操作"}
                         frozen_target=None
                         snapshot=getattr(self.desktop,'menu_layer_context',None)
-                        if isinstance(self.bridge,UxpBridge) and 'menu_epoch' in args and snapshot and len(snapshot.get('layer_ids',[]))==1:
+                        if isinstance(self.bridge,UxpBridge) and 'menu_epoch' in args and snapshot and (len(snapshot.get('layer_ids',[]))==1 or name=='shape.paint' and snapshot.get('shape_editor',{}).get('mask_batch') is True):
                             frozen_target={key:snapshot.get(key) for key in ('session','document_id','layer_ids')}
-                            frozen_target['active_layer_id']=snapshot['layer_ids'][0]
+                            frozen_target['active_layer_id']=(snapshot.get('shape_editor',{}).get('active_layer_id') if name=='shape.paint' and snapshot.get('shape_editor',{}).get('mask_batch') else snapshot['layer_ids'][0])
                     # Target reads can also wait for Photoshop; show busy
                     # feedback before entering COM, not just before writing.
                     if not self.bridge.busy:

@@ -78,7 +78,7 @@ async function refreshMenuContext(folder,now) {
     return true;
   }
   const readDone=Date.now();contextReadAt=readDone;
-  const needsShape=context.kind==='shape-fill' && context.layer_ids.length===1 && !context.locked;
+  const needsShape=!context.locked && !context.background && (context.kind==='shape-fill' && context.layer_ids.length===1 || context.layer_ids.length>=2 && context.layer_ids.length<=128);
   const basic={...context,shape_editor:{available:false},schema:1,plugin_time_ms:readDone,
     menu_request_id:request.id,menu_phase:needsShape?'basic':'completed',timings_ms:{selection_ms:readDone-started}};
   // Publish ordinary capabilities before optional vector/pattern metadata.
@@ -169,7 +169,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.34', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.35', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
@@ -217,7 +217,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.34', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.35', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -249,6 +249,7 @@ async function probe(reason) {
         // Reserve the plugin's existing worker without entering executeAsModal.
         // While native JSX owns the host, only mailbox I/O and cached pulses run.
         const prepared=await labels.prepareLegacyShape(request);
+        if(JSON.stringify(prepared).length>(request.paint?.mask_batch?900000:60000))throw Error('预览准备数据过大，请减少批量图层或路径复杂度');
         await record(folder,'legacy-prepared-'+request.id+'.json',{schema:1,id:request.id,session,operation:request.operation,token,phase:'prepared',prepared});
         await executionStage('legacy-native-wait');
         while(true) {

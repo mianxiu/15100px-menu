@@ -1619,7 +1619,7 @@ int main() {
         else if (i+1<argc && arg==L"--preview-shape") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
             shapeEditor.prepare(data);previewShape=true;previewKind="hold";
-            layerAware=true;layerKind=6;layerCount=1;layerMask=15;quickMask=127;panelKind=2;
+            layerAware=true;layerKind=6;layerCount=shapeEditor.batchMask?shapeEditor.batchCount:1;layerMask=15;quickMask=127;panelKind=2;
         }
         else if (i+1<argc && arg==L"--preview-layer-context") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
@@ -2414,6 +2414,32 @@ int main() {
                 if(testedMaskEvents.size()<3 || testedMaskEvents.front()["action"]!="mask.preview.update" ||
                    testedMaskEvents.back()["action"]!="mask.preview.commit" || testedMaskEvents.back()["params"]!=maskDraft)
                     throw std::runtime_error("Mask preview must stream updates then commit its exact final draft");
+                const auto oldBatchTheme=uiTheme;
+                Json batchFixture={{"available",true},{"mask_batch",true},{"revision","batch:1"},{"layer_ids",{30,31}},
+                    {"active_layer_id",31},{"mask",{{"feather",1},{"density",80}}},{"mixed",{{"feather",true},{"density",true}}},{"live_preview",true}};
+                for(const char* name:{"light","light-gray","dark-gray","dark"}) {
+                    uiTheme=name;theme();shapeEditor.prepare(batchFixture);setHoldMode(true);layerCount=2;layerKind=8;numberFrame(ImGuiKey_None,false);holdMoved=true;
+                    if(!shapeEditor.ready() || shapeEditor.bounds.right || shapeEditor.maskBounds.right<=shapeEditor.maskBounds.left || shapeEditor.dirty)
+                        throw std::runtime_error("Batch mask panel must show only sliders with untouched mixed values");
+                    const auto batchFeather=shapeEditor.featherBounds;
+                    maskMouse(batchFeather,.5f,false);maskMouse(batchFeather,.5f,true);maskMouse(batchFeather,.7f,true);maskMouse(batchFeather,.7f,false);
+                    if(!shapeEditor.dirty || !shapeEditor.draft["mask"].contains("feather") || shapeEditor.draft["mask"].contains("density") || shapeEditor.draft.contains("fill"))
+                        throw std::runtime_error("Batch feather must not overwrite per-layer density or paint");
+                    const auto batchDensity=shapeEditor.densityBounds;
+                    maskMouse(batchDensity,.4f,false);maskMouse(batchDensity,.4f,true);maskMouse(batchDensity,.6f,true);maskMouse(batchDensity,.6f,false);
+                    if(!shapeEditor.draft["mask"].contains("density") || testedMaskEvents.back()["params"]!=shapeEditor.draft)
+                        throw std::runtime_error("Batch mask changes must share one latest preview");
+                    inputFocused=true;if(shapeEditor.ready())throw std::runtime_error("Batch editor ignored input protection");inputFocused=false;
+                    layerLocked=true;if(shapeEditor.ready())throw std::runtime_error("Batch editor ignored locked target");layerLocked=false;
+                    panelKind=0;if(shapeEditor.ready())throw std::runtime_error("Batch editor leaked into canvas");panelKind=2;
+                    layerCount=1;if(shapeEditor.ready())throw std::runtime_error("Batch editor accepted changed selection count");layerCount=2;
+                    const auto finalBatch=shapeEditor.draft;POINT point={(batchDensity.left+batchDensity.right)/2,(batchDensity.top+batchDensity.bottom)/2};
+                    renderedHit=100;finishHold(point,true,&point);const auto completed=testedActions.size();finishHold(point);
+                    if(testedActions.size()!=completed || testedShapePaint!=finalBatch || testedMaskEvents.back()["action"]!="mask.preview.commit")
+                        throw std::runtime_error("Batch confirmation must submit once");
+                    testedActions.resize(shapeCount);
+                }
+                uiTheme=oldBatchTheme;theme();layerCount=1;layerKind=6;
                 testedActions.resize(shapeCount);shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;
                 shapeEditor.mode(1);shapeEditor.mode(2);shapeEditor.mode(0);
                 if(testedActions.size()!=shapeCount || shapeEditor.dirty)throw std::runtime_error("Local type switching wrote or lost original draft");

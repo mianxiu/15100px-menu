@@ -564,6 +564,7 @@ module.exports = function createLabels(ps, session, options={}) {
 
 // Cached vector-paint metadata and request-bound, one-history preview writes.
 function createShapePaint(ps,session,capture,selectionContext,legacyPreview=false) {
+  const batchMasks=createBatchMasks(ps,session,capture,selectionContext,legacyPreview);
   let cache=null,serial=0,catalog=[],catalogAt=0,catalogInfo={};
   const clone=value=>JSON.parse(JSON.stringify(value));
   const rgb=color=>color?._obj==='RGBColor'?[color.red,color.grain??color.green,color.blue].map(v=>Math.round(Number(v))):null;
@@ -618,6 +619,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
     return raw;
   }
   async function observe(context,force=false,frozenCatalog=null) {
+    if(context.layer_ids?.length>1)return batchMasks.observe(context);
     if(context.kind!=='shape-fill' || context.layer_ids?.length!==1 || context.locked || !ps.app.documents.length)
       return {available:false};
     const doc=ps.app.activeDocument,id=context.layer_ids[0],key=doc.id+':'+id;
@@ -762,6 +764,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
     }
   }
   async function apply(request,previewIO=null) {
+    if(request.paint?.mask_batch)return batchMasks.apply(request,previewIO);
     let params=request.paint;validateParams(params);
     const preview=request.command==='shape.preview';
     if(preview && typeof ps.core.redrawDocument!=='function')
@@ -928,6 +931,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
   }
   async function prepareLegacy(request) {
     if(!legacyPreview || typeof ps.core.redrawDocument==='function')throw Error('Legacy preview channel unavailable');
+    if(request.paint?.mask_batch)return batchMasks.prepare(request);
     validateParams(request.paint);
     const actual=await capture(),expected=request.target;
     if(Date.now()>request.expires_at_ms || expected?.session!==session || actual.document_id!==expected.document_id ||
@@ -943,6 +947,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
       order:Array.from(anchor.parent?anchor.parent.layers:doc.layers,l=>l.id)};
   }
   async function finishLegacy(request,prepared,response) {
+    if(request.paint?.mask_batch)return batchMasks.finishLegacy(request,prepared,response);
     if(response.phase!=='completed') {const error=Error(response.error || 'Legacy preview failed');error.resultUnknown=response.result_unknown===true;throw error;}
     let uncertain=true;
     try {
@@ -1082,4 +1087,134 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree) {
     },{commandName:'Menu '+command,interactive:command==='editStyle',timeOut:0});
   }
   return {commands,execute};
+}
+
+// Selected vector masks only. No selection changes, paint setters or per-frame history.
+function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
+  const clone=v=>JSON.parse(JSON.stringify(v)),same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  let cache=null,serial=0;
+  const contentKeys=['layerKind','adjustment','AGMStrokeStyleInfo','hasVectorMask','hasUserMask','userMaskFeather','userMaskDensity'];
+  const close=(a,b)=>Math.abs(a.feather-b.feather)<.01 && Math.abs(a.density-b.density)<=100/255+.001;
+  function validate(p) {
+    if(!p || p.mask_batch!==true || Object.keys(p).sort().join(',')!=='mask,mask_batch,revision' || typeof p.revision!=='string' || !p.revision || p.revision.length>128 ||
+        !p.mask || !Object.keys(p.mask).length || Object.keys(p.mask).some(k=>!['feather','density'].includes(k) || typeof p.mask[k]!=='number' || !Number.isFinite(p.mask[k]) || p.mask[k]<0 || p.mask[k]>(k==='feather'?1000:100)))throw Error('Invalid batch mask parameters');
+  }
+  function locked(layer) {for(let p=layer;p;p=p.parent)if(p.locked || p.allLocked || p.pixelsLocked || p.positionLocked || p.transparentPixelsLocked || p.isBackgroundLayer)return true;return false;}
+  function targetSame(a,b) {return a.session===b?.session && a.document_id===b.document_id && a.active_layer_id===b.active_layer_id && same(a.layer_ids,b.layer_ids);}
+  async function snapshot(expected=null) {
+    const identity=await capture();if(expected && !targetSame(identity,expected))throw Error('批量蒙版选择已改变');
+    const doc=ps.app.activeDocument,layers=Array.from(doc.activeLayers).sort((a,b)=>a.id-b.id);
+    if(layers.length<2 || layers.length>128 || layers.some(locked))throw Error('请选择2至128个未锁定的矢量蒙版图层');
+    const descriptors=await ps.action.batchPlay(layers.map(l=>({_obj:'get',_target:[{_ref:'layer',_id:l.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})),{});
+    if(descriptors.length!==layers.length || descriptors.some((v,i)=>v?._obj==='error' || v?.layerID!==layers[i].id || v.hasVectorMask!==true))throw Error('所有选中图层都必须有矢量蒙版');
+    const paths=await ps.action.batchPlay(layers.map(l=>({_obj:'get',_target:[{_ref:'property',_property:'pathContents'},
+      {_ref:'path',_enum:'path',_value:'vectorMask'},{_ref:'layer',_id:l.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})),{});
+    const parents=new Map();
+    const members=layers.map((l,i)=>{
+      const mask={feather:l.vectorMaskFeather,density:l.vectorMaskDensity},parent=l.parent?.id??null;
+      if(!Number.isFinite(mask.feather)||mask.feather<0||mask.feather>1000||!Number.isFinite(mask.density)||mask.density<0||mask.density>100 || !paths[i]?.pathContents)throw Error('矢量蒙版读回不可用');
+      if(!parents.has(parent))parents.set(parent,Array.from(l.parent?l.parent.layers:doc.layers,x=>x.id));
+      return {id:l.id,mask,content:Object.fromEntries(contentKeys.map(k=>[k,descriptors[i][k]??null])),path:paths[i].pathContents,parent_id:parent,order:parents.get(parent)};
+    });
+    if(!targetSame(await capture(),identity) || layers.some(locked))throw Error('批量蒙版读取期间选择已改变');
+    return {identity,members};
+  }
+  async function observe(context) {
+    try {
+      if(context.locked || context.background || !Array.isArray(context.layer_ids) || context.layer_ids.length<2 || context.layer_ids.length>128)return {available:false};
+      const snap=await snapshot();
+      if(snap.identity.document_id!==context.document_id || !same(snap.identity.layer_ids,context.layer_ids))return {available:false};
+      const signature=JSON.stringify(snap);if(signature.length>524288)throw Error('所选矢量路径过于复杂，请减少批量图层');
+      const revision=cache?.signature===signature?cache.data.revision:session+':batch:'+ ++serial;
+      const mask=clone(snap.members[0].mask),mixed=Object.fromEntries(['feather','density'].map(k=>[k,snap.members.some(v=>Math.abs(v.mask[k]-mask[k])>(k==='feather'?.01:100/255+.001))]));
+      const data={available:true,mask_batch:true,vector:true,revision,mask,mixed,layer_ids:snap.identity.layer_ids,active_layer_id:snap.identity.active_layer_id,
+        live_preview:typeof ps.core.redrawDocument==='function'||legacyPreview,...(legacyPreview && typeof ps.core.redrawDocument!=='function'?{preview_engine:'legacy-com'}:{})};
+      cache={signature,data,snap};return data;
+    } catch(error) {return {available:false,reason:String(error).slice(0,200)};}
+  }
+  async function prepare(request) {
+    validate(request.paint);
+    if(Date.now()>request.expires_at_ms)throw Error('Batch request expired');
+    const before=await observe(selectionContext(true));
+    if(!before.available || before.revision!==request.paint.revision || !targetSame(cache.snap.identity,request.target))throw Error('批量蒙版或选择已改变，请重新打开菜单');
+    return {before:clone(before),members:clone(cache.snap.members),identity:clone(cache.snap.identity)};
+  }
+  function check(actual,baseline,masks) {
+    if(!targetSame(actual.identity,baseline.identity) || actual.members.length!==baseline.members.length)throw Error('Batch identity changed');
+    for(let i=0;i<actual.members.length;i++){
+      const {mask:a,...rest}=actual.members[i],{mask:b,...base}=baseline.members[i];
+      if(!same(rest,base) || !close(a,masks[i]))throw Error('Batch mask/content/path/order readback mismatch');
+    }
+  }
+  async function finishLegacy(request,prepared,response) {
+    if(response.phase!=='completed'){const e=Error(response.error||'Batch native preview failed');e.resultUnknown=response.result_unknown===true;throw e;}
+    try {
+      const v=response.result;validate(v.paint);
+      if(v.verified!==true || v.mask_batch!==true || !same(v.layer_ids,request.target.layer_ids) || !Number.isInteger(v.count) || v.count<0 || v.count>prepared.members.length || v.placement_moves!==0 ||
+          v.paint.revision!==request.paint.revision || v.preview?.engine!=='standalone-extendscript' || !Number.isInteger(v.preview.last_seq) ||
+          v.cancelled && v.rollback_verified!==true || !Array.isArray(v.masks) || v.masks.length!==prepared.members.length)throw Error('Incomplete batch proof');
+      for(let i=0;i<v.masks.length;i++)if(v.masks[i].id!==prepared.members[i].id || !close(v.masks[i].mask,{...prepared.members[i].mask,...(v.cancelled?{}:v.paint.mask)}))throw Error('Batch final mask mismatch');
+      cache=null;const {paint,...result}=v;try{result.selection_context=selectionContext();}catch(_){}return result;
+    } catch(error){error.resultUnknown=true;throw error;}
+  }
+  async function apply(request,io) {
+    validate(request.paint);const preview=request.command==='shape.preview';
+    if(preview && (typeof ps.core.redrawDocument!=='function' || !io))throw Error('Batch live preview unavailable');
+    let uncertain=false;
+    try {return await ps.core.executeAsModal(async context=>{
+      const prepared=await prepare(request),baseline={identity:prepared.identity,members:prepared.members};
+      let applied=baseline.members.map(v=>clone(v.mask)),params=request.paint,seq=0,updates=0,changed=false,cancelled=false;
+      let historyOpen=false,committed=false,history;const touched=new Set();
+      const verify=async masks=>check(await snapshot(baseline.identity),baseline,masks);
+      async function restoreSelection() {
+        const actual=await capture();if(actual.document_id!==baseline.identity.document_id)throw Error('Batch document changed during rollback');
+        if(targetSame(actual,baseline.identity))return;
+        const ids=baseline.identity.layer_ids.filter(id=>id!==baseline.identity.active_layer_id).concat(baseline.identity.active_layer_id);
+        const results=await ps.action.batchPlay(ids.map((id,i)=>({_obj:'select',_target:[{_ref:'layer',_id:id},{_ref:'document',_id:baseline.identity.document_id}],
+          makeVisible:false,...(i?{selectionModifier:{_enum:'selectionModifierType',_value:'addToSelection'}}:{}),_options:{dialogOptions:'dontDisplay'}})),{});
+        if(results.some(v=>v?._obj==='error'))throw Error('Batch selection restoration failed');
+      }
+      async function frame(p) {
+        validate(p);if(p.revision!==prepared.before.revision)throw Error('Batch revision changed');
+        if(context.isCancelled)throw Error('Cancelled');
+        await verify(applied);const wanted=baseline.members.map(v=>({...v.mask,...p.mask})),commands=[];
+        for(let i=0;i<wanted.length;i++)for(const k of ['feather','density'])if(Math.abs(wanted[i][k]-applied[i][k])>(k==='feather'?.00001:100/255+.001)){
+          commands.push({_obj:'set',_target:[{_ref:'layer',_id:baseline.members[i].id},{_ref:'document',_id:baseline.identity.document_id}],
+            to:{_obj:'layer',[k==='feather'?'vectorMaskFeather':'vectorMaskDensity']:{_unit:k==='feather'?'pixelsUnit':'percentUnit',_value:wanted[i][k]}},_options:{dialogOptions:'silent'}});touched.add(baseline.members[i].id);
+        }
+        if(commands.length){changed=true;const results=await ps.action.batchPlay(commands,{});if(results.length!==commands.length || results.some(v=>v?._obj==='error'))throw Error('Batch mask setter failed');}
+        await verify(wanted);applied=wanted;params=p;updates++;
+        if(preview && commands.length){await ps.core.redrawDocument({documentID:baseline.identity.document_id});await verify(applied);}
+      }
+      try {
+        history=await context.hostControl.suspendHistory({documentID:baseline.identity.document_id,name:'批量羽化／密度'});historyOpen=true;
+        if(!preview)await frame(params);
+        else {
+          let lease=Date.now()+4000;
+          while(true){
+            if(context.isCancelled)throw Error('Cancelled');
+            const packet=await io.read(),now=Date.now();
+            if(packet){
+              if(packet.id!==request.id||packet.session!==request.session||packet.token!==request.token||!Number.isSafeInteger(packet.seq)||packet.seq<seq||!Number.isFinite(packet.lease_until_ms)||packet.lease_until_ms>now+5000||!['preview','commit','cancel'].includes(packet.phase))throw Error('Invalid batch mailbox');
+              lease=packet.lease_until_ms;if(lease<now || packet.phase==='cancel'){cancelled=true;break;}
+              validate(packet.paint);if(packet.paint.revision!==prepared.before.revision || packet.seq===seq && !same(packet.paint,params))throw Error('Batch sequence payload changed');
+              if(packet.seq>seq){await frame(packet.paint);seq=packet.seq;if(io.applied)await io.applied({seq,updates,count:baseline.members.length,mask_batch:true,redraw_completed:true});}
+              if(packet.phase==='commit')break;
+            } else if(now>lease){cancelled=true;break;}
+            await new Promise(resolve=>setTimeout(resolve,40));
+          }
+        }
+        await verify(applied);historyOpen=false;uncertain=true;await context.hostControl.resumeHistory(history,!cancelled);committed=!cancelled;uncertain=false;
+        if(cancelled){await restoreSelection();await verify(baseline.members.map(v=>v.mask));if(changed)await ps.core.redrawDocument({documentID:baseline.identity.document_id});await verify(baseline.members.map(v=>v.mask));}
+        cache=null;return {verified:true,mask_batch:true,count:cancelled?0:touched.size,placement_moves:0,layer_ids:baseline.identity.layer_ids,
+          ...(cancelled?{cancelled:true,rollback_verified:true}:{}),preview:{updates,last_seq:seq},selection_context:selectionContext()};
+      } catch(error){
+        uncertain=uncertain||committed||!!error.resultUnknown;
+        if(historyOpen){historyOpen=false;try{await context.hostControl.resumeHistory(history,false);await restoreSelection();await verify(baseline.members.map(v=>v.mask));if(preview&&changed)await ps.core.redrawDocument({documentID:baseline.identity.document_id});await verify(baseline.members.map(v=>v.mask));}catch(_){uncertain=true;}}
+        cache=null;throw error;
+      }
+    },{commandName:'批量羽化／密度',timeOut:0,...(preview?{interactive:true}:{})});}
+    catch(error){if(uncertain){const e=Error(String(error));e.resultUnknown=true;throw e;}throw error;}
+  }
+  return {observe,apply,prepare,finishLegacy};
 }

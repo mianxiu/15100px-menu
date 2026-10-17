@@ -101,6 +101,8 @@ class UxpTransport:
                     raise RuntimeError('请更新并重新加载 UXP 0.3.16，以支持单选与Shift多选；未提交操作')
                 if payload.get('command')=='convertSmartObject' and version(heartbeat.get('probe_version'))<(0,3,18):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.18，以支持转换智能对象；未提交操作')
+                if payload.get('paint',{}).get('mask_batch') and version(heartbeat.get('probe_version'))<(0,3,35):
+                    raise RuntimeError('批量羽化／密度需要更新并加载UXP0.3.35；未提交')
                 if payload.get('command')=='shape.paint' and 'mask' in payload.get('paint',{}) and version(heartbeat.get('probe_version'))<(0,3,20):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.20，以支持形状羽化／密度；未提交操作')
                 if payload.get('command')=='shape.preview' and (preview is None or version(heartbeat.get('probe_version'))<(0,3,31)):
@@ -140,7 +142,7 @@ class UxpTransport:
                         ready=None
                         try:
                             ready_path=folder/('legacy-prepared-'+identity+'.json')
-                            if ready_path.stat().st_size<=65536:ready=json.loads(ready_path.read_text('utf-8-sig'))
+                            if ready_path.stat().st_size<=(1048576 if payload.get('paint',{}).get('mask_batch') else 65536):ready=json.loads(ready_path.read_text('utf-8-sig'))
                         except (OSError,ValueError):pass
                         if isinstance(ready,dict) and ready.get('phase')=='prepared' and ready.get('schema')==1 and all(ready.get(k)==request[k] for k in ('id','session','operation','token')):
                             native_started=True  # A COM error never permits invoking this again.
@@ -392,6 +394,15 @@ class UxpBridge(PhotoshopBridge):
             return await self._execute_task(action,before_dispatch,capture=self._prepare_direct_caps,result_target=self._direct_caps_result_target)
         return await super().execute(action,before_dispatch,enqueue=False)
 
+    def _bind_batch_mask_target(self,target):
+        from .operation_target import validate_target
+        if self.focus_guard:self.focus_guard()
+        bound=validate_target(target)
+        if not isinstance(target.get('session'),str) or not target['session'] or not 2<=len(bound['layer_ids'])<=128:
+            raise ValueError('Invalid frozen batch mask target')
+        self._captured_app=target['session'];self._captured_target={**bound,'session':target['session']}
+        return {**self._captured_target,'instance_binding':self._captured_app}
+
     async def execute_shape(self, params, before_dispatch=None, frozen_target=None, preview=None):
         from .shape_paint import parameters
         params=parameters(params)
@@ -415,7 +426,7 @@ class UxpBridge(PhotoshopBridge):
                 self.layer_context=value if fresh(value) else unavailable()
                 return json.dumps(response['result'])
             finally:self._uxp_worker_active=False
-        capture=(lambda:self._bind_menu_target(frozen_target)) if frozen_target is not None else self._capture_target
+        capture=(lambda:(self._bind_batch_mask_target if params.get('mask_batch') else self._bind_menu_target)(frozen_target)) if frozen_target is not None else self._capture_target
         return await self._execute_task('shape.paint',before_dispatch,capture=capture,execute=write,interactive=preview is not None)
 
     def _capture_new_target(self):

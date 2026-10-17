@@ -1,6 +1,7 @@
 // Frame-coalesced paint and mask updates share one rollbackable transaction.
 struct ShapeColorEditor {
-    bool available=false,dirty=false,vector=true,livePreview=false;
+    bool available=false,dirty=false,vector=true,livePreview=false,batchMask=false;
+    int batchCount=0;Json maskValues,maskMixed;
     int channel=0,stop=0;
     Json original,draft,patterns,lastPreview;
     std::array<Json,2> modes;
@@ -12,10 +13,16 @@ struct ShapeColorEditor {
     bool gradientDragging=false;
     float gradientDragOffset=0;
     void prepare(const Json& data) {
-        maskPreviewStarted=false;shapeDraftOnly=false;livePreview=false;
+        maskPreviewStarted=false;shapeDraftOnly=false;livePreview=false;batchMask=false;batchCount=0;maskValues=maskMixed=Json::object();
         lastPreview=Json();
         available=false;dirty=false;bounds=maskBounds=copyBounds=gradientBounds=featherBounds=densityBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
         if(!data.value("available",false))return;
+        if(data.value("mask_batch",false)) {
+            batchCount=data.at("layer_ids").size();if(batchCount<2 || batchCount>128)return;
+            maskValues=data.at("mask");maskMixed=data.at("mixed");
+            original=draft=Json{{"revision",data.at("revision")},{"mask_batch",true},{"mask",Json::object()}};
+            batchMask=true;vector=true;livePreview=data.value("live_preview",false);shapeDraftOnly=!livePreview;available=true;return;
+        }
         if(!data.at("revision").is_string() || !data.at("fill").is_object() || !data.at("stroke").is_object())return;
         original=draft=Json{{"revision",data.at("revision")},{"fill",data.at("fill")},{"stroke",data.at("stroke")}};
         patterns=data.value("patterns",Json::array());
@@ -26,7 +33,7 @@ struct ShapeColorEditor {
         if(vector && data.contains("mask") && data["mask"].is_object())original["mask"]=draft["mask"]=data["mask"];
     }
     Json& current(){return draft.at(channel?"stroke":"fill");}
-    bool ready() const {return available && holdMode && panelKind==2 && layerAware && layerKind==6 && layerCount==1
+    bool ready() const {return available && holdMode && panelKind==2 && layerAware && (batchMask ? layerCount==batchCount : layerKind==6 && layerCount==1)
         && !layerLocked && !layerBackground && !inputFocused
         && (canExecute() || maskPreviewStarted && allowed && !taskBusy && !busyFeedback) && !holdFinished;}
     void changed(){dirty=draft!=original;}
@@ -47,6 +54,7 @@ struct ShapeColorEditor {
     }
     bool valid() const {
         if(!available)return false;
+        if(batchMask)return !draft.at("mask").empty();
         for(const char* name:{"fill","stroke"})if(draft.at(name).value("kind","")=="pattern" && draft.at(name).value("name","").empty())return false;
         return true;
     }
@@ -202,16 +210,17 @@ static void drawShapeEditor() {
     auto* panelFont=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
     const float width=std::min(menuPanelWidth*scale,available),gap=menuPanelGap*scale;
     const float row=menuControlHeight*scale+gap,textLine=panelFont->FontSize+gap;
-    const auto kind=shapeEditor.current().value("kind",std::string("solid"));
+    const auto kind=shapeEditor.batchMask?std::string("mask"):shapeEditor.current().value("kind",std::string("solid"));
     const float content=2*menuControlPadding*scale+textLine+2*row+(shapeEditor.vector?row:0)+
         (kind=="pattern"?row:textLine+width-2*menuControlPadding*scale+2*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+(shapeEditor.vector?row:0);
     const float maskHeight=shapeEditor.hasMask()?2*menuControlPadding*scale+textLine+2*row:0;
-    const float separation=shapeEditor.hasMask()?gap:0;
-    const float height=std::min(content,windowSize.y-24*scale-maskHeight-separation);
+    const float separation=shapeEditor.hasMask() && !shapeEditor.batchMask?gap:0;
+    const float height=shapeEditor.batchMask?0:std::min(content,windowSize.y-24*scale-maskHeight-separation);
     const float totalHeight=height+separation+maskHeight;
     ImVec2 at={std::max(windowPos.x+16*scale,pieCenter.x-65*scale-basicLabelExtent(0).x-basicTextOffset()-figmaBasicRightPadding*scale-30*scale-width),std::max(windowPos.y+12*scale,pieCenter.y-238*scale)};
     at.y=std::max(windowPos.y+12*scale,std::min(at.y,windowPos.y+windowSize.y-totalHeight-12*scale));
-    shapeEditor.bounds={LONG(at.x),LONG(at.y),LONG(at.x+width),LONG(at.y+height)};
+    if(shapeEditor.batchMask)at.y=std::max(windowPos.y+12*scale,std::min(pieCenter.y-menuControlHeight*scale*.5f,windowPos.y+windowSize.y-maskHeight-12*scale));
+    if(!shapeEditor.batchMask)shapeEditor.bounds={LONG(at.x),LONG(at.y),LONG(at.x+width),LONG(at.y+height)};
     const auto saved=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos(at);
     ImGui::PushStyleColor(ImGuiCol_ChildBg,ImGui::GetStyle().Colors[ImGuiCol_WindowBg]);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding,ImGui::GetStyle().FrameRounding);
@@ -222,12 +231,14 @@ static void drawShapeEditor() {
     ImGui::PushFont(panelFont);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,{menuControlTextInset*scale,std::max(0.f,(menuControlHeight*scale-controlTextSize)*.5f)});
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,scale);
+    float inner=width-2*menuControlPadding*scale;
+    if(!shapeEditor.batchMask) {
     ImGui::BeginChild("shape-color",{width,height},ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::SetWindowFontScale(1.f);
     if(selfTest && std::abs(ImGui::GetFontSize()-controlTextSize)>.01f)
         throw std::runtime_error("Shape controls must share the menu panel body font");
     ImGui::BeginDisabled(pieAnimating);
-    ImGui::TextUnformatted(shapeEditor.vector?"形状颜色":"填充颜色");float inner=ImGui::GetContentRegionAvail().x;
+    ImGui::TextUnformatted(shapeEditor.vector?"形状颜色":"填充颜色");inner=ImGui::GetContentRegionAvail().x;
     if(!shapeEditor.vector)shapeEditor.channel=0;
     if(shapeSegment("channel",shapeEditor.vector?std::vector<std::string>{"填充","描边"}:std::vector<std::string>{"填充"},shapeEditor.channel,inner)){shapeEditor.stop=0;shapeEditor.gradientDragging=false;}
     auto& p=shapeEditor.current();std::string paintKind=p.at("kind");int mode=paintKind=="solid"?0:paintKind=="gradient"?1:2;
@@ -287,19 +298,22 @@ static void drawShapeEditor() {
         shapeEditor.stop=0;shapeEditor.changed();
     }
     ImGui::EndDisabled();ImGui::EndChild();
+    }
     if(shapeEditor.hasMask()) {
-        const ImVec2 maskAt={at.x,at.y+height+gap};
+        const ImVec2 maskAt={at.x,at.y+height+separation};
         shapeEditor.maskBounds={LONG(maskAt.x),LONG(maskAt.y),LONG(maskAt.x+width),LONG(maskAt.y+maskHeight)};
         ImGui::SetCursorScreenPos(maskAt);
         ImGui::BeginChild("shape-mask",{width,maskHeight},ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::BeginDisabled(pieAnimating);
-        ImGui::TextUnformatted("羽化／密度");
+        if(shapeEditor.batchMask)ImGui::Text("羽化／密度 · %d 个图层",shapeEditor.batchCount);else ImGui::TextUnformatted("羽化／密度");
+        inner=ImGui::GetContentRegionAvail().x;
         const float labelWidth=std::max(ImGui::CalcTextSize("羽化").x,ImGui::CalcTextSize("密度").x);
         auto slider=[&](const char* label,const char* id,const char* key,float maximum,const char* format,ImGuiSliderFlags flags,RECT& bounds){
             const auto at=ImGui::GetCursorScreenPos();
             ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(label);
             ImGui::SameLine();ImGui::SetCursorScreenPos({at.x+labelWidth+gap,at.y});
-            float value=shapeEditor.draft["mask"][key].get<float>();ImGui::SetNextItemWidth(inner-labelWidth-gap);
+            float value=shapeEditor.draft["mask"].contains(key)?shapeEditor.draft["mask"][key].get<float>():shapeEditor.maskValues[key].get<float>();
+            if(shapeEditor.batchMask && !shapeEditor.draft["mask"].contains(key) && shapeEditor.maskMixed.value(key,false))format="混合";ImGui::SetNextItemWidth(inner-labelWidth-gap);
             if(ImGui::SliderFloat(id,&value,0.f,maximum,format,flags|ImGuiSliderFlags_AlwaysClamp)){
                 shapeEditor.draft["mask"][key]=value;shapeEditor.changed();}
             const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();bounds={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};

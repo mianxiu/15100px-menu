@@ -28,8 +28,9 @@ def window_transition(method):
 
 def shape_editor_allowed(panel, shape, hold, context=None):
     context=context or {}
+    from .shape_paint import editor_matches
     return bool(hold and shape.get('available') is True and panel.get('kind')=='layers' and not panel.get('input_focused')
-                and context.get('kind')=='shape-fill' and len(context.get('layer_ids',[]))==1
+                and editor_matches(shape,context)
                 and not context.get('locked') and not context.get('background'))
 
 
