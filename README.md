@@ -4,7 +4,7 @@
 
 状态识别：旋转圆弧配“执行中：操作名 · 耗时”表示任务等待完成；蓝勾配“空闲 · 上次已完成”表示已成功，不能把勾号当作运行中。[状态说明](https://github.com/mianxiu/15100px-menu/wiki/Menu-recovery)。后续新增／修复优先按低配办公电脑验收，先做受限CPU短批次，再补正常配置对照；[范围与限制](https://github.com/mianxiu/15100px-menu/wiki/Quiet-testing)。
 
-154新增[完成反馈后自动恢复图层菜单](docs/MENU-RECOVERY.md)：成功勾号短暂停留后，以新鲜选择恢复完整菜单，关闭／外部应用／忙碌及未知结果不自动恢复。[副屏低干扰测试](docs/QUIET-TESTING.md)提供独立维护工具，9项受限CPU真实PS测试通过，未测视频掉帧。154已切换本机实际运行入口，公开包／备用更新通道已校验，发行页仅154；后续使用说明见[Wiki](https://github.com/mianxiu/15100px-menu/wiki)。
+154新增[完成反馈后自动恢复图层菜单](docs/MENU-RECOVERY.md)：成功勾号短暂停留后，以新鲜选择恢复完整菜单，关闭／外部应用／忙碌及未知结果不自动恢复。[副屏低干扰测试](docs/QUIET-TESTING.md)提供独立维护工具，9项受限CPU真实PS测试通过，未测视频掉帧。154已切换本机实际运行入口，公开包／备用更新通道已校验，发行页仅155；后续使用说明见[Wiki](https://github.com/mianxiu/15100px-menu/wiki)。
 
 ## 当前交付（2026-10-17）
 
@@ -12,7 +12,7 @@
 | --- | --- |
 | 主程序／dist／本机运行入口 | v0.4.155，EXE／HTTP前端已匹配，原生组件沿用154并核对哈希 |
 | 内置／安装／PS实际加载插件 | 本机均为UXP0.3.23，三个版本分别核对 |
-| 当前下载 | [v0.4.154 Release](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.154)，公开ZIP／SHA256／备用清单及冻结更新器限流回退已验证，发行页仅154 |
+| 当前下载 | [v0.4.155 Release](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.155)，公开ZIP／SHA256／备用清单及冻结更新器限流回退已验证，发行页仅155 |
 | 验证 | 333后台、37前端；1664种按键与后台解析一致，受限CPU隔离浏览器四主题／窄窗口／保存重载及最终EXE烟雾通过；真实155界面14项原绑定已核对，PS文档与配置保留；实体键鼠及故障机另列 |
 
 安装和加载见[离线管理](OFFLINE-INSTALL.md)，默认按键见[操作菜单](#photoshop-操作菜单)，在线升级见[应用更新](docs/UPDATES.md)，待办见[TODO](TODO.md)。当前155保留153按大小分流创建前的整树读取，保留152的中部首次定位、151的重复定位与心跳修复、形状羽化／密度、Caps立即展开和既有布局。后续功能使用说明统一维护在[Wiki](https://github.com/mianxiu/15100px-menu/wiki)。

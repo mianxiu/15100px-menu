@@ -52,3 +52,5 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 150：149回退位于.local/recovery/releases/0.4.149-before150及.local/archive/dist/v0.4.149-before150；蒙版事务、重启加载和四主题导出证据位于.runtime/mask150*及shape-live-0.4.150.json，不公开用户配置／文档。
 
 154：副屏维护入口tools/test-quiet-ps.py与quiet_ps_session.py；使用和限制见docs/QUIET-TESTING.md，完成恢复见docs/MENU-RECOVERY.md及Wiki。153回退保留于.local/recovery/releases/0.4.153-before154和.local/archive/dist/v0.4.153-before154。实体键鼠与视频掉帧仍单列，安全暂停不是完整测试通过。
+
+155：新增frontend/src/shortcuts.mjs及对应测试，使用说明docs/SHORTCUTS.md／Wiki；原生组件与UXP23不变。154回退位于.local/recovery/releases/0.4.154-before155和.local/archive/dist/v0.4.154-before155；dist当前仅155发行物。
