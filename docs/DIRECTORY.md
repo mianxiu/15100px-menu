@@ -60,3 +60,5 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 157最终公开交付：dist仅157 EXE／ZIP／UXP ZIP／SHA256／更新清单六项。155发行物仍在.local/archive/dist/v0.4.155-before156，156未公开候选及包在.local/archive/dist/v0.4.156-before157；实际156入口／配置回退在.local/recovery/releases/0.4.156-before157，155稳定入口回退另存保留。所有Git标签保留。
 
 158实机工具：tools/verify-paint-preview.py覆盖颜色预览、交叉编辑、普通填充／渐变；tools/verify-mask-preview.py覆盖蒙版回归。最终报告入口.runtime/live158-reports.json；旧157发行包归档.local/archive/dist/v0.4.157-before158，实际EXE与配置回退.local/recovery/releases/0.4.157-before158。
+
+158公开交付：dist仅当前六项；旧157发行包、实际EXE与配置已按上述目录保留，所有Git标签与源码历史保持。

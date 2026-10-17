@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 158颜色实时预览代码／测试／构建／实际入口：340后台、37前端、13份插件脚本（含30组实时预览事务）、原生四主题生产显示／命中／输入／取消与最终EXE启动／重启通过。最终UXP25在真实PS24.0.1通过颜色低CPU27项／正常8项及蒙版低CPU10项／正常6项，共51项事务；取消恢复、一次撤销、末值、交叉编辑、普通纯色／渐变、路径／像素蒙版和未编辑属性保留分别核验。 本机158 EXE／dist／原生组件与内置／安装／加载UXP25匹配，文档／配置／主屏前台保持，资源已恢复。证据.runtime/live158-reports.json、caps158-final-pending.json、runtime158-verification.json、native158-themes.json。首轮渐变失败仅根据原请求匹配终态核对；最终批次没有重发或COM写入回退。
-- [ ] 158公开Release附件、备用清单／限流回退与Wiki发布核验，尚不以本地代码／文档代替公开交付。
+- [x] 158公开交付：ZIP／SHA256及最新备用清单匿名下载核验、最终冻结更新器强制API403后的实网下载与校验通过；Wiki八页面和首页／图片匿名核验。发行页仅158，旧157 Release／附件已清理，全部源码标签与本地回退保留；dist仅158六项文件，实际入口与UXP25匹配。证据.runtime/runtime158-delivered.json、release-0.4.158-public-verification.json、manifest158-verification.json、fallback158-live.json、release158-cleanup.json。
 - [ ] 158实体Caps／鼠标预览与取消、一次撤销及跨DPI、真实低内存／集显／故障电脑验收；仅CPU受限51项实机事务通过，不冒充实体帧率或所有配置稳定保证。
 
 - [x] 157实时预览代码／测试／构建／实际入口：340后台、37前端、13插件（15组预览事务）通过；同一最终UXP24受限CPU10项／正常6项真实PS预览及19项既有调色通过，取消恢复、末值、持续拖动、6秒停留、4秒失联租约、1000px／0%边界与一次撤销分别核验。157补齐确认分支既有前台授权，实际EXE／dist／原生组件与内置／安装／加载UXP24已匹配，最终启动／重启及实际组件四主题生产显示／输入／取消／预览与单次授权自测通过。证据.runtime/caps157-final-pending.json、runtime157-verification.json、mask-preview-live-1792222080456651600、mask-preview-live-1792222148190491900、shape-live-0.4.156.json、native157-themes.json。156未公开候选的源码标签与本地副本保留。PS资源、原文档已恢复；低配文档测试主屏前台保持，157首轮原生检查前台变化时停止、稳定后检查通过，未强行恢复或归因。
