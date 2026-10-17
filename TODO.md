@@ -2,6 +2,8 @@
 
 - [x] 164自动自检本机交付：版本／能力变化及异常稳定后只读检查、异步脱敏留证、最多20份、后台提示／导出／已读完成；373后台、40前端、13份脚本（51组预览模拟）、四主题／英文界面和最终EXE启动／重启通过。最终164入口／dist／原生／前端资源匹配，UXP31正常加载；真实报告导出与已读跨重启保持。低CPU及正常资源各6项真实PS草稿提交／一次撤销／过期目标拒绝通过，资源、主屏前台及原用户文档恢复。Wiki已同步；旧版实时预览仍未完成，未发布。证据.runtime/recovery164/final-runtime.json、health164-lowcpu/report.json、health164-normal/report.json、smoke164-final.log。
 
+- [ ] 旧版独立预览路径：仅本次明确授权的隔离COM app.refresh探针在双逻辑处理器下1.18秒返回，历史不变，备份／原文档及资源恢复。脱离UXP的单历史原型两次刷新均返回，但首次确认后的颜色精确断言失败，取消未运行；原返回收据及pending保留，资源恢复，追加只读核对被自动审批拒绝。连续拖动与实体画布效果仍未验证，不以单次返回认定修复。证据.runtime/legacy-refresh-standalone/result.json及restored.json。
+
 - [ ] MXC启动冲突收尾：无本项目UXP时仍随PS运行复现，项目插件不是必要条件。备份后只关闭本机MXC自动优先选择，保留elevated及同权限管理策略，PS运行中新CLI探针通过；当前桌面界面工具仍使用MXC而失败，需正常重启Codex后核验，不标记永久修复。见docs/VERSION-HEALTH.md、.runtime/ui-tool-diagnostic/without-project-plugin.json及saved-fallback-repair.json。
 
 - [ ] 163／UXP31版本能力分流（历史候选记录；当前已切换164，最新状态见上）：代码及候选构建完成，351后台／37未变前端／13份脚本（51组事务）及原生四主题、EXE检查通过。24.1+实际存在官方重绘API时启用预览；旧版暂用兼容草稿，确认一次提交、取消不写PS。旧版PS本身能重绘，缺少的是此UXP接口；独立旧版实时预览尚未实现，不以草稿降级视为交付。实际入口163／内置安装加载UXP31及组件已匹配；原空PS经用户本次明确授权结束，新31会话启动及零文档正常退出通过。界面工具MXC错误可随PS运行／退出复现，停用本UXP对照未做，工具因URL可信度保护停止本轮交互；当前PS／服务已正常关闭，预览实机测试暂停。原4c029及其他未知记录保留，不重发、不伪造终态。只读诊断两次确认主线程仍在ScriptingSupport／ExtendScript链内、约占满单核，旧刷新未退栈，WCT未见等待循环；尚无Adobe内部根因符号。现代宿主实机、旧版实时预览／取消／一次撤销与低配稳定仍待完成；不发布，正式Release159。证据.runtime/preview163-candidate.json、native163-themes.json、recovery163/documents.json。
