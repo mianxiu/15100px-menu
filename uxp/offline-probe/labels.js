@@ -616,7 +616,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
     }
     return raw;
   }
-  async function observe(context,force=false) {
+  async function observe(context,force=false,frozenCatalog=null) {
     if(context.kind!=='shape-fill' || context.layer_ids?.length!==1 || context.locked || !ps.app.documents.length)
       return {available:false};
     const doc=ps.app.activeDocument,id=context.layer_ids[0],key=doc.id+':'+id;
@@ -631,7 +631,12 @@ function createShapePaint(ps,session,capture,selectionContext) {
     const fill={...paint(raw.fill),enabled:raw.stroke.fillEnabled!==false};
     const stroke={...paint(raw.stroke.strokeStyleContent),enabled:!!raw.stroke.strokeEnabled,
       width:Number(raw.stroke.strokeStyleLineWidth?._value ?? 1)*(raw.stroke.strokeStyleLineWidth?._unit==='pointsUnit'?doc.resolution/72:1)};
-    const data={available:true,vector:raw.vector,revision,fill,stroke,patterns:await patterns(),pattern_catalog:catalogInfo};
+    // A live transaction needs only the frozen editor catalog. Refreshing
+    // application-wide presets mid-drag adds unrelated host work, and cannot
+    // make a newly added pattern valid for the original frozen editor anyway.
+    const data={available:true,vector:raw.vector,live_preview:typeof ps.core.redrawDocument==='function',revision,fill,stroke,
+      patterns:frozenCatalog?frozenCatalog.patterns:await patterns(),
+      pattern_catalog:frozenCatalog?frozenCatalog.pattern_catalog:catalogInfo};
     if(raw.mask)data.mask=clone(raw.mask);
     cache={key,at:Date.now(),signature,raw,data};return data;
   }
@@ -676,24 +681,33 @@ function createShapePaint(ps,session,capture,selectionContext) {
       typeof params.mask.feather!=='number' || !Number.isFinite(params.mask.feather) || params.mask.feather<0 || params.mask.feather>1000 ||
       typeof params.mask.density!=='number' || !Number.isFinite(params.mask.density) || params.mask.density<0 || params.mask.density>100))throw Error('Invalid vector mask');
   }
-  async function redrawPreview(doc,anchor) {
-    // A suspended history/modal scope otherwise defers visible canvas updates.
-    // One small, read-only batch flushes the combined color + mask frame on
-    // PS24+, without splitting history or changing selection/focus.
+  async function redrawPreview(identity,io) {
+    // Use only the host document redraw API (PS24.1+). Nested JSX refresh
+    // under PS24.0 can remain blocked, even after Cancel Plugin Command.
+    const started=Date.now();
+    if(io?.stage)await io.stage('redraw-target');
     const [value]=await ps.action.batchPlay([{_obj:'get',_target:[
-      {_ref:'property',_property:'layerID'},{_ref:'layer',_id:anchor.id},
-      {_ref:'document',_id:doc.id}],_options:{dialogOptions:'silent'}}],{immediateRedraw:true});
-    if(value?._obj==='error' || value?.layerID!==anchor.id)throw Error('Photoshop 预览刷新目标校验失败');
+      {_ref:'property',_property:'layerID'},{_ref:'layer',_id:identity.layerID},
+      {_ref:'document',_id:identity.documentID}],_options:{dialogOptions:'silent'}}],{});
+    if(value?._obj==='error' || value?.layerID!==identity.layerID)throw Error('Photoshop 预览刷新目标校验失败');
+    if(ps.app.activeDocument.id!==identity.documentID || ps.app.activeDocument.activeLayers.length!==1 ||
+        ps.app.activeDocument.activeLayers[0].id!==identity.layerID)throw Error('Preview target changed before redraw');
+    if(typeof ps.core.redrawDocument!=='function')throw Error('当前PS使用本地草稿，实时预览需要PS24.1及官方重绘API');
+    if(io?.stage)await io.stage('redraw-native');
+    await ps.core.redrawDocument({documentID:identity.documentID});
+    const method='core.redrawDocument';
+    return {redraw_method:method,redraw_ms:Date.now()-started};
   }
-  async function previewMask(context,request,before,doc,anchor,io,applyPaint) {
+  async function previewMask(context,request,before,doc,anchor,identity,io,applyPaint) {
     if(!io || typeof io.read!=='function')throw Error('Missing preview mailbox');
     let seq=0,lease=Date.now()+4000,applied=before.mask?clone(before.mask):undefined,updates=0,maxWriteMs=0;
     const close=(a,b)=>!a&&!b || !!a&&!!b&&Math.abs(a.feather-b.feather)<=.01 && Math.abs(a.density-b.density)<=100/255+.001;
     const read=()=>({feather:anchor.vectorMaskFeather,density:anchor.vectorMaskDensity});
-    const target=()=>ps.app.activeDocument.id===doc.id && doc.activeLayers.length===1 &&
-      doc.activeLayers[0].id===anchor.id && !anchor.allLocked;
+    const target=()=>ps.app.activeDocument.id===identity.documentID && doc.activeLayers.length===1 &&
+      doc.activeLayers[0].id===identity.layerID && !anchor.allLocked;
     while(true) {
       if(context.isCancelled)throw Error('Photoshop cancelled preview');
+      if(io.stage)await io.stage('read-control',seq);
       const packet=await io.read(),now=Date.now();
       if(packet) {
         if(packet.id!==request.id || packet.session!==request.session || packet.token!==request.token ||
@@ -708,20 +722,35 @@ function createShapePaint(ps,session,capture,selectionContext) {
         if(packet.paint.revision!==before.revision || !!packet.paint.mask!==!!request.paint.mask)throw Error('Preview revision changed');
         if(applied && !close(read(),applied))throw Error('Vector mask changed outside preview');
         if(packet.seq>seq || packet.phase==='commit') {
+          if(io.stage)await io.stage('validate-frame',packet.seq);
           const wanted=packet.paint.mask || before.mask,started=Date.now();
+          const maskChanged=!close(applied,wanted);
           const {changed:colorChanged,...colors}=await applyPaint(packet.paint);
           if(packet.phase==='commit')return {paint:packet.paint,updates,max_write_ms:Math.max(maxWriteMs,Date.now()-started)};
-          const maskChanged=!close(applied,wanted);
           if(wanted && maskChanged) {
-            if(wanted.feather!==applied.feather)anchor.vectorMaskFeather=wanted.feather;
-            if(wanted.density!==applied.density)anchor.vectorMaskDensity=wanted.density;
+            // Same properties/units as Adobe's DOM setters, with an async
+            // modifying batch so PS24.0 can flush the final combined frame.
+            const to={_obj:'layer'};
+            if(wanted.feather!==applied.feather)to.vectorMaskFeather={_unit:'pixelsUnit',_value:wanted.feather};
+            if(wanted.density!==applied.density)to.vectorMaskDensity={_unit:'percentUnit',_value:wanted.density};
+            // Photoshop's layer setter processes these mask properties one at
+            // a time. Keep both descriptors in one batch and redraw once.
+            const descriptors=Object.entries(to).filter(([key])=>key!=='_obj').map(([key,value])=>({
+              _obj:'set',_target:[{_ref:'layer',_id:identity.layerID},{_ref:'document',_id:identity.documentID}],
+              to:{_obj:'layer',[key]:value},_options:{dialogOptions:'silent'}}));
+            if(io.stage)await io.stage('write-mask');
+            const responses=await ps.action.batchPlay(descriptors,{});
+            for(const response of responses)if(response?._obj==='error')throw Error(response.message || 'Photoshop 拒绝蒙版预览');
+            if(io.stage)await io.stage('read-mask');
             applied=read();
           }
           if(!target() || !close(applied,wanted))throw Error('Preview mask readback mismatch');
           const redrawCompleted=!!(colorChanged || maskChanged);
-          if(redrawCompleted)await redrawPreview(doc,anchor);
+          const redraw=redrawCompleted?await redrawPreview(identity,io):{};
+          if(!target())throw Error('Preview target changed during redraw');
           updates++;maxWriteMs=Math.max(maxWriteMs,Date.now()-started);seq=packet.seq;
-          if(io.applied)await io.applied({seq,...colors,...(applied?{mask:applied}:{}),updates,max_write_ms:maxWriteMs,redraw_completed:redrawCompleted});
+          if(io.stage)await io.stage('publish-frame');
+          if(io.applied)await io.applied({seq,...colors,...(applied?{mask:applied}:{}),updates,max_write_ms:maxWriteMs,redraw_completed:redrawCompleted,...redraw});
         }
       }
       // A slow Photoshop redraw may outlast the previously read lease. Read
@@ -733,11 +762,20 @@ function createShapePaint(ps,session,capture,selectionContext) {
   async function apply(request,previewIO=null) {
     let params=request.paint;validateParams(params);
     const preview=request.command==='shape.preview';
-    return ps.core.executeAsModal(async context=>{
+    if(preview && typeof ps.core.redrawDocument!=='function')
+      throw Error('当前PS使用本地草稿，实时预览需要PS24.1及官方重绘API');
+    const stage=async name=>{if(previewIO?.stage)await previewIO.stage(name);};
+    await stage('enter-modal');
+    // Photoshop may recreate thrown errors across the native modal boundary,
+    // dropping custom fields. Keep uncertainty outside that boundary.
+    let uncertain=false;
+    try {return await ps.core.executeAsModal(async context=>{
+      await stage('capture-target');
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
       const actual=await capture(),expected=request.target;
       if(expected?.session!==session || actual.document_id!==expected.document_id || actual.active_layer_id!==expected.active_layer_id || actual.layer_ids.join(',')!==expected.layer_ids?.join(','))throw Error('Document or layer target changed');
-      const eligibility=selectionContext(),before=await observe(eligibility,true);
+      await stage('read-initial-paint');
+      const eligibility=selectionContext(true),before=await observe(eligibility,true);
       if(!before.available || before.revision!==params.revision)throw Error('填充／描边已改变，请重新打开菜单；本次未修改');
       if(params.mask && (!before.vector || !before.mask))throw Error('当前图层不支持矢量蒙版羽化／密度；本次未修改');
       if(!before.vector && params.fill.kind!==before.fill.kind)throw Error('普通填充层保持PS原生类型；本次未修改');
@@ -745,6 +783,9 @@ function createShapePaint(ps,session,capture,selectionContext) {
           || params.stroke.width!==before.stroke.width || JSON.stringify(params.stroke.rgb)!==JSON.stringify(before.stroke.rgb)))
         throw Error('普通填充层不支持形状描边或禁用填充；本次未修改');
       const original=cache.raw,doc=ps.app.activeDocument,anchor=doc.activeLayers[0];
+      const identity={documentID:doc.id,layerID:anchor.id};
+      const target=()=>ps.app.activeDocument.id===identity.documentID && doc.activeLayers.length===1 &&
+        doc.activeLayers[0].id===identity.layerID && !anchor.allLocked;
       const parent=anchor.parent,parentId=parent?.id ?? null,order=Array.from(parent?parent.layers:doc.layers,l=>l.id);
       let appliedPaint=before,liveColors=before,appliedRaw=original,paintTouched=false;
       const rawKey=raw=>JSON.stringify([raw.fill,raw.stroke,raw.vector]);
@@ -771,6 +812,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
       };
       let prepared=preparePaint();
       const applyPreviewPaint=async value=>{
+        if(!target())throw Error('Preview target changed');
         params=value;
         if(!before.vector && (params.fill.kind!==before.fill.kind || !params.fill.enabled ||
           params.stroke.kind!==before.stroke.kind || params.stroke.enabled!==before.stroke.enabled ||
@@ -780,15 +822,26 @@ function createShapePaint(ps,session,capture,selectionContext) {
         // Mask-only updates retain the cheap DOM path. Colors use four targeted
         // properties, never a document tree or per-frame pattern enumeration.
         if(next.paintChanged || paintTouched) {
-          const raw=await readCore(doc,anchor.id);
+          await stage('read-color-before');
+          const raw=await readCore(doc,identity.layerID);
           if(!raw || rawKey(raw)!==appliedRawKey)throw Error('Fill or stroke changed outside preview');
         }
+        if(!target())throw Error('Preview target changed during read');
         if(next.paintChanged) {
+          await stage('write-color');
+          if(!target())throw Error('Preview target changed before write');
+          // PS24 contentLayer setters require the current content reference.
+          // ID references can reject or silently do nothing. The frozen target
+          // is checked immediately above, with no intervening await, and the
+          // actual color/identity is checked again after the write.
           const [response]=await ps.action.batchPlay([{_obj:'set',_target:[{_ref:'contentLayer',_enum:'ordinal',_value:'targetEnum'}],
             to:next.to,_options:{dialogOptions:'silent'}}],{});
           if(response?._obj==='error')throw Error(response.message || 'Photoshop 拒绝颜色预览');
-          const actual=await observe(selectionContext(),true);
-          if(!actual.available || actual.vector!==before.vector || !samePaint(actual.fill,params.fill) ||
+          await stage('read-color-after');
+          // Paint validation needs fresh identity/type/ancestor locks, not
+          // sibling adjacency and sort capabilities on every color frame.
+          const actual=await observe(selectionContext(true),true,before);
+          if(!target() || !actual.available || actual.vector!==before.vector || !samePaint(actual.fill,params.fill) ||
             !samePaint(actual.stroke,params.stroke) || Math.abs(actual.stroke.width-params.stroke.width)>.01)
             throw Error('Fill or stroke preview readback mismatch');
           appliedPaint=clone(params);liveColors=actual;appliedRaw=cache.raw;appliedRawKey=rawKey(appliedRaw);paintTouched=true;
@@ -796,19 +849,26 @@ function createShapePaint(ps,session,capture,selectionContext) {
         return {fill:liveColors.fill,stroke:liveColors.stroke,changed:next.paintChanged};
       };
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+      await stage('suspend-history');
       const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu shape paint'});
+      let historyOpen=true,committed=false;
+      const originalSignature=cache.signature;
       try {
         let previewStats=null;
         if(preview) {
           const signature=cache.signature;
-          previewStats=await previewMask(context,request,before,doc,anchor,previewIO,applyPreviewPaint);
+          previewStats=await previewMask(context,request,before,doc,anchor,identity,previewIO,applyPreviewPaint);
           if(previewStats.cancelled) {
+            await stage('rollback-history');
+            historyOpen=false;uncertain=true;
             await context.hostControl.resumeHistory(history,false);cache=null;
-            await redrawPreview(doc,anchor);
-            await observe(selectionContext(),true);
+            await redrawPreview(identity,previewIO);
+            await stage('verify-rollback');
+            await observe(selectionContext(true),true,before);
             if(!cache || cache.signature!==signature || doc.activeLayers.length!==1 || doc.activeLayers[0].id!==anchor.id ||
               (anchor.parent?.id ?? null)!==parentId || Array.from(parent?parent.layers:doc.layers,l=>l.id).join(',')!==order.join(','))
               {const error=Error('预览回滚结果待核对');error.resultUnknown=true;throw error;}
+            uncertain=false;
             return {cancelled:true,verified:true,rollback_verified:true,preview:previewStats,selection_context:selectionContext()};
           }
           params=previewStats.paint;
@@ -816,6 +876,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
         }
         const {paintChanged,to}=prepared;
         if(context.isCancelled || !preview && Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+        if(!target())throw Error('Paint target changed before final write');
 
         if(paintChanged) {
           const [response]=await ps.action.batchPlay([{_obj:'set',_target:[{_ref:'contentLayer',_enum:'ordinal',_value:'targetEnum'}],
@@ -826,22 +887,42 @@ function createShapePaint(ps,session,capture,selectionContext) {
           if(params.mask.feather!==anchor.vectorMaskFeather)anchor.vectorMaskFeather=params.mask.feather;
           if(params.mask.density!==anchor.vectorMaskDensity)anchor.vectorMaskDensity=params.mask.density;
         }
-        const after=await observe(selectionContext(),true);
+        await stage('verify-final');
+        const after=await observe(selectionContext(true),true,preview?before:null);
         const wantedMask=params.mask || before.mask;
         if(wantedMask && (!after.mask || Math.abs(after.mask.feather-wantedMask.feather)>.01 ||
           Math.abs(after.mask.density-wantedMask.density)>100/255+.001))throw Error('矢量蒙版羽化／密度读回不符，已回滚');
         if(!after.available || after.vector!==before.vector || !samePaint(after.fill,params.fill) || !samePaint(after.stroke,params.stroke) || Math.abs(after.stroke.width-params.stroke.width)>.01 ||
           doc.activeLayers.length!==1 || doc.activeLayers[0].id!==anchor.id || (anchor.parent?.id ?? null)!==parentId ||
           Array.from(parent?parent.layers:doc.layers,l=>l.id).join(',')!==order.join(','))throw Error('形状颜色／图层身份读回不符，已回滚');
-        await context.hostControl.resumeHistory(history,true);
+        await stage('commit-history');
+        historyOpen=false;uncertain=true;
+        await context.hostControl.resumeHistory(history,true);committed=true;uncertain=false;
         return {count:1,verified:true,placement_moves:0,fill_kind:after.fill.kind,stroke_kind:after.stroke.kind,
           ...(after.mask?{mask:after.mask}:{}),...(previewStats?{preview:previewStats}:{}),selection_context:selectionContext()};
       } catch(error) {
-        try {await context.hostControl.resumeHistory(history,false);cache=null;}
-        catch(_) {error.resultUnknown=true;}
+        await stage('rollback-error');
+        uncertain=uncertain || !!error.resultUnknown || committed;
+        if(historyOpen) {
+          try {
+            historyOpen=false;
+            await context.hostControl.resumeHistory(history,false);cache=null;
+            await stage('verify-error-rollback');
+            await observe(selectionContext(true),true,before);
+            if(!target() || !cache || cache.signature!==originalSignature ||
+                (anchor.parent?.id ?? null)!==parentId ||
+                Array.from(parent?parent.layers:doc.layers,l=>l.id).join(',')!==order.join(','))uncertain=true;
+          } catch(_) {uncertain=true;}
+        }
         throw error;
       }
     },{commandName:preview?'Menu paint preview':'Menu shape paint',timeOut:0,...(preview?{interactive:true}:{})});
+    } catch(error) {
+      if(uncertain) {
+        const result=Error(String(error));result.resultUnknown=true;throw result;
+      }
+      throw error;
+    }
   }
   return {observe,apply};
 }

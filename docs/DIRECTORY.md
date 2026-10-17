@@ -12,7 +12,8 @@
 | `photoshop_action/` 与根目录 COM 兼容模块 | 后端仍引用的兼容代码 |
 | `tools/`、`tests/` | 维护工具与自动回归 |
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
-| `dist/` | 当前v0.4.160本机候选EXE、统一ZIP、UXP ZIP与两份校验，共5项；正式159清单与包已归档，公开Release仍159 |
+| `dist/` | 当前v0.4.164本机候选EXE及SHA256，共2项；不保留混用的160 ZIP，不作为完整正式包；旧159正式包及160 ZIP已归档，公开Release仍159 |
+| 应用数据目录 `version-health/` | 自动版本自检摘要及最多20份脱敏报告，不随发行包提交 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |

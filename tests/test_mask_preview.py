@@ -80,7 +80,7 @@ class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def exercise(self,reopen):
         focus=threading.Event();entered=threading.Event();calls=[];events=[]
         desktop=SimpleNamespace(menu_epoch=7,visible=True,color_editor_active=True,
-            menu_layer_context={'session':'s','document_id':3,'layer_ids':[4]},
+            menu_layer_context={'session':'s','document_id':3,'layer_ids':[4],'shape_editor':{'live_preview':True}},
             _scope=lambda:True,event=events.append,require_menu_layer_target=lambda *_:None)
         def require_focus():entered.set();self.assertTrue(focus.wait(2))
         desktop.require_action_focus=require_focus
@@ -107,6 +107,17 @@ class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(app.operation_lock.locked())
         self.assertIsNone(app._mask_preview)
         self.assertEqual(desktop.visible,reopen)
+
+    async def test_draft_only_menu_rejects_live_event_before_reserving_or_starting_task(self):
+        for capability in (False,None):
+            desktop=SimpleNamespace(menu_epoch=7,visible=True,color_editor_active=True,
+                menu_layer_context={'session':'s','document_id':3,'layer_ids':[4],'shape_editor':{'live_preview':capability}})
+            bridge=object.__new__(UxpBridge);bridge.busy=False
+            app=SimpleNamespace(bridge=bridge,desktop=desktop,operation_lock=asyncio.Lock(),
+                require_uxp_enabled=lambda:None,photoshop_launcher=SimpleNamespace(active=False))
+            with self.assertRaisesRegex(RuntimeError,'本地草稿'):
+                await dispatch_preview(app,'mask.preview.update',{'menu_epoch':7,'params':paint(1)})
+            self.assertFalse(app.operation_lock.locked());self.assertIsNone(getattr(app,'_mask_preview',None))
 
     async def test_early_updates_and_release_share_reserved_transaction(self):
         await self.exercise(False)

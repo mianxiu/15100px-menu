@@ -3,6 +3,38 @@ from pathlib import Path
 from unittest.mock import Mock,patch
 from backend.uxp_bridge import UxpBridge,UxpResultUnknown,UxpTransport,publish_request,read_heartbeat
 
+class UxpStatusIsolationTests(unittest.TestCase):
+    def exercise(self,running,heartbeat=None):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as base:
+            root=Path(base);bridge=object.__new__(UxpBridge)
+            bridge.transport=SimpleNamespace(folder=root)
+            bridge.ui_theme='dark';bridge.ui_font_size='small'
+            bridge._application=Mock(side_effect=AssertionError('Status must not acquire COM'))
+            if heartbeat is not None:(root/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+            with patch('backend.uxp_management.photoshop_running',side_effect=running if isinstance(running,Exception) else None,return_value=running) as presence:
+                result=bridge._status()
+            bridge._application.assert_not_called()
+            return result,presence.call_count
+
+    def test_lost_plugin_observes_process_only(self):
+        result,calls=self.exercise(True)
+        self.assertTrue(result['connected']);self.assertIsNone(result['document'])
+        self.assertIn('等待 UXP',result['message']);self.assertEqual(calls,1)
+
+    def test_closed_host_has_no_com_connection_attempt(self):
+        result,calls=self.exercise(False)
+        self.assertFalse(result['connected']);self.assertIsNone(result['document']);self.assertEqual(calls,1)
+
+    def test_process_observation_failure_stays_unavailable(self):
+        result,_=self.exercise(OSError('snapshot unavailable'))
+        self.assertFalse(result['connected']);self.assertIsNone(result['document'])
+
+    def test_fresh_plugin_metadata_retains_document_and_theme(self):
+        result,calls=self.exercise(False,{'ui_theme':'light','ui_font_size':'large','document_name':'Current.psd'})
+        self.assertEqual(result['document'],'Current.psd');self.assertEqual(result['ui_theme'],'light')
+        self.assertEqual(result['ui_font_size'],'large');self.assertEqual(calls,0)
+
 class UxpPublicationTests(unittest.TestCase):
     def test_partial_heartbeat_recovers_before_single_menu_publication(self):
         from types import SimpleNamespace
@@ -117,11 +149,58 @@ class UxpDiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'0.3.20'):
             self.transport.call('set_label',command='shape.paint',paint={'mask':{'feather':0,'density':100}},target={'session':'s'})
         self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
-        heartbeat['probe_version']='0.3.26'
+        heartbeat['probe_version']='0.3.29'
         (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
-        with self.assertRaisesRegex(RuntimeError,'0.3.27'):
+        with self.assertRaisesRegex(RuntimeError,'0.3.31'):
             self.transport.call('set_label',preview=object(),command='shape.preview',target={'session':'s'})
         self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
+    def test_preview_requires_supported_host_and_actual_redraw_capability_before_publication(self):
+        folder=self.heartbeat(24)
+        self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        for host,capability in [('24.0.1',True),('24.0.1',False),('24.1',False),('24.2.0',None),('25.5',False)]:
+            heartbeat={'session':'s','probe_version':'0.3.31','photoshop_version':host,
+                       'document_redraw_available':capability,'plugin_time_ms':time.time()*1000}
+            (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+            with self.assertRaisesRegex(RuntimeError,'PS24.1'):
+                self.transport.call('set_label',preview=object(),command='shape.preview',target={'session':'s'})
+            self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
+
+    def test_supported_preview_publishes_once_with_original_identity(self):
+        from types import SimpleNamespace
+        folder=self.heartbeat(26)
+        self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.31',
+            'photoshop_version':'26.0.0','document_redraw_available':True,'plugin_time_ms':time.time()*1000}),'utf-8')
+        self.transport.pending.storage=self.transport.storage
+        self.transport.task_id='b'*32
+        preview=SimpleNamespace(bind=Mock(),trace=False)
+        def publish(source,destination):
+            request=json.loads(source.read_text('utf-8'))
+            response={k:request[k] for k in ('id','session','operation')}
+            response.update(schema=1,phase='completed',result={'verified':True})
+            (folder/('result-'+request['id']+'.json')).write_text(json.dumps(response),'utf-8')
+            source.replace(destination)
+        with patch('backend.uxp_bridge.publish_request',side_effect=publish) as published, patch('backend.uxp_management.photoshop_running',return_value=False) as presence:
+            result=self.transport.call('set_label',preview=preview,command='shape.preview',target={'session':'s'})
+        presence.assert_not_called()
+        self.assertTrue(result['result']['verified']);self.assertEqual(published.call_count,1)
+        preview.bind.assert_called_once()
+        self.assertEqual(self.transport.pending.value['id'],result['id'])
+
+    def test_host_exit_without_matching_preview_terminal_keeps_unknown_request(self):
+        from types import SimpleNamespace
+        folder=self.heartbeat(26)
+        self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.31',
+            'photoshop_version':'26.0.0','document_redraw_available':True,'plugin_time_ms':time.time()*1000}),'utf-8')
+        self.transport.pending.storage=self.transport.storage
+        self.transport.task_id='c'*32
+        with patch('backend.uxp_management.photoshop_running',return_value=False):
+            with self.assertRaises(UxpResultUnknown):
+                self.transport.call('set_label',preview=SimpleNamespace(bind=Mock(),trace=False),command='shape.preview',target={'session':'s'})
+        self.assertIsNotNone(self.transport.pending.value)
+        self.assertTrue((folder/'probe-request.json').exists())
+
     def test_smart_conversion_rejects_old_plugin_before_publication(self):
         folder=self.heartbeat(24)
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.17',session='s')

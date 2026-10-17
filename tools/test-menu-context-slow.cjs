@@ -10,7 +10,7 @@ async function host(){
  const labels={selectionContext:context,selectionContextFresh:async()=>{if(control.readBlock)await new Promise(r=>{releaseRead=r;});return context();},selectionMatches:()=>!control.changed,interfacePreferences:async()=>({}),
    observeShape:async()=>{control.shapes++;if(control.block)await new Promise(r=>{release=r;});if(control.shapeFail)throw Error('color unavailable');
      return {available:true,revision:'s:1'};}};
- const sandbox={console:{log(){}},module:{exports:{}},Date:class extends Date{static now(){return control.now;}},setInterval(fn){poll=fn;},require(name){
+ const sandbox={console:{log(){}},module:{exports:{}},Date:class extends Date{static now(){return control.now;}},setInterval(fn,ms){if(ms===16)poll=fn;},require(name){
    if(name==='./labels.js')return (ps,session)=>{control.session=session;return labels;};if(name==='./probe-config.js')return 'token';
    if(name==='photoshop')return {app:{documents:[]},action:{addNotificationListener(){}}};
    if(name==='uxp')return {storage:{localFileSystem:{getDataFolder:async()=>folder,getPluginFolder:async()=>{throw Error('no manifest');}}},host:{},versions:{}};

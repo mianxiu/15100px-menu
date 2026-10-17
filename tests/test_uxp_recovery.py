@@ -114,6 +114,34 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         await self.bridge.reconcile_result();self.assertTrue(self.bridge.busy)
         self.assertEqual(self.bridge.tasks.get(task)['state'],'result-unknown')
 
+    async def test_legacy_rollback_failure_without_native_flag_remains_unknown(self):
+        task=await self.unknown()
+        for text in ('预览回滚结果待核对','Error: 预览回滚结果待核对'):
+            self.receipt(phase='failed',error=text,result_unknown=False)
+            pending=self.bridge.transport.pending
+            original=(self.folder/('result-'+pending.value['id']+'.json')).read_bytes()
+            self.assertIsNone(pending.read_result())
+            self.assertTrue(pending.read_result(allow_unknown=True)['result_unknown'])
+            self.assertTrue((await self.bridge.reconcile_result())['active'])
+            self.assertTrue(self.bridge.busy)
+            self.assertEqual(self.bridge.tasks.get(task)['state'],'result-unknown')
+            self.assertEqual((self.folder/('result-'+pending.value['id']+'.json')).read_bytes(),original)
+
+    async def test_misclassified_failed_history_cannot_clear_unknown_rollback_receipt(self):
+        task=await self.unknown()
+        self.receipt(phase='failed',error='Error: 预览回滚结果待核对',result_unknown=False)
+        self.bridge.tasks.update(task,'failed',error='Error: 预览回滚结果待核对')
+        self.assertTrue((await self.bridge.reconcile_result())['active'])
+        self.assertTrue(self.bridge.busy)
+        self.assertTrue(self.bridge.transport.pending.path.exists())
+
+    async def test_other_known_failure_still_reconciles_normally(self):
+        task=await self.unknown()
+        self.receipt(phase='failed',error='Error: unsupported setter',result_unknown=False)
+        await self.bridge.reconcile_result()
+        self.assertFalse(self.bridge.busy)
+        self.assertEqual(self.bridge.tasks.get(task)['state'],'failed')
+
     async def test_pending_contains_no_token_and_bad_journal_blocks_after_restart(self):
         await self.unknown()
         text=self.bridge.transport.pending.path.read_text()

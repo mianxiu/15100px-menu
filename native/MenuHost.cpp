@@ -58,7 +58,7 @@ static bool allowed=false,capable=false,rightHide=false;
 static std::string document="连接中…",notice;
 static int renderedHit=-1,pendingHit=-1;
 static bool taskBusy=false,taskFailed=false,taskHasResult=false;
-static bool maskPreviewStarted=false;
+static bool maskPreviewStarted=false,shapeDraftOnly=false;
 static bool busyFeedback=false;
 static ULONGLONG feedbackStarted=0;
 static ULONGLONG completionStarted=0;
@@ -71,6 +71,7 @@ static std::string taskStatus() {
     if (taskBusy) return "执行中："+(taskName.empty()?std::string("Photoshop 操作"):taskName)+
         " · "+std::to_string((GetTickCount64()-taskStarted)/1000)+" 秒"+
         (taskQueueCount>0?" · 等待 "+std::to_string(taskQueueCount)+" 项":"");
+    if(shapeDraftOnly)return "本地草稿 · 确认后生效（兼容模式）";
     if (taskHasResult && taskFailed && taskError.find("背景图层")!=std::string::npos)
         return "空闲 · 背景图层请先解锁，再设置标签";
     if (taskHasResult) return std::string(taskFailed?"空闲 · 上次失败：":"空闲 · 上次已完成：")+
@@ -2375,7 +2376,7 @@ int main() {
                 if (busyFeedback || !canExecute() || !pieReady)
                     throw std::runtime_error("Explicit reopen did not restore idle menu");
                 const auto shapeCount=testedActions.size();
-                Json shapeFixture={{"available",true},{"revision","test:1"},
+                Json shapeFixture={{"available",true},{"live_preview",true},{"revision","test:1"},
                     {"mask",{{"feather",0},{"density",100}}},
                     {"fill",{{"kind","solid"},{"enabled",true},{"rgb",{12,34,56}}}},
                     {"stroke",{{"kind","solid"},{"enabled",false},{"rgb",{0,0,0}},{"width",1}}},
@@ -2464,6 +2465,26 @@ int main() {
                 renderedHit=100;finishHold(paintPoint,true,&paintPoint);
                 if(testedActions.back()!="hide")throw std::runtime_error("Unchanged paint submitted");
                 auto resetShape=[&]{shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;};
+                // Old/missing host capability keeps the entire editor local.
+                for(const bool missing:{false,true}) {
+                    auto local=shapeFixture;
+                    if(missing)local.erase("live_preview");else local["live_preview"]=false;
+                    shapeEditor.prepare(local);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;
+                    const auto events=testedMaskEvents.size(),actions=testedActions.size();
+                    shapeEditor.current()["rgb"]={93,72,51};shapeEditor.draft["mask"]["feather"]=7.5;shapeEditor.changed();
+                    numberFrame(ImGuiKey_None,false);
+                    if(maskPreviewStarted || testedMaskEvents.size()!=events || !shapeDraftOnly || !shapeEditor.ready())
+                        throw std::runtime_error("Draft-only host published a live preview or disabled editing");
+                    renderedHit=100;finishHold(paintPoint,true,&paintPoint);finishHold(paintPoint);
+                    if(testedActions.size()!=actions+1 || testedActions.back()!="shape.paint" || testedMaskEvents.size()!=events)
+                        throw std::runtime_error("Draft-only confirmation did not submit exactly once");
+                    shapeEditor.prepare(local);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;
+                    shapeEditor.current()["rgb"]={42,62,82};shapeEditor.changed();
+                    POINT centre={LONG(pieCenter.x),LONG(pieCenter.y)};renderedHit=100;finishHold(paintPoint,true,&centre);
+                    if(testedActions.back()!="hide" || testedMaskEvents.size()!=events)
+                        throw std::runtime_error("Draft-only centre cancellation submitted a change");
+                    testedActions.resize(shapeCount);
+                }
                 resetShape();const auto colorEvents=testedMaskEvents.size();
                 shapeEditor.current()["rgb"]={91,82,73};shapeEditor.changed();numberFrame(ImGuiKey_None,false);
                 if(testedMaskEvents.size()!=colorEvents+1 || !maskPreviewStarted || !shapeEditor.ready() || canExecute() ||

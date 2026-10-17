@@ -18,6 +18,51 @@ let completedReceipts=[];
 let lastWorkAt=0;
 let menuRefreshId='';
 let heartbeatValue=null;
+let activeExecution=null,executionPulseRunning=false;
+// This pulse performs only local file I/O. A pending Photoshop await must not
+// hide which original operation owns the host, or masquerade as fresh layer data.
+async function executionPulse() {
+  if(!activeExecution || executionPulseRunning)return;
+  executionPulseRunning=true;
+  try {
+    const current=activeExecution;
+    await record(current.folder,'execution-'+current.id+'.json',{
+      schema:1,id:current.id,session,operation:current.operation,command:current.command,
+      stage:current.stage,stage_started_at_ms:current.stageAt,seq:current.seq,
+      phase:'running',plugin_time_ms:Date.now()});
+  } catch(error) {console.log('Execution pulse unavailable',String(error));}
+  finally {executionPulseRunning=false;}
+}
+async function executionStage(stage,seq) {
+  if(!activeExecution)return;
+  activeExecution.stage=stage;activeExecution.stageAt=Date.now();
+  if(Number.isSafeInteger(seq))activeExecution.seq=seq;
+  // Detailed durable checkpoints are opt-in for owned test documents only.
+  // Normal dragging does not add per-frame filesystem writes.
+  if(activeExecution.trace)await executionPulse();
+}
+function boundedPreviewRead(read,timeout=250) {
+  let pending=null;
+  const expired={};
+  return async()=>{
+    // Only local mailbox I/O can be timed out here. Photoshop mutations and
+    // redraw calls must always remain awaited until their actual outcome.
+    // Reuse an unresolved read rather than accumulating abandoned file reads.
+    if(!pending) {
+      pending=Promise.resolve().then(read).then(value=>({value}),()=>({value:null}));
+    }
+    let timer;const current=pending;
+    try {
+      const result=await Promise.race([current,new Promise(resolve=>{timer=setTimeout(()=>resolve(expired),timeout);})]);
+      if(result===expired)return null;
+      // Retain late data until it is consumed. Clearing on resolution would
+      // lose every frame if disk latency consistently just exceeded timeout.
+      if(pending===current)pending=null;
+      return result.value;
+    }
+    finally {clearTimeout(timer);}
+  };
+}
 async function refreshMenuContext(folder,now) {
   let request;
   try {request=JSON.parse(await (await folder.getEntry('menu-context-request.json')).read());}catch(_){return false;}
@@ -63,10 +108,11 @@ async function finishResponse(folder,response) {
   await record(folder,'result-'+response.id+'.json',response);
   await record(folder,'probe-response.json',response);
   pendingResponse=null;
+  if(activeExecution?.id===response.id)activeExecution=null;
   completedReceipts.push('result-'+response.id+'.json');
   if(completedReceipts.length>64) {
     const name=completedReceipts.shift();
-    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-')])
+    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-'),name.replace('result-','execution-')])
       try {await (await folder.getEntry(file)).delete();}catch(_){}
   }
 }
@@ -121,11 +167,12 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.27', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.31', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
+        document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
         plugin_id: 'com.15100px.menu.offline-probe',
         document_count: app.documents.length, document_name: app.documents.length ? app.activeDocument.title : null, plugin_time_ms: now, phase: 'ready'
       };
@@ -160,13 +207,18 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.27', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.31', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
     if(modifying)await record(folder,'result-'+request.id+'.json',{...response,phase:'accepted'});
     timings.accept_ms=Date.now()-timingStarted;
     const operationStarted=Date.now();
+    if(modifying) {
+      activeExecution={folder,id:request.id,operation:request.operation,command:request.command,
+        stage:'accepted',stageAt:Date.now(),seq:0,trace:request.preview_trace===true};
+      await executionStage('dispatch');
+    }
     try {
       if (request.operation === 'inspect') {
         response.target = labels.documentTarget();
@@ -175,7 +227,8 @@ async function probe(reason) {
       if (request.operation === 'capture') response.target = await labels.capture();
       if (request.operation === 'set_label') response.result = await labels.setLabel(request,
         request.command==='shape.preview'?{
-          read:async()=>{
+          stage:executionStage,
+          read:boundedPreviewRead(async()=>{
             if(heartbeatValue && Date.now()-lastHeartbeat>=1000) {
               lastHeartbeat=Date.now();
               await record(folder,'probe-last.json',{...heartbeatValue,phase:'preview',reason:'mask-preview',plugin_time_ms:lastHeartbeat});
@@ -189,7 +242,7 @@ async function probe(reason) {
               // Expiry rolls back; never restart or replay the operation.
               return null;
             }
-          },
+          }),
           applied:value=>record(folder,'mask-preview-status-'+request.id+'.json',{
             id:request.id,session,phase:'preview',...value,plugin_time_ms:Date.now()})
         }:null);
@@ -209,6 +262,7 @@ async function probe(reason) {
         timings.selection_feedback_ms=Date.now()-feedbackStarted;
       }
       response.timings_ms=timings;
+      await executionStage('persist-result');
       await finishResponse(folder,response);
     }
     else await record(folder, 'probe-response.json', response);
@@ -229,5 +283,6 @@ try {require('photoshop').action.addNotificationListener(
   ['select','make','delete','set','undo','redo'].map(event=>({event})),()=>{contextReadAt=0;});}
 catch(_) {}
 setInterval(() => probe('poll'), 16);
+setInterval(executionPulse,1000);
 
 

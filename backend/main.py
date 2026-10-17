@@ -29,6 +29,7 @@ from .recent_documents import RecentDocuments
 from .application_updates import ApplicationUpdates
 from .uxp_auto_update import UxpAutoUpdate
 from .diagnostics import Diagnostics
+from .version_health import VersionHealth
 
 APP_ID = "photoshop-menu"
 from .version import APP_VERSION
@@ -185,6 +186,7 @@ class Application(web.Application):
         self.application_updates = ApplicationUpdates(self.runtime)
         self.uxp_auto=UxpAutoUpdate(self.runtime)
         self.diagnostics=Diagnostics(self.runtime,ROOT/"tools/inspect-panels.ps1",port)
+        self.version_health=VersionHealth(self.runtime)
         self.updating = False
         self.closing = False
         self.headless = self.no_desktop = False
@@ -319,6 +321,11 @@ class Application(web.Application):
                     desktop.diagnostic_trace=False;desktop._native_config()
                 self.diagnostics.task.add_done_callback(finish_trace)
             return result
+        if action=='version.health.export':return await self.version_health.export()
+        if action=='version.health.acknowledge':
+            result=await self.version_health.acknowledge()
+            await self.broadcast({'type':'version-health','data':result})
+            return result
         if action=='diagnostics.status':return self.diagnostics.snapshot()
         if action=='diagnostics.export':return self.diagnostics.export()
         if action=='uxp.auto':
@@ -392,7 +399,7 @@ class Application(web.Application):
             recent=await asyncio.to_thread(self.recent_documents.refresh,status.get('photoshop_version'))
             if isinstance(self.bridge,UxpBridge) and not uxp['enabled']:
                 status={**status,'uxp_ready':False,'message':'UXP 执行已禁用'}
-            return {"photoshop": status, "actions": ACTIONS, 'recent_documents':recent,
+            value = {"photoshop": status, "actions": ACTIONS, 'recent_documents':recent,
                     "commands": Application.execution_contracts(self),
                     'tasks':self.tasks.snapshot(), 'photoshop_start':self.photoshop_launcher.snapshot(),
                     'language':read_language(self.runtime),
@@ -413,6 +420,9 @@ class Application(web.Application):
                              "hotkey_pid": self.desktop.native.pid if self.desktop and self.desktop.native else None},
                     "desktop": self.desktop.message if self.desktop else "无桌面模式",
                     "tray_error": self.tray.error if self.tray else ""}
+            self.version_health.observe(value)
+            value['version_health']=self.version_health.snapshot()
+            return value
         if action == 'document.new':
             if args.get('params') not in (None, {}):raise ValueError('新建窗口入口不接受文档参数')
             if not self.desktop:raise RuntimeError('无桌面模式不提供新建窗口')
@@ -660,7 +670,12 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         while not app.stop_event.is_set():
             try:await app.sync_uxp_auto()
             except Exception:logging.exception('UXP follow update check failed')
-            await app.broadcast({"type": "status", "data": await app.dispatch("status", {})})
+            try:
+                await app.broadcast({"type": "status", "data": await app.dispatch("status", {})})
+            except Exception:
+                logging.exception('Status observation failed')
+                app.version_health.observe({'version':APP_VERSION, '_status_unavailable':True})
+                await app.broadcast({'type':'version-health','data':app.version_health.snapshot()})
             await asyncio.to_thread(app.control.refresh_icon)
             try:
                 await asyncio.wait_for(app.stop_event.wait(), 3)
@@ -696,6 +711,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
     finally:
         app.closing=True
         await app.diagnostics.close()
+        await app.version_health.close()
         await app.application_updates.close()
         if status_task:
             status_task.cancel()

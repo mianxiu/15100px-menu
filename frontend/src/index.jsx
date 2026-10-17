@@ -3,6 +3,7 @@ import {createSignal, createMemo, createEffect, onMount, onCleanup, For, Show} f
 import {Client} from './client.mjs';
 import {translate} from './i18n.mjs';
 import {diagnosticClock,diagnosticScopes,diagnosticComponents,diagnosticFinding} from './diagnostics.mjs';
+import {healthView,healthFinding} from './version-health.mjs';
 import {applyMenuTheme} from './theme.mjs';
 import {prefixOptions,triggerKeys,keyLabel,shortcutParts,triggerAllowed,changePrefix,changeTrigger,shortcutErrors} from './shortcuts.mjs';
 import './admin.css';
@@ -46,6 +47,7 @@ function App() {
     if(event.type==='status') accept(event.data);
     if(event.type==='notice') setNotice(event);
     if(event.type==='diagnostics')setState(previous=>({...previous,diagnostics:receivedDiagnostic(event.data)}));
+    if(event.type==='version-health')setState(previous=>({...previous,version_health:event.data}));
     if(event.type==='tasks') setState(previous=>({...previous,tasks:event.data}));
   });
   async function call(action,args={}) {
@@ -124,6 +126,13 @@ function App() {
       <div class="buttons"><button disabled={disabled() || state().diagnostics?.phase==='collecting'} onClick={()=>perform('diagnostics.start',{scope:scope()})}>{t("开始只读诊断")}</button><button disabled={disabled() || !state().diagnostics?.ready} onClick={exportDiagnostics}>{t("导出统一报告")}</button></div><p class="caption">{t("综合检测合并菜单／热键、UXP安装加载、图层读取耗时、任务与更新状态，生成一份JSON；单项失败仍可导出其余结果。")}</p><p class="caption">{t("仅读取窗口结构、插件加载日志和已有状态，不读取输入文字、文档内容或凭据，不向PS提交操作。")}</p></section>;
   }
   async function exportDiagnostics(){try{const report=await call('diagnostics.export');const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='ps-menu-diagnostic-'+Date.now()+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{}}
+  const health=()=>healthView(state().version_health);
+  async function exportHealth(){try{const report=await call('version.health.export');const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='ps-menu-version-check-'+Date.now()+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{}}
+  function VersionHealthPanel(){return <section id="version-health"><div class="section-heading"><h2>{t('版本变化自动自检')}</h2><span classList={{'status-pill':true,warn:state().version_health?.attention,good:health().ready && !state().version_health?.attention}}>{t(health().message)}</span></div>
+    <p>{t('仅检查版本、连接和接口；不代表文档操作或低配性能已验收。')}</p>
+    <Show when={health().ready}><p>Photoshop {health().versions.photoshop || '—'} · UXP {health().versions.loaded_uxp || '—'} · {t('应用')} {health().versions.application || '—'}</p><For each={health().findings}>{finding=><p>{t(healthFinding(finding.code))}</p>}</For><p class="caption">{t('上次检查：')}{new Date(state().version_health.checked_at*1000).toLocaleString(state().language || 'zh-CN')}</p></Show>
+    <div class="buttons"><button disabled={disabled() || !health().ready} onClick={exportHealth}>{t('导出自检报告')}</button><Show when={health().alert}><button disabled={disabled()} onClick={()=>perform('version.health.acknowledge')}>{t('标为已读')}</button></Show></div>
+    <p class="caption">{t('版本变化和异常稳定出现后自动留证，最多保留20份；不写文档、不切换焦点、不上传数据。')}</p></section>;}
   function UxpFollow(){return <><label class="option-row"><input type="checkbox" checked={state().uxp_auto_update?.enabled ?? true} disabled={disabled()} onChange={e=>perform('uxp.auto',{enabled:e.target.checked})}/><span>{t("已安装UXP自动跟随内置版本更新")}</span></label><p role="status">{t(state().uxp_auto_update?.message || '等待检查内置 UXP')}</p><p class="caption">{t("保存并关闭PS后自动安装较新内置版，不自动关闭PS。禁用、卸载、回退和未知结果保护优先。")}</p></>;}
   function PhotoshopStartup(){return <>
     <p>{t(state().photoshop_start?.message) || t("等待启动状态")}<Show when={state().photoshop_start?.active}> · {state().photoshop_start?.elapsed_seconds || 0} {t("秒")}</Show></p>
@@ -140,7 +149,7 @@ function App() {
     <Show when={!state().photoshop.status_fresh}><p class="error">{t("状态等待更新 · 显示缓存")}</p></Show>
     <div class="buttons"><Show when={!state().photoshop.connected || state().photoshop_start?.active}><button class="primary" disabled={managedBusy()} onClick={()=>perform('photoshop.start')}>{state().photoshop_start?.active?t("正在启动…"):t("启动 Photoshop")}</button></Show><button disabled={disabled()} onClick={()=>perform('status',{refresh:true})}>{t("刷新连接状态")}</button><button onClick={()=>choose('settings')}>{t("菜单设置")}</button><button onClick={()=>choose('plugins')}>{t("插件管理")}</button></div>
     </section>
-    <DiagnosticPanel/><section class="compact-section"><details><summary>{t("启动选项")}</summary><PhotoshopStartup/></details></section>
+    <VersionHealthPanel/><DiagnosticPanel/><section class="compact-section"><details><summary>{t("启动选项")}</summary><PhotoshopStartup/></details></section>
     <section class="compact-section"><details><summary>{t("连接详情")}</summary><dl class="info-list"><div><dt>{t("当前面板：")}</dt><dd>{t(state().menu?.panel_context?.label) || t("通用操作")}</dd></div><div><dt>{t("上次读取：")}</dt><dd>{state().photoshop.status_updated_at ? new Date(state().photoshop.status_updated_at).toLocaleTimeString(state().language || 'zh-CN') : '—'}</dd></div><div><dt>{t("当前运行版本")}</dt><dd>v{state().version || '—'}</dd></div><div><dt>{t("程序：")}</dt><dd>{state().service?.executable || t("此服务未提供程序路径")}</dd></div></dl><p>{t(state().desktop)}</p><Show when={state().tray_error}><p class="error">{t("托盘：")}{state().tray_error}</p></Show><button class="danger" disabled={managedBusy()} onClick={()=>perform('service.quit')}>{t("退出后台服务")}</button></details></section>
   </div>;}
   function UxpInstalled(){return <div class="panel-scroll"><section>
@@ -205,6 +214,7 @@ function App() {
     </aside>
     <main><header><div><h1>{t(pages.find(([name])=>name===page())?.[1])}</h1><p>{t(({overview:'连接状态和常用操作',settings:'调整菜单行为与快捷键',plugins:'管理 Photoshop 执行插件',updates:'检查与安装正式版本',tasks:'查看操作结果与耗时',logs:'按需查看服务诊断'})[page()])}</p></div><div class="header-status"><span class="version-tag">{state().version ? 'v'+state().version : '—'}</span><span classList={{badge:true,online:connection()==='connected'}}>{connection()==='connected'?t("后台在线"):connection()==='connecting'?t("正在连接"):t("已断开 · 自动重连")}</span></div></header>
       <Show when={notice().message}><div classList={{notice:true,error:!notice().ok}} role="status"><span>{t(notice().message)}</span><button class="dismiss" aria-label={t("关闭提示")} onClick={()=>setNotice({message:'',ok:true})}>×</button></div></Show>
+      <Show when={health().alert}><div class="notice" role="status"><span>{t(health().message)}</span><button disabled={disabled()} onClick={()=>{choose('overview');queueMicrotask(()=>document.getElementById('version-health')?.scrollIntoView({block:'nearest'}));}}>{t('查看自检报告')}</button><button disabled={disabled()} onClick={()=>perform('version.health.acknowledge')}>{t('标为已读')}</button></div></Show>
       <Show when={tabItems().length}><div class="subtabs" role="tablist" aria-label={t("页面选项")} onKeyDown={tabKeys}><For each={tabItems()}>{([id,label])=><button id={'tab-'+page()+'-'+id} role="tab" aria-selected={currentTab()===id} aria-controls="active-panel" tabIndex={currentTab()===id?0:-1} classList={{selected:currentTab()===id}} onClick={()=>selectTab(id)}>{t(label)}</button>}</For></div></Show>
       <div id="active-panel" class="workspace" role={tabItems().length?'tabpanel':undefined} aria-labelledby={tabItems().length?'tab-'+page()+'-'+currentTab():undefined}>
 <Show when={page()==='overview'}><Overview/></Show>

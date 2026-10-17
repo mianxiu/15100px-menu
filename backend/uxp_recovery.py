@@ -67,8 +67,16 @@ class PendingUxp:
             if not isinstance(result, dict): return None
             if any(result.get(key) != value[key] for key in ('id', 'session', 'operation')):
                 return None
-            if result.get('schema') != 1 or result.get('phase') not in ('completed', 'failed') or (result.get('result_unknown') and not allow_unknown):
+            if result.get('schema') != 1 or result.get('phase') not in ('completed', 'failed'):
                 return None
+            # Older Photoshop can drop custom Error fields across executeAsModal.
+            # This exact plugin-generated failure explicitly means rollback was
+            # not verified. Preserve the receipt bytes and fail closed locally.
+            uncertain = result.get('result_unknown') or (result.get('phase') == 'failed' and
+                result.get('error') in ('预览回滚结果待核对', 'Error: 预览回滚结果待核对'))
+            if uncertain:
+                if not allow_unknown: return None
+                result = {**result, 'result_unknown':True}
             if result['phase'] == 'completed' and not isinstance(result.get('result'), dict):
                 return None
             if result['phase'] == 'failed' and not isinstance(result.get('error'), str):

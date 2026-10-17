@@ -1,6 +1,6 @@
 // Frame-coalesced paint and mask updates share one rollbackable transaction.
 struct ShapeColorEditor {
-    bool available=false,dirty=false,vector=true;
+    bool available=false,dirty=false,vector=true,livePreview=false;
     int channel=0,stop=0;
     Json original,draft,patterns,lastPreview;
     std::array<Json,2> modes;
@@ -12,7 +12,7 @@ struct ShapeColorEditor {
     bool gradientDragging=false;
     float gradientDragOffset=0;
     void prepare(const Json& data) {
-        maskPreviewStarted=false;
+        maskPreviewStarted=false;shapeDraftOnly=false;livePreview=false;
         lastPreview=Json();
         available=false;dirty=false;bounds=maskBounds=copyBounds=gradientBounds=featherBounds=densityBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
         if(!data.value("available",false))return;
@@ -21,7 +21,8 @@ struct ShapeColorEditor {
         patterns=data.value("patterns",Json::array());
         for(const auto& item:patterns)if(item.is_string())requireText(item.get<std::string>());
         for(int i=0;i<2;++i){const auto& p=draft.at(i?"stroke":"fill");modes[i]=Json::object();modes[i][p.at("kind").get<std::string>()]=p;}
-        vector=data.value("vector",true);available=true;
+        vector=data.value("vector",true);livePreview=data.value("live_preview",false);
+        shapeDraftOnly=!livePreview;available=true;
         if(vector && data.contains("mask") && data["mask"].is_object())original["mask"]=draft["mask"]=data["mask"];
     }
     Json& current(){return draft.at(channel?"stroke":"fill");}
@@ -57,6 +58,7 @@ static Json testedShapePaint;
 static size_t testedShapeGrants=0;
 static std::vector<Json> testedMaskEvents;
 static void emitMaskPreview(bool commit=false) {
+    if(!shapeEditor.livePreview)return;
     maskPreviewStarted=true;
     shapeEditor.lastPreview=shapeEditor.draft;
     Json event={{"type","action"},{"action",commit?"mask.preview.commit":"mask.preview.update"},
@@ -307,7 +309,7 @@ static void drawShapeEditor() {
         ImGui::EndDisabled();ImGui::EndChild();
     }
     // No writes for channel/stop selection or copying; one latest draft per frame.
-    if(!pieAnimating && shapeEditor.valid() && (shapeEditor.dirty || maskPreviewStarted) &&
+    if(shapeEditor.livePreview && !pieAnimating && shapeEditor.valid() && (shapeEditor.dirty || maskPreviewStarted) &&
        shapeEditor.draft!=shapeEditor.lastPreview)emitMaskPreview();
     ImGui::PopStyleVar(6);ImGui::PopFont();ImGui::PopStyleColor();ImGui::SetCursorScreenPos(saved);
 }

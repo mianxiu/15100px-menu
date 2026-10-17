@@ -51,5 +51,7 @@ def metadata(value):
         if 'mask' in result and not vector:raise ValueError()
         patterns=value.get('patterns',[])
         if not isinstance(patterns,list) or len(patterns)>128 or any(not isinstance(x,str) or not x or len(x)>128 for x in patterns):raise ValueError()
-        return {'available':True,'vector':vector,**result,'patterns':list(patterns)}
+        live=value.get('live_preview',False)
+        if type(live) is not bool:raise ValueError()
+        return {'available':True,'vector':vector,'live_preview':live,**result,'patterns':list(patterns)}
     except ValueError:return {'available':False}

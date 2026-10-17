@@ -20,18 +20,24 @@ def live_idle():
     state=json.load(urlopen('http://127.0.0.1:15151/api/status',timeout=5));ps=state['photoshop']
     if ps['busy'] or state['menu']['visible'] or state['photoshop_start']['active'] or ps.get('uxp_recovery',{}).get('active'):
         raise RuntimeError('Live service is not idle')
-    if ps.get('uxp_version')!='0.3.27' or not ps.get('uxp_ready'):raise RuntimeError('Loaded UXP27 required')
+    if ps.get('uxp_version')!='0.3.31' or not ps.get('uxp_ready'):raise RuntimeError('Loaded UXP31 required')
     if (Path(state['data_dir'])/'uxp-pending.json').exists():raise RuntimeError('Live request unresolved')
     return state
 
 
-async def main(normal=False):
+async def main(normal=False,trace=False):
     state=live_idle();folder=ROOT/'.runtime'/('paint-preview-live-'+str(time.time_ns()));folder.mkdir()
-    window,monitor=select(inventory());placement=place(inventory(),folder/'placement.json')
-    initial=win32gui.GetForegroundWindow()
+    window,monitor=select(inventory())
+    if win32gui.IsIconic(window['hwnd']):raise RuntimeError('Photoshop is minimized; canvas tests require a restored secondary-screen window')
+    placement=place(inventory(),folder/'placement.json')
+    initial=win32gui.GetForegroundWindow();foreground_changes=[]
     if win32process.GetWindowThreadProcessId(initial)[1]==window['pid']:raise RuntimeError('PS is in use; no test started')
     config=folder/'uxp-config.json';shutil.copy2(Path(state['data_dir'])/'uxp-config.json',config)
     bridge=UxpBridge(folder/'tasks.json',config)
+    heartbeat=json.loads((bridge.transport.folder/'probe-last.json').read_text('utf-8-sig'))
+    if heartbeat.get('document_redraw_available') is not True:
+        raise RuntimeError('This verifier requires the official UXP document redraw API; old-host realtime remains unverified')
+    stream_interval=.02
     app=win32com.client.GetActiveObject('Photoshop.Application');previous=app.ActiveDocument if app.Documents.Count else None
     # Read constants without importing the older executable verification script.
     tree=ast.parse((ROOT/'tools/verify-shape-paint.py').read_text('utf-8'))
@@ -41,9 +47,17 @@ async def main(normal=False):
     read_script=next(ast.literal_eval(n.value) for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='READ' for t in n.targets))
     read=lambda:json.loads(app.DoJavaScript(read_script))
     owned=None;cases=[];complete=False
+    def foreground_changed():
+        current=win32gui.GetForegroundWindow()
+        if current==initial:return False
+        if not foreground_changes or foreground_changes[-1]['hwnd']!=current:
+            try:pid=win32process.GetWindowThreadProcessId(current)[1];cls=win32gui.GetClassName(current)
+            except Exception:pid=None;cls='unavailable'
+            foreground_changes.append({'at_ms':int(time.time()*1000),'hwnd':current,'pid':pid,'class':cls})
+        return True
     def guard():
         live_idle()
-        if (ROOT/'.runtime/quiet-ps.stop').exists() or win32gui.GetForegroundWindow()!=initial:
+        if (ROOT/'.runtime/quiet-ps.stop').exists() or foreground_changed():
             raise RuntimeError('Foreground changed or cooperative stop requested; no next operation')
     bridge.execution_guard=guard
     async def inspect():return (await asyncio.to_thread(bridge.transport.call,'inspect',shape_inspect=True))['shape_editor']
@@ -59,11 +73,11 @@ async def main(normal=False):
             data=await inspect()
         params={k:copy.deepcopy(data[k]) for k in ('revision','fill','stroke','mask') if k in data}
         target=await asyncio.to_thread(bridge._capture_target);before=read()
-        preview=MaskPreview(1,params);stopped=asyncio.Event();error=[]
+        preview=MaskPreview(1,params,trace=trace);stopped=asyncio.Event();error=[]
         async def publish():
             while not stopped.is_set():
                 try:
-                    if win32gui.GetForegroundWindow()!=initial:preview.cancel()
+                    if foreground_changed():preview.cancel()
                     await asyncio.to_thread(preview.publish)
                 except Exception as e:error.append(str(e));preview.cancel();return
                 await asyncio.sleep(.08)
@@ -93,9 +107,9 @@ async def main(normal=False):
             await applied()
             for i in range(1,101):
                 alter([i,70,190]);preview.update(params)
-                if stream:await asyncio.sleep(.02)
+                if stream:await asyncio.sleep(stream_interval)
             ack=await applied(preview.seq)
-            assert ack.get('redraw_completed') is True,'UI redraw was not completed before acknowledgement'
+            assert ack.get('redraw_completed') is True and ack.get('redraw_method')=='core.redrawDocument','Document redraw was not completed before acknowledgement'
             assert all(abs(a-b)<=1 for a,b in zip(color(ack[channel]),[100,70,190])),ack
             assert not operation.done(),'Live color must precede confirmation'
             if stream:assert 3<ack['updates']<100
@@ -139,7 +153,7 @@ async def main(normal=False):
                 app.DoJavaScript('var d=app.activeDocument;d.activeHistoryState=d.historyStates[d.historyStates.length-2];')
                 equal_content(before,read())
             proof={'case':name,'end':end,'channel':channel,'one_undo':end=='commit','cancel_restored':end=='cancel',
-                   'live_before_confirmation':True,'redraw_completed_before_confirmation':True,'canvas_visual_verified':False,'live_readback_ms':round(live_ms,2),
+                   'live_before_confirmation':True,'redraw_completed_before_confirmation':True,'redraw_method':ack['redraw_method'],'canvas_visual_verified':False,'live_readback_ms':round(live_ms,2),
                    'published_updates':100,'applied_updates_before_finish':ack['updates'],
                    'max_write_ms':ack['max_write_ms'],'total_ms':round((time.perf_counter()-started)*1000,2),'task_id':result['task_id']}
             cases.append(proof);print(json.dumps(proof),flush=True)
@@ -150,7 +164,7 @@ async def main(normal=False):
                 except Exception:pass
             stopped.set();await publisher;preview.close()
     try:
-        with (nullcontext() if normal else ResourceLease(window['pid'],folder/'resources.json',seconds=240)):
+        with (nullcontext() if normal else ResourceLease(window['pid'],folder/'resources.json',seconds=360)):
             for kind,count,size in [('shape',4,181),('mixed',40,1024)]:
                 guard();app.DoJavaScript(fixture(kind,count));owned=app.ActiveDocument
                 if size>181:app.DoJavaScript(f'app.activeDocument.resizeCanvas(UnitValue({size},"px"),UnitValue({size},"px"));')
@@ -160,7 +174,7 @@ async def main(normal=False):
                 for attempt in range(50):
                     try:guard();break
                     except RuntimeError as error:
-                        if 'Loaded UXP27 required' not in str(error):raise
+                        if 'Loaded UXP31 required' not in str(error):raise
                         await asyncio.sleep(.2)
                 else:raise RuntimeError('UXP heartbeat did not resume after fixture creation')
                 if not normal:
@@ -205,13 +219,13 @@ async def main(normal=False):
         if owned is not None and not bridge.busy and not bridge.transport.pending.value and win32process.GetWindowThreadProcessId(win32gui.GetForegroundWindow())[1]!=window['pid']:
             owned.Close(2);owned=None
         if previous is not None and owned is None and not bridge.busy:app.ActiveDocument=previous
-        report={'runtime_version':state['version'],'executor_version':'0.3.27','complete':complete,'normal':normal,
+        report={'runtime_version':state['version'],'executor_version':'0.3.31','complete':complete,'normal':normal,'detailed_checkpoints':trace,
                 'scope':'real UXP with native readback acknowledgements before confirmation; independent COM after terminal; no synthesized input',
-                'physical_input':False,'cases':cases,'foreground_preserved':win32gui.GetForegroundWindow()==initial,
+                'physical_input':False,'foreground_changes':foreground_changes,'cases':cases,'foreground_preserved':win32gui.GetForegroundWindow()==initial,
                 'owned_document_closed':owned is None,'unresolved':bool(bridge.busy or bridge.transport.pending.value),'placement':placement}
         save(folder/'report.json',report);print('REPORT '+str(folder/'report.json'),flush=True)
         await bridge.close()
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--normal',action='store_true')
-    asyncio.run(main(parser.parse_args().normal))
+    parser=argparse.ArgumentParser();parser.add_argument('--normal',action='store_true');parser.add_argument('--trace',action='store_true')
+    args=parser.parse_args();asyncio.run(main(args.normal,args.trace))

@@ -10,8 +10,9 @@ from .shape_paint import parameters
 
 
 class MaskPreview:
-    def __init__(self, epoch, paint):
+    def __init__(self, epoch, paint, *, trace=False):
         self.epoch = epoch
+        self.trace = trace is True
         self.paint = parameters(paint)
         self.has_mask = 'mask' in self.paint
         self.revision = self.paint['revision']
@@ -77,7 +78,7 @@ class MaskPreview:
 async def dispatch_preview(app, action, args):
     from .uxp_bridge import UxpBridge
     if not isinstance(app.bridge,UxpBridge) or not app.desktop:
-        raise RuntimeError('实时预览需要桌面菜单和 UXP 0.3.27')
+        raise RuntimeError('实时预览需要桌面菜单和 UXP 0.3.31')
     epoch=args.get('menu_epoch')
     if type(epoch) is not int or epoch!=app.desktop.menu_epoch:
         raise ValueError('预览菜单已过期')
@@ -95,8 +96,10 @@ async def dispatch_preview(app, action, args):
             or app.photoshop_launcher.active or not app.desktop.visible
             or epoch!=app.desktop.menu_epoch or not getattr(app.desktop,'color_editor_active',False)):
         raise RuntimeError('当前不能开始预览，请等待完成后重新打开菜单')
-    preview=MaskPreview(epoch,args.get('params'))
     snapshot=app.desktop.menu_layer_context
+    if snapshot.get('shape_editor',{}).get('live_preview') is not True:
+        raise RuntimeError('当前PS使用本地草稿，请确认后一次提交')
+    preview=MaskPreview(epoch,args.get('params'))
     target={key:snapshot.get(key) for key in ('session','document_id','layer_ids')}
     if len(target.get('layer_ids') or [])!=1:raise ValueError('预览需要冻结的单选形状')
     target['active_layer_id']=target['layer_ids'][0]

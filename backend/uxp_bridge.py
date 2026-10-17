@@ -6,7 +6,7 @@ from pathlib import Path
 import secrets
 import time
 from .photoshop_bridge import PhotoshopBridge
-from .photoshop_version import require_version
+from .photoshop_version import require_version, version_tuple
 from .plugins import version
 from .layer_context import unavailable,validate,fresh
 from .uxp_recovery import PendingUxp
@@ -96,8 +96,11 @@ class UxpTransport:
                     raise RuntimeError('请更新并重新加载 UXP 0.3.18，以支持转换智能对象；未提交操作')
                 if payload.get('command')=='shape.paint' and 'mask' in payload.get('paint',{}) and version(heartbeat.get('probe_version'))<(0,3,20):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.20，以支持形状羽化／密度；未提交操作')
-                if payload.get('command')=='shape.preview' and (preview is None or version(heartbeat.get('probe_version'))<(0,3,27)):
-                    raise RuntimeError('请更新并重新加载 UXP 0.3.27，以支持颜色及蒙版实时预览；未提交操作')
+                if payload.get('command')=='shape.preview' and (preview is None or version(heartbeat.get('probe_version'))<(0,3,31)):
+                    raise RuntimeError('请更新并重新加载 UXP 0.3.31，以支持颜色及蒙版实时预览；未提交操作')
+                if payload.get('command')=='shape.preview' and (version_tuple(heartbeat.get('photoshop_version'))<(24,1,0) or heartbeat.get('document_redraw_available') is not True):
+                    raise RuntimeError('当前PS使用本地草稿，实时预览需要PS24.1及官方重绘API；未提交修改')
+                if preview is not None and getattr(preview,'trace',False):payload['preview_trace']=True
                 request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
                 encoded=json.dumps(request)
                 if len(encoded.encode('utf-8'))>4096:raise ValueError('UXP 请求超出本地协议长度，未提交操作')
@@ -113,6 +116,14 @@ class UxpTransport:
                 deadline=None if interactive else time.monotonic()+self.response_timeout
                 checked=0
                 while deadline is None or time.monotonic()<deadline:
+                    try:
+                        response=self.pending.read_result(allow_unknown=True) if modifying else json.loads((folder/'probe-response.json').read_text('utf-8-sig'))
+                        if response is not None and response.get('id')==identity:
+                            if response.get('phase')!='completed':
+                                if response.get('result_unknown'):raise UxpResultUnknown(response.get('error','新建结果未知，请检查 Photoshop'))
+                                raise RuntimeError(response.get('error','UXP failed'))
+                            return response
+                    except (FileNotFoundError,PermissionError,json.JSONDecodeError):pass
                     if interactive and time.monotonic()-checked>=1:
                         checked=time.monotonic()
                         from .uxp_management import photoshop_running
@@ -122,16 +133,6 @@ class UxpTransport:
                             current=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
                             if current.get('session')!=request['session']:raise UxpResultUnknown('PS会话已改变，'+operation_name+'结果待核对；不重发')
                         except (OSError,ValueError):pass
-                    try:
-                        response=self.pending.read_result(allow_unknown=True) if modifying else json.loads((folder/'probe-response.json').read_text('utf-8-sig'))
-                        if response is None:
-                            time.sleep(.008);continue
-                        if response.get('id')==identity:
-                            if response.get('phase')!='completed':
-                                if response.get('result_unknown'):raise UxpResultUnknown(response.get('error','新建结果未知，请检查 Photoshop'))
-                                raise RuntimeError(response.get('error','UXP failed'))
-                            return response
-                    except (FileNotFoundError,PermissionError,json.JSONDecodeError):pass
                     time.sleep(.008)
                 raise UxpResultUnknown('UXP 回应超时，结果待核对；已阻止新操作，不自动重发')
             finally:
@@ -141,8 +142,9 @@ class UxpBridge(PhotoshopBridge):
     def _status(self):
         # Avoid status DoJavaScript calls that may reset Photoshop's tool cursor
         # even for a read-only script. Observe the UXP heartbeat instead.
-        # An older/missing plugin may use native COM properties as a fallback,
-        # but never execute a script from the status path.
+        # A lost plugin must not add COM work to a potentially blocked host.
+        # Process presence is enough to distinguish "start PS" from "wait for
+        # UXP"; unknown document/selection data stays unavailable.
         try:
             heartbeat=json.loads((self.transport.folder/'probe-last.json').read_text('utf-8-sig'))
             theme=heartbeat.get('ui_theme');font=heartbeat.get('ui_font_size')
@@ -153,10 +155,10 @@ class UxpBridge(PhotoshopBridge):
                 'document':name if isinstance(name,str) else None,'message':'已连接 Photoshop'}
         except (OSError,ValueError,RuntimeError):
             try:
-                app=self._application();count=int(app.Documents.Count)
-                return {'connected':True,'ui_theme':self.ui_theme,'ui_font_size':self.ui_font_size,
-                    'document':str(app.ActiveDocument.Name) if count else None,
-                    'message':'Photoshop 已连接，等待 UXP 加载'}
+                from .uxp_management import photoshop_running
+                running=photoshop_running()
+                return {'connected':running,'ui_theme':self.ui_theme,'ui_font_size':self.ui_font_size,
+                    'document':None,'message':'Photoshop 已运行，等待 UXP 恢复连接' if running else '请先启动 Photoshop'}
             except Exception:
                 return {'connected':False,'ui_theme':self.ui_theme,'ui_font_size':self.ui_font_size,
                     'document':None,'message':'请先启动 Photoshop'}
@@ -184,6 +186,13 @@ class UxpBridge(PhotoshopBridge):
             try:task=self.tasks.get(task_id)
             except ValueError:return {**pending.snapshot(),'message':'原任务历史记录缺失，保留待核对记录并阻止修改'}
             if task['state'] in ('succeeded','failed'):
+                # An older modal boundary could strip the rollback-unknown flag
+                # and incorrectly classify this receipt as a known failure.
+                # The matching original receipt takes priority over that state.
+                original=await asyncio.to_thread(pending.read_result,allow_unknown=True)
+                if original and original.get('result_unknown'):
+                    self.busy=True
+                    return pending.snapshot()
                 await self.tasks.flush()
                 await asyncio.to_thread(pending.clear)
                 self.busy=False
@@ -276,6 +285,8 @@ class UxpBridge(PhotoshopBridge):
             value['uxp_ready']=compatible(heartbeat.get('probe_version')) and time.time()*1000-heartbeat.get('plugin_time_ms',0)<15000
             value['uxp_version']=heartbeat.get('probe_version')
             value['photoshop_version']=heartbeat.get('photoshop_version')
+            capability=heartbeat.get('document_redraw_available')
+            value['document_redraw_available']=capability if type(capability) is bool else None
             value['layer_observation']=heartbeat.get('layer_observation',{})
         except (OSError,ValueError,RuntimeError):value['uxp_ready']=False
         return value

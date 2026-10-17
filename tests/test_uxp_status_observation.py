@@ -1,7 +1,7 @@
 import json,time,tempfile,unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock,patch
 from backend.uxp_bridge import UxpBridge
 
 class UxpStatusObservationTests(unittest.IsolatedAsyncioTestCase):
@@ -20,16 +20,17 @@ class UxpStatusObservationTests(unittest.IsolatedAsyncioTestCase):
                 bridge._application.assert_not_called()
             finally:await bridge.close()
 
-    async def test_missing_plugin_fallback_does_not_execute_jsx(self):
+    async def test_missing_plugin_uses_process_presence_without_com(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);bridge=UxpBridge(root/'tasks.json',root/'uxp-config.json')
             bridge.transport=SimpleNamespace(folder=root)
-            app=SimpleNamespace(Documents=SimpleNamespace(Count=1),ActiveDocument=SimpleNamespace(Name='fallback.psd'),
-                DoJavaScript=Mock(side_effect=AssertionError('Status must not execute JSX')))
-            bridge._application=Mock(return_value=app)
+            bridge._application=Mock(side_effect=AssertionError('Lost UXP must not fall back to COM'))
             try:
-                for _ in range(10):self.assertEqual(bridge._status()['document'],'fallback.psd')
-                app.DoJavaScript.assert_not_called()
-                bridge._application.side_effect=RuntimeError('Photoshop closed')
-                self.assertFalse(bridge._status()['connected'])
+                with patch('backend.uxp_management.photoshop_running',return_value=True):
+                    for _ in range(10):
+                        value=bridge._status()
+                        self.assertIsNone(value['document']);self.assertTrue(value['connected'])
+                with patch('backend.uxp_management.photoshop_running',return_value=False):
+                    self.assertFalse(bridge._status()['connected'])
+                bridge._application.assert_not_called()
             finally:await bridge.close()

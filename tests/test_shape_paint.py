@@ -84,6 +84,15 @@ class ShapePaintTests(unittest.TestCase):
             self.value['fill']={'kind':'pattern','enabled':True,'name':name}
             with self.assertRaises(ValueError):parameters(self.value)
 
+    def test_preview_capability_is_explicit_and_does_not_change_submission_parameters(self):
+        value={'available':True,**self.value}
+        self.assertFalse(metadata(value)['live_preview'])
+        for enabled in (False,True):
+            result=metadata({**value,'live_preview':enabled})
+            self.assertEqual(result['live_preview'],enabled)
+            self.assertEqual(parameters({k:result[k] for k in ('revision','fill','stroke')}),self.value)
+        self.assertFalse(metadata({**value,'live_preview':'true'})['available'])
+
     def test_untrusted_metadata_disables_editor(self):
         value={'available':True,**self.value,'patterns':['Loaded Pattern']}
         self.assertTrue(metadata(value)['available'])

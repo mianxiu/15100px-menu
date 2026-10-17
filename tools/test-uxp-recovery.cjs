@@ -6,7 +6,7 @@ const code=fs.readFileSync(require('node:path').join(__dirname,source),'utf8');
 const immediate=()=>new Promise(resolve=>setImmediate(resolve));
 async function settle(){for(let i=0;i<25;i++)await immediate();}
 function host(files,control) {
-  let interval;
+  let interval,pulse;
   const folder={
     async getEntry(name){if(!files.has(name))throw Error('missing');return entry(name);},
     async createFile(name){if(!files.has(name))files.set(name,'');return entry(name);}
@@ -24,15 +24,16 @@ function host(files,control) {
   const labels={selectionContext:()=>{control.contextReads=(control.contextReads||0)+1;
     if(control.now!==undefined)control.now+=control.contextCost||0;
     return {kind:control.executed?'pixel':'none',layer_ids:control.executed?[99]:[]};},documentTarget:()=>({document_ids:[]}),capture:async()=>({}),
-    setLabel:async request=>{
+    setLabel:async (request,io)=>{
       const saved=JSON.parse(files.get('result-'+request.id+'.json'));
       assert.equal(saved.phase,'accepted');control.executed++;
+      if(control.block){await io.stage('write-color',2);await new Promise(resolve=>{control.release=resolve;});}
       if(control.unknown){const e=Error('rollback uncertain');e.resultUnknown=true;throw e;}
       return {count:1,verified:true,...(control.prepared?{selection_context:{session:'prepared',kind:'pixel',layer_ids:[99]}}:{})};
     },selectionMatches:()=>!control.selectionChanged,interfacePreferences:async()=>({ui_theme:'dark',ui_font_size:'small'}),observeShape:async()=>({available:false}),
     createDocument:async()=>{control.created++;return {document_id:99};}};
   labels.selectionContextFresh=async()=>labels.selectionContext();
-  const context={console:{log(){}},setInterval(fn){interval=fn;},module:{exports:{}},require(name){
+  const context={console:{log(){}},setInterval(fn,ms){if(ms===16)interval=fn;else if(ms===1000)pulse=fn;},module:{exports:{}},require(name){
     if(name==='./probe-config.js')return 'secret';
     if(name==='./labels.js')return ()=>labels;
     if(name==='photoshop')return {app:{documents:[]},action:{addNotificationListener(){}}};
@@ -41,7 +42,7 @@ function host(files,control) {
   }};
   if(control.now!==undefined)context.Date=class extends Date {static now(){return control.now;}};
   vm.runInNewContext(code,context);
-  return {poll:()=>interval(),command:()=>context.module.exports.commands.probe()};
+  return {poll:()=>interval(),pulse:()=>pulse(),command:()=>context.module.exports.commands.probe()};
 }
 function request(files,id='a'.repeat(32),operation='set_label') {
   files.set('probe-request.json',JSON.stringify({id,token:'secret',operation,expires_at_ms:Date.now()+5000}));
@@ -85,6 +86,30 @@ async function main(){
     assert.equal(control.contextReads,reads+(changed?1:0),'Prepared snapshot is reused only while selection identity matches');
     assert.deepEqual(JSON.parse(files.get('result-'+ 'a'.repeat(32)+'.json')).layer_context.layer_ids,[99]);
   }
+  // A blocked host await must retain ownership and expose its last stage
+  // without sending a second command, refreshing layer data, or clearing busy.
+  files=new Map();control={executed:0,created:0,failFinal:0,block:true};
+  plugin=host(files,control);await settle();
+  const blockedReads=control.contextReads;
+  request(files);const req=JSON.parse(files.get('probe-request.json'));req.command='shape.preview';
+  files.set('probe-request.json',JSON.stringify(req));
+  const operation=plugin.command();await settle();
+  const heartbeat=files.get('probe-last.json');
+  assert.equal(files.has('execution-'+req.id+'.json'),false,'Normal frames have no checkpoint I/O before the independent pulse');
+  await plugin.pulse();
+  const progress=JSON.parse(files.get('execution-'+req.id+'.json'));
+  assert.equal(progress.id,req.id);assert.equal(progress.operation,req.operation);
+  assert.equal(progress.command,'shape.preview');assert.equal(progress.stage,'write-color');
+  assert.equal(progress.seq,2);assert.equal(progress.phase,'running');
+  assert.equal(JSON.stringify(progress).includes('secret'),false);
+  assert.equal('folder' in progress,false);
+  assert.equal(files.get('probe-last.json'),heartbeat,'Execution pulse must not claim fresh Photoshop metadata');
+  request(files,'b'.repeat(32));await plugin.poll();await settle();
+  assert.equal(control.executed,1);assert.equal(control.contextReads,blockedReads);
+  assert.equal(JSON.parse(files.get('result-'+req.id+'.json')).phase,'accepted');
+  control.release();await operation;assert.equal(JSON.parse(files.get('result-'+req.id+'.json')).phase,'completed');
+  const afterFinal=files.get('execution-'+req.id+'.json');await plugin.pulse();
+  assert.equal(files.get('execution-'+req.id+'.json'),afterFinal,'Persisted final receipt releases pulse ownership');
   console.log('PASS: durable acceptance before mutation; final-write retry without replay; reload dedupe; unknown retained; new-document receipt; disk failure prevents mutation');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

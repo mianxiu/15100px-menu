@@ -72,6 +72,27 @@ class ApiTests(AsyncHTTPTestCase):
         self.assertFalse(json.loads(self.fetch('/api/status').body)['photoshop']['connected'])
         self.assertEqual(self.fetch('/').code, 200)
 
+    @gen_test
+    async def test_automatic_version_report_export_and_ack_use_existing_status_only(self):
+        from unittest.mock import AsyncMock, Mock
+        from test_version_health import state
+        value=state()
+        self._app.bridge.status=AsyncMock(return_value=value['photoshop'])
+        self._app.uxp.status=Mock(return_value=value['uxp'])
+        self._app.version_health.settle=0
+        try:
+            await self._app.dispatch('status',{})
+            await self._app.dispatch('status',{})
+            await self._app.version_health.task
+            result=await self._app.dispatch('version.health.export',{})
+            self.assertTrue(result['read_only'])
+            self.assertEqual(result['versions']['photoshop'],'25.5.0')
+            self.assertEqual(self._app.bridge.status.await_count,2)
+            ack=await self._app.dispatch('version.health.acknowledge',{})
+            self.assertTrue(ack['acknowledged'])
+            self.assertEqual(self._app.bridge.status.await_count,2)
+        finally:await self._app.version_health.close()
+
     def test_task_feed_is_local_bounded_and_independent_of_photoshop_status(self):
         task_id=self._app.tasks.create('color','标色')
         self._app.bridge.busy=True
