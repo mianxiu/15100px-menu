@@ -1,5 +1,6 @@
 # Photoshop Menu TODO
 
+- [x] 167发布闭环（2026-10-18）：本机实际167／UXP34，源码与标签已推送；Wiki 236e596同步。公开ZIP／SHA及备用清单下载核验通过，发布EXE内更新模块在模拟API403后通过真实备用下载。Release仅保留167，165旧附件已备份、Git标签及历史保留。证据.runtime/release-0.4.167-public-verification.json、fallback167-live.json、release167-cleanup.json。
 - [x] 167小文档／直接Caps优化及实际入口：一次请求内捕获与执行，保留事务内二次校验、目标落盘和未知保护；后台慢状态连接不阻塞操作。137项PS事务（低CPU111／正常26）、389后台／原生、15份脚本与最终EXE通过，实际167／UXP34及组件匹配。低CPU5层同会话中位182.44→158.62ms；完整限制见docs/CAPS-EXECUTION.md和.runtime/recovery167/runtime.json。
 - [ ] 167剩余验收：实体Caps／鼠标与故障i5集显／PS24.2、Win10／PS2024；120／200／300ms连按接受率本轮新旧相同，仍需继续定位其他漏执行原因。双核完整套件中的原生恢复菜单自测失败原因未确认，独立双逻辑处理器原生自测／正常资源套件通过；不以宿主事务通过代替此项。
 
