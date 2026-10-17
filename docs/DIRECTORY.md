@@ -1,6 +1,6 @@
 # 目录与本地归档
 
-2026-10-17同步：当前实际程序与dist为v0.4.153／内置UXP0.3.23。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
+2026-10-17同步：当前实际程序与dist为v0.4.154／内置UXP0.3.23。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
 
 | 路径 | 用途 |
 | --- | --- |
@@ -12,7 +12,7 @@
 | `photoshop_action/` 与根目录 COM 兼容模块 | 后端仍引用的兼容代码 |
 | `tools/`、`tests/` | 维护工具与自动回归 |
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
-| `dist/` | 当前v0.4.153 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
+| `dist/` | 当前v0.4.154 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |
@@ -50,3 +50,5 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 149回退保留于.local/recovery/releases/0.4.148-before149和.local/archive/dist/v0.4.148-before149；UXP19保持，PS无需重启。
 
 150：149回退位于.local/recovery/releases/0.4.149-before150及.local/archive/dist/v0.4.149-before150；蒙版事务、重启加载和四主题导出证据位于.runtime/mask150*及shape-live-0.4.150.json，不公开用户配置／文档。
+
+154：副屏维护入口tools/test-quiet-ps.py与quiet_ps_session.py；使用和限制见docs/QUIET-TESTING.md，完成恢复见docs/MENU-RECOVERY.md及Wiki。153回退保留于.local/recovery/releases/0.4.153-before154和.local/archive/dist/v0.4.153-before154。实体键鼠与视频掉帧仍单列，安全暂停不是完整测试通过。
