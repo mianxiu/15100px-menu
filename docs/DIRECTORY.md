@@ -13,7 +13,7 @@
 | `tools/`、`tests/` | 维护工具与自动回归 |
 | `jsx/legacy_shape_preview.jsx`、`backend/legacy_preview.py` | 当前旧版独立预览执行端，打包进入主程序；不是未知结果后的COM回退，也不在菜单唤出时加载 |
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
-| `dist/` | 当前v0.4.165本机候选EXE、后端ZIP、UXP ZIP及两份SHA256，共5项；候选包尚未公开发布；旧159正式包及160 ZIP已归档，公开Release仍159 |
+| `dist/` | 当前v0.4.165 EXE、后端ZIP、UXP ZIP、更新清单及两份SHA256，共6项；仅保留最新Release；旧159正式包及160 ZIP已归档 |
 | 应用数据目录 `version-health/` | 自动版本自检摘要及最多20份脱敏报告，不随发行包提交 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
