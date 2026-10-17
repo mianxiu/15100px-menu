@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+状态识别：旋转圆弧配“执行中：操作名 · 耗时”表示任务等待完成；蓝勾配“空闲 · 上次已完成”表示已成功，不能把勾号当作运行中。[状态说明](https://github.com/mianxiu/15100px-menu/wiki/Menu-recovery)。后续新增／修复优先按低配办公电脑验收，先做受限CPU短批次，再补正常配置对照；[范围与限制](https://github.com/mianxiu/15100px-menu/wiki/Quiet-testing)。
+
 154新增[完成反馈后自动恢复图层菜单](docs/MENU-RECOVERY.md)：成功勾号短暂停留后，以新鲜选择恢复完整菜单，关闭／外部应用／忙碌及未知结果不自动恢复。[副屏低干扰测试](docs/QUIET-TESTING.md)提供独立维护工具，9项受限CPU真实PS测试通过，未测视频掉帧。154已切换本机实际运行入口，公开包／备用更新通道已校验，发行页仅154；后续使用说明见[Wiki](https://github.com/mianxiu/15100px-menu/wiki)。
 
 ## 当前交付（2026-10-17）
