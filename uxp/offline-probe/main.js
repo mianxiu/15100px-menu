@@ -3,7 +3,9 @@ const {app} = require('photoshop');
 const uxp = require('uxp');
 const token = require('./probe-config.js');
 const session = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
-const labels = require('./labels.js')(require('photoshop'), session);
+const hostVersion=String(uxp.host?.version || '').split('.').map(Number);
+const legacyPreview=hostVersion[0]===24 && hostVersion[1]===0 && hostVersion[2]>=1;
+const labels = require('./labels.js')(require('photoshop'), session, {legacyPreview});
 const seen = new Set();
 let sequence = 0;
 let running = false;
@@ -112,7 +114,7 @@ async function finishResponse(folder,response) {
   completedReceipts.push('result-'+response.id+'.json');
   if(completedReceipts.length>64) {
     const name=completedReceipts.shift();
-    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-'),name.replace('result-','execution-')])
+    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-'),name.replace('result-','execution-'),name.replace('result-','legacy-prepared-'),name.replace('result-','legacy-result-')])
       try {await (await folder.getEntry(file)).delete();}catch(_){}
   }
 }
@@ -167,12 +169,13 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.31', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.32', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
+        legacy_preview_available:legacyPreview,
         plugin_id: 'com.15100px.menu.offline-probe',
         document_count: app.documents.length, document_name: app.documents.length ? app.activeDocument.title : null, plugin_time_ms: now, phase: 'ready'
       };
@@ -207,7 +210,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.31', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.32', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -225,7 +228,23 @@ async function probe(reason) {
         if(request.shape_inspect)response.shape_editor=await labels.observeShape(await labels.selectionContextFresh(),true);
       }
       if (request.operation === 'capture') response.target = await labels.capture();
-      if (request.operation === 'set_label') response.result = await labels.setLabel(request,
+      if(request.operation==='set_label' && request.command==='shape.legacy.preview') {
+        // Reserve the plugin's existing worker without entering executeAsModal.
+        // While native JSX owns the host, only mailbox I/O and cached pulses run.
+        const prepared=await labels.prepareLegacyShape(request);
+        await record(folder,'legacy-prepared-'+request.id+'.json',{schema:1,id:request.id,session,operation:request.operation,token,phase:'prepared',prepared});
+        await executionStage('legacy-native-wait');
+        while(true) {
+          let native=null;
+          try {const raw=await(await folder.getEntry('legacy-result-'+request.id+'.json')).read();if(raw.length<=65536)native=JSON.parse(raw);}catch(_){}
+          if(native?.schema===1 && native.id===request.id && native.session===session && native.operation===request.operation && native.token===token && ['completed','failed'].includes(native.phase)) {
+            response.result=await labels.finishLegacyShape(request,prepared,native);break;
+          }
+          if(heartbeatValue && Date.now()-lastHeartbeat>=1000){lastHeartbeat=Date.now();await record(folder,'probe-last.json',{...heartbeatValue,phase:'preview',reason:'legacy-native',plugin_time_ms:lastHeartbeat});}
+          await new Promise(resolve=>setTimeout(resolve,40));
+        }
+      }
+      if (request.operation === 'set_label' && request.command!=='shape.legacy.preview') response.result = await labels.setLabel(request,
         request.command==='shape.preview'?{
           stage:executionStage,
           read:boundedPreviewRead(async()=>{
@@ -267,7 +286,7 @@ async function probe(reason) {
     }
     else await record(folder, 'probe-response.json', response);
     lastRequest = request.id;
-    if(request.command==='shape.preview')lastHeartbeat=0;
+    if(['shape.preview','shape.legacy.preview'].includes(request.command))lastHeartbeat=0;
     // Capture gets a quiet period while its write follows; after modification
     // refresh the new selection on the next poll, without an extra 80ms wait.
     lastWorkAt=modifying?0:Date.now();

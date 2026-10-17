@@ -73,7 +73,7 @@ class UxpTransport:
             raise RuntimeError('UXP 未就绪，请启动 Photoshop 24.0.1 或更新版本')
         return candidates[0]
 
-    def call(self, operation, preview=None, **payload):
+    def call(self, operation, preview=None, native_preview=None, **payload):
         import msvcrt
         if self.pending.value or self.pending.error:raise RuntimeError('上一项 UXP 结果待核对，未提交新请求')
         token=json.loads(self.config.read_text('utf-8-sig'))['token']
@@ -100,6 +100,11 @@ class UxpTransport:
                     raise RuntimeError('请更新并重新加载 UXP 0.3.31，以支持颜色及蒙版实时预览；未提交操作')
                 if payload.get('command')=='shape.preview' and (version_tuple(heartbeat.get('photoshop_version'))<(24,1,0) or heartbeat.get('document_redraw_available') is not True):
                     raise RuntimeError('当前PS使用本地草稿，实时预览需要PS24.1及官方重绘API；未提交修改')
+                legacy=payload.get('command')=='shape.legacy.preview'
+                if legacy and (preview is None or native_preview is None or version(heartbeat.get('probe_version'))<(0,3,32) or
+                        heartbeat.get('legacy_preview_available') is not True or heartbeat.get('document_redraw_available') is not False or
+                        not (24,0,1)<=version_tuple(heartbeat.get('photoshop_version'))<(24,1,0)):
+                    raise RuntimeError('旧版独立预览能力未就绪；未提交修改')
                 if preview is not None and getattr(preview,'trace',False):payload['preview_trace']=True
                 request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
                 encoded=json.dumps(request)
@@ -112,9 +117,9 @@ class UxpTransport:
                 except Exception:
                     if modifying:self.pending.clear()
                     raise
-                interactive=operation=='set_label' and payload.get('command') in ('editStyle','shape.preview')
+                interactive=operation=='set_label' and payload.get('command') in ('editStyle','shape.preview','shape.legacy.preview')
                 deadline=None if interactive else time.monotonic()+self.response_timeout
-                checked=0
+                checked=0;native_started=False;native_error_at=None
                 while deadline is None or time.monotonic()<deadline:
                     try:
                         response=self.pending.read_result(allow_unknown=True) if modifying else json.loads((folder/'probe-response.json').read_text('utf-8-sig'))
@@ -124,10 +129,23 @@ class UxpTransport:
                                 raise RuntimeError(response.get('error','UXP failed'))
                             return response
                     except (FileNotFoundError,PermissionError,json.JSONDecodeError):pass
+                    if legacy and not native_started:
+                        ready=None
+                        try:
+                            ready_path=folder/('legacy-prepared-'+identity+'.json')
+                            if ready_path.stat().st_size<=65536:ready=json.loads(ready_path.read_text('utf-8-sig'))
+                        except (OSError,ValueError):pass
+                        if isinstance(ready,dict) and ready.get('phase')=='prepared' and ready.get('schema')==1 and all(ready.get(k)==request[k] for k in ('id','session','operation','token')):
+                            native_started=True  # A COM error never permits invoking this again.
+                            try:native_preview(folder,request,ready)
+                            except Exception:native_error_at=time.monotonic()
+                            continue  # Read the original UXP terminal BEFORE checking host state.
+                    if native_error_at is not None and time.monotonic()-native_error_at>5:
+                        raise UxpResultUnknown('旧版原生预览调用结果待核对；不重发')
                     if interactive and time.monotonic()-checked>=1:
                         checked=time.monotonic()
                         from .uxp_management import photoshop_running
-                        operation_name='预览' if payload.get('command')=='shape.preview' else '样式'
+                        operation_name='预览' if payload.get('command') in ('shape.preview','shape.legacy.preview') else '样式'
                         if not photoshop_running():raise UxpResultUnknown('Photoshop已退出，'+operation_name+'结果待核对；不重发')
                         try:
                             current=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
@@ -287,6 +305,7 @@ class UxpBridge(PhotoshopBridge):
             value['photoshop_version']=heartbeat.get('photoshop_version')
             capability=heartbeat.get('document_redraw_available')
             value['document_redraw_available']=capability if type(capability) is bool else None
+            value['legacy_preview_available']=heartbeat.get('legacy_preview_available') is True
             value['layer_observation']=heartbeat.get('layer_observation',{})
         except (OSError,ValueError,RuntimeError):value['uxp_ready']=False
         return value
@@ -348,7 +367,18 @@ class UxpBridge(PhotoshopBridge):
         def write(action):
             self.transport.task_id=self._active_task_id;self._uxp_worker_active=True
             try:
-                response=self.transport.call('set_label',preview=preview,command='shape.preview' if preview else 'shape.paint',target=self._captured_target,paint=params)
+                native=None;command='shape.preview' if preview else 'shape.paint'
+                if preview:
+                    heartbeat=read_heartbeat(self.transport.folder)
+                    if heartbeat.get('legacy_preview_available') is True and heartbeat.get('document_redraw_available') is False and (24,0,1)<=version_tuple(heartbeat.get('photoshop_version'))<(24,1,0):
+                        # Bind the COM instance before the UXP preparation. A host
+                        # restart can only invalidate this proxy, never attach a
+                        # later process that might reuse document/layer IDs.
+                        application=self._application()
+                        from .legacy_preview import invoke
+                        native=lambda folder,request,ready:invoke(application,folder,request,ready)
+                        command='shape.legacy.preview'
+                response=self.transport.call('set_label',preview=preview,native_preview=native,command=command,target=self._captured_target,paint=params)
                 value=validate(response.get('layer_context'),self._captured_app)
                 self.layer_context=value if fresh(value) else unavailable()
                 return json.dumps(response['result'])

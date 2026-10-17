@@ -91,7 +91,7 @@ def assessment(value, system):
             elif capability is None:
                 add('redraw_capability_unreported')
         elif versions['photoshop']:
-            add('legacy_preview_pending', 'info')
+            add('legacy_preview_available' if ps.get('legacy_preview_available') is True else 'legacy_preview_pending', 'info')
     return versions, capability, findings, ready or host_expected or bool(findings)
 
 

@@ -1,4 +1,5 @@
 export default {
+"旧版使用独立执行预览，兼容性以实际宿主验收为准":"Older Photoshop uses standalone preview; compatibility requires validation on the actual host.",
   "状态格式发生变化，已保留兼容性线索":"Status format changed; compatibility evidence saved",
   "版本变化自动自检":"Automatic version checks",
   "等待版本与连接状态":"Waiting for version and connection status",

@@ -10,6 +10,7 @@ const messages={
  redraw_capability_unreported:'插件未报告重绘能力，实时预览兼容性待核验',
  redraw_capability_lost:'相较上次正常自检，实时重绘能力发生变化',
  legacy_preview_pending:'当前使用兼容草稿，旧版实时预览尚待修复',
+ legacy_preview_available:'旧版使用独立执行预览，兼容性以实际宿主验收为准',
  task_failed:'最近操作失败，已保存状态与耗时线索',
  task_result_unknown:'最近操作结果未知，请核对原请求',
  status_unavailable:'后台状态读取异常，已保留线索',

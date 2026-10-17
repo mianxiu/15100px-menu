@@ -53,5 +53,8 @@ def metadata(value):
         if not isinstance(patterns,list) or len(patterns)>128 or any(not isinstance(x,str) or not x or len(x)>128 for x in patterns):raise ValueError()
         live=value.get('live_preview',False)
         if type(live) is not bool:raise ValueError()
-        return {'available':True,'vector':vector,'live_preview':live,**result,'patterns':list(patterns)}
+        engine=value.get('preview_engine')
+        if engine is not None and engine!='legacy-com':raise ValueError()
+        return {'available':True,'vector':vector,'live_preview':live,**result,'patterns':list(patterns),
+                **({'preview_engine':engine} if engine and live else {})}
     except ValueError:return {'available':False}

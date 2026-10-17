@@ -12,6 +12,10 @@ def state():
    'tasks':{'items':[]},'menu':{'visible':False},'photoshop_start':{'active':False}}
 
 class VersionHealthTests(unittest.IsolatedAsyncioTestCase):
+ async def test_legacy_execution_capability_does_not_claim_draft_or_full_acceptance(self):
+  s=state();s['photoshop'].update(photoshop_version='24.0.1',document_redraw_available=False,legacy_preview_available=True)
+  value=await self.check(s);codes={f['code'] for f in value['findings']}
+  self.assertIn('legacy_preview_available',codes);self.assertNotIn('legacy_preview_pending',codes)
  async def asyncSetUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.path=Path(self.tmp.name);self.now=100
   self.h=VersionHealth(self.path,clock=lambda:self.now,system='26200.9457')

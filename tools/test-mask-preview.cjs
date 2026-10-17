@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const create=require('../uxp/offline-probe/labels.js');
 const copy=v=>JSON.parse(JSON.stringify(v));
-async function fixture(ordinary=false,gradient=false,coreRedraw=true,stripModalFields=false){
+async function fixture(ordinary=false,gradient=false,coreRedraw=true,stripModalFields=false,legacyPreview=false){
  const layer={id:30,kind:'solid',parent:null,vectorMaskFeather:0,vectorMaskDensity:100};
  let siblingReads=0,catalogReads=0;
  const doc={id:12,activeLayers:[layer],get layers(){siblingReads++;return [layer];},mode:'rgb',bitsPerChannel:8,resolution:72};
@@ -57,7 +57,7 @@ async function fixture(ordinary=false,gradient=false,coreRedraw=true,stripModalF
   if(redrawBlock)await redrawBlock;
   if(failRedraw)throw Error('刷新 unavailable');return .01;
  };
- const rawApi=create(ps,'session');
+ const rawApi=create(ps,'session',{legacyPreview});
  const api=rawApi;
  const target=await api.capture();
  const data=await api.observeShape(api.selectionContext(),true);
@@ -76,6 +76,22 @@ async function fixture(ordinary=false,gradient=false,coreRedraw=true,stripModalF
 }
 async function main(){
  let count=0;
+ {const f=await fixture(false,false,false,false,true),request={...f.request,command:'shape.legacy.preview'};
+  const prepared=await f.api.prepareLegacyShape(request);assert.equal(prepared.before.preview_engine,'legacy-com');assert.equal(prepared.before.live_preview,true);
+  assert.equal(f.state().histories,0);assert.equal(f.state().sets,0);
+  f.switchTarget(); // A later user selection must not invalidate the native terminal proof.
+  const result=await f.api.finishLegacyShape(request,prepared,{phase:'completed',result:{verified:true,count:1,placement_moves:0,paint:request.paint,preview:{engine:'standalone-extendscript',last_seq:2}}});
+  assert.equal(result.verified,true);assert.equal(f.state().histories,0);assert.equal(f.state().sets,0);count++;}
+ {const f=await fixture(false,false,false,false,true),request={...f.request,command:'shape.legacy.preview'};
+  const prepared=await f.api.prepareLegacyShape(request);
+  await assert.rejects(f.api.finishLegacyShape(request,prepared,{phase:'completed',result:{verified:true,count:1,placement_moves:0,paint:request.paint,preview:{engine:'forged',last_seq:2}}}),e=>e.resultUnknown===true);
+  assert.equal(f.state().histories,0);count++;}
+ {const f=await fixture(false,false,false,false,true),request={...f.request,command:'shape.legacy.preview'};
+  const prepared=await f.api.prepareLegacyShape(request);
+  await assert.rejects(f.api.finishLegacyShape(request,prepared,{phase:'failed',error:'native rollback unavailable',result_unknown:true}),e=>e.resultUnknown===true);
+  assert.equal(f.state().histories,0);count++;}
+ {const f=await fixture(false,false,false,false,true);f.request.paint.revision='stale';
+  await assert.rejects(f.api.prepareLegacyShape(f.request),/已改变/);assert.equal(f.state().histories,0);assert.equal(f.state().sets,0);count++;}
  for(const change of ['fill','mask']) {
   const f=await fixture(false,false,false);f.request.command='shape.paint';
   if(change==='fill')f.request.paint.fill.rgb=[80,70,60];else f.request.paint.mask={feather:12.5,density:40};

@@ -1,8 +1,8 @@
 // Experimental executor: only fixed-target labels, no arbitrary scripts.
-module.exports = function createLabels(ps, session) {
+module.exports = function createLabels(ps, session, options={}) {
   const caps=createCapsActions(ps,session,capture,selectionContext);
   const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
-  const shapePaint=createShapePaint(ps,session,capture,selectionContext);
+  const shapePaint=createShapePaint(ps,session,capture,selectionContext,options.legacyPreview===true);
   const quickCommands=['layer.new','layer.solid','layer.group','adjustment.curves',
     'adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite'];
   // Scalar lookup hints only, bounded for long sessions. A hint never supplies
@@ -557,12 +557,13 @@ module.exports = function createLabels(ps, session) {
     } catch(_) {}
     return {...interfaceState};
   }
-  return {capture,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:shapePaint.observe};
+  return {capture,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:shapePaint.observe,
+    prepareLegacyShape:shapePaint.prepareLegacy,finishLegacyShape:shapePaint.finishLegacy};
 };
 
 
 // Cached vector-paint metadata and request-bound, one-history preview writes.
-function createShapePaint(ps,session,capture,selectionContext) {
+function createShapePaint(ps,session,capture,selectionContext,legacyPreview=false) {
   let cache=null,serial=0,catalog=[],catalogAt=0,catalogInfo={};
   const clone=value=>JSON.parse(JSON.stringify(value));
   const rgb=color=>color?._obj==='RGBColor'?[color.red,color.grain??color.green,color.blue].map(v=>Math.round(Number(v))):null;
@@ -634,7 +635,8 @@ function createShapePaint(ps,session,capture,selectionContext) {
     // A live transaction needs only the frozen editor catalog. Refreshing
     // application-wide presets mid-drag adds unrelated host work, and cannot
     // make a newly added pattern valid for the original frozen editor anyway.
-    const data={available:true,vector:raw.vector,live_preview:typeof ps.core.redrawDocument==='function',revision,fill,stroke,
+    const data={available:true,vector:raw.vector,live_preview:typeof ps.core.redrawDocument==='function' || legacyPreview,
+      ...(legacyPreview && typeof ps.core.redrawDocument!=='function'?{preview_engine:'legacy-com'}:{}),revision,fill,stroke,
       patterns:frozenCatalog?frozenCatalog.patterns:await patterns(),
       pattern_catalog:frozenCatalog?frozenCatalog.pattern_catalog:catalogInfo};
     if(raw.mask)data.mask=clone(raw.mask);
@@ -924,7 +926,44 @@ function createShapePaint(ps,session,capture,selectionContext) {
       throw error;
     }
   }
-  return {observe,apply};
+  async function prepareLegacy(request) {
+    if(!legacyPreview || typeof ps.core.redrawDocument==='function')throw Error('Legacy preview channel unavailable');
+    validateParams(request.paint);
+    const actual=await capture(),expected=request.target;
+    if(Date.now()>request.expires_at_ms || expected?.session!==session || actual.document_id!==expected.document_id ||
+      actual.active_layer_id!==expected.active_layer_id || actual.layer_ids.join(',')!==expected.layer_ids?.join(','))throw Error('Legacy preview target changed');
+    const before=await observe(selectionContext(true),true);
+    if(!before.available || before.revision!==request.paint.revision)throw Error('填充／描边已改变，请重新打开菜单；本次未修改');
+    if(request.paint.mask && (!before.vector || !before.mask))throw Error('Vector mask unavailable');
+    if(!before.vector && (request.paint.fill.kind!==before.fill.kind || !request.paint.fill.enabled ||
+      JSON.stringify(request.paint.stroke)!==JSON.stringify(before.stroke)))throw Error('Ordinary fill type must remain unchanged');
+    const doc=ps.app.activeDocument,anchor=doc.activeLayers[0];
+    if(doc.id!==actual.document_id || doc.activeLayers.length!==1 || anchor?.id!==actual.active_layer_id)throw Error('Legacy prepare selection changed');
+    return {before:clone(before),raw:clone(cache.raw),parent_id:anchor.parent?.id??null,
+      order:Array.from(anchor.parent?anchor.parent.layers:doc.layers,l=>l.id)};
+  }
+  async function finishLegacy(request,prepared,response) {
+    if(response.phase!=='completed') {const error=Error(response.error || 'Legacy preview failed');error.resultUnknown=response.result_unknown===true;throw error;}
+    let uncertain=true;
+    try {
+      const result=response.result;
+      if(!result || result.verified!==true || typeof result.cancelled!=='undefined' && typeof result.cancelled!=='boolean')throw Error('Invalid native preview result');
+      const wanted=result.cancelled?prepared.before:result.paint;
+      validateParams(wanted);
+      if(wanted.revision!==request.paint.revision || result.preview?.engine!=='standalone-extendscript' || !Number.isInteger(result.preview.last_seq) || result.preview.last_seq<0 ||
+        !result.cancelled && (result.placement_moves!==0 || ![0,1].includes(result.count)) || result.cancelled && result.rollback_verified!==true)throw Error('Native preview proof incomplete');
+      // The native transaction read back its target, paint, vector path, pixel
+      // mask and sibling order BEFORE publishing this authenticated terminal.
+      // Do not reinterpret a later user selection as an unknown old write, or
+      // add a duplicate paint query. Fresh selection feedback is separate.
+      cache=null;
+      uncertain=false;
+      const {paint,...summary}=result;
+      try {summary.selection_context=selectionContext();}catch(_){}
+      return summary;
+    } catch(error) {if(uncertain)error.resultUnknown=true;throw error;}
+  }
+  return {observe,apply,prepareLegacy,finishLegacy};
 }
 
 // Fixed reference-Caps actions. No menu letters, synthetic keys or IME changes.
