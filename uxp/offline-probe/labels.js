@@ -676,6 +676,15 @@ function createShapePaint(ps,session,capture,selectionContext) {
       typeof params.mask.feather!=='number' || !Number.isFinite(params.mask.feather) || params.mask.feather<0 || params.mask.feather>1000 ||
       typeof params.mask.density!=='number' || !Number.isFinite(params.mask.density) || params.mask.density<0 || params.mask.density>100))throw Error('Invalid vector mask');
   }
+  async function redrawPreview(doc,anchor) {
+    // A suspended history/modal scope otherwise defers visible canvas updates.
+    // One small, read-only batch flushes the combined color + mask frame on
+    // PS24+, without splitting history or changing selection/focus.
+    const [value]=await ps.action.batchPlay([{_obj:'get',_target:[
+      {_ref:'property',_property:'layerID'},{_ref:'layer',_id:anchor.id},
+      {_ref:'document',_id:doc.id}],_options:{dialogOptions:'silent'}}],{immediateRedraw:true});
+    if(value?._obj==='error' || value?.layerID!==anchor.id)throw Error('Photoshop 预览刷新目标校验失败');
+  }
   async function previewMask(context,request,before,doc,anchor,io,applyPaint) {
     if(!io || typeof io.read!=='function')throw Error('Missing preview mailbox');
     let seq=0,lease=Date.now()+4000,applied=before.mask?clone(before.mask):undefined,updates=0,maxWriteMs=0;
@@ -700,16 +709,19 @@ function createShapePaint(ps,session,capture,selectionContext) {
         if(applied && !close(read(),applied))throw Error('Vector mask changed outside preview');
         if(packet.seq>seq || packet.phase==='commit') {
           const wanted=packet.paint.mask || before.mask,started=Date.now();
-          const colors=await applyPaint(packet.paint);
+          const {changed:colorChanged,...colors}=await applyPaint(packet.paint);
           if(packet.phase==='commit')return {paint:packet.paint,updates,max_write_ms:Math.max(maxWriteMs,Date.now()-started)};
-          if(wanted) {
+          const maskChanged=!close(applied,wanted);
+          if(wanted && maskChanged) {
             if(wanted.feather!==applied.feather)anchor.vectorMaskFeather=wanted.feather;
             if(wanted.density!==applied.density)anchor.vectorMaskDensity=wanted.density;
             applied=read();
           }
           if(!target() || !close(applied,wanted))throw Error('Preview mask readback mismatch');
+          const redrawCompleted=!!(colorChanged || maskChanged);
+          if(redrawCompleted)await redrawPreview(doc,anchor);
           updates++;maxWriteMs=Math.max(maxWriteMs,Date.now()-started);seq=packet.seq;
-          if(io.applied)await io.applied({seq,...colors,...(applied?{mask:applied}:{}),updates,max_write_ms:maxWriteMs});
+          if(io.applied)await io.applied({seq,...colors,...(applied?{mask:applied}:{}),updates,max_write_ms:maxWriteMs,redraw_completed:redrawCompleted});
         }
       }
       // A slow Photoshop redraw may outlast the previously read lease. Read
@@ -773,7 +785,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
         }
         if(next.paintChanged) {
           const [response]=await ps.action.batchPlay([{_obj:'set',_target:[{_ref:'contentLayer',_enum:'ordinal',_value:'targetEnum'}],
-            to:next.to,_options:{dialogOptions:'dontDisplay'}}],{});
+            to:next.to,_options:{dialogOptions:'silent'}}],{});
           if(response?._obj==='error')throw Error(response.message || 'Photoshop 拒绝颜色预览');
           const actual=await observe(selectionContext(),true);
           if(!actual.available || actual.vector!==before.vector || !samePaint(actual.fill,params.fill) ||
@@ -781,7 +793,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
             throw Error('Fill or stroke preview readback mismatch');
           appliedPaint=clone(params);liveColors=actual;appliedRaw=cache.raw;appliedRawKey=rawKey(appliedRaw);paintTouched=true;
         }
-        return {fill:liveColors.fill,stroke:liveColors.stroke};
+        return {fill:liveColors.fill,stroke:liveColors.stroke,changed:next.paintChanged};
       };
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
       const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu shape paint'});
@@ -792,6 +804,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
           previewStats=await previewMask(context,request,before,doc,anchor,previewIO,applyPreviewPaint);
           if(previewStats.cancelled) {
             await context.hostControl.resumeHistory(history,false);cache=null;
+            await redrawPreview(doc,anchor);
             await observe(selectionContext(),true);
             if(!cache || cache.signature!==signature || doc.activeLayers.length!==1 || doc.activeLayers[0].id!==anchor.id ||
               (anchor.parent?.id ?? null)!==parentId || Array.from(parent?parent.layers:doc.layers,l=>l.id).join(',')!==order.join(','))
@@ -806,7 +819,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
 
         if(paintChanged) {
           const [response]=await ps.action.batchPlay([{_obj:'set',_target:[{_ref:'contentLayer',_enum:'ordinal',_value:'targetEnum'}],
-            to,_options:{dialogOptions:'dontDisplay'}}],{});
+            to,_options:{dialogOptions:'silent'}}],{});
           if(response?._obj==='error')throw Error(response.message || 'Photoshop 拒绝修改形状颜色');
         }
         if(params.mask) {

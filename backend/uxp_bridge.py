@@ -96,8 +96,8 @@ class UxpTransport:
                     raise RuntimeError('请更新并重新加载 UXP 0.3.18，以支持转换智能对象；未提交操作')
                 if payload.get('command')=='shape.paint' and 'mask' in payload.get('paint',{}) and version(heartbeat.get('probe_version'))<(0,3,20):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.20，以支持形状羽化／密度；未提交操作')
-                if payload.get('command')=='shape.preview' and (preview is None or version(heartbeat.get('probe_version'))<(0,3,26)):
-                    raise RuntimeError('请更新并重新加载 UXP 0.3.26，以支持颜色及蒙版实时预览；未提交操作')
+                if payload.get('command')=='shape.preview' and (preview is None or version(heartbeat.get('probe_version'))<(0,3,27)):
+                    raise RuntimeError('请更新并重新加载 UXP 0.3.27，以支持颜色及蒙版实时预览；未提交操作')
                 request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
                 encoded=json.dumps(request)
                 if len(encoded.encode('utf-8'))>4096:raise ValueError('UXP 请求超出本地协议长度，未提交操作')

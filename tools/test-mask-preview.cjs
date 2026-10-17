@@ -12,10 +12,17 @@ async function fixture(ordinary=false,gradient=false){
   type:{_enum:'gradientType',_value:'linear'},gradient:{_obj:'gradientClassEvent',name:'Owned gradient',
    colors:[0,4096].map(location=>({_obj:'colorStop',color:{_obj:'RGBColor',red:12,grain:34,blue:56},location,midpoint:37})),
    transparency:[0,4096].map(location=>({_obj:'transferSpec',location,midpoint:29,opacity:{_unit:'percentUnit',_value:73}}))}};
- let histories=0,commits=0,rollbacks=0,sets=0,saved,failRollback=false;
+ let histories=0,commits=0,rollbacks=0,sets=0,redraws=0,saved,failRollback=false,failRedraw=false;
  const ps={constants:{LayerKind:{SOLIDFILL:'solid'},DocumentMode:{RGB:'rgb'},BitsPerChannelType:{EIGHT:8,SIXTEEN:16}},
- app:{documents:[doc],activeDocument:doc},action:{batchPlay:async cs=>cs.map(c=>{
+ app:{documents:[doc],activeDocument:doc},action:{batchPlay:async (cs,options)=>cs.map(c=>{
+  if(options.immediateRedraw){
+   assert.equal(c._obj,'get');assert.equal(c._target[0]._property,'layerID');
+   assert.equal(c._target[1]._id,layer.id);assert.equal(c._target[2]._id,doc.id);
+   assert.equal(c._options.dialogOptions,'silent');redraws++;
+   return failRedraw?{_obj:'error',message:'redraw unavailable'}:{layerID:layer.id};
+  }
   if(c._obj==='set'){
+   assert.equal(c._options.dialogOptions,'silent');
    if(!ordinary && c.to._obj!=='shapeStyle')throw Error('Set unavailable: vector-backed fills require shapeStyle');
    sets++;if(c.to._obj!=='shapeStyle')fill=copy(c.to);else {if(c.to.fillContents)fill=copy(c.to.fillContents);if(c.to.strokeStyle)stroke=copy(c.to.strokeStyle);}return {};
   }
@@ -42,12 +49,29 @@ async function fixture(ordinary=false,gradient=false){
   expires_at_ms:Date.now()+10000,paint};
  const packet=(seq,phase='preview',mask={feather:seq,density:70})=>({id:request.id,session:request.session,token:request.token,
   seq,phase,lease_until_ms:Date.now()+4000,paint:{...copy(paint),mask}});
- const state=()=>({histories,commits,rollbacks,sets,mask:{feather:layer.vectorMaskFeather,density:layer.vectorMaskDensity}});
+ const state=()=>({histories,commits,rollbacks,sets,redraws,mask:{feather:layer.vectorMaskFeather,density:layer.vectorMaskDensity}});
  return {api,request,packet,layer,state,fail:()=>{failRollback=true;},color:()=>fill.color,
-  raw:()=>copy({fill,stroke}),external:()=>{fill.color.red=213;}};
+  raw:()=>copy({fill,stroke}),external:()=>{fill.color.red=213;},failRedraw:()=>{failRedraw=true;}};
 }
 async function main(){
  let count=0;
+ // Acknowledgement must follow an awaited UI flush, once per combined frame.
+ for(const channel of ['fill','stroke','mask','combined','unchanged']){
+  const f=await fixture(),p=f.packet(1,'preview',{feather:0,density:100});
+  if(channel==='fill'||channel==='combined')p.paint.fill.rgb=[100,80,60];
+  if(channel==='stroke'||channel==='combined'){p.paint.stroke.enabled=true;p.paint.stroke.rgb=[20,40,60];}
+  if(channel==='mask'||channel==='combined')p.paint.mask={feather:20,density:40};
+  const frames=[p,{...copy(p),seq:2},{...copy(p),seq:3,phase:'cancel'}];let seen=0;
+  await f.api.setLabel(f.request,{read:async()=>frames.shift(),applied:async v=>{
+   assert.equal(f.state().redraws,channel==='unchanged'?0:1);
+   assert.equal(v.redraw_completed,channel!=='unchanged' && seen===0);seen++;
+  }});
+  assert.equal(seen,2);assert.equal(f.state().redraws,channel==='unchanged'?1:2);
+  assert.equal(f.state().histories,1);assert.equal(f.state().rollbacks,1);count++;
+ }
+ {const f=await fixture(),p=f.packet(1);f.failRedraw();let acknowledgements=0;
+  await assert.rejects(f.api.setLabel(f.request,{read:async()=>p,applied:async()=>{acknowledgements++;}}),/刷新/);
+  assert.equal(acknowledgements,0);assert.equal(f.state().rollbacks,1);count++;}
  {const f=await fixture(),frames=[f.packet(1),f.packet(2),f.packet(3,'commit')];
   for(const p of frames){p.paint.stroke.rgb=[81,72,63];p.paint.stroke.enabled=true;}
   frames[1].paint.fill.enabled=false;frames[2].paint.fill.enabled=false;

@@ -12,7 +12,7 @@
 | `photoshop_action/` 与根目录 COM 兼容模块 | 后端仍引用的兼容代码 |
 | `tools/`、`tests/` | 维护工具与自动回归 |
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
-| `dist/` | 当前v0.4.159 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
+| `dist/` | 当前v0.4.160本机候选EXE、统一ZIP、UXP ZIP与两份校验，共5项；正式159清单与包已归档，公开Release仍159 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |
@@ -66,3 +66,5 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 159回退：.local/archive/dist/v0.4.158-before159保留158完整发行包，.local/recovery/releases/0.4.158-before159保留实际入口与配置；文档恢复副本在.local/recovery/documents/panels159-1792227890664024000，原稿与所有源码标签保留。
 
 159公开交付：dist仅当前六项；旧158发行包、实际EXE与配置已按上述目录保留，所有Git标签与源码历史保持。
+
+160本机候选：实际入口和dist/PhotoshopMenu.exe为160／UXP27；dist现为160候选完整5项，与.runtime/release160-ready一致；正式159包／清单已归档保留，160尚无公开更新清单。旧159实际入口／配置及完整dist分别保存在.local/recovery/releases/0.4.159-before160与.local/archive/dist/v0.4.159-before160。画布目视确认前不发布或删除159 Release。

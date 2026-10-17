@@ -20,7 +20,7 @@ def live_idle():
     state=json.load(urlopen('http://127.0.0.1:15151/api/status',timeout=5));ps=state['photoshop']
     if ps['busy'] or state['menu']['visible'] or state['photoshop_start']['active'] or ps.get('uxp_recovery',{}).get('active'):
         raise RuntimeError('Live service is not idle')
-    if ps.get('uxp_version')!='0.3.26' or not ps.get('uxp_ready'):raise RuntimeError('Loaded UXP26 required')
+    if ps.get('uxp_version')!='0.3.27' or not ps.get('uxp_ready'):raise RuntimeError('Loaded UXP27 required')
     if (Path(state['data_dir'])/'uxp-pending.json').exists():raise RuntimeError('Live request unresolved')
     return state
 
@@ -82,6 +82,7 @@ async def main(normal=False):
                 preview.update(params)
                 if stream:await asyncio.sleep(.02)
             ack=await applied(preview.seq)
+            assert ack.get('redraw_completed') is True,'UI redraw was not completed before acknowledgement'
             assert abs(ack['mask']['feather']-25)<.01 and abs(ack['mask']['density']-50)<=100/255+.001
             assert not operation.done(),'Live values must precede confirmation'
             if stream:assert ack['updates']>3 and ack['updates']<100
@@ -115,7 +116,7 @@ async def main(normal=False):
                 app.DoJavaScript('var d=app.activeDocument;d.activeHistoryState=d.historyStates[d.historyStates.length-2];')
                 equal_content(before,read())
             proof={'case':name,'end':end,'one_undo':end=='commit','cancel_restored':end!='commit',
-                   'live_before_confirmation':True,'live_readback_ms':round(live_ms,2),
+                   'live_before_confirmation':True,'redraw_completed_before_confirmation':True,'canvas_visual_verified':False,'live_readback_ms':round(live_ms,2),
                    'published_updates':100,'applied_updates_before_finish':ack['updates'],
                    'total_ms':round((time.perf_counter()-started)*1000,2),'task_id':result['task_id']}
             cases.append(proof);print(json.dumps(proof),flush=True)
@@ -136,7 +137,7 @@ async def main(normal=False):
                 for attempt in range(50):
                     try:guard();break
                     except RuntimeError as error:
-                        if 'Loaded UXP26 required' not in str(error):raise
+                        if 'Loaded UXP27 required' not in str(error):raise
                         await asyncio.sleep(.2)
                 else:raise RuntimeError('UXP heartbeat did not resume after fixture creation')
                 await run_case(kind+'-live-commit');await asyncio.sleep(2)
@@ -156,7 +157,7 @@ async def main(normal=False):
         if owned is not None and not bridge.busy and not bridge.transport.pending.value and win32process.GetWindowThreadProcessId(win32gui.GetForegroundWindow())[1]!=window['pid']:
             owned.Close(2);owned=None
         if previous is not None and owned is None and not bridge.busy:app.ActiveDocument=previous
-        report={'runtime_version':state['version'],'executor_version':'0.3.26','complete':complete,'normal':normal,
+        report={'runtime_version':state['version'],'executor_version':'0.3.27','complete':complete,'normal':normal,
                 'scope':'real UXP with native readback acknowledgements before confirmation; independent COM after terminal; no synthesized input',
                 'physical_input':False,'cases':cases,'foreground_preserved':win32gui.GetForegroundWindow()==initial,
                 'owned_document_closed':owned is None,'unresolved':bool(bridge.busy or bridge.transport.pending.value),'placement':placement}
