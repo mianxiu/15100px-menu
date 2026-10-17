@@ -52,6 +52,7 @@ struct ShapeColorEditor {
 };
 static ShapeColorEditor shapeEditor;
 static Json testedShapePaint;
+static size_t testedShapeGrants=0;
 static std::vector<Json> testedMaskEvents;
 static void emitMaskPreview(bool commit=false) {
     maskPreviewStarted=true;
@@ -85,13 +86,16 @@ static void copyShapeHex(const Json& rgb) {
 }
 static void commitShapeDraft() {
     if(!shapeEditor.ready() || (!shapeEditor.dirty && !maskPreviewStarted) || !shapeEditor.valid()){send("hide");return;}
+    // Both draft and preview confirmation return from the foreground menu to
+    // its own backend. Preserve the same bounded focus grant for both paths.
+    if(selfTest)++testedShapeGrants;
+    else if(backendParent)AllowSetForegroundWindow(backendParent);
     if(maskPreviewStarted){
         emitMaskPreview(true);
         if(selfTest){testedActions.emplace_back("shape.paint");testedShapePaint=shapeEditor.draft;}
         return;
     }
     if(selfTest){testedActions.emplace_back("shape.paint");testedShapePaint=shapeEditor.draft;return;}
-    if(backendParent)AllowSetForegroundWindow(backendParent);
     std::cout<<Json{{"type","action"},{"action","shape.paint"},{"session",menuEpoch},{"params",shapeEditor.draft}}.dump()<<std::endl;
 }
 static bool shapeSegment(const char* id,const std::vector<std::string>& names,int& selected,float width,bool lockSelection=false) {

@@ -2400,7 +2400,8 @@ int main() {
                 if(!maskPreviewStarted || !shapeEditor.ready() || canExecute() || capsEnabled(0))
                     throw std::runtime_error("Preview must preserve only its owning editor, rejecting other actions");
                 POINT maskPoint={(densityRect.left+densityRect.right)/2,(densityRect.top+densityRect.bottom)/2};
-                const auto maskDraft=shapeEditor.draft;renderedHit=100;finishHold(maskPoint,true,&maskPoint);const auto maskSubmitted=testedActions.size();finishHold(maskPoint);
+                const auto maskDraft=shapeEditor.draft;const auto maskGrants=testedShapeGrants;renderedHit=100;finishHold(maskPoint,true,&maskPoint);const auto maskSubmitted=testedActions.size();finishHold(maskPoint);
+                if(testedShapeGrants!=maskGrants+1)throw std::runtime_error("Preview confirmation must grant its backend focus exactly once");
                 if(testedShapePaint!=maskDraft || testedActions.back()!="shape.paint" || testedActions.size()!=maskSubmitted)
                     throw std::runtime_error("Mask slider release must submit its exact draft once");
                 if(testedMaskEvents.size()<3 || testedMaskEvents.front()["action"]!="mask.preview.update" ||
