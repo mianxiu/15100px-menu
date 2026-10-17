@@ -6,7 +6,7 @@
 | --- | --- |
 | 主程序／dist／本机运行入口 | v0.4.153，EXE及原生菜单／热键组件属于同次构建 |
 | 内置／安装／PS实际加载插件 | 本机均为UXP0.3.23，三个版本分别核对 |
-| 当前下载 | [最新正式版](https://github.com/mianxiu/15100px-menu/releases/latest)，本次发布核验见发行记录 |
+| 当前下载 | [v0.4.153 Release](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.153)，公开ZIP／SHA256／备用清单及冻结更新器限流回退已验证，发行页仅153 |
 | 验证 | 330后台、33前端、12份插件回归、最终EXE烟雾／重启与实际原生组件自测通过；153／UXP23真实读取／执行及撤销通过，实体键鼠与故障机另列 |
 
 安装和加载见[离线管理](OFFLINE-INSTALL.md)，默认按键见[操作菜单](#photoshop-操作菜单)，在线升级见[应用更新](docs/UPDATES.md)，待办见[TODO](TODO.md)。当前153按大小分流创建前的整树读取，保留152的中部首次定位、151的重复定位与心跳修复、形状羽化／密度、Caps立即展开和既有布局。后续功能使用说明统一维护在[Wiki](https://github.com/mianxiu/15100px-menu/wiki)。

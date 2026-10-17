@@ -1,6 +1,6 @@
 # Photoshop Menu TODO
 
-2026-10-17同步：当前实际入口／dist为153，内置／本机安装／PS加载UXP23；正式Latest以发行记录为准。下方版本记录中的“实际”“Latest”“已发布”和测试数量属于当时证据；旧Release已清理，Git标签和本地回退保留。profile146文件是145测量的实验代号，146正式版另有统一诊断交付记录。
+2026-10-17同步：当前实际入口／dist为153，内置／本机安装／PS加载UXP23；正式Latest为153。下方版本记录中的“实际”“Latest”“已发布”和测试数量属于当时证据；旧Release已清理，Git标签和本地回退保留。profile146文件是145测量的实验代号，146正式版另有统一诊断交付记录。
 
 ## 当前优先事项
 
@@ -42,6 +42,8 @@
 - [x] UXP未加载独立采集脚本：tools/inspect-uxp.ps1在Windows PowerShell5实际运行，采集当前用户安装路径、manifest／脚本哈希、宿主UXP存在性、最近两份受限加载日志与后台安装／加载状态；不读凭据／文档，不修改安装、设置或PS，不覆盖报告。本机正常加载及路径匹配、日志过滤、已有文件保护核验通过；故障机结果待提供，不等同修复。证据.runtime/uxp-startup-local146-final.json。独立脚本更新，实际145及发布附件保持。
 
 ## 已交付与按版本验收记录
+
+- [x] 153正式发行及Wiki：源码／注释标签、Wiki正文已推送并匿名核验；统一ZIP／SHA256／备用清单匿名下载、最终EXE内更新器强制API403后真实下载校验通过。随后只删除152 Release，源码标签与本地152回退保留；dist六项均为153，实际入口／内置安装加载UXP23及组件匹配。证据.runtime/release-0.4.153-public-verification.json、manifest153-verification.json、fallback153-live.json、wiki153-verification.json、release153-cleanup.json、runtime153-delivered.json。实体键鼠和故障机仍待验证。
 
 - [x] 152正式发行、Wiki与只留最新版：源码／v0.4.152标签及Wiki推送，Wiki公开正文、统一ZIP／SHA256／备用清单匿名下载核验，最终EXE内更新器强制API403后真实下载／校验152通过；随后移除151 Release，Git标签集合不变、151本地回退保留。dist与实际入口152／UXP22及组件匹配，当前dist仅152。证据.runtime/release-0.4.152-public-verification.json、manifest152-verification.json、fallback152-live.json、release152-cleanup.json、wiki152-verification.json、runtime152-delivered.json。实体键鼠与故障机未验收。
 
