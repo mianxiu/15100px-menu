@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 168 多选羽化／密度代码、构建、实际入口及本机真实事务：2–128 层、混合原值、只改指定项；修复历史回滚丢失多选，整批取消恢复和一次撤销。394 回归、16 份插件脚本（批量28组）、四主题、EXE 启动／重启通过；11 项真实事务（9低CPU／2正常）和4项保护检查通过。实际168／UXP35，配置／文档及资源恢复，旧失败记录保留。证据.runtime/recovery168/runtime.json、live-matrix.json；docs/BATCH-MASKS.md记录大批量延迟。
-- [ ] 168 公开Release／最终Wiki同步、匿名附件与备用更新通道核验，完成后只留最新版Release。
+- [x] 168 公开交付：Release／最终Wiki已同步，匿名ZIP／校验文件／备用清单及冻结更新器强制API403后的实网下载通过；仅保留168 Release，旧标签／源码／本地回退保留。dist仅168六项文件，实际入口168／UXP35匹配。证据.runtime/release-0.4.168-public-verification.json、fallback168-live.json、release168-cleanup.json、wiki168-public.json、recovery168/runtime.json。
 - [ ] 168 现代宿主、故障i5／集显、Win10／PS2024及实体Caps／鼠标验收。128层旧PS预览仍较慢，不按全配置即时响应交付。
 
 - [x] 167发布闭环（2026-10-18）：本机实际167／UXP34，源码与标签已推送；Wiki 236e596同步。公开ZIP／SHA及备用清单下载核验通过，发布EXE内更新模块在模拟API403后通过真实备用下载。Release仅保留167，165旧附件已备份、Git标签及历史保留。证据.runtime/release-0.4.167-public-verification.json、fallback167-live.json、release167-cleanup.json。
