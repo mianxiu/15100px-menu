@@ -15,7 +15,10 @@ async function fixture(ordinary=false,gradient=false){
  let histories=0,commits=0,rollbacks=0,sets=0,saved,failRollback=false;
  const ps={constants:{LayerKind:{SOLIDFILL:'solid'},DocumentMode:{RGB:'rgb'},BitsPerChannelType:{EIGHT:8,SIXTEEN:16}},
  app:{documents:[doc],activeDocument:doc},action:{batchPlay:async cs=>cs.map(c=>{
-  if(c._obj==='set'){sets++;if(c.to._obj!=='shapeStyle')fill=copy(c.to);else {if(c.to.fillContents)fill=copy(c.to.fillContents);if(c.to.strokeStyle)stroke=copy(c.to.strokeStyle);}return {};}
+  if(c._obj==='set'){
+   if(!ordinary && c.to._obj!=='shapeStyle')throw Error('Set unavailable: vector-backed fills require shapeStyle');
+   sets++;if(c.to._obj!=='shapeStyle')fill=copy(c.to);else {if(c.to.fillContents)fill=copy(c.to.fillContents);if(c.to.strokeStyle)stroke=copy(c.to.strokeStyle);}return {};
+  }
   switch(c._target[0]._property){
    case 'layerKind':return {layerKind:4};case 'hasVectorMask':return {hasVectorMask:!ordinary};
    case 'adjustment':return {adjustment:[copy(fill)]};case 'AGMStrokeStyleInfo':return {AGMStrokeStyleInfo:copy(stroke)};

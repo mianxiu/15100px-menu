@@ -20,7 +20,7 @@ def live_idle():
     state=json.load(urlopen('http://127.0.0.1:15151/api/status',timeout=5));ps=state['photoshop']
     if ps['busy'] or state['menu']['visible'] or state['photoshop_start']['active'] or ps.get('uxp_recovery',{}).get('active'):
         raise RuntimeError('Live service is not idle')
-    if ps.get('uxp_version')!='0.3.25' or not ps.get('uxp_ready'):raise RuntimeError('Loaded UXP25 required')
+    if ps.get('uxp_version')!='0.3.26' or not ps.get('uxp_ready'):raise RuntimeError('Loaded UXP26 required')
     if (Path(state['data_dir'])/'uxp-pending.json').exists():raise RuntimeError('Live request unresolved')
     return state
 
@@ -121,7 +121,14 @@ async def main(normal=False):
                 for k in ('layerID','layerKind','path','order','hasUserMask','userMaskFeather','userMaskDensity','vectorMaskFeather','vectorMaskDensity'):
                     assert before.get(k)==after.get(k),(name,k)
                 if channel=='stroke':assert before['adjustment']==after['adjustment']
-                if channel=='fill':assert before.get('AGMStrokeStyleInfo')==after.get('AGMStrokeStyleInfo')
+                if channel=='fill':
+                    if before.get('AGMStrokeStyleInfo') is None and after.get('AGMStrokeStyleInfo') is not None:
+                        # Native shapeStyle may materialize a previously implicit
+                        # default stroke. It must remain disabled; undo below
+                        # still restores the exact descriptor absence.
+                        assert not after['AGMStrokeStyleInfo'].get('strokeEnabled',False)
+                        assert after['AGMStrokeStyleInfo'].get('fillEnabled',True)
+                    else:assert before.get('AGMStrokeStyleInfo')==after.get('AGMStrokeStyleInfo')
                 if gradient:
                     old=before['adjustment'][0] if channel=='fill' else before['AGMStrokeStyleInfo']['strokeStyleContent']
                     new=after['adjustment'][0] if channel=='fill' else after['AGMStrokeStyleInfo']['strokeStyleContent']
@@ -152,9 +159,16 @@ async def main(normal=False):
                 for attempt in range(50):
                     try:guard();break
                     except RuntimeError as error:
-                        if 'Loaded UXP25 required' not in str(error):raise
+                        if 'Loaded UXP26 required' not in str(error):raise
                         await asyncio.sleep(.2)
                 else:raise RuntimeError('UXP heartbeat did not resume after fixture creation')
+                if not normal:
+                    await bridge.execute('layer.solid',frozen_target=await asyncio.to_thread(bridge._capture_target))
+                    await run_case(kind+'-new-solid-fill-commit');await asyncio.sleep(2)
+                    await run_case(kind+'-new-solid-fill-cancel',end='cancel');await asyncio.sleep(2)
+                    # Only our known-terminal owned fixture is touched here.
+                    # Return to the original vector shape for the remaining cases.
+                    guard();app.DoJavaScript('app.activeDocument.activeLayer.remove();')
                 await run_case(kind+'-fill-commit');await asyncio.sleep(2)
                 await run_case(kind+'-fill-cancel',end='cancel');await asyncio.sleep(2)
                 await run_case(kind+'-stroke-commit',channel='stroke');await asyncio.sleep(2)
@@ -190,7 +204,7 @@ async def main(normal=False):
         if owned is not None and not bridge.busy and not bridge.transport.pending.value and win32process.GetWindowThreadProcessId(win32gui.GetForegroundWindow())[1]!=window['pid']:
             owned.Close(2);owned=None
         if previous is not None and owned is None and not bridge.busy:app.ActiveDocument=previous
-        report={'runtime_version':state['version'],'executor_version':'0.3.25','complete':complete,'normal':normal,
+        report={'runtime_version':state['version'],'executor_version':'0.3.26','complete':complete,'normal':normal,
                 'scope':'real UXP with native readback acknowledgements before confirmation; independent COM after terminal; no synthesized input',
                 'physical_input':False,'cases':cases,'foreground_preserved':win32gui.GetForegroundWindow()==initial,
                 'owned_document_closed':owned is None,'unresolved':bool(bridge.busy or bridge.transport.pending.value),'placement':placement}

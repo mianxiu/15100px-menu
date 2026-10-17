@@ -518,7 +518,7 @@ static int holdActionAt(POINT point) {
         if(capsDividerAt(i,point))return -1;
         return 40+i;
     }
-    if(shapeEditor.ready() && PtInRect(&shapeEditor.bounds,point))return 100;
+    if(shapeEditor.ready() && shapeEditor.hit(point))return 100;
     for(int i=0;i<7;++i)if(quickEnabled(i) && PtInRect(&quickRows[i],point)) {
         if(quickDividerAt(i,point))return -1;
         return 32+i;
@@ -1670,7 +1670,7 @@ int main() {
     // Keep this policy identical in production and automated checks.
     io.ConfigFlags|=ImGuiConfigFlags_NoMouseCursorChange;
     scale=ImGui_ImplWin32_GetDpiScaleForHwnd(window);theme();
-    if (!preview.empty() || selfTest) SetWindowPos(window,nullptr,selfTest?testOrigin.x:100,selfTest?testOrigin.y:100,
+    if (!preview.empty() || selfTest) SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,
         static_cast<int>((previewShape?920:contextMode?260:360)*scale),static_cast<int>((previewShape?menuShapeWindowHeight:contextMode?240:300)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
     io.ConfigViewportsNoTaskBarIcon=true;
     std::wstring fontPath; wchar_t windowsPath[MAX_PATH];GetWindowsDirectoryW(windowsPath,MAX_PATH);fontPath=std::wstring(windowsPath)+L"/Fonts/msyh.ttc";
@@ -1849,10 +1849,10 @@ int main() {
             ShowWindow(window,SW_MINIMIZE);ShowWindow(window,SW_HIDE);
             for (int i=0;i<3;++i) {ShowWindow(window,SW_RESTORE);ShowWindow(window,SW_HIDE);}
         }
-    if (!selfTest) {ShowWindow(window,SW_SHOWNORMAL);UpdateWindow(window);}
+    if (!selfTest) {ShowWindow(window,preview.empty()?SW_SHOWNORMAL:SW_SHOWNOACTIVATE);UpdateWindow(window);}
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
-            SetWindowPos(window,nullptr,100,100,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?menuShapeWindowHeight:440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?menuShapeWindowHeight:440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);
             if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
         }
@@ -2387,8 +2387,14 @@ int main() {
                 if(!shapeEditor.ready() || shapeEditor.bounds.right<=shapeEditor.bounds.left || ImGui::GetDrawData()->TotalVtxCount<=0)
                     throw std::runtime_error("Shape editor did not render through production window path");
                 const auto featherRect=shapeEditor.featherBounds,densityRect=shapeEditor.densityBounds;
-                if(featherRect.right<=featherRect.left || densityRect.right<=densityRect.left || densityRect.bottom>shapeEditor.bounds.bottom)
+                RECT shapeWindow;GetWindowRect(window,&shapeWindow);
+                if(featherRect.right<=featherRect.left || densityRect.right<=densityRect.left || densityRect.bottom>shapeEditor.maskBounds.bottom ||
+                   shapeEditor.maskBounds.left!=shapeEditor.bounds.left || shapeEditor.maskBounds.right!=shapeEditor.bounds.right ||
+                   shapeEditor.maskBounds.top-shapeEditor.bounds.bottom<LONG(menuPanelGap*scale)-1 ||
+                   featherRect.top<shapeEditor.maskBounds.top || shapeEditor.maskBounds.bottom>shapeWindow.bottom)
                     throw std::runtime_error("Vector mask sliders are clipped or have no hit bounds");
+                POINT panelGap={shapeEditor.bounds.left+LONG(10*scale),(shapeEditor.bounds.bottom+shapeEditor.maskBounds.top)/2};
+                if(holdActionAt(panelGap)!=-1 || shapeEditor.hit(panelGap))throw std::runtime_error("Split panel gap must cancel, never confirm");
                 auto maskMouse=[&](const RECT& r,float portion,bool down){io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);
                     io.AddMousePosEvent(r.left+(r.right-r.left)*portion,(r.top+r.bottom)*.5f);
                     io.AddMouseButtonEvent(ImGuiMouseButton_Left,down);numberFrame(ImGuiKey_None,false);};
@@ -2418,7 +2424,7 @@ int main() {
                 if(testedCopiedHex!="#0C2238" || testedActions.size()!=shapeCount || shapeEditor.dirty)
                     throw std::runtime_error("Hex copy changed the draft or submitted Photoshop action");
                 for(int context:{0,1,3,4}){panelKind=context;numberFrame(ImGuiKey_None,false);
-                    if(shapeEditor.ready() || shapeEditor.bounds.right)throw std::runtime_error("Shape editor escaped Layers context");}
+                    if(shapeEditor.ready() || shapeEditor.bounds.right || shapeEditor.maskBounds.right)throw std::runtime_error("Shape editor escaped Layers context");}
                 panelKind=2;
                 for(int kind:{0,1,2,3,4,5,7,8,9}){layerKind=kind;numberFrame(ImGuiKey_None,false);
                     if(shapeEditor.ready() || shapeEditor.bounds.right)throw std::runtime_error("Stale shape metadata enabled a nonshape layer");}
@@ -2494,10 +2500,10 @@ int main() {
                 SendMessageW(window,WM_APP+22,0,0);auto pinnedSubmitted=testedActions.size();SendMessageW(window,WM_APP+22,0,0);
                 if(testedActions.back()!="shape.paint" || testedActions.size()!=pinnedSubmitted)throw std::runtime_error("Pinned paint repeated");
                 resetShape();inputFocused=true;numberFrame(ImGuiKey_None,false);
-                if(shapeEditor.ready() || shapeEditor.bounds.right)throw std::runtime_error("Input protection retained shape editor");
+                if(shapeEditor.ready() || shapeEditor.bounds.right || shapeEditor.maskBounds.right)throw std::runtime_error("Input protection retained shape editor");
                 inputFocused=false;shapeEditor.prepare(Json{{"available",false}});testedActions.resize(shapeCount);
                 shapeFixture["vector"]=false;shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);
-                if(!shapeEditor.ready() || shapeEditor.vector || shapeEditor.channel!=0 || shapeEditor.bounds.right<=shapeEditor.bounds.left)
+                if(!shapeEditor.ready() || shapeEditor.vector || shapeEditor.channel!=0 || shapeEditor.bounds.right<=shapeEditor.bounds.left || shapeEditor.maskBounds.right)
                     throw std::runtime_error("Plain fill must expose only fill controls");
                 shapeEditor.prepare(Json{{"available",false}});
                 const auto previousRenderMode=renderMode;

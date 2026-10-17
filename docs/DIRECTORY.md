@@ -1,6 +1,6 @@
 # 目录与本地归档
 
-2026-10-17同步：本轮158／UXP25颜色实时预览交付记录见下方；此前155为历史时点。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
+2026-10-17同步：本轮159／UXP26独立面板与填充修复交付记录见下方；此前155为历史时点。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
 
 | 路径 | 用途 |
 | --- | --- |
@@ -12,7 +12,7 @@
 | `photoshop_action/` 与根目录 COM 兼容模块 | 后端仍引用的兼容代码 |
 | `tools/`、`tests/` | 维护工具与自动回归 |
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
-| `dist/` | 当前v0.4.158 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
+| `dist/` | 当前v0.4.159 EXE、统一ZIP、UXP ZIP、校验文件及PhotoshopMenu-update.json；旧发行物另行归档保留 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |
@@ -62,3 +62,5 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 158实机工具：tools/verify-paint-preview.py覆盖颜色预览、交叉编辑、普通填充／渐变；tools/verify-mask-preview.py覆盖蒙版回归。最终报告入口.runtime/live158-reports.json；旧157发行包归档.local/archive/dist/v0.4.157-before158，实际EXE与配置回退.local/recovery/releases/0.4.157-before158。
 
 158公开交付：dist仅当前六项；旧157发行包、实际EXE与配置已按上述目录保留，所有Git标签与源码历史保持。
+
+159回退：.local/archive/dist/v0.4.158-before159保留158完整发行包，.local/recovery/releases/0.4.158-before159保留实际入口与配置；文档恢复副本在.local/recovery/documents/panels159-1792227890664024000，原稿与所有源码标签保留。

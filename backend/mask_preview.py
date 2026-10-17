@@ -77,7 +77,7 @@ class MaskPreview:
 async def dispatch_preview(app, action, args):
     from .uxp_bridge import UxpBridge
     if not isinstance(app.bridge,UxpBridge) or not app.desktop:
-        raise RuntimeError('实时预览需要桌面菜单和 UXP 0.3.25')
+        raise RuntimeError('实时预览需要桌面菜单和 UXP 0.3.26')
     epoch=args.get('menu_epoch')
     if type(epoch) is not int or epoch!=app.desktop.menu_epoch:
         raise ValueError('预览菜单已过期')

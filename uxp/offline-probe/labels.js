@@ -741,13 +741,11 @@ function createShapePaint(ps,session,capture,selectionContext) {
         const key=p=>JSON.stringify([p.kind,p.enabled,p.rgb,p.stops?.map(s=>[s.location,...s.rgb]),p.name,p.width]);
         const fillChanged=key(params.fill)!==key(appliedPaint.fill),strokeChanged=key(params.stroke)!==key(appliedPaint.stroke);
         const paintChanged=fillChanged || strokeChanged;
-        // A legacy shape can have no AGM stroke descriptor at all. A fill-only
-        // shapeStyle set materializes a default stroke; use contentLayer's
-        // native fill setter instead to preserve that absence and its flags.
-        const fillOnly=fillChanged && !strokeChanged && params.fill.kind==='solid' &&
-          params.fill.enabled===appliedPaint.fill.enabled;
-        const to=before.vector&&!fillOnly?{_obj:'shapeStyle'}:build(params.fill,original.fill);
-        if(before.vector && !fillOnly) {
+        // Vector-backed content must use Photoshop's shapeStyle setter.
+        // Direct solidColorLayer writes are unavailable in some real shapes,
+        // including vector masks inherited by a newly created solid fill.
+        const to=before.vector?{_obj:'shapeStyle'}:build(params.fill,original.fill);
+        if(before.vector) {
           if(fillChanged)to.fillContents=build(params.fill,original.fill);
           if(strokeChanged || params.fill.enabled!==appliedPaint.fill.enabled) {
             to.strokeStyle={...clone(appliedRaw.stroke),strokeStyleVersion:2,fillEnabled:params.fill.enabled};
