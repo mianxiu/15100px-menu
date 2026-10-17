@@ -15,7 +15,7 @@ async function main(){
  });
  const ps={constants:{LayerKind:{SOLIDFILL:'solid',NORMAL:'pixel'},DocumentMode:{RGB:'rgb'},BitsPerChannelType:{EIGHT:8,SIXTEEN:16}},
  app:{documents:[doc],activeDocument:doc},action:{batchPlay:async commands=>commands.map(c=>{
-  if(c._obj==='set'){sets++;if(c.to._obj==='shapeStyle'){fill=copy(c.to.fillContents);stroke=copy(c.to.strokeStyle);}else fill=copy(c.to);if(mismatch==='armed')mismatch=true;return {};}
+  if(c._obj==='set'){sets++;if(c.to._obj==='shapeStyle'){if(c.to.fillContents)fill=copy(c.to.fillContents);if(c.to.strokeStyle)stroke=copy(c.to.strokeStyle);}else fill=copy(c.to);if(mismatch==='armed')mismatch=true;return {};}
   gets++;const key=c._target[0]._property;
   if(key==='layerKind')return {layerKind:4};
   if(key==='hasVectorMask')return {hasVectorMask:vector};

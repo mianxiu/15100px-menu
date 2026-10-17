@@ -13,8 +13,7 @@ class MaskPreview:
     def __init__(self, epoch, paint):
         self.epoch = epoch
         self.paint = parameters(paint)
-        if 'mask' not in self.paint:
-            raise ValueError('实时预览仅适用于形状矢量蒙版')
+        self.has_mask = 'mask' in self.paint
         self.revision = self.paint['revision']
         self.phase = 'preview'
         self.seq = 1
@@ -27,7 +26,7 @@ class MaskPreview:
 
     def update(self, paint, commit=False):
         value = parameters(paint)
-        if value['revision'] != self.revision or 'mask' not in value:
+        if value['revision'] != self.revision or ('mask' in value) != self.has_mask:
             raise ValueError('预览草稿身份已改变')
         with self.lock:
             if self.closed or self.phase != 'preview':
@@ -78,7 +77,7 @@ class MaskPreview:
 async def dispatch_preview(app, action, args):
     from .uxp_bridge import UxpBridge
     if not isinstance(app.bridge,UxpBridge) or not app.desktop:
-        raise RuntimeError('实时预览需要桌面菜单和 UXP 0.3.24')
+        raise RuntimeError('实时预览需要桌面菜单和 UXP 0.3.25')
     epoch=args.get('menu_epoch')
     if type(epoch) is not int or epoch!=app.desktop.menu_epoch:
         raise ValueError('预览菜单已过期')

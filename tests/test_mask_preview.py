@@ -55,7 +55,10 @@ class MaskPreviewTests(unittest.TestCase):
         preview=MaskPreview(8,paint())
         for value in ({**paint(),'revision':'other'},paint(1001),paint(0,-1)):
             with self.assertRaises(ValueError):preview.update(value)
-        with self.assertRaises(ValueError):MaskPreview(8,{k:v for k,v in paint().items() if k!='mask'})
+        plain={k:v for k,v in paint().items() if k!='mask'}
+        preview=MaskPreview(8,plain)
+        preview.update({**plain,'fill':{'kind':'solid','enabled':True,'rgb':[99,88,77]}})
+        with self.assertRaises(ValueError):preview.update(paint())
 
     def test_slow_publication_does_not_block_cancel_or_overwrite_terminal(self):
         preview=MaskPreview(8,paint());entered=threading.Event();release=threading.Event()

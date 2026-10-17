@@ -1,8 +1,8 @@
-// Local paint draft; mask sliders use one backend-owned preview transaction.
+// Frame-coalesced paint and mask updates share one rollbackable transaction.
 struct ShapeColorEditor {
     bool available=false,dirty=false,vector=true;
     int channel=0,stop=0;
-    Json original,draft,patterns;
+    Json original,draft,patterns,lastPreview;
     std::array<Json,2> modes;
     char hexInput[8]{};
     std::string hexKey;
@@ -13,6 +13,7 @@ struct ShapeColorEditor {
     float gradientDragOffset=0;
     void prepare(const Json& data) {
         maskPreviewStarted=false;
+        lastPreview=Json();
         available=false;dirty=false;bounds=copyBounds=gradientBounds=featherBounds=densityBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
         if(!data.value("available",false))return;
         if(!data.at("revision").is_string() || !data.at("fill").is_object() || !data.at("stroke").is_object())return;
@@ -56,6 +57,7 @@ static size_t testedShapeGrants=0;
 static std::vector<Json> testedMaskEvents;
 static void emitMaskPreview(bool commit=false) {
     maskPreviewStarted=true;
+    shapeEditor.lastPreview=shapeEditor.draft;
     Json event={{"type","action"},{"action",commit?"mask.preview.commit":"mask.preview.update"},
         {"session",menuEpoch},{"params",shapeEditor.draft}};
     if(selfTest){testedMaskEvents.push_back(event);return;}
@@ -286,11 +288,14 @@ static void drawShapeEditor() {
             ImGui::SameLine();ImGui::SetCursorScreenPos({at.x+labelWidth+gap,at.y});
             float value=shapeEditor.draft["mask"][key].get<float>();ImGui::SetNextItemWidth(inner-labelWidth-gap);
             if(ImGui::SliderFloat(id,&value,0.f,maximum,format,flags|ImGuiSliderFlags_AlwaysClamp)){
-                shapeEditor.draft["mask"][key]=value;shapeEditor.changed();emitMaskPreview();}
+                shapeEditor.draft["mask"][key]=value;shapeEditor.changed();}
             const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();bounds={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
         };
         slider("羽化","##mask-feather","feather",1000.f,"%.1f px",ImGuiSliderFlags_Logarithmic,shapeEditor.featherBounds);
         slider("密度","##mask-density","density",100.f,"%.1f%%",ImGuiSliderFlags_None,shapeEditor.densityBounds);
     }
+    // No writes for channel/stop selection or copying; one latest draft per frame.
+    if(!pieAnimating && shapeEditor.valid() && (shapeEditor.dirty || maskPreviewStarted) &&
+       shapeEditor.draft!=shapeEditor.lastPreview)emitMaskPreview();
     ImGui::EndDisabled();ImGui::EndChild();ImGui::PopStyleVar(6);ImGui::PopFont();ImGui::PopStyleColor();ImGui::SetCursorScreenPos(saved);
 }

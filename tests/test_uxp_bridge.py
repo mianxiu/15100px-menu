@@ -117,6 +117,11 @@ class UxpDiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'0.3.20'):
             self.transport.call('set_label',command='shape.paint',paint={'mask':{'feather':0,'density':100}},target={'session':'s'})
         self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
+        heartbeat['probe_version']='0.3.24'
+        (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+        with self.assertRaisesRegex(RuntimeError,'0.3.25'):
+            self.transport.call('set_label',preview=object(),command='shape.preview',target={'session':'s'})
+        self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
     def test_smart_conversion_rejects_old_plugin_before_publication(self):
         folder=self.heartbeat(24)
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.17',session='s')

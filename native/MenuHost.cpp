@@ -66,7 +66,7 @@ static ULONGLONG taskStarted=0;
 static std::string taskName,taskError,taskRecovery;
 static int taskQueueCount=0;
 static std::string taskStatus() {
-    if(maskPreviewStarted && !taskBusy)return "预览中：羽化／密度";
+    if(maskPreviewStarted && !taskBusy)return "预览中：填充／描边／蒙版";
     if (!taskRecovery.empty()) return taskRecovery;
     if (taskBusy) return "执行中："+(taskName.empty()?std::string("Photoshop 操作"):taskName)+
         " · "+std::to_string((GetTickCount64()-taskStarted)/1000)+" 秒"+
@@ -2458,6 +2458,21 @@ int main() {
                 renderedHit=100;finishHold(paintPoint,true,&paintPoint);
                 if(testedActions.back()!="hide")throw std::runtime_error("Unchanged paint submitted");
                 auto resetShape=[&]{shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;};
+                resetShape();const auto colorEvents=testedMaskEvents.size();
+                shapeEditor.current()["rgb"]={91,82,73};shapeEditor.changed();numberFrame(ImGuiKey_None,false);
+                if(testedMaskEvents.size()!=colorEvents+1 || !maskPreviewStarted || !shapeEditor.ready() || canExecute() ||
+                   testedMaskEvents.back()["params"]["fill"]["rgb"]!=Json({91,82,73}))
+                    throw std::runtime_error("Fill color must preview through its owning editor");
+                shapeEditor.channel=1;copyShapeHex(shapeEditor.current()["rgb"]);numberFrame(ImGuiKey_None,false);
+                if(testedMaskEvents.size()!=colorEvents+1)throw std::runtime_error("Channel selection or copying wrote Photoshop");
+                shapeEditor.current()["rgb"]={19,28,37};shapeEditor.current()["enabled"]=true;
+                shapeEditor.draft["mask"]["density"]=61;shapeEditor.changed();numberFrame(ImGuiKey_None,false);
+                if(testedMaskEvents.size()!=colorEvents+2 || testedMaskEvents.back()["params"]!=shapeEditor.draft)
+                    throw std::runtime_error("Stroke and mask changes must coalesce to one frame payload");
+                renderedHit=100;finishHold(paintPoint,true,&paintPoint);
+                if(testedMaskEvents.back()["action"]!="mask.preview.commit" || testedShapePaint!=shapeEditor.draft)
+                    throw std::runtime_error("Color preview confirmation lost its final draft");
+                testedActions.resize(shapeCount);
                 resetShape();shapeEditor.current()["rgb"]={200,30,10};shapeEditor.changed();
                 renderedHit=100;finishHold(paintPoint,true,&paintPoint);auto paintSubmitted=testedActions.size();finishHold(paintPoint);
                 if(testedActions.back()!="shape.paint" || testedShapePaint["fill"]["rgb"]!=Json({200,30,10}) || testedActions.size()!=paintSubmitted)
