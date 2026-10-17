@@ -58,6 +58,7 @@ static bool allowed=false,capable=false,rightHide=false;
 static std::string document="连接中…",notice;
 static int renderedHit=-1,pendingHit=-1;
 static bool taskBusy=false,taskFailed=false,taskHasResult=false;
+static bool maskPreviewStarted=false;
 static bool busyFeedback=false;
 static ULONGLONG feedbackStarted=0;
 static ULONGLONG completionStarted=0;
@@ -65,6 +66,7 @@ static ULONGLONG taskStarted=0;
 static std::string taskName,taskError,taskRecovery;
 static int taskQueueCount=0;
 static std::string taskStatus() {
+    if(maskPreviewStarted && !taskBusy)return "预览中：羽化／密度";
     if (!taskRecovery.empty()) return taskRecovery;
     if (taskBusy) return "执行中："+(taskName.empty()?std::string("Photoshop 操作"):taskName)+
         " · "+std::to_string((GetTickCount64()-taskStarted)/1000)+" 秒"+
@@ -204,7 +206,7 @@ static const char* rowAction(int i) {return panelKind==4?"document.new":actions[
 static const char* rowLabel(int i) {return panelKind==4?"新建文档":i==2?"置顶":i==3?"置底":i==0 && layerAware && layerKind!=3?"选择相邻图层":labels[i];}
 static const char* rowShortcut(int i) {return panelKind==4?"Ctrl + N":shortcuts[i].c_str();}
 static bool inputFocused=false;
-static bool canExecute() {return (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
+static bool canExecute() {return !maskPreviewStarted && (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
 static bool capsEnabled(int i) {
     if(i>=capsCount())return false;
     if(!capsReady || !canExecute() || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
@@ -437,6 +439,7 @@ static std::string shortcut(const std::string& raw) {
 }
 static void accept(const Json& event) {
     std::string type=event.value("type","");
+    if(type=="mask.preview") {maskPreviewStarted=event.value("active",false);return;}
     if (type=="diagnostic.progress") {DiagnosticHint::update(event);return;}
     if (type=="document") {
         if (event.contains("name") && event["name"].is_string()) document=event["name"].get<std::string>();
@@ -502,7 +505,7 @@ static bool quickDividerAt(int i,POINT point) {
         (i!=2 && i!=6 && point.x>=quickRows[i].right-scale);
 }
 static int holdActionAt(POINT point) {
-    if (!holdMode || !pieReady || holdFinished || pieAnimating || !canExecute()) return -1;
+    if (!holdMode || !pieReady || holdFinished || pieAnimating || (!canExecute() && !shapeEditor.ready())) return -1;
     float dx=point.x-pieCenter.x,dy=point.y-pieCenter.y;
     float ox=static_cast<float>(point.x-holdOrigin.x),oy=static_cast<float>(point.y-holdOrigin.y);
     // Edge clamping may put the invocation point on top of a swatch. Protect
@@ -2394,10 +2397,15 @@ int main() {
                 if(!shapeEditor.dirty || shapeEditor.draft["mask"]["feather"].get<float>()<=0 ||
                     shapeEditor.draft["mask"]["density"].get<float>()>=100 || testedActions.size()!=shapeCount)
                     throw std::runtime_error("Mask sliders must change the local draft without submitting");
+                if(!maskPreviewStarted || !shapeEditor.ready() || canExecute() || capsEnabled(0))
+                    throw std::runtime_error("Preview must preserve only its owning editor, rejecting other actions");
                 POINT maskPoint={(densityRect.left+densityRect.right)/2,(densityRect.top+densityRect.bottom)/2};
                 const auto maskDraft=shapeEditor.draft;renderedHit=100;finishHold(maskPoint,true,&maskPoint);const auto maskSubmitted=testedActions.size();finishHold(maskPoint);
                 if(testedShapePaint!=maskDraft || testedActions.back()!="shape.paint" || testedActions.size()!=maskSubmitted)
                     throw std::runtime_error("Mask slider release must submit its exact draft once");
+                if(testedMaskEvents.size()<3 || testedMaskEvents.front()["action"]!="mask.preview.update" ||
+                   testedMaskEvents.back()["action"]!="mask.preview.commit" || testedMaskEvents.back()["params"]!=maskDraft)
+                    throw std::runtime_error("Mask preview must stream updates then commit its exact final draft");
                 testedActions.resize(shapeCount);shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;
                 shapeEditor.mode(1);shapeEditor.mode(2);shapeEditor.mode(0);
                 if(testedActions.size()!=shapeCount || shapeEditor.dirty)throw std::runtime_error("Local type switching wrote or lost original draft");

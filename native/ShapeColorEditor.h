@@ -1,4 +1,4 @@
-// Local paint draft only. The renderer never communicates with Photoshop.
+// Local paint draft; mask sliders use one backend-owned preview transaction.
 struct ShapeColorEditor {
     bool available=false,dirty=false,vector=true;
     int channel=0,stop=0;
@@ -12,6 +12,7 @@ struct ShapeColorEditor {
     bool gradientDragging=false;
     float gradientDragOffset=0;
     void prepare(const Json& data) {
+        maskPreviewStarted=false;
         available=false;dirty=false;bounds=copyBounds=gradientBounds=featherBounds=densityBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
         if(!data.value("available",false))return;
         if(!data.at("revision").is_string() || !data.at("fill").is_object() || !data.at("stroke").is_object())return;
@@ -24,7 +25,8 @@ struct ShapeColorEditor {
     }
     Json& current(){return draft.at(channel?"stroke":"fill");}
     bool ready() const {return available && holdMode && panelKind==2 && layerAware && layerKind==6 && layerCount==1
-        && !layerLocked && !layerBackground && !inputFocused && canExecute() && !holdFinished;}
+        && !layerLocked && !layerBackground && !inputFocused
+        && (canExecute() || maskPreviewStarted && allowed && !taskBusy && !busyFeedback) && !holdFinished;}
     void changed(){dirty=draft!=original;}
     void mode(int next) {
         const char* names[]={"solid","gradient","pattern"};
@@ -50,6 +52,14 @@ struct ShapeColorEditor {
 };
 static ShapeColorEditor shapeEditor;
 static Json testedShapePaint;
+static std::vector<Json> testedMaskEvents;
+static void emitMaskPreview(bool commit=false) {
+    maskPreviewStarted=true;
+    Json event={{"type","action"},{"action",commit?"mask.preview.commit":"mask.preview.update"},
+        {"session",menuEpoch},{"params",shapeEditor.draft}};
+    if(selfTest){testedMaskEvents.push_back(event);return;}
+    std::cout<<event.dump()<<std::endl;
+}
 static std::string testedCopiedHex;
 static std::string shapeHex(const Json& rgb) {
     const char* digits="0123456789ABCDEF";std::string result="#";
@@ -74,7 +84,12 @@ static void copyShapeHex(const Json& rgb) {
     shapeEditor.copiedAt=GetTickCount64();
 }
 static void commitShapeDraft() {
-    if(!shapeEditor.ready() || !shapeEditor.dirty || !shapeEditor.valid()){send("hide");return;}
+    if(!shapeEditor.ready() || (!shapeEditor.dirty && !maskPreviewStarted) || !shapeEditor.valid()){send("hide");return;}
+    if(maskPreviewStarted){
+        emitMaskPreview(true);
+        if(selfTest){testedActions.emplace_back("shape.paint");testedShapePaint=shapeEditor.draft;}
+        return;
+    }
     if(selfTest){testedActions.emplace_back("shape.paint");testedShapePaint=shapeEditor.draft;return;}
     if(backendParent)AllowSetForegroundWindow(backendParent);
     std::cout<<Json{{"type","action"},{"action","shape.paint"},{"session",menuEpoch},{"params",shapeEditor.draft}}.dump()<<std::endl;
@@ -266,7 +281,8 @@ static void drawShapeEditor() {
             ImGui::AlignTextToFramePadding();ImGui::TextUnformatted(label);
             ImGui::SameLine();ImGui::SetCursorScreenPos({at.x+labelWidth+gap,at.y});
             float value=shapeEditor.draft["mask"][key].get<float>();ImGui::SetNextItemWidth(inner-labelWidth-gap);
-            if(ImGui::SliderFloat(id,&value,0.f,maximum,format,flags|ImGuiSliderFlags_AlwaysClamp)){shapeEditor.draft["mask"][key]=value;shapeEditor.changed();}
+            if(ImGui::SliderFloat(id,&value,0.f,maximum,format,flags|ImGuiSliderFlags_AlwaysClamp)){
+                shapeEditor.draft["mask"][key]=value;shapeEditor.changed();emitMaskPreview();}
             const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();bounds={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
         };
         slider("羽化","##mask-feather","feather",1000.f,"%.1f px",ImGuiSliderFlags_Logarithmic,shapeEditor.featherBounds);

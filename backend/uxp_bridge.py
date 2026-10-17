@@ -73,7 +73,7 @@ class UxpTransport:
             raise RuntimeError('UXP 未就绪，请启动 Photoshop 24.0.1 或更新版本')
         return candidates[0]
 
-    def call(self, operation, **payload):
+    def call(self, operation, preview=None, **payload):
         import msvcrt
         if self.pending.value or self.pending.error:raise RuntimeError('上一项 UXP 结果待核对，未提交新请求')
         token=json.loads(self.config.read_text('utf-8-sig'))['token']
@@ -96,27 +96,31 @@ class UxpTransport:
                     raise RuntimeError('请更新并重新加载 UXP 0.3.18，以支持转换智能对象；未提交操作')
                 if payload.get('command')=='shape.paint' and 'mask' in payload.get('paint',{}) and version(heartbeat.get('probe_version'))<(0,3,20):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.20，以支持形状羽化／密度；未提交操作')
+                if payload.get('command')=='shape.preview' and (preview is None or version(heartbeat.get('probe_version'))<(0,3,24)):
+                    raise RuntimeError('请更新并重新加载 UXP 0.3.24，以支持蒙版实时预览；未提交操作')
                 request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
                 encoded=json.dumps(request)
                 if len(encoded.encode('utf-8'))>4096:raise ValueError('UXP 请求超出本地协议长度，未提交操作')
                 temporary=folder/(identity+'.tmp')
                 if modifying:self.pending.begin(request,folder,self.task_id)
                 try:
+                    if preview is not None:preview.bind(folder,request)
                     temporary.write_text(encoded,'utf-8');publish_request(temporary,folder/'probe-request.json')
                 except Exception:
                     if modifying:self.pending.clear()
                     raise
-                interactive=operation=='set_label' and payload.get('command')=='editStyle'
+                interactive=operation=='set_label' and payload.get('command') in ('editStyle','shape.preview')
                 deadline=None if interactive else time.monotonic()+self.response_timeout
                 checked=0
                 while deadline is None or time.monotonic()<deadline:
                     if interactive and time.monotonic()-checked>=1:
                         checked=time.monotonic()
                         from .uxp_management import photoshop_running
-                        if not photoshop_running():raise UxpResultUnknown('Photoshop已退出，样式结果待核对；不重发')
+                        operation_name='预览' if payload.get('command')=='shape.preview' else '样式'
+                        if not photoshop_running():raise UxpResultUnknown('Photoshop已退出，'+operation_name+'结果待核对；不重发')
                         try:
                             current=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
-                            if current.get('session')!=request['session']:raise UxpResultUnknown('PS会话已改变，样式结果待核对；不重发')
+                            if current.get('session')!=request['session']:raise UxpResultUnknown('PS会话已改变，'+operation_name+'结果待核对；不重发')
                         except (OSError,ValueError):pass
                     try:
                         response=self.pending.read_result(allow_unknown=True) if modifying else json.loads((folder/'probe-response.json').read_text('utf-8-sig'))
@@ -326,20 +330,20 @@ class UxpBridge(PhotoshopBridge):
             return await self._execute_task(action,before_dispatch,capture=lambda:self._bind_menu_target(frozen))
         return await super().execute(action,before_dispatch,enqueue=False)
 
-    async def execute_shape(self, params, before_dispatch=None, frozen_target=None):
+    async def execute_shape(self, params, before_dispatch=None, frozen_target=None, preview=None):
         from .shape_paint import parameters
         params=parameters(params)
         if self.execution_guard:self.execution_guard()
         def write(action):
             self.transport.task_id=self._active_task_id;self._uxp_worker_active=True
             try:
-                response=self.transport.call('set_label',command='shape.paint',target=self._captured_target,paint=params)
+                response=self.transport.call('set_label',preview=preview,command='shape.preview' if preview else 'shape.paint',target=self._captured_target,paint=params)
                 value=validate(response.get('layer_context'),self._captured_app)
                 self.layer_context=value if fresh(value) else unavailable()
                 return json.dumps(response['result'])
             finally:self._uxp_worker_active=False
         capture=(lambda:self._bind_menu_target(frozen_target)) if frozen_target is not None else self._capture_target
-        return await self._execute_task('shape.paint',before_dispatch,capture=capture,execute=write)
+        return await self._execute_task('shape.paint',before_dispatch,capture=capture,execute=write,interactive=preview is not None)
 
     def _capture_new_target(self):
         if self.document_guard:self.document_guard()

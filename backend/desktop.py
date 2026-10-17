@@ -323,8 +323,16 @@ class Desktop:
                 self.menu_ready.clear()
 
     def event(self, event):
-        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress'):
+        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress','mask.preview'):
             return
+        preview=getattr(self,'mask_preview',None)
+        if preview and preview.epoch==self.menu_epoch and preview.phase=='preview':
+            # Only the owning editor remains interactive. Other consumers still
+            # receive the real busy/pending state and cannot submit operations.
+            if event.get('type')=='status':
+                event={**event,'data':{**event['data'],'photoshop':{**event['data']['photoshop'],
+                    'busy':False,'uxp_recovery':{},'mask_preview':True}}}
+            elif event.get('type')=='operation':event={**event,'busy':False}
         with self.menu_lock:
             if self.process and self.process.poll() is None:
                 try:
@@ -721,6 +729,8 @@ class Desktop:
 
     @window_transition
     def hide(self, restore=True):
+        preview=getattr(self,'mask_preview',None)
+        if preview:preview.cancel()
         # Hiding the window can activate a different application's window.
         # Capture ownership before ShowWindow, including ImGui submenus.
         foreground = self.gui.GetForegroundWindow()

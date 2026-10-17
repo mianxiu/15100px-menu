@@ -1,0 +1,84 @@
+const assert=require('node:assert/strict');
+const create=require('../uxp/offline-probe/labels.js');
+const copy=v=>JSON.parse(JSON.stringify(v));
+async function fixture(){
+ const layer={id:30,kind:'solid',parent:null,vectorMaskFeather:0,vectorMaskDensity:100};
+ const doc={id:12,activeLayers:[layer],layers:[layer],mode:'rgb',bitsPerChannel:8,resolution:72};
+ let fill={_obj:'solidColorLayer',color:{_obj:'RGBColor',red:12,grain:34,blue:56}};
+ let stroke={_obj:'strokeStyle',strokeStyleVersion:2,strokeEnabled:false,fillEnabled:true,
+  strokeStyleLineWidth:{_unit:'pixelsUnit',_value:1},strokeStyleContent:{_obj:'solidColorLayer',color:{_obj:'RGBColor',red:0,grain:0,blue:0}}};
+ let histories=0,commits=0,rollbacks=0,sets=0,saved,failRollback=false;
+ const ps={constants:{LayerKind:{SOLIDFILL:'solid'},DocumentMode:{RGB:'rgb'},BitsPerChannelType:{EIGHT:8,SIXTEEN:16}},
+ app:{documents:[doc],activeDocument:doc},action:{batchPlay:async cs=>cs.map(c=>{
+  if(c._obj==='set'){sets++;fill=copy(c.to.fillContents);stroke=copy(c.to.strokeStyle);return {};}
+  switch(c._target[0]._property){
+   case 'layerKind':return {layerKind:4};case 'hasVectorMask':return {hasVectorMask:true};
+   case 'adjustment':return {adjustment:[copy(fill)]};case 'AGMStrokeStyleInfo':return {AGMStrokeStyleInfo:copy(stroke)};
+   case 'presetManager':return {presetManager:[]};default:throw Error('Unexpected descriptor');
+  }
+ })},core:{executeAsModal:async(fn,options)=>{
+  assert.equal(options.interactive,true);
+  return fn({isCancelled:false,hostControl:{
+   suspendHistory:async()=>{histories++;saved={fill:copy(fill),stroke:copy(stroke),feather:layer.vectorMaskFeather,density:layer.vectorMaskDensity};return 7;},
+   resumeHistory:async(id,commit)=>{assert.equal(id,7);if(commit){commits++;return;}rollbacks++;
+    if(failRollback)throw Error('rollback unavailable');
+    fill=saved.fill;stroke=saved.stroke;layer.vectorMaskFeather=saved.feather;layer.vectorMaskDensity=saved.density;}
+  }});
+ }}};
+ const api=create(ps,'session'),target=await api.capture();
+ const data=await api.observeShape(api.selectionContext(),true);
+ const paint=Object.fromEntries(['revision','fill','stroke','mask'].map(k=>[k,copy(data[k])]));
+ const request={command:'shape.preview',id:'a'.repeat(32),session:'session',token:'local-test',target,
+  expires_at_ms:Date.now()+10000,paint};
+ const packet=(seq,phase='preview',mask={feather:seq,density:70})=>({id:request.id,session:request.session,token:request.token,
+  seq,phase,lease_until_ms:Date.now()+4000,paint:{...copy(paint),mask}});
+ const state=()=>({histories,commits,rollbacks,sets,mask:{feather:layer.vectorMaskFeather,density:layer.vectorMaskDensity}});
+ return {api,request,packet,layer,state,fail:()=>{failRollback=true;},color:()=>fill.color};
+}
+async function main(){
+ let count=0;
+ for(const end of ['commit','cancel']){
+  const f=await fixture(),frames=[f.packet(1),f.packet(90),f.packet(91,end,{feather:12.5,density:40})],seen=[];
+  const result=await f.api.setLabel(f.request,{read:async()=>frames.shift(),applied:async v=>{
+   seen.push(v.seq);assert.deepEqual(v.mask,f.state().mask);assert.equal(f.state().commits,0);
+  }});
+  assert.deepEqual(seen,[1,90]);assert.equal(f.state().histories,1);assert.equal(f.state().sets,0);
+  if(end==='commit'){assert.equal(result.verified,true);assert.equal(f.state().commits,1);assert.deepEqual(f.state().mask,{feather:12.5,density:40});}
+  else {assert.equal(result.rollback_verified,true);assert.equal(f.state().commits,0);assert.deepEqual(f.state().mask,{feather:0,density:100});}
+  count++;
+ }
+ {const f=await fixture(),a=f.packet(1),last=f.packet(2,'commit',{feather:0,density:100});
+  last.paint.fill.rgb=[99,88,77];const frames=[a,last];
+  await f.api.setLabel(f.request,{read:async()=>frames.shift()});
+  assert.deepEqual(f.state().mask,{feather:0,density:100});assert.equal(f.state().commits,1);
+  assert.deepEqual(f.color(),{_obj:'RGBColor',red:99,grain:88,blue:77});count++;}
+ for(const problem of ['identity','session','token','revision','sequence','lease','mask','target','rollback']){
+  const f=await fixture(),first=f.packet(10),bad=f.packet(11),frames=[first,bad];
+  if(problem==='identity')bad.id='b'.repeat(32);
+  if(problem==='session')bad.session='new-session';
+  if(problem==='token')bad.token='other';
+  if(problem==='revision')bad.paint.revision='stale';
+  if(problem==='sequence')bad.seq=9;
+  if(problem==='lease')bad.lease_until_ms=Date.now()+60000;
+  if(problem==='mask')bad.paint.mask.feather=1001;
+  if(problem==='rollback'){bad.phase='cancel';f.fail();}
+  await assert.rejects(f.api.setLabel(f.request,{read:async()=>frames.shift(),applied:async()=>{
+   if(problem==='target')f.layer.id=31;
+  }}),e=>problem==='rollback'?e.resultUnknown===true:true);
+  assert.equal(f.state().commits,0);assert.ok(f.state().rollbacks>=1);count++;
+ }
+ {const f=await fixture(),p=f.packet(1);p.lease_until_ms=Date.now()-1;
+  const result=await f.api.setLabel(f.request,{read:async()=>p});assert.equal(result.cancelled,true);
+  assert.equal(f.state().commits,0);assert.equal(f.state().rollbacks,1);count++;}
+ {const f=await fixture();f.request.paint.revision='stale';
+  await assert.rejects(f.api.setLabel(f.request,{read:async()=>f.packet(1)}));assert.equal(f.state().histories,0);count++;}
+ {const f=await fixture(),clock=Date.now;let offset=0,frame=0;
+  Date.now=()=>clock()+offset;
+  try {
+   const result=await f.api.setLabel(f.request,{read:async()=>f.packet(++frame,frame===1?'preview':'commit'),
+    applied:async()=>{offset=5000;}});
+   assert.equal(result.verified,true);assert.equal(f.state().commits,1);count++;
+  }finally{Date.now=clock;}}
+ console.log(`PASS mask preview: ${count} transaction cases; live readback, skipped obsolete values, final value, rollback, one history, identity and unknown guards`);
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

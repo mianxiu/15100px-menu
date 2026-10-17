@@ -1,6 +1,6 @@
 # 目录与本地归档
 
-2026-10-17同步：当前实际程序与dist为v0.4.155／内置UXP0.3.23。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
+2026-10-17同步：本轮156／UXP24实时预览交付记录见下方；此前155为历史时点。源码、历史实验、当前发行物和本地资料分别存放；下面明确标为2026-10-12的整理数据属于历史时点。
 
 | 路径 | 用途 |
 | --- | --- |
@@ -54,3 +54,5 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 154：副屏维护入口tools/test-quiet-ps.py与quiet_ps_session.py；使用和限制见docs/QUIET-TESTING.md，完成恢复见docs/MENU-RECOVERY.md及Wiki。153回退保留于.local/recovery/releases/0.4.153-before154和.local/archive/dist/v0.4.153-before154。实体键鼠与视频掉帧仍单列，安全暂停不是完整测试通过。
 
 155：新增frontend/src/shortcuts.mjs及对应测试，使用说明docs/SHORTCUTS.md／Wiki；原生组件与UXP23不变。154回退位于.local/recovery/releases/0.4.154-before155和.local/archive/dist/v0.4.154-before155；dist当前仅155发行物。
+
+156：backend/mask_preview.py为单请求控制快照发布与会话生命周期；tools/verify-mask-preview.py为自建文档受限CPU／正常对照，文档docs/MASK-PREVIEW.md／Wiki。私有证据在.runtime/mask-preview-live-*，不公开本机凭据。正式运行入口与发行物仍分别核验，155回退预留于.local/recovery/releases/0.4.155-before156和.local/archive/dist/v0.4.155-before156。

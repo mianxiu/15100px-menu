@@ -453,6 +453,9 @@ class Application(web.Application):
                     raise
                 finally:
                     await self.broadcast({'type':'operation','busy':self.bridge.busy})
+        if action in ('mask.preview.update','mask.preview.commit'):
+            from .mask_preview import dispatch_preview
+            return await dispatch_preview(self,action,args)
         if action == "action.execute":
             name = args.get("name")
             if name=='document.recent':raise ValueError('请从首页最近预设列表选择尺寸')
@@ -640,6 +643,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             mapping = {"toggle": "panel.toggle", "context": "panel.context", "open": "panel.open", "hide": "panel.hide", "dismiss": "panel.dismiss", "hold_begin": "panel.hold_begin", "hold_release": "panel.hold_release", "hold_cancel": "panel.hold_cancel", "control": "control.open", "quit": "service.quit"}
             mapping['hold_pin'] = 'panel.hold_pin'
             mapping['document.new'] = 'document.new'
+            mapping.update({name:name for name in ('mask.preview.update','mask.preview.commit')})
             if action.startswith('document.recent.'):
                 event_args['params']={'preset_id':action.removeprefix('document.recent.')}
                 action='document.recent'
@@ -647,6 +651,8 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             await app.dispatch(mapping.get(action, "action.execute"), event_args if action in mapping else {**event_args,"name": action})
         except Exception as exc:
             logging.exception("Desktop action failed")
+            if action in ('mask.preview.update','mask.preview.commit') and not getattr(app,'_mask_preview',None) and app.desktop:
+                app.desktop.event({'type':'mask.preview','active':False})
             await app.broadcast({"type": "notice", "scope": "interaction", "ok": False, "message": str(exc)})
     def notify(action):
         loop.call_soon_threadsafe(lambda: asyncio.create_task(notification(action)))

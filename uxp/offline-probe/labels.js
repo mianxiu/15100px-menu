@@ -270,9 +270,9 @@ module.exports = function createLabels(ps, session) {
     const ids=Array.from(doc.activeLayers,l=>l.id).sort((a,b)=>a-b);
     return ps.app.activeDocument.id===doc.id && doc.id===value.document_id && ids.join(',')===value.layer_ids.join(',');
   }
-  async function setLabel(request) {
+  async function setLabel(request,previewIO=null) {
     if(caps.commands.includes(request.command))return caps.execute(request);
-    if(request.command==='shape.paint')return shapePaint.apply(request);
+    if(request.command==='shape.paint' || request.command==='shape.preview')return shapePaint.apply(request,previewIO);
     const command = request.command || 'label';
     const quickIndex=quickCommands.indexOf(command);
     if (!['label','select','moveToTop','moveToBottom'].includes(command) && quickIndex<0) throw Error('Unknown command');
@@ -561,7 +561,7 @@ module.exports = function createLabels(ps, session) {
 };
 
 
-// Cached vector-paint metadata and one-transaction writes. No JSX or previews.
+// Cached vector-paint metadata and request-bound, one-history preview writes.
 function createShapePaint(ps,session,capture,selectionContext) {
   let cache=null,serial=0,catalog=[],catalogAt=0,catalogInfo={};
   const clone=value=>JSON.parse(JSON.stringify(value));
@@ -667,8 +667,7 @@ function createShapePaint(ps,session,capture,selectionContext) {
     if(actual.kind==='pattern')return actual.name===wanted.name;
     return actual.stops.length===wanted.stops.length && actual.stops.every((s,i)=>s.location===wanted.stops[i].location && close(s.rgb,wanted.stops[i].rgb));
   }
-  async function apply(request) {
-    const params=request.paint;
+  function validateParams(params) {
     if(!params || typeof params.revision!=='string' || params.revision.length>128)throw Error('Missing shape revision');
     validatePaint(params.fill);validatePaint(params.stroke);
     if(typeof params.stroke.width!=='number' || !Number.isFinite(params.stroke.width) || params.stroke.width<0 || params.stroke.width>1000)throw Error('Invalid stroke width');
@@ -676,36 +675,101 @@ function createShapePaint(ps,session,capture,selectionContext) {
       Object.keys(params.mask).sort().join(',')!=='density,feather' ||
       typeof params.mask.feather!=='number' || !Number.isFinite(params.mask.feather) || params.mask.feather<0 || params.mask.feather>1000 ||
       typeof params.mask.density!=='number' || !Number.isFinite(params.mask.density) || params.mask.density<0 || params.mask.density>100))throw Error('Invalid vector mask');
+  }
+  async function previewMask(context,request,before,doc,anchor,io) {
+    if(!io || typeof io.read!=='function')throw Error('Missing preview mailbox');
+    let seq=0,lease=Date.now()+4000,applied=clone(before.mask),updates=0,maxWriteMs=0;
+    const close=(a,b)=>Math.abs(a.feather-b.feather)<=.01 && Math.abs(a.density-b.density)<=100/255+.001;
+    const read=()=>({feather:anchor.vectorMaskFeather,density:anchor.vectorMaskDensity});
+    const target=()=>ps.app.activeDocument.id===doc.id && doc.activeLayers.length===1 &&
+      doc.activeLayers[0].id===anchor.id && !anchor.allLocked;
+    while(true) {
+      if(context.isCancelled)throw Error('Photoshop cancelled preview');
+      const packet=await io.read(),now=Date.now();
+      if(packet) {
+        if(packet.id!==request.id || packet.session!==request.session || packet.token!==request.token ||
+          !Number.isSafeInteger(packet.seq) || packet.seq<seq ||
+          !Number.isFinite(packet.lease_until_ms) || packet.lease_until_ms>now+5000 ||
+          !['preview','commit','cancel'].includes(packet.phase))throw Error('Invalid preview identity or lease');
+        lease=packet.lease_until_ms;
+        if(lease<now)return {cancelled:true,updates,max_write_ms:maxWriteMs,reason:'lease-expired'};
+        if(!target())throw Error('Preview target changed');
+        if(packet.phase==='cancel')return {cancelled:true,updates,max_write_ms:maxWriteMs,reason:'cancel'};
+        validateParams(packet.paint);
+        if(packet.paint.revision!==before.revision || !packet.paint.mask)throw Error('Preview revision changed');
+        if(!close(read(),applied))throw Error('Vector mask changed outside preview');
+        if(packet.phase==='commit')return {paint:packet.paint,updates,max_write_ms:maxWriteMs};
+        if(packet.seq>seq) {
+          const wanted=packet.paint.mask,started=Date.now();
+          if(wanted.feather!==applied.feather)anchor.vectorMaskFeather=wanted.feather;
+          if(wanted.density!==applied.density)anchor.vectorMaskDensity=wanted.density;
+          applied=read();
+          if(!target() || !close(applied,wanted))throw Error('Preview mask readback mismatch');
+          updates++;maxWriteMs=Math.max(maxWriteMs,Date.now()-started);seq=packet.seq;
+          if(io.applied)await io.applied({seq,mask:applied,updates,max_write_ms:maxWriteMs});
+        }
+      }
+      // A slow Photoshop redraw may outlast the previously read lease. Read
+      // the current mailbox before expiring a still-renewed live session.
+      if(!packet && Date.now()>lease)return {cancelled:true,updates,max_write_ms:maxWriteMs,reason:'lease-expired'};
+      await new Promise(resolve=>setTimeout(resolve,40));
+    }
+  }
+  async function apply(request,previewIO=null) {
+    let params=request.paint;validateParams(params);
+    const preview=request.command==='shape.preview';
     return ps.core.executeAsModal(async context=>{
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
       const actual=await capture(),expected=request.target;
       if(expected?.session!==session || actual.document_id!==expected.document_id || actual.active_layer_id!==expected.active_layer_id || actual.layer_ids.join(',')!==expected.layer_ids?.join(','))throw Error('Document or layer target changed');
       const eligibility=selectionContext(),before=await observe(eligibility,true);
       if(!before.available || before.revision!==params.revision)throw Error('填充／描边已改变，请重新打开菜单；本次未修改');
-      if(params.mask && (!before.vector || !before.mask))throw Error('当前图层不支持矢量蒙版羽化／密度；本次未修改');
+      if((preview || params.mask) && (!before.vector || !before.mask))throw Error('当前图层不支持矢量蒙版羽化／密度；本次未修改');
       if(!before.vector && params.fill.kind!==before.fill.kind)throw Error('普通填充层保持PS原生类型；本次未修改');
       if(!before.vector && (!params.fill.enabled || params.stroke.kind!==before.stroke.kind || params.stroke.enabled!==before.stroke.enabled
           || params.stroke.width!==before.stroke.width || JSON.stringify(params.stroke.rgb)!==JSON.stringify(before.stroke.rgb)))
         throw Error('普通填充层不支持形状描边或禁用填充；本次未修改');
       const original=cache.raw,doc=ps.app.activeDocument,anchor=doc.activeLayers[0];
-      const paintKey=p=>JSON.stringify([p.kind,p.enabled,p.rgb,p.stops?.map(s=>[s.location,...s.rgb]),p.name,p.width]);
-      const paintChanged=paintKey(params.fill)!==paintKey(before.fill) || paintKey(params.stroke)!==paintKey(before.stroke);
       const parent=anchor.parent,parentId=parent?.id ?? null,order=Array.from(parent?parent.layers:doc.layers,l=>l.id);
-      const to=before.vector?{_obj:'shapeStyle',fillContents:build(params.fill,original.fill),strokeStyle:{...clone(original.stroke),
-        strokeStyleVersion:2,fillEnabled:params.fill.enabled,strokeEnabled:params.stroke.enabled,
-        strokeStyleLineWidth:{_unit:'pixelsUnit',_value:params.stroke.width},
-        strokeStyleContent:build(params.stroke,original.stroke.strokeStyleContent)}}:build(params.fill,original.fill);
+      const preparePaint=()=>{
+        const key=p=>JSON.stringify([p.kind,p.enabled,p.rgb,p.stops?.map(s=>[s.location,...s.rgb]),p.name,p.width]);
+        const paintChanged=key(params.fill)!==key(before.fill) || key(params.stroke)!==key(before.stroke);
+        const to=before.vector?{_obj:'shapeStyle',fillContents:build(params.fill,original.fill),strokeStyle:{...clone(original.stroke),
+          strokeStyleVersion:2,fillEnabled:params.fill.enabled,strokeEnabled:params.stroke.enabled,
+          strokeStyleLineWidth:{_unit:'pixelsUnit',_value:params.stroke.width},
+          strokeStyleContent:build(params.stroke,original.stroke.strokeStyleContent)}}:build(params.fill,original.fill);
+        return {paintChanged,to};
+      };
+      let prepared=preparePaint();
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
       const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu shape paint'});
       try {
+        let previewStats=null;
+        if(preview) {
+          const signature=cache.signature;
+          previewStats=await previewMask(context,request,before,doc,anchor,previewIO);
+          if(previewStats.cancelled) {
+            await context.hostControl.resumeHistory(history,false);cache=null;
+            await observe(selectionContext(),true);
+            if(!cache || cache.signature!==signature || doc.activeLayers.length!==1 || doc.activeLayers[0].id!==anchor.id ||
+              (anchor.parent?.id ?? null)!==parentId || Array.from(parent?parent.layers:doc.layers,l=>l.id).join(',')!==order.join(','))
+              {const error=Error('预览回滚结果待核对');error.resultUnknown=true;throw error;}
+            return {cancelled:true,verified:true,rollback_verified:true,preview:previewStats,selection_context:selectionContext()};
+          }
+          params=previewStats.paint;
+          prepared=preparePaint();
+        }
+        const {paintChanged,to}=prepared;
+        if(context.isCancelled || !preview && Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+
         if(paintChanged) {
           const [response]=await ps.action.batchPlay([{_obj:'set',_target:[{_ref:'contentLayer',_enum:'ordinal',_value:'targetEnum'}],
             to,_options:{dialogOptions:'dontDisplay'}}],{});
           if(response?._obj==='error')throw Error(response.message || 'Photoshop 拒绝修改形状颜色');
         }
         if(params.mask) {
-          if(params.mask.feather!==before.mask.feather)anchor.vectorMaskFeather=params.mask.feather;
-          if(params.mask.density!==before.mask.density)anchor.vectorMaskDensity=params.mask.density;
+          if(params.mask.feather!==anchor.vectorMaskFeather)anchor.vectorMaskFeather=params.mask.feather;
+          if(params.mask.density!==anchor.vectorMaskDensity)anchor.vectorMaskDensity=params.mask.density;
         }
         const after=await observe(selectionContext(),true);
         const wantedMask=params.mask || before.mask;
@@ -716,13 +780,13 @@ function createShapePaint(ps,session,capture,selectionContext) {
           Array.from(parent?parent.layers:doc.layers,l=>l.id).join(',')!==order.join(','))throw Error('形状颜色／图层身份读回不符，已回滚');
         await context.hostControl.resumeHistory(history,true);
         return {count:1,verified:true,placement_moves:0,fill_kind:after.fill.kind,stroke_kind:after.stroke.kind,
-          ...(after.mask?{mask:after.mask}:{}),selection_context:selectionContext()};
+          ...(after.mask?{mask:after.mask}:{}),...(previewStats?{preview:previewStats}:{}),selection_context:selectionContext()};
       } catch(error) {
         try {await context.hostControl.resumeHistory(history,false);cache=null;}
         catch(_) {error.resultUnknown=true;}
         throw error;
       }
-    },{commandName:'Menu shape paint',timeOut:0});
+    },{commandName:preview?'Menu mask preview':'Menu shape paint',timeOut:0,...(preview?{interactive:true}:{})});
   }
   return {observe,apply};
 }

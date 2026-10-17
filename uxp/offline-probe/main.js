@@ -17,6 +17,7 @@ let pendingResponse=null;
 let completedReceipts=[];
 let lastWorkAt=0;
 let menuRefreshId='';
+let heartbeatValue=null;
 async function refreshMenuContext(folder,now) {
   let request;
   try {request=JSON.parse(await (await folder.getEntry('menu-context-request.json')).read());}catch(_){return false;}
@@ -65,7 +66,8 @@ async function finishResponse(folder,response) {
   completedReceipts.push('result-'+response.id+'.json');
   if(completedReceipts.length>64) {
     const name=completedReceipts.shift();
-    try {await (await folder.getEntry(name)).delete();}catch(_){}
+    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-')])
+      try {await (await folder.getEntry(file)).delete();}catch(_){}
   }
 }
 async function updateLayerContext(folder,now,force=false,prepared=null) {
@@ -116,17 +118,18 @@ async function probe(reason) {
     if(pendingResponse) {await finishResponse(folder,pendingResponse);return;}
     const now = Date.now();
     if (reason !== 'poll' || now - lastHeartbeat >= 5000) {
-      await record(folder, 'probe-last.json', {
+      heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.23', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.24', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         plugin_id: 'com.15100px.menu.offline-probe',
         document_count: app.documents.length, document_name: app.documents.length ? app.activeDocument.title : null, plugin_time_ms: now, phase: 'ready'
-      });
+      };
+      await record(folder,'probe-last.json',heartbeatValue);
       lastHeartbeat = now;
     }
     if(await refreshMenuContext(folder,now))return;
@@ -157,7 +160,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.23', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.24', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -170,7 +173,26 @@ async function probe(reason) {
         if(request.shape_inspect)response.shape_editor=await labels.observeShape(await labels.selectionContextFresh(),true);
       }
       if (request.operation === 'capture') response.target = await labels.capture();
-      if (request.operation === 'set_label') response.result = await labels.setLabel(request);
+      if (request.operation === 'set_label') response.result = await labels.setLabel(request,
+        request.command==='shape.preview'?{
+          read:async()=>{
+            if(heartbeatValue && Date.now()-lastHeartbeat>=1000) {
+              lastHeartbeat=Date.now();
+              await record(folder,'probe-last.json',{...heartbeatValue,phase:'preview',reason:'mask-preview',plugin_time_ms:lastHeartbeat});
+            }
+            try {
+              const raw=await (await folder.getEntry('mask-preview-'+request.id+'.json')).read();
+              if(raw.length>4096)throw Error('Preview mailbox exceeds limit');
+              return JSON.parse(raw);
+            } catch(error) {
+              // A transient filesystem read cannot renew the preview lease.
+              // Expiry rolls back; never restart or replay the operation.
+              return null;
+            }
+          },
+          applied:value=>record(folder,'mask-preview-status-'+request.id+'.json',{
+            id:request.id,session,phase:'preview',...value,plugin_time_ms:Date.now()})
+        }:null);
       if (request.operation === 'new_document') response.result = await labels.createDocument(request);
     } catch (error) { response.phase = 'failed'; response.error = String(error); response.result_unknown=!!error.resultUnknown; }
     response.completed_at_ms = Date.now();
@@ -191,6 +213,7 @@ async function probe(reason) {
     }
     else await record(folder, 'probe-response.json', response);
     lastRequest = request.id;
+    if(request.command==='shape.preview')lastHeartbeat=0;
     // Capture gets a quiet period while its write follows; after modification
     // refresh the new selection on the next poll, without an extra 80ms wait.
     lastWorkAt=modifying?0:Date.now();
