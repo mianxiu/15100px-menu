@@ -60,6 +60,7 @@ static int renderedHit=-1,pendingHit=-1;
 static bool taskBusy=false,taskFailed=false,taskHasResult=false;
 static bool busyFeedback=false;
 static ULONGLONG feedbackStarted=0;
+static ULONGLONG completionStarted=0;
 static ULONGLONG taskStarted=0;
 static std::string taskName,taskError,taskRecovery;
 static int taskQueueCount=0;
@@ -86,6 +87,10 @@ static const char* keywords[]={"select group layers","orange color tag","move to
 static char search[256]{};
 static int selection=0;
 static bool holdMode=false;
+static bool completionReady() {
+    return busyFeedback && !taskBusy && taskHasResult && !taskFailed && taskRecovery.empty() &&
+        completionStarted && GetTickCount64()-completionStarted>=450 && holdMode;
+}
 static std::array<RECT,4> holdRows{};
 static POINT holdOrigin{};
 static bool holdMoved=false;
@@ -477,7 +482,7 @@ static void accept(const Json& event) {
             if(action=="extendAbove")taskName="向上扩展图层多选";
             if(action=="extendBelow")taskName="向下扩展图层多选";
             if(action=="convertSmartObject")taskName="转换为智能对象";
-            notice.clear();taskError.clear();taskRecovery.clear();taskFailed=false;taskHasResult=false;
+            notice.clear();taskError.clear();taskRecovery.clear();taskFailed=false;taskHasResult=false;completionStarted=0;
         }
         updateBusy(event.value("busy",false),event.value("queue_ready",false),event.value("queue_count",0));
     }
@@ -486,6 +491,7 @@ static void accept(const Json& event) {
         if (event.value("scope","")=="operation") {
             taskFailed=!event.value("ok",true);taskHasResult=true;
             taskError=taskFailed?notice:"";
+            completionStarted=taskFailed?0:GetTickCount64();
         }
     }
     else if (type=="popup.prepare") { contextMode=event.value("mode","quick")=="context";resetMenu(); }
@@ -568,7 +574,19 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         if(!data || (data->dwData!=0x53485045 && data->dwData!=0x4d435458) || !data->lpData || data->cbData<2 || data->cbData>65536)return FALSE;
         try {auto* text=static_cast<const char*>(data->lpData);const auto value=Json::parse(text,text+data->cbData-1);
             if(data->dwData==0x4d435458){
-                if(!IsWindowVisible(hwnd) || holdFinished || value.value("epoch",0)!=menuEpoch || shapeEditor.dirty || busyFeedback || taskBusy)return FALSE;
+                const bool resume=value.value("resume",false);
+                if(!IsWindowVisible(hwnd) || value.value("epoch",0)!=menuEpoch || shapeEditor.dirty || taskBusy)return FALSE;
+                if(resume) {
+                    if(!completionReady() || value.value("next_epoch",0)!=menuEpoch+1 || inputFocused || panelKind!=2)return FALSE;
+                    // No old hover or held input can become a new action. Keep
+                    // the original anchor; the restored menu is click-pinned.
+                    for(int key:{VK_CAPITAL,VK_LBUTTON,VK_RBUTTON,VK_SHIFT,VK_CONTROL,VK_MENU})
+                        if(GetAsyncKeyState(key)&0x8000)return FALSE;
+                    const auto origin=holdOrigin;
+                    setHoldMode(true);holdOrigin=origin;pinned=true;
+                    menuEpoch=value.at("next_epoch");
+                    completionStarted=0;
+                } else if(holdFinished || busyFeedback)return FALSE;
                 const auto flags=value.value("flags",uint64_t(0));
                 layerAware=true;layerMask=(flags>>8)&15;layerKind=(flags>>12)&15;
                 layerBackground=(flags&(1u<<16))!=0;layerCount=(flags>>17)&255;
@@ -591,6 +609,9 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     // Read-only diagnostic used by the real SetWindowPos lifecycle regression.
     if (msg==WM_APP+18) return static_cast<LRESULT>(std::lround(compositionOpacity*1000));
     if (msg==WM_APP+19) return (busyFeedback?1:0)|(taskBusy?2:0);
+    // Read-only readiness query. The backend still validates scope and obtains
+    // a new request-bound selection before the atomic COPYDATA transition.
+    if (msg==WM_APP+24) return IsWindowVisible(hwnd) && completionReady();
     // One synchronous transition: no intermediate layout or repeated round trips.
     if (msg==WM_APP+17) {
         panelKind=(wp&32)?4:static_cast<int>(wp&3);inputFocused=(wp&4)!=0;
@@ -1563,12 +1584,15 @@ int main() {
     // Report CRT assertions to overlay.log rather than a blocking OS dialog.
     _set_error_mode(_OUT_TO_STDERR);
     int argc;LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);
-    std::wstring iconPath;DWORD parent=0;
+    std::wstring iconPath;DWORD parent=0;POINT testOrigin{100,100};
     for (int i=1;i<argc;++i) {
         std::wstring arg=argv[i];
         if (arg==L"--preview-lifecycle") previewLifecycle=true;
         else if (arg==L"--preview-live") previewLive=true;
         else if (arg==L"--self-test") selfTest=true;
+        else if (i+2<argc && arg==L"--self-test-origin") {
+            testOrigin.x=std::stol(argv[++i]);testOrigin.y=std::stol(argv[++i]);
+        }
         else if (arg==L"--benchmark-render-completion") benchmarkRenderCompletion=true;
         else if (i+1<argc && arg==L"--render-mode") {
             std::wstring value=argv[++i];std::string mode(value.begin(),value.end());
@@ -1643,7 +1667,7 @@ int main() {
     // Keep this policy identical in production and automated checks.
     io.ConfigFlags|=ImGuiConfigFlags_NoMouseCursorChange;
     scale=ImGui_ImplWin32_GetDpiScaleForHwnd(window);theme();
-    if (!preview.empty() || selfTest) SetWindowPos(window,nullptr,100,100,
+    if (!preview.empty() || selfTest) SetWindowPos(window,nullptr,selfTest?testOrigin.x:100,selfTest?testOrigin.y:100,
         static_cast<int>((previewShape?920:contextMode?260:360)*scale),static_cast<int>((previewShape?menuShapeWindowHeight:contextMode?240:300)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
     io.ConfigViewportsNoTaskBarIcon=true;
     std::wstring fontPath; wchar_t windowsPath[MAX_PATH];GetWindowsDirectoryW(windowsPath,MAX_PATH);fontPath=std::wstring(windowsPath)+L"/Fonts/msyh.ttc";
@@ -1916,7 +1940,7 @@ int main() {
             ++frames;
             if (selfTest && frames==20) {
                 if (testedActions!=std::vector<std::string>{"color","moveToBottom"}) throw std::runtime_error("ImGui keyboard/click dispatch self-test failed: "+Json(testedActions).dump());
-                SetWindowPos(window,nullptr,100,100,static_cast<int>(620*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+                SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>(620*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
                 setHoldMode(true);
             }
             if (selfTest && frames==21) {
@@ -1985,7 +2009,7 @@ int main() {
                 const auto previousHoldRows=holdRows;
                 const auto previousPieCenter=pieCenter;
                 finishPlatformFrame();
-                SetWindowPos(window,nullptr,100,100,static_cast<int>(820*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+                SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>(820*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
                 ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();
                 ImGui::NewFrame();drawMenu();ImGui::Render();
                 if(recentRows.size()!=9)throw std::runtime_error("Recent preset grid count failed");
@@ -2084,7 +2108,7 @@ int main() {
                 testedActions.pop_back();shownPresets.clear();recentRows.clear();recentReady=false;
                 labelRows=previousLabelRows;holdRows=previousHoldRows;
                 pieCenter=previousPieCenter;
-                SetWindowPos(window,nullptr,100,100,static_cast<int>(620*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+                SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>(620*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
                 holdFinished=false;pieReady=true;renderedHit=-1;
                 panelKind=2;
                 for (int i=0;i<8;++i) {
@@ -2316,6 +2340,34 @@ int main() {
                 numberFrame(ImGuiKey_2,true);numberFrame(ImGuiKey_2,false);
                 if (!busyFeedback || canExecute() || testedActions.size()!=before)
                     throw std::runtime_error("Completion expanded feedback or executed a hidden action");
+                completionStarted=GetTickCount64()-500;
+                if(SendMessageW(window,WM_APP+24,0,0)!=1)
+                    throw std::runtime_error("Confirmed completion did not become refresh-ready");
+                const auto oldEpoch=menuEpoch;
+                Json resume={{"epoch",oldEpoch},{"next_epoch",oldEpoch+1},{"resume",true},
+                    {"flags",uint64_t(64)|(uint64_t(15)<<8)|(uint64_t(2)<<12)|(uint64_t(1)<<17)|(uint64_t(127)<<32)},
+                    {"shape",{{"available",false}}}};
+                auto applyResume=[&](const Json& value){const auto payload=value.dump();
+                    COPYDATASTRUCT packet{0x4d435458,DWORD(payload.size()+1),const_cast<char*>(payload.c_str())};
+                    return SendMessageW(window,WM_COPYDATA,0,reinterpret_cast<LPARAM>(&packet));};
+                auto staleResume=resume;staleResume["epoch"]=oldEpoch-1;
+                if(applyResume(staleResume))
+                    throw std::runtime_error("Old completion epoch resumed the menu");
+                taskBusy=true;
+                if(applyResume(resume))throw std::runtime_error("Busy completion resumed actions");
+                taskBusy=false;taskFailed=true;
+                if(applyResume(resume))throw std::runtime_error("Failed completion resumed actions");
+                taskFailed=false;taskRecovery="Result unknown";
+                if(applyResume(resume))throw std::runtime_error("Unknown result resumed actions");
+                taskRecovery.clear();inputFocused=true;
+                if(applyResume(resume))throw std::runtime_error("Input protection allowed completion resume");
+                inputFocused=false;
+                if(!applyResume(resume))throw std::runtime_error("Fresh completion snapshot was not applied");
+                numberFrame(ImGuiKey_None,false);
+                if(busyFeedback || !canExecute() || !pieReady || !pinned || menuEpoch!=oldEpoch+1 ||
+                    testedActions.size()!=before || ImGui::GetDrawData()->TotalVtxCount<=0)
+                    throw std::runtime_error("Completion resume lacked visible actions or replayed a command");
+                if(applyResume(resume))throw std::runtime_error("Completion snapshot replayed");
                 setHoldMode(true);numberFrame(ImGuiKey_None,false);
                 if (busyFeedback || !canExecute() || !pieReady)
                     throw std::runtime_error("Explicit reopen did not restore idle menu");
