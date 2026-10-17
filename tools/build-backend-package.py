@@ -38,6 +38,8 @@ with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as bundle:
     bundle.write(ROOT/'docs/UPDATES.md','docs/UPDATES.md')
     bundle.write(ROOT/'docs/UXP-LOADING.md','docs/UXP-LOADING.md')
     bundle.write(ROOT/'docs/READ-STRATEGIES.md','docs/READ-STRATEGIES.md')
+    bundle.write(ROOT/'docs/CREATION-TREES.md','docs/CREATION-TREES.md')
+    bundle.write(ROOT/'docs/DIVERSE-LAYERS.md','docs/DIVERSE-LAYERS.md')
     bundle.write(ROOT/'docs/UI-GUIDE.md','docs/UI-GUIDE.md')
     bundle.write(ROOT/'tools/inspect-panels.ps1','tools/inspect-panels.ps1')
     bundle.write(ROOT/'tools/inspect-uxp.ps1','tools/inspect-uxp.ps1')

@@ -3,9 +3,39 @@ const create=require('../uxp/offline-probe/labels.js');
 const k={NORMAL:'pixel',GROUP:'group',SOLIDFILL:'fill',CURVES:'curves',HUESATURATION:'hue',COLORBALANCE:'balance',BLACKANDWHITE:'bw'};
 const doc={id:1,mode:'RGB',bitsPerChannel:8,layers:[{id:1,kind:'pixel'},{id:2,kind:'pixel'}]};
 doc.activeLayers=[doc.layers[0]];let next=3,writes=0,histories=0,rollbacks=0,wrongKind=false,consumeEmpty=true;
+let nativeReads=0,nativeFault=null,modalContext=null;
+function nativeRows() {
+  const rows=[];
+  function walk(layers,parent=0) {for(const layer of layers) {
+    rows.push({layerID:layer.id,parentLayerID:parent,layerSection:{_value:layer.kind==='group'?'layerSectionStart':'layerSectionContent'}});
+    if(layer.kind==='group'){walk(layer.layers,layer.id);rows.push({layerSection:{_value:'layerSectionEnd'}});}
+  }}walk(doc.layers);
+  rows.forEach((row,i)=>row.itemIndex=rows.length-i);return rows;
+}
 const ps={constants:{LayerKind:k,DocumentMode:{RGB:'RGB',GRAYSCALE:'gray'},BitsPerChannelType:{EIGHT:8,SIXTEEN:16},ElementPlacement:{PLACEBEFORE:'before',PLACEINSIDE:'inside'}},
 app:{documents:[doc],activeDocument:doc,foregroundColor:{rgb:{red:12,green:34,blue:56}}},
 action:{batchPlay:async list=>list.map(d=>{
+  if(d._obj==='get' && d._target[0]._property==='numberOfLayers') {
+    nativeReads++;return {numberOfLayers:nativeFault==='oversize'?4097:nativeRows().length-(doc.layers.at(-1).isBackgroundLayer?1:0)};
+  }
+  if(d._obj==='multiGet') {
+    nativeReads++;const rows=nativeRows();
+    assert.deepEqual(d.extendedReference[0],['layerID','parentLayerID','layerSection','itemIndex']);
+    assert.equal(d.extendedReference[1].index,doc.layers.at(-1).isBackgroundLayer?0:1);
+    assert.equal(d.extendedReference[1].count,rows.length);
+    if(nativeFault==='unsupported')throw Error('Host unsupported');
+    if(nativeFault==='incomplete')rows.pop();
+    if(nativeFault==='duplicate')rows[1].layerID=rows[0].layerID;
+    if(nativeFault==='parent')rows[1].parentLayerID=987;
+    if(nativeFault==='index')rows[1].itemIndex=rows[0].itemIndex;
+    if(nativeFault==='index-base')rows.forEach(row=>row.itemIndex--);
+    if(nativeFault==='section')rows[1].layerSection._value='unknown';
+    if(nativeFault==='unbalanced')rows[1].layerSection._value='layerSectionEnd';
+    if(nativeFault==='prefix') [rows[0].layerID,rows[1].layerID]=[rows[1].layerID,rows[0].layerID];
+    if(nativeFault==='stale')doc.activeLayers=[doc.layers[0]];
+    if(nativeFault==='cancelled')modalContext.isCancelled=true;
+    return {list:rows};
+  }
   if(d._obj==='get')return {layerID:doc.activeLayers[0].id};
   writes++;
   if(d._target[0]._ref==='layer') {
@@ -32,9 +62,9 @@ action:{batchPlay:async list=>list.map(d=>{
   doc.activeLayers=[layer];return {};
 })},core:{executeAsModal:async f=>{
   const snapshot=structuredClone({layers:doc.layers,active:doc.activeLayers});
-  return f({isCancelled:false,hostControl:{suspendHistory:async()=>{histories++;return 1;},resumeHistory:async(id,commit)=>{
+  modalContext={isCancelled:false,hostControl:{suspendHistory:async()=>{histories++;return 1;},resumeHistory:async(id,commit)=>{
     if(!commit){rollbacks++;doc.layers=snapshot.layers;doc.activeLayers=snapshot.active;}
-  }}});
+  }}};return f(modalContext);
 }}};
 let badMove=false;
 function remove(layer) {const layers=layer.parent?layer.parent.layers:doc.layers;const i=layers.indexOf(layer);assert.ok(i>=0);layers.splice(i,1);}
@@ -132,6 +162,35 @@ async function main(){
   const metadataFailed=await run('layer.new');
   assert.equal(metadataFailed.verified,true);assert.equal(metadataFailed.selection_context,undefined);
   Object.defineProperty(doc,'mode',originalMode);
+  function largeFixture(count,nested=false,background=false) {
+    const layers=Array.from({length:count},(_,i)=>attach({id:10000+i,kind:'pixel',boundsNoEffects:{left:0,top:0,right:3,bottom:3}}));
+    if(background)layers.at(-1).isBackgroundLayer=true;
+    if(nested) {
+      const group={id:9000,kind:'group',layers};for(const layer of layers)layer.parent=group;
+      doc.layers=[group];
+    } else doc.layers=layers;
+    doc.activeLayers=[layers[Math.floor(count/2)]];next=20000;
+  }
+  for(const count of [4,31,32]) {
+    largeFixture(count);const reads=nativeReads;
+    assert.equal((await run('layer.new')).tree_reader,'dom');assert.equal(nativeReads,reads);
+  }
+  for(const nested of [false,true])for(const background of [false,true]) {
+    if(nested && background)continue;
+    largeFixture(100,nested,background);
+    assert.equal((await run('adjustment.curves')).tree_reader,'batch');
+  }
+  for(const fault of ['unsupported','incomplete','duplicate','parent','index','index-base','section','unbalanced','prefix','oversize']) {
+    largeFixture(100);nativeFault=fault;
+    assert.equal((await run('layer.new')).tree_reader,'dom-fallback',fault);
+  }
+  largeFixture(100);nativeFault='stale';const writesAt=writes;
+  await assert.rejects(run('layer.new'),/target changed/);assert.equal(writes,writesAt);nativeFault=null;
+  largeFixture(100);nativeFault='cancelled';const cancelWrites=writes;
+  await assert.rejects(run('layer.new'),/expired/);assert.equal(writes,cancelWrites);nativeFault=null;
+  largeFixture(100);wrongKind=true;const failedBatchRollbacks=rollbacks;
+  await assert.rejects(run('adjustment.curves'),/核验失败/);assert.equal(rollbacks,failedBatchRollbacks+1);assert.equal(doc.layers.length,100);wrongKind=false;
+  console.log('PASS small DOM boundary, large root/nested/background batch, malformed/unsupported/oversize fallback, fresh target after await');
   console.log('PASS '+placementChecks+' creation placements, native group-inside, zero moves, multi-focus, consumed/retained placeholder, native naming descriptors, wrong insertion rollback');
   console.log('PASS seven commands, RGB foreground, exact group membership, target/eligibility before history, failed readback rollback');
 }

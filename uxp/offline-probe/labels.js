@@ -10,6 +10,38 @@ module.exports = function createLabels(ps, session) {
   // on every read. Reorder/delete/undo simply fall back to the original scan.
   const positionHints=new Map(),positionHintLimit=2048;
   let nativeHintsRetryAt=0;
+  // Only a modal creation transaction calls this reader. Read scalars, never
+  // pixels, effects or names. Section ends are structural records, not layers.
+  async function creationTree(doc) {
+    const target=[{_ref:'document',_id:doc.id}];
+    const [n]=await ps.action.batchPlay([{_obj:'get',_target:[{_ref:'property',_property:'numberOfLayers'},...target],_options:{dialogOptions:'dontDisplay'}}],{});
+    const count=n && n.numberOfLayers;
+    if(!Number.isInteger(count)||count<1||count>4096)throw Error('Native tree range unavailable');
+    const background=!!doc.layers[doc.layers.length-1].isBackgroundLayer,first=background?0:1,total=count+(background?1:0);
+    const [result]=await ps.action.batchPlay([{_obj:'multiGet',_target:{_ref:target},
+      extendedReference:[['layerID','parentLayerID','layerSection','itemIndex'],{_obj:'layer',index:first,count:total}],
+      options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'dontDisplay'}}],{});
+    if(!result||!Array.isArray(result.list)||result.list.length!==total)throw Error('Incomplete native tree');
+    const records=result.list.slice().sort((a,b)=>(b&&b.itemIndex)-(a&&a.itemIndex));
+    const ids=new Set(),groups=new Map(),stack=[],order=[];
+    for(let i=0;i<records.length;i++) {
+      const row=records[i],section=row && row.layerSection && row.layerSection._value;
+      // AM references start at zero when a Background exists; the returned
+      // itemIndex is still one-based (including group end records).
+      if(!row||row.itemIndex!==total-i)throw Error('Invalid native tree indices');
+      if(section==='layerSectionEnd') {
+        if(!stack.length)throw Error('Unbalanced native tree');
+        stack.pop();continue;
+      }
+      if(!['layerSectionStart','layerSectionContent'].includes(section)||!Number.isInteger(row.layerID)||row.layerID<=0||ids.has(row.layerID)||
+          !Number.isInteger(row.parentLayerID)||(row.parentLayerID>0?row.parentLayerID:null)!==(stack.length?stack[stack.length-1]:null))
+        throw Error('Invalid native tree membership');
+      ids.add(row.layerID);order.push(row.layerID);groups.set(row.layerID,section==='layerSectionStart');
+      if(section==='layerSectionStart')stack.push(row.layerID);
+    }
+    if(stack.length||!order.length)throw Error('Unbalanced native tree');
+    return {order,groups};
+  }
   function rememberPosition(key,index) {
     positionHints.delete(key);positionHints.set(key,index);
     if(positionHints.size>positionHintLimit)positionHints.delete(positionHints.keys().next().value);
@@ -279,17 +311,37 @@ module.exports = function createLabels(ps, session) {
           const kinds=[k.NORMAL,k.SOLIDFILL,k.GROUP,k.CURVES,k.HUESATURATION,k.COLORBALANCE,k.BLACKANDWHITE];
           // Reuse original type reads inside this modal; reread the actual
           // tree/order and every new node, without another full anchor walk.
-          const knownKinds=new Map(),knownLayers=new Map();
-          function allIds(layers) {return Array.from(layers).flatMap(l=>{
-            const id=l.id,kind=knownKinds.has(id)?knownKinds.get(id):l.kind;
-            knownKinds.set(id,kind);knownLayers.set(id,l);
-            return [id,...(kind===k.GROUP?allIds(l.layers):[])];
+          const knownGroups=new Map(),knownLayers=new Map(),largeTree={};let visited=0;
+          function allIds(layers,bounded=false) {return Array.from(layers).flatMap(l=>{
+            if(bounded && visited>=32)throw largeTree;
+            visited++;
+            const id=l.id,group=knownGroups.has(id)?knownGroups.get(id):l.kind===k.GROUP;
+            knownGroups.set(id,group);knownLayers.set(id,l);
+            return [id,...(group?allIds(l.layers,bounded):[])];
           });}
-          const before=allIds(doc.layers);
-          const anchor=knownLayers.get(actual.active_layer_id);
+          let before,treeReader='dom';
+          try {before=allIds(doc.layers,true);}catch(error) {
+            if(error!==largeTree)throw error;
+            try {
+              const native=await creationTree(doc);
+              // The partial DOM prefix is independently known in this modal.
+              // Never accept an alternate tree that contradicts those reads.
+              if([...knownGroups].some(([id,group])=>native.groups.get(id)!==group)||
+                  [...knownLayers.keys()].join(',')!==native.order.slice(0,knownLayers.size).join(','))throw Error('Native tree prefix differs');
+              before=native.order;knownGroups.clear();for(const [id,group] of native.groups)knownGroups.set(id,group);
+              treeReader='batch';
+            }catch(_) {before=allIds(doc.layers);treeReader='dom-fallback';}
+          }
+          // A read failure may fall back; a changed/cancelled write target may
+          // not. No mutation has happened yet, and no request is replayed.
+          const fresh=await capture();
+          if(context.isCancelled||Date.now()>request.expires_at_ms||fresh.document_id!==actual.document_id||
+              fresh.active_layer_id!==actual.active_layer_id||fresh.layer_ids.join(',')!==actual.layer_ids.join(','))throw Error('Creation target changed or expired');
+          const anchor=treeReader==='dom'?knownLayers.get(actual.active_layer_id):Array.from(doc.activeLayers).find(l=>l.id===actual.active_layer_id);
           if(!anchor)throw Error('新建图层目标已改变');
           // A selected group receives its new layer inside, like native PS.
-          const insideGroup=command!=='layer.group' && knownKinds.get(anchor.id)===k.GROUP;
+          if(!before.includes(anchor.id)||knownGroups.get(anchor.id)!==(anchor.kind===k.GROUP))throw Error('Creation anchor membership changed');
+          const insideGroup=command!=='layer.group' && knownGroups.get(anchor.id);
           const parentLayer=insideGroup?anchor:anchor.parent;
           const parentId=parentLayer?parentLayer.id:null;
           const siblingLayers=()=>parentLayer?parentLayer.layers:doc.layers;
@@ -372,7 +424,7 @@ module.exports = function createLabels(ps, session) {
           const name=created.name,parent=created.parent;
           const result={verified:true,command,layer_id:createdId,name,kind:createdKind,
             parent_id:parent?parent.id:null,anchor_id:anchor.id,count:command==='layer.group'?actual.layer_ids.length:1,
-            placement_moves:placementMoves,placeholder_used:placeholderUsed};
+            placement_moves:placementMoves,placeholder_used:placeholderUsed,tree_reader:treeReader,tree_count:before.length};
           timings.verify_ms=Date.now()-stageStarted;stageStarted=Date.now();
           // Read the new state while the same PS modal still owns the target.
           // Metadata failure cannot undo a successfully verified creation:

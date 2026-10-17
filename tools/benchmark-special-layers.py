@@ -1,6 +1,7 @@
 """Real Photoshop special-layer/count coverage for the scoped read experiment.
 
-Requires the diagnostic fixture, and an idle, normally stopped live service.
+Diagnostic modes require the companion fixture; --production uses the installed
+executor. Normally stop the live service, or explicitly use --live-idle.
 Setup/readback/undo are outside timing; no retry of a submitted operation.
 """
 import argparse, asyncio, hashlib, json, shutil, sys, time
@@ -14,12 +15,18 @@ from benchmark_read_helpers import ACTIONS, MODES, summary, native, fixture, TRE
 async def main(args):
     try:urlopen('http://127.0.0.1:15151/api/health',timeout=1)
     except OSError:pass
-    else:raise RuntimeError('Normally stop the idle live service first')
+    else:
+        if not args.live_idle:raise RuntimeError('Normally stop the idle live service first, or explicitly use --live-idle')
+        live=json.load(urlopen('http://127.0.0.1:15151/api/status',timeout=5))
+        assert not live['photoshop']['busy'] and not live['menu']['visible'] and not live['photoshop_start']['active']
+        assert not live['photoshop'].get('uxp_recovery',{}).get('active')
+        assert not (Path(live['data_dir'])/'uxp-pending.json').exists()
+        assert not any(t['state'] in ('capturing','running','result-unknown') for t in live['tasks']['items'])
     folder=ROOT/'.runtime'/('special-read-benchmark-'+str(time.time_ns()));folder.mkdir()
     config=folder/'uxp-config.json';shutil.copy2(args.config,config)
     bridge=UxpBridge(folder/'tasks.json',config)
     app=win32com.client.GetActiveObject('Photoshop.Application');previous=app.ActiveDocument if app.Documents.Count else None
-    scratch=None;report={'photoshop':str(app.Version),'plugin':None,'checks':[],'rounds':{},'complete':False,'production':args.production}
+    scratch=None;fixture_id=None;report={'photoshop':str(app.Version),'plugin':None,'checks':[],'rounds':{},'complete':False,'production':args.production}
     def js(code):return app.DoJavaScript(code)
     def tree():return str(js(TREE))
     def semantic():return str(js(SEMANTIC))
@@ -44,12 +51,15 @@ async def main(args):
         value=await inspect(read_experiment={'mode':mode,'refresh':'poll','document_id':identity})
         assert value['read_experiment']['mode']==mode and value['read_experiment']['document_id']==identity
     def create(kind,count):
-        nonlocal scratch
-        try:js(fixture(kind,count))
+        nonlocal scratch,fixture_id
+        guard='var creationFixtureDeadline=(new Date()).getTime()+'+str(args.max_setup_seconds*1000)+';function creationFixtureDuplicate(layer){if((new Date()).getTime()>creationFixtureDeadline)throw Error("Owned creation fixture setup budget exceeded");return layer.duplicate();}'
+        code=guard+fixture(kind,count).replace('templates[i%templates.length].duplicate();','creationFixtureDuplicate(templates[i%templates.length]);').replace('anchor.duplicate();','creationFixtureDuplicate(anchor);')
+        try:js(code)
         except Exception:
             if str(app.ActiveDocument.Name).startswith('Read strategy benchmark scratch'):app.ActiveDocument.Close(2)
             raise
         scratch=app.ActiveDocument
+        fixture_id=int(js('app.activeDocument.id;'))
         return tree(),semantic(),int(js('app.activeDocument.historyStates.length-1;'))
     def close():
         nonlocal scratch
@@ -61,6 +71,7 @@ async def main(args):
         js('app.activeDocument.activeLayer=app.activeDocument.artLayers.getByName("Anchor");')
     async def sequence(mode,before,original,index):
         await configure(mode);target=await asyncio.to_thread(bridge._capture_target)
+        assert target['document_id']==fixture_id,'Owned fixture is no longer active; no operation submitted'
         samples=[];started=time.perf_counter()
         for action in ACTIONS:
             frozen={key:target[key] for key in ('session','document_id','layer_ids')};frozen['active_layer_id']=frozen['layer_ids'][0]
@@ -69,7 +80,8 @@ async def main(args):
             assert creation['verified'] and creation['placement_moves']==0
             assert target['document_id']==frozen['document_id'] and target['layer_ids']==[creation['layer_id']] and target['quick_mask']==127
             assert not bridge.busy and not bridge.transport.pending.value
-            samples.append({'action':action,'ms':round(elapsed,3),'timings_ms':creation.get('timings_ms',{}),'placeholder_used':creation['placeholder_used']})
+            samples.append({'action':action,'ms':round(elapsed,3),'timings_ms':creation.get('timings_ms',{}),'placeholder_used':creation['placeholder_used'],
+                'tree_reader':creation.get('tree_reader','dom'),'tree_count':creation.get('tree_count')})
         total=(time.perf_counter()-started)*1000
         after=tree().splitlines();old=before.splitlines();ids={line.split('\t')[1] for line in old}
         assert [line for line in after if line.split('\t')[1] in ids]==old
@@ -163,6 +175,8 @@ if __name__=='__main__':
     p.add_argument('--kinds',default='shape,solid,gradient,text,smart,curves,levels,masked')
     p.add_argument('--small-only',action='store_true');p.add_argument('--production',action='store_true')
     p.add_argument('--counts-only',action='store_true')
+    p.add_argument('--live-idle',action='store_true',help='Explicitly permit an idle production service; this test is the only PS command producer during the run')
+    p.add_argument('--max-setup-seconds',type=int,default=300,choices=range(10,301),metavar='10..300',help='Cooperative fixture budget outside measured operations; never forcibly stops a native call')
     p.add_argument('--exclude-cases',default='')
     p.add_argument('--cases',default='')
     p.add_argument('--phase',choices=['all','audit','timing'],default='all');p.add_argument('--output',type=Path,required=True)

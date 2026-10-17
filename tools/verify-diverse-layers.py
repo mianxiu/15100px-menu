@@ -26,7 +26,7 @@ def set_effects():
     # Fixed native Action Manager descriptor: drop shadow plus outer stroke.
     return r'''var s=stringIDToTypeID,r=new ActionReference();r.putProperty(s('property'),s('layerEffects'));r.putEnumerated(s('layer'),s('ordinal'),s('targetEnum'));var z=new ActionDescriptor();z.putReference(s('null'),r);var fx=new ActionDescriptor();fx.putUnitDouble(s('scale'),s('percentUnit'),100);var shadow=new ActionDescriptor();shadow.putBoolean(s('enabled'),true);shadow.putBoolean(s('present'),true);shadow.putBoolean(s('showInDialog'),true);shadow.putEnumerated(s('mode'),s('blendMode'),s('multiply'));var black=new ActionDescriptor();black.putDouble(s('red'),0);black.putDouble(s('green'),0);black.putDouble(s('blue'),0);shadow.putObject(s('color'),s('RGBColor'),black);shadow.putUnitDouble(s('opacity'),s('percentUnit'),65);shadow.putBoolean(s('useGlobalAngle'),false);shadow.putUnitDouble(s('localLightingAngle'),s('angleUnit'),120);shadow.putUnitDouble(s('distance'),s('pixelsUnit'),4);shadow.putUnitDouble(s('chokeMatte'),s('pixelsUnit'),0);shadow.putUnitDouble(s('blur'),s('pixelsUnit'),5);fx.putObject(s('dropShadow'),s('dropShadow'),shadow);var stroke=new ActionDescriptor();stroke.putBoolean(s('enabled'),true);stroke.putBoolean(s('present'),true);stroke.putBoolean(s('showInDialog'),true);stroke.putEnumerated(s('style'),s('frameStyle'),s('outsetFrame'));stroke.putEnumerated(s('paintType'),s('frameFill'),s('solidColor'));stroke.putEnumerated(s('mode'),s('blendMode'),s('normal'));stroke.putUnitDouble(s('opacity'),s('percentUnit'),100);stroke.putUnitDouble(s('size'),s('pixelsUnit'),2);stroke.putObject(s('color'),s('RGBColor'),black);fx.putObject(s('frameFX'),s('frameFX'),stroke);z.putObject(s('to'),s('layerEffects'),fx);executeAction(s('set'),z,DialogModes.NO);'''
 
-def setup(kind,count=4,size=181):
+def setup(kind,count=4,size=181,max_setup_seconds=300):
     base='smart' if kind=='smart-filter' else kind.replace('-effects','').replace('-mask','')
     if base in ('pixel','empty','clipped','hidden','blend','nested'):
         make='var a=d.artLayers.add();'+('d.selection.selectAll();d.selection.fill(app.foregroundColor);d.selection.deselect();' if base!='empty' else '')
@@ -37,7 +37,7 @@ def setup(kind,count=4,size=181):
         make=r'''var s=stringIDToTypeID,r=new ActionReference();r.putProperty(s('property'),s('presetManager'));r.putEnumerated(s('application'),s('ordinal'),s('targetEnum'));var presets=executeActionGet(r).getList(s('presetManager')),name=null;for(var pi=0;pi<presets.count;pi++){var pt=typeIDToStringID(presets.getObjectType(pi))||typeIDToCharID(presets.getObjectType(pi));if(/pattern|PttR/i.test(pt)){var names=presets.getObjectValue(pi).getList(s('name'));if(names.count){name=names.getString(0);break;}}}if(!name)throw Error('No installed pattern fixture');var ref=new ActionReference();ref.putClass(s('contentLayer'));var z=new ActionDescriptor();z.putReference(s('null'),ref);var pattern=new ActionDescriptor();pattern.putString(s('name'),name);var t=new ActionDescriptor();t.putObject(s('pattern'),s('pattern'),pattern);var u=new ActionDescriptor();u.putObject(s('type'),s('patternLayer'),t);z.putObject(s('using'),s('contentLayer'),u);executeAction(s('make'),z,DialogModes.NO);'''
     else:make=special(base)
     if base=='pattern':make='(function(){'+make+'})();'
-    body='var lower=d.artLayers.add();lower.name="Lower";'+make+'var anchor=d.activeLayer;anchor.name="Anchor";'
+    body='var diverseFixtureDeadline=(new Date()).getTime()+'+str(max_setup_seconds*1000)+';var lower=d.artLayers.add();lower.name="Lower";'+make+'var anchor=d.activeLayer;anchor.name="Anchor";'
     if kind.endswith('-effects'):body+=set_effects()
     if kind=='smart-mask':body+='var s=stringIDToTypeID,'+special('masked').split('var s=stringIDToTypeID,',1)[1]
     if kind=='smart-filter':body+="var z=new ActionDescriptor();z.putUnitDouble(stringIDToTypeID('radius'),stringIDToTypeID('pixelsUnit'),2);executeAction(stringIDToTypeID('gaussianBlur'),z,DialogModes.NO);"
@@ -46,7 +46,9 @@ def setup(kind,count=4,size=181):
     if kind=='blend':body+='anchor.opacity=37;anchor.blendMode=BlendMode.MULTIPLY;'
     body+='var upper=d.artLayers.add();upper.name="Upper";'
     if kind=='nested':body+='var g=d.layerSets.add();g.name="Outer";var h=g.layerSets.add();h.name="Inner";h.artLayers.add().name="Inside lower";anchor.move(h,ElementPlacement.INSIDE);h.artLayers.add().name="Inside upper";'
-    body+='for(var i=d.layers.length;i<'+str(count)+';i++)upper.duplicate();d.activeLayer=anchor;'
+    # Unique names belong only to disposable fixture copies. Avoid building a
+    # long chain of colliding native "Upper copy N" names during test setup.
+    body+='for(var i=d.layers.length;i<'+str(count)+';i++){if((new Date()).getTime()>diverseFixtureDeadline)throw Error("Owned diverse fixture setup budget exceeded");var diverseCopy=upper.duplicate();diverseCopy.name="Diverse fixture "+i;}d.activeLayer=anchor;'
     return 'app.documents.add(UnitValue('+str(size)+',"px"),UnitValue('+str(size)+',"px"),72,"Diverse owned '+kind+'",NewDocumentMode.RGB,DocumentFill.TRANSPARENT);var d=app.activeDocument;d.suspendHistory("Diverse fixture",'+json.dumps(body)+');'
 
 # Also preserve visibility, blend and clipping; labels deliberately excluded.
@@ -87,18 +89,20 @@ async def run(args):
             await asyncio.sleep(.03)
         raise RuntimeError('No post-COM heartbeat; no action submitted')
     async def execute(action,target):
+        assert target['document_id']==fixture_id,'Owned fixture is no longer active; no operation submitted'
         start=time.perf_counter();result=await bridge.execute(action,frozen_target=target)
         assert not bridge.busy and not bridge.transport.pending.value
         return json.loads(result['result']),round((time.perf_counter()-start)*1000,3)
     try:
         for kind in args.kinds.split(','):
             assert kind in KINDS
-            try:js(setup(kind,args.count,args.size))
+            try:js(setup(kind,args.count,args.size,args.max_setup_seconds))
             except Exception:
                 if app.Documents.Count and str(app.ActiveDocument.Name)=='Diverse owned '+kind:scratch=app.ActiveDocument
                 raise
             scratch=app.ActiveDocument
             assert str(scratch.Name)=='Diverse owned '+kind
+            fixture_id=int(js('app.activeDocument.id;'))
             before,payload,index=readall();anchor=int(js('app.activeDocument.activeLayer.id;'))
             assert ('layerEffects:' in payload)==kind.endswith('-effects'),('Effects fixture invalid',kind)
             if kind.startswith('smart'):assert 'smartObject:' in payload,('Smart fixture invalid',kind)
@@ -158,7 +162,8 @@ async def run(args):
                         assert len(new_rows)==len(old_rows) and old_anchor.split('\t')[0]==new_anchor.split('\t')[0]
                         assert [v for v in old_rows if v!=old_anchor]==[v for v in new_rows if v!=new_anchor]
                 # Reset using the exact pre-operation cursor: one native undo.
-                reset();case['operations'].append({'action':action,'ms':ms,'one_undo':not result.get('unchanged',False),'verified_noop':result.get('unchanged',False),'payload_preserved':True,'payload_checked':'after-undo' if action=='convertSmartObject' else 'during-and-after-undo','timings_ms':result.get('timings_ms',{})});save()
+                reset();case['operations'].append({'action':action,'ms':ms,'one_undo':not result.get('unchanged',False),'verified_noop':result.get('unchanged',False),'payload_preserved':True,'payload_checked':'after-undo' if action=='convertSmartObject' else 'during-and-after-undo','timings_ms':result.get('timings_ms',{}),
+                    'tree_reader':result.get('tree_reader'),'tree_count':result.get('tree_count')});save()
             # Frozen target must refuse a different selection without history.
             await ready();target=await asyncio.to_thread(bridge._capture_target)
             stale,_,ci=readall('app.activeDocument.activeLayer=app.activeDocument.artLayers.getByName("Upper");')
@@ -183,7 +188,8 @@ async def run(args):
             if previous:app.ActiveDocument=previous
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--kinds',default=','.join(KINDS));p.add_argument('--actions',default=','.join(OPERATIONS));p.add_argument('--count',type=int,default=4);p.add_argument('--size',type=int,default=181);p.add_argument('--output',type=Path,required=True);args=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--kinds',default=','.join(KINDS));p.add_argument('--actions',default=','.join(OPERATIONS));p.add_argument('--count',type=int,default=4);p.add_argument('--size',type=int,default=181);p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--max-setup-seconds',type=int,default=300,choices=range(10,301),metavar='10..300',help='Cooperative scratch construction budget, outside command timing; never interrupts an already running native step');args=p.parse_args()
     if not 4<=args.count<=1000:p.error('Use 4–1000 layers')
     if not 16<=args.size<=8192:p.error('Use 16–8192 pixels')
     asyncio.run(run(args))
