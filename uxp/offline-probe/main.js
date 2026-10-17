@@ -169,7 +169,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.32', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.33', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
@@ -182,14 +182,21 @@ async function probe(reason) {
       await record(folder,'probe-last.json',heartbeatValue);
       lastHeartbeat = now;
     }
-    if(await refreshMenuContext(folder,now))return;
+    // A chord may follow Caps after its menu request was published. Service
+    // the accepted command before optional menu/color reads; capture's short
+    // quiet period also protects the following fixed-target write.
+    async function idleRead() {
+      if(now-lastWorkAt<80)return;
+      if(await refreshMenuContext(folder,now))return;
+      await updateLayerContext(folder,now);
+    }
     let request;
     try {
       const file = await folder.getEntry('probe-request.json');
       const raw = await file.read();
       if (raw.length > 4096) return;
       request = JSON.parse(raw);
-    } catch (_) { await updateLayerContext(folder,now);return; }
+    } catch (_) { await idleRead();return; }
     if (request.token !== token || !['inspect','capture','set_label','new_document'].includes(request.operation) ||
         typeof request.id !== 'string' || request.id.length > 128 ||
         seen.has(request.id) || !Number.isFinite(request.expires_at_ms) ||
@@ -197,7 +204,7 @@ async function probe(reason) {
       // Metadata DOM reads are comparatively costly. Pending work takes
       // priority; a short quiet period also lets capture's write arrive before
       // an unrelated cache refresh. Execution still rechecks fresh eligibility.
-      if(now-lastWorkAt>=80)await updateLayerContext(folder,now);
+      await idleRead();
       return;
     }
     if(request.session && request.session!==session)return;
@@ -210,7 +217,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.32', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.33', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

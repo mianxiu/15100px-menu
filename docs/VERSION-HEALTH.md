@@ -35,7 +35,7 @@ PS24.1+有官方UXP重绘API不等于已验收该宿主的实时预览。PS24.0.
 
 `0x80070020`发生于MXC CreateProcessSecurityEnvironment，早于界面插件导入。C／G两个工作目录和普通沙箱命令都复现；PS运行时失败，正常退出菜单服务后仍失败，正常退出PS后恢复。完全卸载本项目UXP再启动PS仍复现，已排除本插件是必要触发条件；测试后插件及管理记录原样恢复。此故障与旧版嵌套刷新卡住不能混为同一根因。
 
-依据[OpenAI沙箱说明](https://learn.chatgpt.com/docs/windows/windows-sandbox)，在保留同等workspace权限和管理配置时，已配置的elevated备用实现可运行。已备份本机Codex配置，仅设置`features.prefer_mxc=false`、保留原有`windows.sandbox="elevated"`，PS运行时新CLI探针通过；未关闭沙箱、未改权限边界或网络策略。当前桌面会话仍在使用已加载的MXC配置，界面工具复测仍失败，需正常重启Codex后核验；这只是临时替代路径，不能宣称已修复Windows内部共享冲突。
+依据[OpenAI沙箱说明](https://learn.chatgpt.com/docs/windows/windows-sandbox)，在保留同等workspace权限和管理配置时，已配置的elevated备用实现可运行。已备份本机Codex配置，仅设置`features.prefer_mxc=false`、保留原有`windows.sandbox="elevated"`，PS运行时新CLI探针通过；未关闭沙箱、未改权限边界或网络策略。后续确认桌面启动参数优先选择MXC并覆盖用户配置，不能承诺重启Codex会恢复。用户已要求跳过这一独立工具问题；未修改系统沙箱策略，也不将它列为本插件继续运行或优化的前置条件。
 
 本功能不会在其他电脑自动修改Codex配置，也不会把Codex作为Photoshop Menu运行依赖。当前本机24.0.1与办公电脑24.2／Win10 PS2024等故障机的实测范围分别记录。
 

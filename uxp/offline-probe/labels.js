@@ -1,6 +1,6 @@
 // Experimental executor: only fixed-target labels, no arbitrary scripts.
 module.exports = function createLabels(ps, session, options={}) {
-  const caps=createCapsActions(ps,session,capture,selectionContext);
+  const caps=createCapsActions(ps,session,capture,selectionContext,creationTree);
   const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
   const shapePaint=createShapePaint(ps,session,capture,selectionContext,options.legacyPreview===true);
   const quickCommands=['layer.new','layer.solid','layer.group','adjustment.curves',
@@ -10,7 +10,7 @@ module.exports = function createLabels(ps, session, options={}) {
   // on every read. Reorder/delete/undo simply fall back to the original scan.
   const positionHints=new Map(),positionHintLimit=2048;
   let nativeHintsRetryAt=0;
-  // Only a modal creation transaction calls this reader. Read scalars, never
+  // Modal creation and Caps transactions call this reader. Read scalars, never
   // pixels, effects or names. Section ends are structural records, not layers.
   async function creationTree(doc) {
     const target=[{_ref:'document',_id:doc.id}];
@@ -967,7 +967,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
 }
 
 // Fixed reference-Caps actions. No menu letters, synthetic keys or IME changes.
-function createCapsActions(ps,session,capture,selectionContext) {
+function createCapsActions(ps,session,capture,selectionContext,readNativeTree) {
   const commands=['selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle','convertSmartObject'];
   async function convert(request) {
     return ps.core.executeAsModal(async context=>{
@@ -1015,9 +1015,16 @@ function createCapsActions(ps,session,capture,selectionContext) {
       if(actual.document_id!==expected.document_id || actual.active_layer_id!==expected.active_layer_id || actual.layer_ids.join(',')!==expected.layer_ids?.join(','))throw Error('Caps target changed');
       const doc=ps.app.activeDocument;
       function walk(layers){return Array.from(layers).flatMap(l=>[l,...(l.kind===ps.constants.LayerKind.GROUP?walk(l.layers):[])]);}
-      const before=walk(doc.layers),order=before.map(l=>l.id),active=before.find(l=>l.id===actual.active_layer_id);
-      const selected=before.filter(l=>actual.layer_ids.includes(l.id));
-      if(!active || selected.length!==actual.layer_ids.length)throw Error('Caps target missing');
+      async function readOrder() {
+        // Keep full before/after tree validation. Large flat documents use
+        // the already validated scalar reader, not per-layer DOM objects.
+        if(doc.layers.length>=64)try {return (await readNativeTree(doc)).order;}catch(_){}
+        return walk(doc.layers).map(l=>l.id);
+      }
+      const order=await readOrder(),membership=new Set(order);
+      const selected=Array.from(doc.activeLayers),active=selected.find(l=>l.id===actual.active_layer_id);
+      if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
+      if(!active || selected.length!==actual.layer_ids.length || selected.some(l=>!actual.layer_ids.includes(l.id) || !membership.has(l.id)))throw Error('Caps target missing');
       if(['copyStyle','editStyle'].includes(command) && selected.length!==1)throw Error('此操作需要单选图层');
       const selecting=['selectAbove','selectBelow','extendAbove','extendBelow'].includes(command);
       const mutate=!selecting && command!=='copyStyle';
@@ -1060,8 +1067,8 @@ function createCapsActions(ps,session,capture,selectionContext) {
           const value=await effects() || {_obj:'layerEffects',scale:{_unit:'percentUnit',_value:100}};
           await batch([{_obj:'set',_target:[{_ref:'property',_property:'layerEffects'},{_ref:'layer',_id:active.id}],to:value,_options:{dialogOptions:'display'}}]);
         }
-        const after=await capture(),now=walk(doc.layers).map(l=>l.id);
-        if(after.document_id!==actual.document_id || now.length!==order.length || now.some(id=>!order.includes(id)))throw Error('Caps document/layer identity changed');
+        const after=await capture(),now=await readOrder();
+        if(after.document_id!==actual.document_id || now.length!==order.length || now.some(id=>!membership.has(id)))throw Error('Caps document/layer identity changed');
         if(!selecting && after.layer_ids.join(',')!==actual.layer_ids.join(','))throw Error('Caps selection changed');
         if(selecting && (command.startsWith('extend')?actual.layer_ids.some(id=>!after.layer_ids.includes(id)):after.layer_ids.length!==1))throw Error('Layer selection readback mismatch');
         if(!['moveUp','moveDown'].includes(command) && now.join(',')!==order.join(','))throw Error('Caps layer order changed');
