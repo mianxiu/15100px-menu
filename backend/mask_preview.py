@@ -9,9 +9,6 @@ from pathlib import Path
 from .shape_paint import parameters
 
 
-MOVE_ACTIONS=frozenset(('moveToTop','moveToBottom','moveUp','moveDown'))
-
-
 class MaskPreview:
     def __init__(self, epoch, paint, *, trace=False):
         self.epoch = epoch
@@ -20,8 +17,7 @@ class MaskPreview:
         self.has_mask = 'mask' in self.paint
         self.revision = self.paint['revision']
         self.phase = 'preview'
-        self.after_action = None
-        self.continuation_running = False
+        self.return_to_menu = False
         self.seq = 1
         self.binding = None
         self.lock = threading.Lock()
@@ -41,9 +37,9 @@ class MaskPreview:
             except (OSError,ValueError,TypeError):return False
         return self.execution_exited
 
-    def update(self, paint, commit=False, after_action=None):
-        if after_action is not None and (not commit or not isinstance(after_action,str) or after_action not in MOVE_ACTIONS or self.paint.get('mask_batch')):
-            raise ValueError('预览后续仅支持单个形状的图层移动')
+    def update(self, paint, commit=False, return_to_menu=False):
+        if type(return_to_menu) is not bool or return_to_menu and not commit:
+            raise ValueError("返回菜单只能确认当前预览")
         value = parameters(paint)
         if value['revision'] != self.revision or ('mask' in value) != self.has_mask or value.get('mask_batch')!=self.paint.get('mask_batch'):
             raise ValueError('预览草稿身份已改变')
@@ -54,7 +50,7 @@ class MaskPreview:
             self.seq += 1
             if commit:
                 self.phase = 'commit'
-                self.after_action = after_action
+                self.return_to_menu = return_to_menu
             return True
 
     def cancel(self):
@@ -94,8 +90,6 @@ class MaskPreview:
         with self.lock:
             binding, phase, closed, seq = self.binding, self.phase, self.closed, self.seq
         if closed:return None
-        if self.continuation_running:
-            return {'type':'preview.progress','epoch':self.epoch,'phase':'commit','stage':'move','done':0,'total':0,'frame':0,'serial':0,'operation':'移动图层'}
         if binding and read:
             folder, identity = binding
             try:
@@ -133,16 +127,17 @@ async def dispatch_preview(app, action, args):
     epoch=args.get('menu_epoch')
     if type(epoch) is not int or epoch!=app.desktop.menu_epoch:
         raise ValueError('预览菜单已过期')
-    after_action=args.get('after_action')
-    if after_action is not None and (action!='mask.preview.commit' or not isinstance(after_action,str) or after_action not in MOVE_ACTIONS):
-        raise ValueError('无效的预览后续移动')
+    if args.get('after_action') is not None:raise ValueError('调色后的移动衔接已移除，请先确认调整')
+    return_to_menu=args.get('return_to_menu',False)
+    if type(return_to_menu) is not bool or return_to_menu and action!='mask.preview.commit':
+        raise ValueError('无效的返回菜单请求')
     current=getattr(app,'_mask_preview',None)
     if current:
         if current.epoch!=epoch:raise RuntimeError('上一项预览尚未结束')
         if action=='mask.preview.commit':
-            if not current.update(args.get('params'),commit=True,after_action=after_action):
-                raise RuntimeError('预览正在收尾，本次移动未接受；不会重复执行')
-            await asyncio.to_thread(app.desktop.hide)
+            if not current.update(args.get('params'),commit=True,return_to_menu=return_to_menu):
+                raise RuntimeError('预览正在收尾，不会重复确认')
+            if not return_to_menu:await asyncio.to_thread(app.desktop.hide)
         else:current.update(args.get('params'))
         return {'message':'已更新当前预览'}
     if action!='mask.preview.update':raise RuntimeError('预览已结束，未重复提交')
@@ -177,16 +172,17 @@ async def dispatch_preview(app, action, args):
 
 async def run_preview(app, preview, target):
     stopped=asyncio.Event()
+    menu_confirmed=False
     last_progress=None
     async def pump():
         nonlocal last_progress
         while not stopped.is_set():
             try:
-                if preview.execution_exited and not preview.continuation_running:return
+                if preview.execution_exited:return
                 if preview.phase=='preview' and (not app.desktop.visible or app.desktop.menu_epoch!=preview.epoch
                         or not await asyncio.to_thread(app.desktop._scope)):
                     preview.cancel()
-                if not preview.continuation_running:await asyncio.to_thread(preview.publish)
+                await asyncio.to_thread(preview.publish)
                 feedback=getattr(app.desktop,'preview_pending_feedback',None)
                 if feedback:feedback()
                 try:
@@ -218,46 +214,18 @@ async def run_preview(app, preview, target):
         result=await app.bridge.execute_shape(preview.paint,before_dispatch=before_dispatch,
                                              frozen_target=target,preview=preview)
         app.desktop.layer_context=dict(app.bridge.layer_context)
-        notice_action='shape.paint'
-        if preview.after_action:
-            # One explicit compound gesture, not a queue. Keep the application
-            # lock across both verified tasks; repeats remain rejected.
-            native=json.loads(result.get('result','{}'))
-            if native.get('verified') is not True or native.get('cancelled') or preview.phase!='commit' or app.bridge.busy:
-                raise RuntimeError('颜色预览未确认成功，未执行后续移动')
-            stopped.set();await publisher
-            preview.continuation_running=True
-            # Only the FIRST request has ended. The next request must never
-            # inherit its exit evidence or release a new unknown operation.
-            preview.execution_exited=False
-            pending=getattr(getattr(app.bridge,'transport',None),'pending',None)
-            preview.execution_check=getattr(pending,'execution_has_exited',None)
-            stopped.clear();publisher=asyncio.create_task(pump())
-            finish_focus=getattr(app.desktop,'finish_preview_focus',None)
-            if finish_focus:await asyncio.to_thread(finish_focus,preview)
-            async def before_move(captured):
-                if app.desktop.menu_epoch!=preview.epoch:
-                    raise RuntimeError('菜单已换会话，颜色已确认，未执行移动')
-                await asyncio.to_thread(app.desktop.require_action_focus)
-                await asyncio.to_thread(app.desktop.require_move_context,preview.after_action)
-                await asyncio.to_thread(app.desktop.require_menu_layer_target,preview.after_action,captured)
-            await before_move(target)
-            prepare_guard=getattr(app.desktop,'prepare_preview_input_guard',None)
-            if prepare_guard:await asyncio.to_thread(prepare_guard,preview)
-            progress=preview.progress(read=False);progress['epoch']=app.desktop.menu_epoch
-            app.desktop.event(progress)
-            await app.broadcast({'type':'operation','busy':True,'action':preview.after_action})
-            result=await app.bridge.execute(preview.after_action,before_dispatch=before_move,frozen_target=dict(target))
-            app.desktop.layer_context=dict(app.bridge.layer_context)
-            notice_action=preview.after_action
-        if app.desktop.menu_epoch==preview.epoch and app.desktop.visible:
+        native=json.loads(result.get('result','{}')) if preview.return_to_menu else {}
+        menu_confirmed=bool(preview.return_to_menu and preview.phase=='commit' and native.get('verified') is True
+                            and not native.get('cancelled') and not app.bridge.busy)
+        if preview.return_to_menu and not menu_confirmed:raise RuntimeError('调整结果未确认，未恢复普通菜单')
+        if not menu_confirmed and app.desktop.menu_epoch==preview.epoch and app.desktop.visible:
             await asyncio.to_thread(app.desktop.hide)
-        await app.broadcast({'type':'notice','scope':'operation','action':notice_action,'ok':True,'message':result['message']})
+        await app.broadcast({'type':'notice','scope':'operation','action':'shape.paint','ok':True,'message':result['message']})
     except Exception as error:
         preview.cancel()
         if app.desktop.menu_epoch==preview.epoch and app.desktop.visible:
             await asyncio.to_thread(app.desktop.hide,restore=False)
-        await app.broadcast({'type':'notice','scope':'operation','action':preview.after_action if preview.continuation_running else 'shape.paint','ok':False,'message':('颜色已确认；后续移动未完成：' if preview.continuation_running else '')+str(error)})
+        await app.broadcast({'type':'notice','scope':'operation','action':'shape.paint','ok':False,'message':str(error)})
         logging.exception('Mask preview ended with error')
     finally:
         stopped.set();await publisher
@@ -280,6 +248,8 @@ async def run_preview(app, preview, target):
         if finish_focus and host_exited:
             try:await asyncio.to_thread(finish_focus,preview)
             except Exception:logging.exception('Preview focus feedback failed; terminal unchanged')
+        if menu_confirmed and host_exited and app.desktop.menu_epoch==preview.epoch and app.desktop.visible:
+            app.desktop.event({'type':'preview.menu.confirmed','epoch':preview.epoch})
         preview.close()
         app.operation_lock.release()
         app._mask_preview=app.desktop.mask_preview=None

@@ -163,6 +163,16 @@ static constexpr FigmaPathCommand styledPath31_1[] = {
     {'L', 0.50000000f, 8.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
     {'L', 8.50000000f, 8.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
 };
+static constexpr FigmaPathCommand styledPath32_0[] = {
+    {'M', 6.50000000f, 1.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 3.50000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 6.50000000f, 7.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath33_0[] = {
+    {'M', 2.50000000f, 1.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 5.50000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 2.50000000f, 7.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
 
 static void styledPath(ImDrawList* draw,const FigmaPathCommand* path,int count,ImVec2 at,float unit,ImU32 ink,float stroke) {
     auto point=[&](float x,float y){return ImVec2{at.x+x*unit,at.y+y*unit};};
@@ -360,6 +370,12 @@ static void drawStyledMenuIcon(ImDrawList* draw,int icon,ImVec2 at,float size,Im
     case 31:
         styledPath(draw,styledPath31_0,sizeof(styledPath31_0)/sizeof(*styledPath31_0),at,unit,color(0.00000000f),1.00000000f);
         styledPath(draw,styledPath31_1,sizeof(styledPath31_1)/sizeof(*styledPath31_1),at,unit,color(0.00000000f),1.00000000f);
+        break;
+    case 32:
+        styledPath(draw,styledPath32_0,sizeof(styledPath32_0)/sizeof(*styledPath32_0),at,unit,color(0.00000000f),1.00000000f);
+        break;
+    case 33:
+        styledPath(draw,styledPath33_0,sizeof(styledPath33_0)/sizeof(*styledPath33_0),at,unit,color(0.00000000f),1.00000000f);
         break;
     }
 }

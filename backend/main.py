@@ -411,9 +411,6 @@ class Application(web.Application):
             return result
         if action == "status":
             status = await self.bridge.status(force=True) if args.get('refresh') and isinstance(self.bridge,PhotoshopBridge) else await self.bridge.status()
-            preview=getattr(self,'_mask_preview',None)
-            if preview and getattr(preview,'after_action',None) and preview.phase=='commit' and not preview.closed:
-                status={**status,'busy':True}
             uxp=await asyncio.to_thread(self.uxp.status)
             recent=await asyncio.to_thread(self.recent_documents.refresh,status.get('photoshop_version'))
             if isinstance(self.bridge,UxpBridge) and not uxp['enabled']:
@@ -667,7 +664,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         try:
             event_args = {}
             if isinstance(action, dict):
-                event_args = {key:action[key] for key in ('menu_epoch','cursor','params','after_action') if key in action}
+                event_args = {key:action[key] for key in ('menu_epoch','cursor','params','after_action','return_to_menu') if key in action}
                 action = action['action']
                 if 'menu_epoch' in event_args and (not app.desktop or event_args['menu_epoch'] != app.desktop.menu_epoch):
                     return

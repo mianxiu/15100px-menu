@@ -360,11 +360,25 @@
       "asset": "native/figma-inspired-assets/shape-perceptualGradient.svg",
       "sha256": "178a669af19ab22148b0ec6725380e4394950bde0d491c9c6246a191fdf207d2",
       "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "operation": "editor.expand",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/editor-expand.svg",
+      "sha256": "a8ec7ef7331ee3babe9ca7ef4211fb29563b535cad4240e61ed6c3a849bdecb9",
+      "adaptation": "Project-authored one-unit chevron on the existing nine-unit family grid; expand toward left-side editor, collapse toward ordinary menu."
+    },
+    {
+      "operation": "editor.collapse",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/editor-collapse.svg",
+      "sha256": "c8337cf69f41e5f54410226bd54150ab8b7d12fa9d7fd5e8e382cfdf521c48d9",
+      "adaptation": "Project-authored one-unit chevron on the existing nine-unit family grid; expand toward left-side editor, collapse toward ordinary menu."
     }
   ],
   "extension_source": {
     "file": "native/figma-inspired-icons.json",
-    "sha256": "749c1a7ef8cf6e512c5fd729811a01c866d7407575b66a201ac6339a2e5b71aa",
+    "sha256": "aa5022abffe68f72460760f423f0b9448ecc17f41faa2cf51752317dc9e1a76c",
     "reference_nodes": [
       "809:619",
       "346:6",

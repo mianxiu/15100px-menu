@@ -1076,6 +1076,34 @@
         }
       ],
       "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "index": 32,
+      "operation": "editor.expand",
+      "name": "展开颜色／羽化",
+      "adaptation": "Project-authored one-unit chevron on the existing nine-unit family grid; expand toward left-side editor, collapse toward ordinary menu.",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 6.5 1.5 L 3.5 4.5 L 6.5 7.5",
+          "tone": 0,
+          "stroke": 1
+        }
+      ]
+    },
+    {
+      "index": 33,
+      "operation": "editor.collapse",
+      "name": "返回普通菜单",
+      "adaptation": "Project-authored one-unit chevron on the existing nine-unit family grid; expand toward left-side editor, collapse toward ordinary menu.",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 2.5 1.5 L 5.5 4.5 L 2.5 7.5",
+          "tone": 0,
+          "stroke": 1
+        }
+      ]
     }
   ],
   "harmony_markers": {

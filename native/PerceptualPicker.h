@@ -3,7 +3,7 @@
 struct PerceptualPickerState {
     perceptual::Color base{},last{},layoutBase{};
     std::string key;int active=0,drag=-1;
-    double cachedLightness=-1;
+    bool meshReady=false;
     std::array<ImU32,193> mesh{};
     RECT wheelBounds{},hueBounds{},lightnessBounds{},squareBounds{};
     float svHue=0;
@@ -51,6 +51,23 @@ struct PerceptualPickerState {
     void dragPoint(double angle,double /*fraction*/,int index){
         active=index;base[2]=perceptual::hue(angle-perceptual::wheelOffsets[index]);
     }
+    static double stripHue(perceptual::Color rgb,double fallback){
+        float h,s,v;ImGui::ColorConvertRGBtoHSV(float(rgb[0]/255),float(rgb[1]/255),float(rgb[2]/255),h,s,v);
+        if(s<.0001f){const auto c=perceptual::fromLch(.72,.18,fallback);
+            ImGui::ColorConvertRGBtoHSV(float(c[0]/255),float(c[1]/255),float(c[2]/255),h,s,v);}
+        return h*360.;
+    }
+    void dragHue(double hsvAngle,int index){
+        // The strip is standard HSV; harmony relations stay in OKLCH. Invert
+        // their monotonic hue mapping so the picked hue and its marker agree.
+        const double lightness=base[1]<.00001?.72:base[0],chroma=base[1]<.00001?.18:base[1];
+        auto hueAt=[&](double h){return stripHue(perceptual::fromLch(lightness,chroma,h),h);};
+        const double start=hueAt(0),desired=perceptual::hue(hsvAngle-start);
+        double lo=0,hi=360;
+        for(int n=0;n<22;++n){const double mid=(lo+hi)*.5;
+            if(perceptual::hue(hueAt(mid)-start)<desired)lo=mid;else hi=mid;}
+        dragPoint((lo+hi)*.5,1,index);
+    }
     // Markers occupy a separate lane outside the hue strip. Pack only their
     // displayed positions; raw hue anchors and drag offsets remain exact.
     void layout(ImVec2 center,float radius,float uiScale){
@@ -59,7 +76,7 @@ struct PerceptualPickerState {
         const float top=center.y-radius,bottom=center.y+radius;
         std::array<int,perceptual::wheelCount> order{};
         for(int i=0;i<perceptual::wheelCount;++i){
-            order[i]=i;rawPoints[i]={center.x,top+float(perceptual::hue(base[2]+perceptual::wheelOffsets[i])/360)*2*radius};
+            order[i]=i;rawPoints[i]={center.x,top+float(stripHue(perceptual::wheelColor(base,i),perceptual::hue(base[2]+perceptual::wheelOffsets[i]))/360)*2*radius};
             points[i]=rawPoints[i];
         }
         std::stable_sort(order.begin(),order.end(),[&](int a,int b){return rawPoints[a].y<rawPoints[b].y;});
@@ -78,9 +95,10 @@ struct PerceptualPickerState {
         return -1;
     }
     void cache(){
-        if(cachedLightness==.72)return;
-        cachedLightness=.72;++meshBuilds;
-        for(int a=0;a<=192;++a)mesh[a]=ink(perceptual::fromLch(.72,.18,a*360./192));
+        if(meshReady)return;
+        meshReady=true;++meshBuilds;
+        for(int a=0;a<=192;++a){float r,g,b;ImGui::ColorConvertHSVtoRGB(a/192.f,1,1,r,g,b);
+            mesh[a]=ImGui::ColorConvertFloat4ToU32({r,g,b,1});}
     }
 };
 static PerceptualPickerState perceptualPicker;
@@ -125,7 +143,7 @@ static bool drawPerceptualPicker(Json& rgb,float width) {
             if(next!=rgb){rgb=next;state.last=State::color(rgb);state.base=perceptual::lch(state.last,state.base[2]);state.active=0;changed=true;}
         }else{
             const double fraction=std::clamp(double(mouse.y-state.dragOffset.y-barLo.y)/side,0.,1.);
-            state.dragPoint(fraction*360,1,state.drag);changed|=state.apply(rgb);
+            state.dragHue(fraction*360,state.drag);changed|=state.apply(rgb);
         }
     }
     if(!ImGui::IsMouseDown(0))state.drag=-1;

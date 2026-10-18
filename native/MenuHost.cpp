@@ -235,16 +235,14 @@ static const char* rowLabel(int i) {return panelKind==4?"新建文档":i==2?"置
 static const char* rowShortcut(int i) {return panelKind==4?"Ctrl + N":shortcuts[i].c_str();}
 static bool inputFocused=false;
 static bool canExecute() {return !maskPreviewStarted && (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
-static bool previewMoveAllowed();
-static void sendPreviewMove(const char* action);
 static bool capsEnabled(int i) {
     if(i>=capsCount())return false;
-    if(!capsReady || !(canExecute() || i>=5 && previewMoveAllowed()) || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
+    if(!capsReady || !canExecute() || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
     if((i==0 || i==2) && layerCount!=1)return false;
     return !(i==1 || i==2 || i>=5) || (!layerLocked && !layerBackground && !layerCrossParents);
 }
 
-static bool rowEnabled(int i) {return !(panelKind==0 && i>=2) && (canExecute() || i>=2 && previewMoveAllowed()) && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
+static bool rowEnabled(int i) {return !(panelKind==0 && i>=2) && canExecute() && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
 static bool quickEnabled(int i) {return layerAware && panelKind!=4 && canExecute() && (quickMask & (1u<<i));}
 static std::string layerTitle() {
     const char* names[]={"图层识别待更新","背景图层","像素图层","图层组","文字图层","智能对象","形状／填充图层","调整图层","混合类型","其他图层"};
@@ -292,7 +290,7 @@ static std::wstring preview;
 static std::string previewKind="menu";
 static int previewRecentHover=-1;
 static int previewQuickHover=-1,previewActionHover=-1,previewCapsHover=-1,previewShapeHover=-1;
-static bool previewOwningEditor=false;
+static bool previewOwningEditor=false,previewOrdinary=false,previewExitEditor=false;
 static float previewShapeHeight=0;
 static bool previewLifecycle=false;
 static bool previewLive=false;
@@ -311,10 +309,6 @@ static void send(const char* action) {
         int row=std::string(action).rfind("label.",0)==0?1:-1;
         for(int i=0;i<4;++i)if(std::string(action)==actions[i])row=i;
         if(row>=0 && !rowEnabled(row))return;
-    }
-    if(maskPreviewStarted && (std::string(action)=="moveToTop" || std::string(action)=="moveToBottom" || std::string(action)=="moveUp" || std::string(action)=="moveDown")){
-        if(previewMoveAllowed())sendPreviewMove(action);
-        return;
     }
     if (selfTest) {testedActions.emplace_back(action);return;}
     // The foreground menu grants its own backend permission to return focus
@@ -485,6 +479,10 @@ static void accept(const Json& event) {
         if(event.value("compact",false) && IsWindowVisible(window)) {maskPreviewStarted=false;updateBusy(true);holdFinished=false;holdMode=true;pinned=true;pieReady=false;hoverTip.reset();tipVisual.reset();}
         return;
     }
+    if(type=="preview.menu.confirmed") {
+        if(shapeReturning && event.value("epoch",LPARAM(-1))==menuEpoch){shapeEditor.prepare(Json{{"available",false}});shapeReturning=false;}
+        return;
+    }
     if(type=="mask.preview") {maskPreviewStarted=event.value("active",false);if(!maskPreviewStarted)previewProgress.clear();return;}
     if (type=="diagnostic.progress") {DiagnosticHint::update(event);return;}
     if (type=="document") {
@@ -587,7 +585,7 @@ static int holdActionAt(POINT point) {
 static void setHoldMode(bool enabled) {
     holdMode=enabled;holdFinished=false;pinned=false;holdMoved=false;resetMenu();focusSearch=false;
     pieStarted=0;pieAnimating=enabled;
-    ringAngleReady=false;
+    ringAngleReady=false;shapeReturning=false;shapeHoverReady=false;shapeHoverBounds={};shapePanelOpen=false;shapeModeBounds={};shapeModeRows={};
     shownPresets=recentPresets;
     // The compositor retains the last presented surface while hidden. Never
     // expose that old, fully expanded pie before the new zero-alpha frame.
@@ -1019,6 +1017,7 @@ static ImVec4 footerBounds{};
 // Secondary icons keep the confirmed compact right column beside the ring.
 static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidgetHeight-quickGroupGap;}
 static const char* actionTipText(int action) {
+    if(action==200+shapeModeTipBase)return shapePanelOpen?(shapeEditor.batchMask?"羽化／密度":"颜色／羽化"):shapeEditor.batchMask?"展开羽化／密度":"展开颜色／羽化";
     if(action==223 && POINT{LONG(ImGui::GetIO().MousePos.x),LONG(ImGui::GetIO().MousePos.y)}.x>=perceptualPicker.squareBounds.left &&
        ImGui::GetIO().MousePos.x<=perceptualPicker.squareBounds.right && ImGui::GetIO().MousePos.y>=perceptualPicker.squareBounds.top &&
        ImGui::GetIO().MousePos.y<=perceptualPicker.squareBounds.bottom)return "饱和度／明度";
@@ -1038,6 +1037,7 @@ static bool tipOverlaps(ImVec4 tip,RECT r,float gap=0) {
     return r.right>r.left && r.bottom>r.top && tip.x<r.right+gap && tip.z>r.left-gap && tip.y<r.bottom+gap && tip.w>r.top-gap;
 }
 static int tipFamily(int action) {
+    if(action>=200+shapeModeTipBase)return 200+shapeModeTipBase;
     if(action>=200)return action==213 || action==214?213:200;
     if(panelKind==2 && ((action>=45 && action<47) || action==2 || action==3))return 2;
     if(action>=40 && action<47)return 40;
@@ -1046,6 +1046,7 @@ static int tipFamily(int action) {
     return action;
 }
 static RECT tipGroupRect(int action) {
+    if(action>=200+shapeModeTipBase)return shapeModeBounds;
     if(action>=200)return action==213 || action==214?shapeEditor.maskBounds:shapeEditor.bounds;
     if(panelKind==2 && capsReady && layerAware && tipFamily(action)==2)return {holdRows[2].left,holdRows[2].top,capsRows[6].right,capsRows[6].bottom};
     if(action>=40 && action<47){
@@ -1087,7 +1088,7 @@ static ImVec4 actionTipBounds(int action) {
         const ImVec4 above={x,group.top-gap-height,x+width,group.top-gap};
         auto valid=[&](ImVec4 tip){
             if(tip.x<pos.x+8*scale || tip.y<pos.y+8*scale || tip.z>pos.x+size.x-8*scale || tip.w>pos.y+size.y-8*scale)return false;
-            if(tipOverlaps(tip,shapeEditor.bounds,2*scale) || tipOverlaps(tip,shapeEditor.maskBounds,2*scale))return false;
+            if(tipOverlaps(tip,shapeEditor.bounds,2*scale) || tipOverlaps(tip,shapeEditor.maskBounds,2*scale) || tipOverlaps(tip,shapeModeBounds,2*scale))return false;
             if(tipOverlaps(tip,centre,2*scale))return false;
             for(const auto& row:holdRows)if(tipOverlaps(tip,row,2*scale))return false;
             for(const auto& row:quickRows)if(tipOverlaps(tip,row,2*scale))return false;
@@ -1095,7 +1096,7 @@ static ImVec4 actionTipBounds(int action) {
             if(tipOverlaps(tip,{LONG(footerBounds.x),LONG(footerBounds.y),LONG(footerBounds.z),LONG(footerBounds.w)},2*scale))return false;
             return true;
         };
-        if(action>=225){
+        if(action>=225 && action<200+shapeModeTipBase){
             const float nearX=group.right+gap;
             const float nearY=std::clamp((anchor.top+anchor.bottom-height)*.5f,pos.y+8*scale,std::max(pos.y+8*scale,pos.y+size.y-height-8*scale));
             const ImVec4 nearby={nearX,nearY,nearX+width,nearY+height};
@@ -1103,7 +1104,7 @@ static ImVec4 actionTipBounds(int action) {
         }
         const float left=group.left-gap-width;
         const float y=std::clamp(float(anchor.top),pos.y+8*scale,std::max(pos.y+8*scale,pos.y+size.y-height-8*scale));
-        if(action<225){
+        if(action<225 || action>=200+shapeModeTipBase){
             if(valid(above))return above;
             for(const auto& candidate:std::array<ImVec4,3>{{{left,y,left+width,y+height},{group.right+gap,y,group.right+gap+width,y+height},{x,group.bottom+gap,x+width,group.bottom+gap+height}}})if(valid(candidate))return candidate;
         }
@@ -1111,7 +1112,7 @@ static ImVec4 actionTipBounds(int action) {
         // instead of silently suppressing the tip when all four anchors fail.
         std::vector<float> rows={float(group.top),float(anchor.top),pos.y+8*scale,pos.y+size.y-height-8*scale};
         auto obstacle=[&](RECT r){if(r.right>r.left && r.bottom>r.top){rows.push_back(r.top-gap-height);rows.push_back(r.bottom+gap);}};
-        obstacle(centre);obstacle(shapeEditor.bounds);obstacle(shapeEditor.maskBounds);
+        obstacle(centre);obstacle(shapeEditor.bounds);obstacle(shapeEditor.maskBounds);obstacle(shapeModeBounds);
         obstacle({LONG(footerBounds.x),LONG(footerBounds.y),LONG(footerBounds.z),LONG(footerBounds.w)});
         for(const auto& r:holdRows)obstacle(r);
         for(const auto& r:quickRows)obstacle(r);
@@ -1143,6 +1144,7 @@ static ImVec4 actionTipBounds(int action) {
         for(auto r:capsRows)if(tipOverlaps(tip,r,2*scale))return false;
         for(auto r:quickRows)if(tipOverlaps(tip,r,2*scale))return false;
         for(auto r:recentRows)if(tipOverlaps(tip,r,2*scale))return false;
+        if(tipOverlaps(tip,shapeModeBounds,2*scale))return false;
         if(panelKind==4 && tipOverlaps(tip,recentPanelBounds,2*scale))return false;
         if(tipOverlaps(tip,centre,2*scale))return false;
         if(footerBounds.z>footerBounds.x && tipOverlaps(tip,{LONG(footerBounds.x),LONG(footerBounds.y),LONG(footerBounds.z),LONG(footerBounds.w)},2*scale))return false;
@@ -1308,6 +1310,8 @@ static void drawCapsBar() {
             capsRows[i]={LONG(x),holdRows[3].top,LONG(x+width),holdRows[3].bottom};x+=width;
         }
     }
+}
+static void shapeEditorKeys() {
     // The hook leaves letters with the editor so focused RGB/Hex fields keep
     // normal typing. Only an unfocused editor frame handles these shortcuts.
     if(shapeEditor.ready() && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput && !holdFinished && !pieAnimating){
@@ -1342,7 +1346,7 @@ static void drawPie() {
     const ImGuiKey numberKeys[]={ImGuiKey_4,ImGuiKey_None,ImGuiKey_8,ImGuiKey_2};
     const ImGuiKey keypadKeys[]={ImGuiKey_Keypad4,ImGuiKey_None,ImGuiKey_Keypad8,ImGuiKey_Keypad2};
     // Direction accelerators are local to an open pie, never global PS keys.
-    if (canExecute() && !shapeEditor.ready() && !holdFinished && !ImGui::GetIO().KeyCtrl &&
+    if (canExecute() && !shapePanelVisible() && !holdFinished && !ImGui::GetIO().KeyCtrl &&
         !ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper) {
         for (int i:{0,2,3}) if (rowVisible(i) && rowEnabled(i) &&
             (ImGui::IsKeyPressed(numberKeys[i],false) || ImGui::IsKeyPressed(keypadKeys[i],false))) {
@@ -1371,12 +1375,15 @@ static void drawPie() {
     }
     pieReady=!holdFinished;
     drawShapeEditor();
+    const bool editing=shapePanelVisible() || shapeReturning;
+    if(editing){holdRows={};labelRows={};quickRows={};capsRows={};}
     drawRecentPresets();
     // Build final hit rectangles before sampling, independent of animation.
-    if(panelKind!=4 && panelKind!=3 && layerAware)for(int i=0;i<7;++i){int group=i>=3,n=group?i-3:i;
+    if(!editing && panelKind!=4 && panelKind!=3 && layerAware)for(int i=0;i<7;++i){int group=i>=3,n=group?i-3:i;
         float x=pieCenter.x+(65+figmaDisplayIconWidth*n)*scale,y=pieCenter.y+quickGroupY(group)*scale;
         quickRows[i]={LONG(x),LONG(y),LONG(x+figmaDisplayIconWidth*scale),LONG(y+figmaDisplayWidgetHeight*scale)};}
-    drawCapsBar();
+    if(!editing)drawCapsBar();
+    shapeEditorKeys();
     POINT cursor{};GetCursorPos(&cursor);int selected=holdActionAt(cursor);
     if(!preview.empty() && previewCapsHover>=0 && previewCapsHover<7 && capsEnabled(previewCapsHover))selected=40+previewCapsHover;
     if(!preview.empty() && previewQuickHover>=0 && previewQuickHover<7 && quickEnabled(previewQuickHover))selected=32+previewQuickHover;
@@ -1394,23 +1401,23 @@ static void drawPie() {
         // Draw once with the same contrast as action labels.
         draw->AddText(at,tint(ImGuiCol_Text),text);
     };
-    caption(panelTitle(),pieCenter.y-40*scale);
+    if(!editing)caption(panelTitle(),pieCenter.y-40*scale);
     // Blender's centre is a 12..19-unit annulus with a direction segment.
-    draw->AddCircle(pieCenter,15.5f*scale,tint(ImGuiCol_WindowBg),40,7*scale);
-    float cursorX=float(cursor.x)-pieCenter.x,cursorY=float(cursor.y)-pieCenter.y;
     const bool previewWorking=previewProgress.active && previewProgress.stage!="ready" && taskRecovery.empty();
+    if(!editing || previewWorking)draw->AddCircle(pieCenter,15.5f*scale,tint(ImGuiCol_WindowBg),40,7*scale);
+    float cursorX=float(cursor.x)-pieCenter.x,cursorY=float(cursor.y)-pieCenter.y;
     if(previewWorking)activity::draw(draw,pieCenter,15.5f*scale,scale,tint(ImGuiCol_Border),tint(ImGuiCol_CheckMark),previewAnimationMs>=0?ULONGLONG(previewAnimationMs):GetTickCount64());
-    else if (cursorX*cursorX+cursorY*cursorY>=12*12*scale*scale && !holdFinished) {
+    else if (!editing && cursorX*cursorX+cursorY*cursorY>=12*12*scale*scale && !holdFinished) {
         float desired=atan2f(cursorY,cursorX);
         ringAngle=ringAngleReady?followAngle(ringAngle,desired,ImGui::GetIO().DeltaTime):desired;
         ringAngleReady=true;
         draw->PathArcTo(pieCenter,15.5f*scale,ringAngle-.785398f,ringAngle+.785398f,10);
         draw->PathStroke(tint(selected>=0?ImGuiCol_CheckMark:ImGuiCol_PlotLines),0,7*scale);
     }
-    draw->AddCircle(pieCenter,12*scale,tint(ImGuiCol_Border),40,scale);
-    draw->AddCircle(pieCenter,19*scale,tint(ImGuiCol_Border),40,scale);
+    if(!editing || previewWorking){draw->AddCircle(pieCenter,12*scale,tint(ImGuiCol_Border),40,scale);
+        draw->AddCircle(pieCenter,19*scale,tint(ImGuiCol_Border),40,scale);}
     for (int i=0;i<4;++i) {
-        if (!rowVisible(i)) continue;
+        if (editing || !rowVisible(i)) continue;
         if(i>=2 && panelKind==2 && capsReady && layerAware)continue;
         int vertexStart=draw->VtxBuffer.Size;
         ImVec2 a={float(holdRows[i].left),float(holdRows[i].top)},b={float(holdRows[i].right),float(holdRows[i].bottom)};
@@ -1439,7 +1446,7 @@ static void drawPie() {
             draw->VtxBuffer[v].pos.y+=roundf(offsets[i].y*(fac-1));
         }
     }
-    if(panelKind==2 && capsReady && layerAware && rowVisible(2)){
+    if(!editing && panelKind==2 && capsReady && layerAware && rowVisible(2)){
         const RECT group=tipGroupRect(2);
         draw->AddRectFilled({float(group.left),float(group.top)},{float(group.right),float(group.bottom)},tint(ImGuiCol_Button),rounding);
         for(int n=0;n<4;++n){
@@ -1464,14 +1471,14 @@ static void drawPie() {
         }
         draw->AddRect({float(group.left),float(group.top)},{float(group.right),float(group.bottom)},tint(ImGuiCol_Border),rounding,0,scale);
     }
-    else if(rowVisible(2) && rowVisible(3)) {
+    else if(!editing && rowVisible(2) && rowVisible(3)) {
         const auto left=holdRows[2],right=holdRows[3];
         ImVec2 a={float(left.left),float(left.top)},b={float(right.right),float(right.bottom)};
         a.y+=roundf(offsets[2].y*(fac-1));b.y+=roundf(offsets[3].y*(fac-1));
         // Both outer ends expand from their own centre; outline joins them at rest.
         draw->AddRect(a,b,tint(ImGuiCol_Border),rounding,0,scale);
     }
-    drawQuickGroups(selected,fac);
+    if(!editing)drawQuickGroups(selected,fac);
     // Only show exceptional state; the normal pie has no tutorial banner.
     const char* hint=panelKind==3 || inputFocused?"输入框编辑中":!canExecute() && !previewProgress.active?"当前不可执行":nullptr;
     std::vector<std::string> messages;
@@ -1485,11 +1492,10 @@ static void drawPie() {
     if(shapeEditor.ready() && shapeEditor.dirty && !previewProgress.active && !maskPreviewStarted)messages.push_back("调整待应用");
     if(shapeEditor.ready() && shapeEditor.copyFailed)messages.push_back("剪贴板暂时不可用，未复制颜色");
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
-    drawFooter(messages,pieCenter.y+(capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
+    drawFooter(messages,pieCenter.y+(!editing && capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
     const int tipAction=shapeEditor.ready() && shapeTipCandidate>=200?shapeTipCandidate:actionTipText(selected)?selected:-1;
     const bool ownEditorTip=tipAction>=200 && tipAction<200+shapeTipCount && shapeEditor.ready();
-    const bool moveTip=previewMoveAllowed() && (tipAction==2 || tipAction==3 || tipAction==45 || tipAction==46);
-    const bool showTip=!pieAnimating && !holdFinished && !inputFocused && !ImGui::IsAnyItemActive() && (ownEditorTip || moveTip || canExecute());
+    const bool showTip=!pieAnimating && !holdFinished && !inputFocused && !ImGui::IsAnyItemActive() && (ownEditorTip || canExecute());
     const int displayed=!preview.empty()?(showTip?tipAction:-1):hoverTip.update(tipAction,tipFamily(tipAction),GetTickCount64(),tipGapAt(hoverTip.shown,cursor),showTip);
     if(displayed>=0)drawActionTip(displayed);else tipVisual.reset();
 }
@@ -1598,7 +1604,7 @@ static void benchmarkShapeEditor(const Json& fixture) {
     for(const char* themeName:{"light","light-gray","dark-gray","dark"}){
         uiTheme=themeName;theme();
         for(const char* kind:{"plain","solid","gradient","pattern"}){
-            shapeEditor.prepare(fixture);setHoldMode(true);
+            shapeEditor.prepare(fixture);setHoldMode(true);testEditorKeepOpen=true;shapePanelOpen=true;
             if(std::string(kind)=="plain")shapeEditor.available=false;
             else if(std::string(kind)=="gradient")shapeEditor.mode(1);
             else if(std::string(kind)=="pattern")shapeEditor.mode(2);
@@ -1742,6 +1748,8 @@ int main() {
         else if (i+1<argc && arg==L"--preview-progress") previewProgressStage=std::filesystem::path(argv[++i]).u8string();
         else if (i+1<argc && arg==L"--preview-shape-hover") previewShapeHover=std::stoi(argv[++i]);
         else if (arg==L"--preview-owning-editor") previewOwningEditor=true;
+        else if (arg==L"--preview-ordinary") previewOrdinary=true;
+        else if (arg==L"--preview-exit-editor") previewExitEditor=true;
         else if (i+1<argc && arg==L"--preview-shape-height") previewShapeHeight=std::clamp(std::stof(argv[++i]),440.f,620.f);
         else if (i+1<argc && arg==L"--preview-shape") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
@@ -1999,7 +2007,7 @@ int main() {
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
             SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
-            setHoldMode(true);
+            setHoldMode(true);shapePanelOpen=previewShape && !previewOrdinary;
             if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
             if(!previewProgressStage.empty())accept({{"type","preview.progress"},{"epoch",menuEpoch},{"phase","preview"},{"stage",previewProgressStage},{"done",12},{"total",previewProgressStage=="redraw"?0:32},{"frame",2}});
         }
@@ -2083,8 +2091,13 @@ int main() {
             }
             if(!preview.empty() && previewShapeHover>=0 && previewShapeHover<shapeTipCount && frames>=2){
                 const auto r=shapeTipRows[previewShapeHover];
-                const ImVec2 point=previewShapeHover>=25?perceptualPicker.points[previewShapeHover-25]:ImVec2{(r.left+r.right)*.5f,(r.top+r.bottom)*.5f};
+                const ImVec2 point=previewShapeHover>=25 && previewShapeHover<shapeModeTipBase?perceptualPicker.points[previewShapeHover-25]:ImVec2{(r.left+r.right)*.5f,(r.top+r.bottom)*.5f};
                 io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(point.x,point.y);io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);
+            }
+            if(!preview.empty() && previewShape && frames>=2 && (previewExitEditor || previewShapeHover<0 && !previewOrdinary)){
+                const auto r=shapeEditor.batchMask?shapeEditor.maskBounds:shapeEditor.bounds;
+                io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);
+                io.AddMousePosEvent(previewExitEditor?pieCenter.x:float(r.left+3*scale),previewExitEditor?pieCenter.y:float(r.top+3*scale));
             }
             if(!preview.empty() && previewOwningEditor && frames>=2)maskPreviewStarted=true;
             ImGui::NewFrame();drawMenu();ImGui::Render();
@@ -2538,6 +2551,16 @@ int main() {
                 for(int h=0;h<360;h+=10){const auto mapped=perceptual::fromLch(.7,.5,h),p=perceptual::lch(mapped);
                     if(std::abs(p[0]-.7)>.0001 || std::abs(perceptual::hue(p[2]-h+180)-180)>.01)
                         throw std::runtime_error("Perceptual gamut map changed hue or lightness");}
+                {PerceptualPickerState standard;standard.cache();
+                    const ImU32 stops[]={IM_COL32(255,0,0,255),IM_COL32(255,255,0,255),IM_COL32(0,255,0,255),IM_COL32(0,255,255,255),IM_COL32(0,0,255,255),IM_COL32(255,0,255,255),IM_COL32(255,0,0,255)};
+                    for(int i=0;i<7;++i)if(standard.mesh[i*32]!=stops[i])throw std::runtime_error("Standard HSV hue stops differ from RGB picker");
+                    for(double l:{.2,.5,.8})for(double c:{.02,.1,.25})for(int role=0;role<4;++role)for(int h=0;h<360;h+=30){
+                        standard.base={l,c,40};standard.dragHue(h,role);
+                        const double actual=PerceptualPickerState::stripHue(perceptual::wheelColor(standard.base,role),h);
+                        if(std::abs(perceptual::hue(actual-h+180)-180)>.25 || standard.base[0]!=l || standard.base[1]!=c)
+                            throw std::runtime_error("Standard hue drag changed L/C or marker alignment");
+                    }
+                }
                 PerceptualPickerState harmony;harmony.base={.65,.12,40};harmony.dragPoint(220,.6,3);
                 if(std::abs(harmony.base[2]-40)>.001)throw std::runtime_error("Complementary handle did not rotate linked base");
                 harmony.cache();auto builds=harmony.meshBuilds;harmony.base[2]=80;harmony.cache();
@@ -2570,7 +2593,7 @@ int main() {
                     {"fill",{{"kind","solid"},{"enabled",true},{"rgb",{12,34,56}}}},
                     {"stroke",{{"kind","solid"},{"enabled",false},{"rgb",{0,0,0}},{"width",1}}},
                     {"patterns",{"Test Pattern"}}};
-                shapeEditor.prepare(shapeFixture);setHoldMode(true);panelKind=2;layerAware=true;layerKind=6;layerCount=1;layerLocked=layerBackground=false;
+                shapeEditor.prepare(shapeFixture);setHoldMode(true);shapePanelOpen=true;panelKind=2;layerAware=true;layerKind=6;layerCount=1;layerLocked=layerBackground=false;
                 {ShapeColorEditor isolated;isolated.prepare(shapeFixture);isolated.mode(1);
                     isolated.current()["method"]="classic";isolated.methodExplicit[0]=true;
                     isolated.current()["stops"][0]["rgb"][0]=120;isolated.changed();
@@ -2580,6 +2603,36 @@ int main() {
                 SetWindowPos(window,nullptr,0,0,int(920*scale),int(menuShapeWindowHeight*scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
                 ImGui_ImplWin32_NewFrame();
                 numberFrame(ImGuiKey_None,false);holdMoved=true;
+                // Exercise the real expander path before isolated control fixtures.
+                shapePanelOpen=false;shapeHoverBounds={};io.AddMousePosEvent(-1000,-1000);numberFrame(ImGuiKey_None,false);
+                const auto switchEvents=testedMaskEvents.size(),switchActions=testedActions.size();const auto switchDraft=shapeEditor.draft;
+                auto pointer=[&](float x,float y){io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(x,y);numberFrame(ImGuiKey_None,false);};
+                if(shapeEditor.bounds.right || !shapeModeBounds.right)throw std::runtime_error("New menu did not start ordinary");
+                const auto arrow=shapeModeBounds;pointer((arrow.left+arrow.right)*.5f,(arrow.top+arrow.bottom)*.5f);
+                const auto panel=shapeEditor.bounds;const auto mask=shapeEditor.maskBounds;
+                if(!shapePanelOpen || panel.right<=panel.left || holdRows[0].right || capsRows[0].right || quickRows[0].right)
+                    throw std::runtime_error("Expander failed to hide ordinary actions and show editor");
+                if(std::abs(arrow.left-panel.right-menuPanelGap*scale)>1)throw std::runtime_error("Editor not anchored next to expander");
+                const float cy=(arrow.top+arrow.bottom)*.5f;
+                for(float x=(arrow.left+arrow.right)*.5f;x>panel.right-10*scale;x-=scale){pointer(x,cy);if(!shapePanelOpen)throw std::runtime_error("Moving from expander to panel collapsed editor");}
+                pointer((panel.left+panel.right)*.5f,(panel.top+panel.bottom)*.5f);
+                for(int n=0;n<20;++n)numberFrame(ImGuiKey_None,false);
+                if(!shapePanelOpen || shapeEditor.draft!=switchDraft || testedMaskEvents.size()!=switchEvents)throw std::runtime_error("Panel dwell altered state");
+                if(mask.right){pointer(mask.left+10*scale,mask.top+5*scale);if(!shapePanelOpen)throw std::runtime_error("Moving to mask collapsed editor");}
+                pointer(pieCenter.x,pieCenter.y);
+                if(shapePanelOpen || shapeEditor.bounds.right || testedMaskEvents.size()!=switchEvents || testedActions.size()!=switchActions)
+                    throw std::runtime_error("Leaving editor did not restore ordinary menu without writes");
+                pointer((arrow.left+arrow.right)*.5f,cy);shapeEditor.current()["rgb"]={72,91,120};shapeEditor.changed();numberFrame(ImGuiKey_None,false);
+                const auto ownedDraft=shapeEditor.draft;const auto ownedEvents=testedMaskEvents.size();pointer(pieCenter.x,pieCenter.y);
+                if(!shapeReturning || !taskBusy || testedMaskEvents.size()!=ownedEvents+1 || !testedMaskEvents.back().value("return_to_menu",false) || testedMaskEvents.back()["params"]!=ownedDraft)
+                    throw std::runtime_error("Leaving dirty editor did not confirm once with protection");
+                accept({{"type","preview.menu.confirmed"},{"epoch",menuEpoch+1}});if(!shapeReturning)throw std::runtime_error("Stale return accepted");
+                accept({{"type","preview.menu.confirmed"},{"epoch",menuEpoch}});if(shapeEditor.available || !taskBusy)throw std::runtime_error("Fresh selection protection bypassed");
+                taskBusy=busyFeedback=false;allowed=capable=true;shapeEditor.prepare(shapeFixture);setHoldMode(true);io.AddMousePosEvent(-1000,-1000);numberFrame(ImGuiKey_None,false);
+                if(shapePanelOpen)throw std::runtime_error("New session inherited expanded editor");
+                testEditorKeepOpen=true;shapePanelOpen=true;numberFrame(ImGuiKey_None,false);
+                testedMaskEvents.resize(switchEvents);testedActions.resize(switchActions);
+                std::cout<<"Hover editor path passed: anchored single expander, continuous travel, panel/mask dwell, exit restores ordinary, one dirty confirmation, stale terminal rejection\n";
                 if(!shapeEditor.ready() || shapeEditor.bounds.right<=shapeEditor.bounds.left || ImGui::GetDrawData()->TotalVtxCount<=0)
                     throw std::runtime_error("Shape editor did not render through production window path");
                 if(shapeTipRows[8].top!=shapeTipRows[10].top || shapeTipRows[10].top!=shapeTipRows[11].top ||
@@ -2590,7 +2643,7 @@ int main() {
                         {shapeTipRows[9].left,shapeTipRows[9].top,shapeTipRows[9].right},
                         {shapeTipRows[10].left,shapeTipRows[10].top,shapeTipRows[10].right},
                         {shapeTipRows[11].left,shapeTipRows[11].top,shapeTipRows[11].right}}).dump()+" scale="+std::to_string(scale));
-                for(int i=17;i<=21;++i)if(shapeTipRows[i].right || shapeTipRows[i].bottom)
+                for(int i=15;i<=21;++i)if(shapeTipRows[i].right || shapeTipRows[i].bottom)
                     throw std::runtime_error("Removed harmony mode retained a hidden hit target");
                 if(PerceptualPickerState::markerRadius(0)<1.9f*PerceptualPickerState::markerRadius(1))
                     throw std::runtime_error("Main perceptual color marker lost its emphasis");
@@ -2631,7 +2684,7 @@ int main() {
                 enterHex("112233");
                 if(shapeEditor.current()["rgb"]!=Json({17,34,51}) || testedActions.size()!=shapeCount || testedMaskEvents.size()<=valueEvents)
                     throw std::runtime_error("Unprefixed Hex failed to update only the owning preview");
-                shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);clickPaintChoice(16);
+                shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);
                 const auto idleDraft=shapeEditor.draft;const auto idleEvents=testedMaskEvents.size();
                 for(int frame=0;frame<120;++frame)numberFrame(ImGuiKey_None,false);
                 if(shapeEditor.draft!=idleDraft || testedMaskEvents.size()!=idleEvents)
@@ -2714,9 +2767,6 @@ int main() {
                 for(int frame=0;frame<30;++frame)numberFrame(ImGuiKey_None,false);
                 if(shapeEditor.draft!=stillDraft || testedMaskEvents.size()!=stillEvents)
                     throw std::runtime_error("Idle square issued repeated previews");
-                shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);clickPaintChoice(15);
-                if(shapeEditor.perceptualPicker || shapeEditor.dirty)throw std::runtime_error("RGB picker mode toggle changed paint");
-                clickPaintChoice(16);if(!shapeEditor.perceptualPicker || shapeEditor.dirty)throw std::runtime_error("Perceptual picker toggle changed paint");
                 testedMaskEvents.resize(valueEvents);shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);
                 const auto featherRect=shapeEditor.featherBounds,densityRect=shapeEditor.densityBounds;
                 RECT shapeWindow;GetWindowRect(window,&shapeWindow);
@@ -2758,7 +2808,7 @@ int main() {
                 Json batchFixture={{"available",true},{"mask_batch",true},{"revision","batch:1"},{"layer_ids",{30,31}},
                     {"active_layer_id",31},{"mask",{{"feather",1},{"density",80}}},{"mixed",{{"feather",true},{"density",true}}},{"live_preview",true}};
                 for(const char* name:{"light","light-gray","dark-gray","dark"}) {
-                    uiTheme=name;theme();shapeEditor.prepare(batchFixture);setHoldMode(true);layerCount=2;layerKind=8;numberFrame(ImGuiKey_None,false);holdMoved=true;
+                    uiTheme=name;theme();shapeEditor.prepare(batchFixture);setHoldMode(true);shapePanelOpen=true;layerCount=2;layerKind=8;numberFrame(ImGuiKey_None,false);holdMoved=true;
                     if(!shapeEditor.ready() || shapeEditor.bounds.right || shapeEditor.maskBounds.right<=shapeEditor.maskBounds.left || shapeEditor.dirty)
                         throw std::runtime_error("Batch mask panel must show only sliders with untouched mixed values");
                     const auto batchFeather=shapeEditor.featherBounds;
@@ -2780,7 +2830,7 @@ int main() {
                     testedActions.resize(shapeCount);
                 }
                 uiTheme=oldBatchTheme;theme();layerCount=1;layerKind=6;
-                testedActions.resize(shapeCount);shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;
+                testedActions.resize(shapeCount);shapeEditor.prepare(shapeFixture);setHoldMode(true);shapePanelOpen=true;numberFrame(ImGuiKey_None,false);holdMoved=true;
                 shapeEditor.mode(1);shapeEditor.mode(2);shapeEditor.mode(0);
                 if(testedActions.size()!=shapeCount || shapeEditor.dirty)throw std::runtime_error("Local type switching wrote or lost original draft");
                 Json parsed;
@@ -2833,31 +2883,13 @@ int main() {
                 POINT paintPoint={(shapeEditor.bounds.left+shapeEditor.bounds.right)/2,(shapeEditor.bounds.top+shapeEditor.bounds.bottom)/2};
                 renderedHit=100;finishHold(paintPoint,true,&paintPoint);
                 if(testedActions.back()!="hide")throw std::runtime_error("Unchanged paint submitted");
-                auto resetShape=[&]{shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;};
-                for(int move=0;move<4;++move)for(bool fixed:{false,true}){
-                    capsReady=true;layerMask=15;layerCrossParents=layerLocked=layerBackground=false;
-                    resetShape();pinned=fixed;shapeEditor.current()["rgb"]={91,82,73};shapeEditor.changed();numberFrame(ImGuiKey_None,false);
-                    if(!rowEnabled(2) || !rowEnabled(3) || !capsEnabled(5) || !capsEnabled(6) || quickEnabled(0) || capsEnabled(0) || canExecute())
-                        throw std::runtime_error("Preview must allow only its explicit move continuation: "+Json({{"row2",rowEnabled(2)},{"row3",rowEnabled(3)},{"caps5",capsEnabled(5)},{"caps6",capsEnabled(6)},{"quick0",quickEnabled(0)},{"caps0",capsEnabled(0)},{"mask",maskPreviewStarted},{"allowed",allowed},{"busy",taskBusy},{"feedback",busyFeedback},{"kind",layerKind},{"count",layerCount}}).dump());
-                    const auto commands=testedActions.size(),events=testedMaskEvents.size();const auto draft=shapeEditor.draft;
-                    const int action=move<2?move+2:move+43;const RECT r=move<2?holdRows[move+2]:capsRows[move+3];
-                    POINT point={(r.left+r.right)/2,(r.top+r.bottom)/2};
-                    if(fixed){io.AddMousePosEvent(float(point.x),float(point.y));numberFrame(ImGuiKey_None,false);
-                        io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);}
-                    else{renderedHit=action;finishHold(point,true,&point);finishHold(point);}
-                    const char* name=move<2?actions[move+2]:capsActions[move+3];
-                    send(name); // A duplicate must not append another compound gesture.
-                    if(testedActions.size()!=commands || testedMaskEvents.size()!=events+1 ||
-                       testedMaskEvents.back().value("action","")!="mask.preview.commit" ||
-                       testedMaskEvents.back().value("after_action","")!=name || testedMaskEvents.back()["params"]!=draft)
-                        throw std::runtime_error("Move gesture failed to commit latest preview exactly once");
-                }
+                auto resetShape=[&]{shapeEditor.prepare(shapeFixture);setHoldMode(true);shapePanelOpen=true;numberFrame(ImGuiKey_None,false);holdMoved=true;};
                 resetShape();
                 // Old/missing host capability keeps the entire editor local.
                 for(const bool missing:{false,true}) {
                     auto local=shapeFixture;
                     if(missing)local.erase("live_preview");else local["live_preview"]=false;
-                    shapeEditor.prepare(local);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;
+                    shapeEditor.prepare(local);setHoldMode(true);shapePanelOpen=true;numberFrame(ImGuiKey_None,false);holdMoved=true;
                     const auto events=testedMaskEvents.size(),actions=testedActions.size();
                     shapeEditor.current()["rgb"]={93,72,51};shapeEditor.draft["mask"]["feather"]=7.5;shapeEditor.changed();
                     numberFrame(ImGuiKey_None,false);
@@ -2866,7 +2898,7 @@ int main() {
                     renderedHit=100;finishHold(paintPoint,true,&paintPoint);finishHold(paintPoint);
                     if(testedActions.size()!=actions+1 || testedActions.back()!="shape.paint" || testedMaskEvents.size()!=events)
                         throw std::runtime_error("Draft-only confirmation did not submit exactly once");
-                    shapeEditor.prepare(local);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;
+                    shapeEditor.prepare(local);setHoldMode(true);shapePanelOpen=true;numberFrame(ImGuiKey_None,false);holdMoved=true;
                     shapeEditor.current()["rgb"]={42,62,82};shapeEditor.changed();
                     POINT centre={LONG(pieCenter.x),LONG(pieCenter.y)};renderedHit=100;finishHold(paintPoint,true,&centre);
                     if(testedActions.back()!="hide" || testedMaskEvents.size()!=events)
@@ -2911,7 +2943,7 @@ int main() {
                 resetShape();inputFocused=true;numberFrame(ImGuiKey_None,false);
                 if(shapeEditor.ready() || shapeEditor.bounds.right || shapeEditor.maskBounds.right)throw std::runtime_error("Input protection retained shape editor");
                 inputFocused=false;shapeEditor.prepare(Json{{"available",false}});testedActions.resize(shapeCount);
-                shapeFixture["vector"]=false;shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);
+                shapeFixture["vector"]=false;shapeEditor.prepare(shapeFixture);setHoldMode(true);shapePanelOpen=true;numberFrame(ImGuiKey_None,false);
                 if(!shapeEditor.ready() || shapeEditor.vector || shapeEditor.channel!=0 || shapeEditor.bounds.right<=shapeEditor.bounds.left || shapeEditor.maskBounds.right)
                     throw std::runtime_error("Plain fill must expose only fill controls");
                 shapeEditor.prepare(Json{{"available",false}});
@@ -2930,7 +2962,7 @@ int main() {
                 benchmarkShapeEditor(shapeFixture);
                 capsReady=true;panelKind=2;layerAware=true;layerKind=2;layerMask=15;layerCount=1;layerLocked=layerBackground=layerCrossParents=false;
                 shapeEditor.prepare(Json{{"available",false}});taskBusy=busyFeedback=false;
-                setHoldMode(true);holdMoved=true;numberFrame(ImGuiKey_None,false);
+                setHoldMode(true);shapePanelOpen=true;holdMoved=true;numberFrame(ImGuiKey_None,false);
                 for(int i=0;i<7;++i){
                     const auto r=capsRows[i];POINT centre={(r.left+r.right)/2,(r.top+r.bottom)/2};
                     if(r.right<=r.left || holdActionAt(centre)!=40+i || !actionTipText(40+i))throw std::runtime_error("Caps bar geometry/hit/tooltip mismatch");
@@ -2948,7 +2980,7 @@ int main() {
                     finishHold({(r.left+r.right)/2,(r.top+r.bottom)/2});
                     if(testedActions.size()!=before+1 || testedActions.back()!=capsActions[i])
                         throw std::runtime_error("Upper step gesture must dispatch once");
-                    setHoldMode(true);holdMoved=true;numberFrame(ImGuiKey_None,false);
+                    setHoldMode(true);shapePanelOpen=true;holdMoved=true;numberFrame(ImGuiKey_None,false);
                 }
                 const auto capsRect=capsRows[0];const auto count=testedActions.size();
                 renderedHit=40;holdFinished=false;finishHold({(capsRect.left+capsRect.right)/2,(capsRect.top+capsRect.bottom)/2});
@@ -2979,10 +3011,18 @@ int main() {
             }
             if (!preview.empty() && frames==20) {
                 screenshot(preview);
+                if(previewShapeHover>=0){
+                    Json draws=Json::array();auto* data=ImGui::GetDrawData();
+                    for(int n=0;n<data->CmdListsCount;++n){const auto* list=data->CmdLists[n];Json commands=Json::array();
+                        for(const auto& cmd:list->CmdBuffer)commands.push_back({{"elements",cmd.ElemCount},{"clip",{cmd.ClipRect.x,cmd.ClipRect.y,cmd.ClipRect.z,cmd.ClipRect.w}}});
+                        Json vertices=Json::array();for(int j=0;j<list->VtxBuffer.Size;++j){const auto& v=list->VtxBuffer[j];if(j%40==0)vertices.push_back({v.pos.x,v.pos.y,v.uv.x,v.uv.y,double(v.col)});}
+                        draws.push_back({{"vertices",list->VtxBuffer.Size},{"commands",commands},{"sample",vertices},{"display",{data->DisplayPos.x,data->DisplayPos.y,data->DisplaySize.x,data->DisplaySize.y}}});}
+                    auto path=std::filesystem::path(preview);path+=L".draw.json";std::ofstream(path)<<draws.dump();
+                }
                 if(previewShapeHover>=0){auto report=std::filesystem::path(preview);report+=L".tooltip.json";
                     std::ofstream(report)<<Json{{"candidate",shapeTipCandidate},{"visible",tipVisual.ready},{"text",tipVisual.text},
                         {"bounds",{tipVisual.bounds.x,tipVisual.bounds.y,tipVisual.bounds.z,tipVisual.bounds.w}},
-                        {"preview_running",maskPreviewStarted},{"other_actions_enabled",canExecute()},{"preview_moves_enabled",previewMoveAllowed()},
+                        {"editor_visible",shapePanelVisible()},{"mode_bounds",{shapeModeBounds.left,shapeModeBounds.top,shapeModeBounds.right,shapeModeBounds.bottom}},{"preview_running",maskPreviewStarted},{"other_actions_enabled",canExecute()},{"preview_moves_enabled",false},
                         {"anchor",previewShapeHover<shapeTipCount?Json({shapeTipRows[previewShapeHover].left,shapeTipRows[previewShapeHover].top,shapeTipRows[previewShapeHover].right,shapeTipRows[previewShapeHover].bottom}):Json()},
                         {"hue_bounds",{perceptualPicker.hueBounds.left,perceptualPicker.hueBounds.top,perceptualPicker.hueBounds.right,perceptualPicker.hueBounds.bottom}},
                         {"square_bounds",{perceptualPicker.squareBounds.left,perceptualPicker.squareBounds.top,perceptualPicker.squareBounds.right,perceptualPicker.squareBounds.bottom}}}.dump();}

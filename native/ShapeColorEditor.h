@@ -1,7 +1,7 @@
 #include "PerceptualColor.h"
 // Frame-coalesced paint and mask updates share one rollbackable transaction.
 struct ShapeColorEditor {
-    bool available=false,dirty=false,vector=true,livePreview=false,batchMask=false,moveSubmitted=false;
+    bool available=false,dirty=false,vector=true,livePreview=false,batchMask=false;
     int batchCount=0;Json maskValues,maskMixed;
     int channel=0,stop=0;
     Json original,draft,patterns,lastPreview;
@@ -12,7 +12,6 @@ struct ShapeColorEditor {
     std::string hexKey;
     ULONGLONG copiedAt=0;
     bool copyFailed=false;
-    bool perceptualPicker=true;
     RECT bounds{},maskBounds{},copyBounds{},gradientBounds{},featherBounds{},densityBounds{},hexBounds{};
     bool gradientDragging=false;
     std::array<ImGuiID,2> maskInputIDs{};
@@ -20,7 +19,7 @@ struct ShapeColorEditor {
     std::array<RECT,3> rgbBounds{};
     float gradientDragOffset=0;
     void prepare(const Json& data) {
-        maskPreviewStarted=false;shapeDraftOnly=false;livePreview=false;moveSubmitted=false;batchMask=false;batchCount=0;maskValues=maskMixed=Json::object();
+        maskPreviewStarted=false;shapeDraftOnly=false;livePreview=false;batchMask=false;batchCount=0;maskValues=maskMixed=Json::object();
         lastPreview=Json();maskInputIDs={};rgbInputIDs={};rgbBounds={};methodExplicit={};
         available=false;dirty=false;bounds=maskBounds=copyBounds=gradientBounds=featherBounds=densityBounds=hexBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
         if(!data.value("available",false))return;
@@ -78,13 +77,21 @@ struct ShapeColorEditor {
     bool hit(POINT point) const {return PtInRect(&bounds,point) || PtInRect(&maskBounds,point);}
 };
 static ShapeColorEditor shapeEditor;
+// Presentation only: a hidden panel retains its request, draft and rollback.
+// A new menu session always starts with the ordinary operations visible.
+static bool shapePanelOpen=false,shapeReturning=false,shapeHoverReady=false;
+static RECT shapeModeBounds{},shapeHoverBounds{};
+static bool testEditorKeepOpen=false; // Isolated control fixtures; the hover matrix runs without this override.
+static std::array<RECT,1> shapeModeRows{};
+static bool shapePanelVisible(){return shapePanelOpen && shapeEditor.ready();}
 static bool shapeClipboardReady=false,shapeClipboardAvailable=false;
 static int shapeTipCandidate=-1;
-static constexpr int shapeTipCount=25+perceptual::wheelCount;
+static constexpr int shapeModeTipBase=25+perceptual::wheelCount;
+static constexpr int shapeTipCount=shapeModeTipBase+1;
 static std::array<RECT,shapeTipCount> shapeTipRows{};
 static const char* shapeTipNames[shapeTipCount]={"填充","描边","纯色","渐变","图案","无填充／无描边","描边宽度：双击输入","复制当前Hex颜色","黑色","白色","交换填充与描边","复制形状填充与描边","粘贴到当前选中的形状图层","羽化：双击数值输入","密度：双击数值输入",
-    "RGB取色器","色相与饱和度分离取色","","","","","","切换渐变插值：感知／线性／经典","色相","",
-    "主色","邻近色 −30°","邻近色 +30°","互补色"};
+    "","","","","","","","切换渐变插值：感知／线性／经典","色相","",
+    "主色","邻近色 −30°","邻近色 +30°","互补色","展开／收起"};
 static void shapeItemTip(int index,bool allowHover=true) {
     const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();shapeTipRows[index]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
     if(allowHover && ImGui::IsItemHovered() && !ImGui::IsItemActive())shapeTipCandidate=200+index;
@@ -92,25 +99,15 @@ static void shapeItemTip(int index,bool allowHover=true) {
 static Json testedShapePaint;
 static size_t testedShapeGrants=0;
 static std::vector<Json> testedMaskEvents;
-static bool previewMoveAllowed() {
-    return maskPreviewStarted && shapeEditor.available && shapeEditor.livePreview && !shapeEditor.batchMask && !shapeEditor.moveSubmitted &&
-        holdMode && panelKind==2 && layerAware && layerKind==6 && layerCount==1 && allowed && !taskBusy && !busyFeedback &&
-        !inputFocused && !pieAnimating && !layerLocked && !layerBackground && !layerCrossParents && shapeEditor.valid();
-}
-static void emitMaskPreview(bool commit=false,const char* afterAction=nullptr) {
+static void emitMaskPreview(bool commit=false,bool returnToMenu=false) {
     if(!shapeEditor.livePreview)return;
     maskPreviewStarted=true;
     shapeEditor.lastPreview=shapeEditor.draft;
     Json event={{"type","action"},{"action",commit?"mask.preview.commit":"mask.preview.update"},
         {"session",menuEpoch},{"params",shapeEditor.draft}};
-    if(afterAction)event["after_action"]=afterAction;
+    if(returnToMenu)event["return_to_menu"]=true;
     if(selfTest){testedMaskEvents.push_back(event);return;}
     std::cout<<event.dump()<<std::endl;
-}
-static void sendPreviewMove(const char* action) {
-    shapeEditor.moveSubmitted=true;
-    if(!selfTest && backendParent)AllowSetForegroundWindow(backendParent);
-    emitMaskPreview(true,action);
 }
 static std::string testedCopiedHex;
 static std::string shapeHex(const Json& rgb) {
@@ -320,11 +317,51 @@ static void drawGradientBar(float width) {
     for(int i=0;i<int(stops.size());++i)if(i!=shapeEditor.stop)handle(i);handle(shapeEditor.stop);
     ImGui::SetCursorScreenPos({at.x,at.y+menuGradientEditorHeight*scale+menuPanelGap*scale});
 }
+static void drawShapeModeSwitch() {
+    shapeModeBounds={};shapeModeRows={};
+    if(!shapeEditor.ready())return;
+    const auto row=holdRows[0];const float width=figmaDisplayIconWidth*scale,height=figmaDisplayWidgetHeight*scale;
+    const float x=std::round((row.left+row.right-width)*.5f),y=row.top-menuPanelGap*scale-height;
+    shapeModeBounds={LONG(x),LONG(y),LONG(x+width),LONG(y+height)};shapeModeRows[0]=shapeModeBounds;
+    const auto saved=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos({x,y});
+    ImGui::PushFont(menuFonts[0]?menuFonts[0]:ImGui::GetFont());
+    ImGui::BeginChild("editor-mode",{width,height},ImGuiChildFlags_None,
+        ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
+    auto* draw=ImGui::GetWindowDrawList();const float rounding=ImGui::GetStyle().FrameRounding;
+    const auto mouse=ImGui::GetIO().MousePos;
+    const bool hovered=mouse.x>=x && mouse.x<x+width && mouse.y>=y && mouse.y<y+height;
+    const bool editing=ImGui::IsAnyItemActive() || ImGui::GetIO().WantTextInput || ImGui::IsMouseDown(0) || ImGui::IsMouseDown(1);
+    const bool canSwitch=!pieAnimating && !holdFinished && !editing;
+    if(!hovered)shapeHoverReady=true;
+    const bool withinPanel=shapeHoverBounds.right>shapeHoverBounds.left && mouse.x>=shapeHoverBounds.left && mouse.x<shapeHoverBounds.right && mouse.y>=shapeHoverBounds.top && mouse.y<shapeHoverBounds.bottom;
+    const bool bridge=shapeHoverBounds.right>shapeHoverBounds.left && mouse.x>=shapeHoverBounds.right && mouse.x<x+width && mouse.y>=y && mouse.y<y+height;
+    const bool keep=hovered || withinPanel || bridge;
+    const bool open=hovered && shapeHoverReady;
+    const bool close=shapePanelOpen && shapeHoverBounds.right>shapeHoverBounds.left && !keep && !(selfTest && testEditorKeepOpen);
+    if(canSwitch && (open && !shapePanelOpen || close)){
+        if(!(close && shapeEditor.dirty && !shapeEditor.livePreview)){
+            if(close && maskPreviewStarted){emitMaskPreview(true,true);shapeReturning=true;updateBusy(true);pinned=true;}
+            shapePanelOpen=!close;shapeEditor.gradientDragging=false;
+            if(close)shapeHoverBounds={};
+            shapeEditor.copyBounds=shapeEditor.gradientBounds=shapeEditor.featherBounds=shapeEditor.densityBounds=shapeEditor.hexBounds={};
+            shapeEditor.rgbBounds={};shapeTipCandidate=-1;hoverTip.reset();tipVisual.reset();renderedHit=pendingHit=-1;
+        }
+    }
+    const ImVec2 a={x,y},b={x+width,y+height};
+    const auto surface=tint(shapePanelOpen?ImGuiCol_ButtonActive:hovered?ImGuiCol_ButtonHovered:ImGuiCol_Button);
+    draw->AddRectFilled(a,b,surface,rounding);draw->AddRect(a,b,tint(ImGuiCol_Border),rounding,0,scale);
+    drawStyledMenuIcon(draw,shapePanelOpen?33:32,{x+(width-figmaDisplayIconSize*scale)*.5f,y+(height-figmaDisplayIconSize*scale)*.5f},figmaDisplayIconSize*scale,tint(ImGuiCol_Text),surface);
+    shapeTipRows[shapeModeTipBase]=shapeModeBounds;
+    if(hovered && canSwitch)shapeTipCandidate=200+shapeModeTipBase;
+    ImGui::EndChild();ImGui::PopFont();ImGui::SetCursorScreenPos(saved);
+}
 static void drawShapeEditor() {
     shapeTipCandidate=-1;shapeTipRows={};
-    shapeEditor.bounds=shapeEditor.maskBounds=shapeEditor.copyBounds=shapeEditor.gradientBounds=shapeEditor.featherBounds=shapeEditor.densityBounds=shapeEditor.hexBounds={};shapeEditor.rgbBounds={};if(!shapeEditor.ready())return;
+    shapeEditor.bounds=shapeEditor.maskBounds=shapeEditor.copyBounds=shapeEditor.gradientBounds=shapeEditor.featherBounds=shapeEditor.densityBounds=shapeEditor.hexBounds={};shapeEditor.rgbBounds={};
+    drawShapeModeSwitch();
+    if(!shapePanelVisible())return;
     const auto windowPos=ImGui::GetWindowPos(),windowSize=ImGui::GetWindowSize();
-    const float available=pieCenter.x-windowPos.x-65*scale-basicLabelExtent(0).x-basicTextOffset()-figmaBasicRightPadding*scale-30*scale;
+    const float available=shapeModeBounds.left-windowPos.x-(menuPanelGap+16)*scale;
     if(available<140*scale)return;
     auto* panelFont=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
     const float gap=menuPanelGap*scale;
@@ -337,20 +374,20 @@ static void drawShapeEditor() {
     const float row=menuControlHeight*scale+gap;
     const auto kind=shapeEditor.batchMask?std::string("mask"):shapeEditor.current().value("kind",std::string("solid"));
     const float iconRow=figmaDisplayWidgetHeight*scale+gap;
-    const float colorSquare=shapeEditor.perceptualPicker?perceptualSquareSide(width-2*menuControlPadding*scale):std::max(menuControlHeight*scale,width-2*menuControlPadding*scale-menuControlHeight*scale-gap);
+    const float colorSquare=perceptualSquareSide(width-2*menuControlPadding*scale);
     const float cell=figmaDisplayIconWidth*scale;
     const bool wrapTools=width-2*menuControlPadding*scale<(shapeEditor.vector?6:4)*cell+gap;
     const bool wrapActions=shapeEditor.vector && kind!="pattern" && width-2*menuControlPadding*scale<5*cell+2*gap;
     const bool wrapValues=width-2*menuControlPadding*scale<valuesWidth;
     const float content=2*menuControlPadding*scale+iconRow*(wrapTools?2:1)+(shapeEditor.vector && shapeEditor.channel?row:0)+
-        (kind=="pattern"?row:colorSquare+iconRow+(wrapValues?2:1)*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+iconRow*(wrapActions?2:1);
+        (kind=="pattern"?row:colorSquare+(wrapValues?2:1)*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+iconRow*(wrapActions?2:1);
     const float maskHeight=shapeEditor.hasMask()?2*menuControlPadding*scale+2*row+(shapeEditor.batchMask?iconRow:0):0;
     const float separation=shapeEditor.hasMask() && !shapeEditor.batchMask?gap:0;
     const float height=shapeEditor.batchMask?0:std::min(content,windowSize.y-24*scale-maskHeight-separation);
     const float totalHeight=height+separation+maskHeight;
-    ImVec2 at={std::max(windowPos.x+16*scale,pieCenter.x-65*scale-basicLabelExtent(0).x-basicTextOffset()-figmaBasicRightPadding*scale-30*scale-width),std::max(windowPos.y+12*scale,pieCenter.y-238*scale)};
+    ImVec2 at={std::max(windowPos.x+16*scale,shapeModeBounds.left-menuPanelGap*scale-width),std::max(windowPos.y+12*scale,float(shapeModeBounds.top))};
     at.y=std::max(windowPos.y+12*scale,std::min(at.y,windowPos.y+windowSize.y-totalHeight-12*scale));
-    if(shapeEditor.batchMask)at.y=std::max(windowPos.y+12*scale,std::min(pieCenter.y-menuControlHeight*scale*.5f,windowPos.y+windowSize.y-maskHeight-12*scale));
+
     at.x=std::round(at.x);at.y=std::round(at.y);
     if(!shapeEditor.batchMask)shapeEditor.bounds={LONG(at.x),LONG(at.y),LONG(at.x+width),LONG(at.y+height)};
     const auto saved=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos(at);
@@ -411,17 +448,10 @@ static void drawShapeEditor() {
             ImGui::SetCursorScreenPos(nextAt);
         }
         Json& c=paintKind=="solid"?p["rgb"]:p["stops"][shapeEditor.stop]["rgb"];
-        const auto pickerAt=ImGui::GetCursorScreenPos();int picker=shapeEditor.perceptualPicker?1:0;
-        if(shapeSegment("picker-mode",{"RGB","感知配色"},picker,2*cell,false,{24,25},15))shapeEditor.perceptualPicker=picker==1;
-        ImGui::SetCursorScreenPos({pickerAt.x,pickerAt.y+iconRow});
-        float color[]={c[0].get<float>()/255,c[1].get<float>()/255,c[2].get<float>()/255,1};
         const float reserve=(wrapValues?ImGui::GetFrameHeightWithSpacing():0)+iconRow*(wrapActions?2:1);
-        const float pickerWidth=std::min(inner,std::max(120*scale,ImGui::GetContentRegionAvail().y-reserve+(shapeEditor.perceptualPicker?(2*menuPanelGap+menuHueBarWidth+menuHarmonyLaneWidth)*scale:0)));
+        const float pickerWidth=std::min(inner,std::max(120*scale,ImGui::GetContentRegionAvail().y-reserve+(2*menuPanelGap+menuHueBarWidth+menuHarmonyLaneWidth)*scale));
         ImGui::SetNextItemWidth(pickerWidth);
-        if(shapeEditor.perceptualPicker){if(drawPerceptualPicker(c,pickerWidth)){p["enabled"]=true;shapeEditor.changed();}}
-        else if(ImGui::ColorPicker4("##paint",color,ImGuiColorEditFlags_NoAlpha|ImGuiColorEditFlags_NoSidePreview|ImGuiColorEditFlags_NoSmallPreview|
-            ImGuiColorEditFlags_NoOptions|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_NoInputs|ImGuiColorEditFlags_Uint8)){
-            c=Json::array({int(std::lround(std::clamp(color[0],0.f,1.f)*255)),int(std::lround(std::clamp(color[1],0.f,1.f)*255)),int(std::lround(std::clamp(color[2],0.f,1.f)*255))});p["enabled"]=true;shapeEditor.changed();}
+        if(drawPerceptualPicker(c,pickerWidth)){p["enabled"]=true;shapeEditor.changed();}
         const std::string hexKey=std::to_string(shapeEditor.channel)+paintKind+std::to_string(shapeEditor.stop);
         const ImGuiID hexId=ImGui::GetID("##hex");
         if(shapeEditor.hexKey!=hexKey){if(ImGui::GetActiveID()==hexId)ImGui::ClearActiveID();shapeEditor.hexKey=hexKey;}
@@ -459,19 +489,13 @@ static void drawShapeEditor() {
         ImGui::BeginDisabled(pieAnimating);
         if(shapeEditor.batchMask)shapePaintToolbar(inner);
         inner=ImGui::GetContentRegionAvail().x;
-        const float labelWidth=figmaDisplayIconWidth*scale;
         auto slider=[&](const char* label,const char* id,const char* key,float maximum,const char* format,ImGuiSliderFlags flags,RECT& bounds){
-            const auto at=ImGui::GetCursorScreenPos();
-            ImGui::Dummy({labelWidth,menuControlHeight*scale});
-            shapeItemTip(std::string(key)=="feather"?13:14);
-            drawStyledMenuIcon(ImGui::GetWindowDrawList(),std::string(key)=="feather"?21:22,{at.x+(labelWidth-figmaDisplayIconSize*scale)*.5f,at.y+(menuControlHeight-figmaDisplayIconSize)*scale*.5f},figmaDisplayIconSize*scale,ImGui::GetColorU32(ImGuiCol_Text),ImGui::GetColorU32(ImGuiCol_FrameBg));
-            ImGui::SameLine();ImGui::SetCursorScreenPos({at.x+labelWidth+gap,at.y});
             float value=shapeEditor.draft["mask"].contains(key)?shapeEditor.draft["mask"][key].get<float>():shapeEditor.maskValues[key].get<float>();
             const auto fieldAt=ImGui::GetCursorScreenPos();const auto fieldId=ImGui::GetID(id);
             shapeEditor.maskInputIDs[std::string(key)=="feather"?0:1]=fieldId;
-            const bool enter=ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && ImGui::IsMouseHoveringRect(fieldAt,{fieldAt.x+inner-labelWidth-gap,fieldAt.y+menuControlHeight*scale}) && !pieAnimating;
+            const bool enter=ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && ImGui::IsMouseHoveringRect(fieldAt,{fieldAt.x+inner,fieldAt.y+menuControlHeight*scale}) && !pieAnimating;
             if(enter){GImGui->NavActivateId=fieldId;GImGui->NavActivateFlags=ImGuiActivateFlags_PreferInput;}
-            if(shapeEditor.batchMask && !shapeEditor.draft["mask"].contains(key) && shapeEditor.maskMixed.value(key,false) && !enter && !ImGui::TempInputIsActive(fieldId))format="混合";ImGui::SetNextItemWidth(inner-labelWidth-gap);
+            if(shapeEditor.batchMask && !shapeEditor.draft["mask"].contains(key) && shapeEditor.maskMixed.value(key,false) && !enter && !ImGui::TempInputIsActive(fieldId))format="混合";ImGui::SetNextItemWidth(inner);
             if(ImGui::SliderFloat(id,&value,0.f,maximum,format,flags|ImGuiSliderFlags_AlwaysClamp)){
                 shapeEditor.draft["mask"][key]=value;shapeEditor.changed();}
             shapeItemTip(std::string(key)=="feather"?13:14);
@@ -481,6 +505,9 @@ static void drawShapeEditor() {
         slider("密度","##mask-density","density",100.f,"%.1f%%",ImGuiSliderFlags_None,shapeEditor.densityBounds);
         ImGui::EndDisabled();ImGui::EndChild();
     }
+    shapeHoverBounds=shapeEditor.batchMask?shapeEditor.maskBounds:shapeEditor.bounds;
+    if(shapeEditor.hasMask())shapeHoverBounds.bottom=shapeEditor.maskBounds.bottom;
+    // The envelope/bridge retain hover only; separate panel rectangles remain the only commit hits.
     // No writes for channel/stop selection or copying; one latest draft per frame.
     if(shapeEditor.livePreview && !pieAnimating && shapeEditor.valid() && (shapeEditor.dirty || maskPreviewStarted) &&
        shapeEditor.draft!=shapeEditor.lastPreview)emitMaskPreview();
