@@ -73,12 +73,16 @@ async function refreshMenuContext(folder,now) {
   // Yield only between read-only host calls. Never abandon a Photoshop call
   // or consume/replay an operation here: the next poll owns its normal dispatch.
   async function checkpoint() {
+    await readHeartbeat(folder);
     let current,cancel,command;
     try {current=JSON.parse(await(await folder.getEntry('menu-context-request.json')).read());}catch(_){}
     try {cancel=JSON.parse(await(await folder.getEntry('menu-context-cancel.json')).read());}catch(_){}
     try {command=JSON.parse(await(await folder.getEntry('probe-request.json')).read());}catch(_){}
     let reason='';
-    if(Date.now()>request.expires_at_ms)reason='expired';
+    // expires_at_ms limits acceptance, not an already accepted read. A large
+    // snapshot may finish later, with fresh identity/capability validation.
+    // Still bound the read itself and yield immediately to close/new commands.
+    if(Date.now()-started>30000)reason='read-timeout';
     else if(current?.token!==token || current?.session!==session || current?.id!==request.id)reason='superseded';
     else if(cancel?.token===token && cancel?.session===session && cancel?.id===request.id)reason='closed';
     else if(command?.token===token && (!command.session || command.session===session) &&
@@ -182,6 +186,17 @@ async function record(folder, name, value) {
   const file = await folder.createFile(name, {overwrite: true});
   await file.write(JSON.stringify(value));
 }
+async function readHeartbeat(folder) {
+  const now=Date.now();
+  if(!heartbeatValue || now-lastHeartbeat<5000)return;
+  // Only a live JS checkpoint can renew transport liveness. No host getters,
+  // and no retimestamping of layer snapshots or metadata: their original
+  // timestamps remain separate. A blocked host call cannot renew this lease.
+  await record(folder,'probe-last.json',{...heartbeatValue,reason:'read-progress',
+    sequence:++sequence,plugin_time_ms:now,metadata_time_ms:heartbeatValue.plugin_time_ms,
+    read_only_work:true,layer_observation:observation});
+  lastHeartbeat=now;
+}
 async function probe(reason) {
   if (running) return;
   running = true;
@@ -189,11 +204,11 @@ async function probe(reason) {
     const folder = await uxp.storage.localFileSystem.getDataFolder();
     if(pendingResponse) {await finishResponse(folder,pendingResponse);return;}
     const now = Date.now();
-    if (reason !== 'poll' || now - lastHeartbeat >= 5000) {
+    if (reason !== 'poll' || now - (heartbeatValue?.plugin_time_ms || 0) >= 5000) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.38', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.39', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
@@ -213,6 +228,7 @@ async function probe(reason) {
       if(now-lastWorkAt<80)return;
       if(await refreshMenuContext(folder,now))return;
       await updateLayerContext(folder,now,false,null,async()=>{
+        await readHeartbeat(folder);
         let command,menu;
         try {command=JSON.parse(await(await folder.getEntry('probe-request.json')).read());}catch(_){}
         try {menu=JSON.parse(await(await folder.getEntry('menu-context-request.json')).read());}catch(_){}
@@ -242,7 +258,9 @@ async function probe(reason) {
       await idleRead();
       return;
     }
-    if(request.session && request.session!==session)return;
+    // A previous host's mailbox must remain untouched, but must not starve
+    // fresh read-only snapshots after a normal Photoshop restart.
+    if(request.session && request.session!==session){await idleRead();return;}
     const modifying=['set_label','new_document'].includes(request.operation);
     if(modifying) {
       if(!/^[0-9a-f]{32}$/.test(request.id))return;
@@ -258,13 +276,13 @@ async function probe(reason) {
       // and making the caller wait forever for an outcome. Existing accepted
       // records above, other sessions and malformed packets are never changed.
       seen.add(request.id);
-      const rejected={schema:1,session,id:request.id,probe_version:'0.3.38',operation:request.operation,
+      const rejected={schema:1,session,id:request.id,probe_version:'0.3.39',operation:request.operation,
         phase:'failed',error:'请求在执行前已过期；未修改 Photoshop',not_executed:true,result_unknown:false,completed_at_ms:Date.now()};
       pendingResponse=rejected;await finishResponse(folder,rejected);
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.38', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.39', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

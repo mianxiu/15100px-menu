@@ -674,7 +674,12 @@ class Desktop:
                     pending.pop('resume',None);self.hold_active=False
                 self.menu_layer_context=dict(value);self.color_editor_active=active
                 if phase=='completed':self.menu_context_pending=None
-                else:pending['applied_phase']=phase
+                else:
+                    pending['applied_phase']=phase
+                    # A matching fresh basic result proves acceptance. Give its
+                    # optional read a bounded completion window; never rewrite
+                    # the request expiry or extend any modifying operation.
+                    pending['deadline']=max(pending['deadline'],pending.get('completion_deadline',pending['deadline']))
                 self._native_config()
         except (OSError,ValueError,KeyError):return
 

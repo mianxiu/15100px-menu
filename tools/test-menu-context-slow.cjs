@@ -79,6 +79,13 @@ async function main(){
  await h.poll();assert.equal(h.control.writes,undefined,'Do not race a host read');
  h.release();await settle();assert.equal(h.control.afterShape,undefined,'Skip remaining optional calls');
  await h.poll();await settle();assert.equal(h.control.writes,1);assert.equal(h.result().menu_phase,'basic');
+ // Acceptance expiry must not discard an already accepted large read.
+ h=await host();h.control.block=true;h.request();h.poll();await settle();
+ h.control.now+=11000;h.release();await settle();assert.equal(h.result().menu_phase,'completed');assert.equal(h.result().plugin_time_ms,h.control.now);
+ const liveBeat=JSON.parse(h.files.get('probe-last.json'));assert.equal(liveBeat.reason,'read-progress');assert.equal(liveBeat.plugin_time_ms,h.control.now);assert.ok(liveBeat.metadata_time_ms<liveBeat.plugin_time_ms);
+ await h.poll();await settle();const refreshedBeat=JSON.parse(h.files.get('probe-last.json'));assert.equal(refreshedBeat.reason,'heartbeat');assert.equal(refreshedBeat.read_only_work,undefined);
+ h=await host();h.control.block=true;h.request();h.poll();await settle();
+ h.control.now+=31000;h.release();await settle();assert.equal(h.result().menu_phase,'basic');
  // Background selection reads also yield before consuming the next DOM block.
  h=await host();h.control.now+=200;h.control.readBlock=true;h.poll();await settle();
  h.files.set('probe-request.json',JSON.stringify({id:'8'.repeat(32),operation:'set_label',command:'selectAbove',token:'token',session:h.control.session,expires_at_ms:h.control.now+9000}));
@@ -92,6 +99,11 @@ async function main(){
  }
  h=await host();h.request();h.files.set('menu-context-cancel.json',JSON.stringify({id:'a'.repeat(32),session:h.control.session,token:'token'}));
  const reads=h.control.reads;await h.poll();await settle();assert.equal(h.control.reads,reads);assert.equal(h.control.shapes,0);
+ // A prior-session packet is preserved without starving the new menu after restart.
+ h=await host();const oldPacket=JSON.stringify({id:'7'.repeat(32),operation:'set_label',command:'selectBelow',token:'token',session:'previous-host',expires_at_ms:h.control.now-1});
+ h.files.set('probe-request.json',oldPacket);h.request();await h.poll();await settle();
+ assert.equal(h.result().menu_phase,'completed');assert.equal(h.control.writes,undefined);
+ assert.equal(h.files.get('probe-request.json'),oldPacket);assert.equal(h.files.has('result-'+ '7'.repeat(32)+'.json'),false);
  // Expired unseen mutation receives a matching failure, never a write;
  // accepted/other-session records remain untouched.
  h=await host();const expiredId='9'.repeat(32);

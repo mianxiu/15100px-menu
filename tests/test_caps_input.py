@@ -1,7 +1,7 @@
 import copy,json,tempfile,time,unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from backend.desktop import Desktop
 from backend.settings import Settings,DEFAULTS
 
@@ -75,6 +75,19 @@ class CapsInputTests(unittest.TestCase):
    d._finish_menu_context();self.assertEqual(d.gui.SendMessage.call_count,1)
    self.result(folder,kind='shape-fill',menu_phase='completed');d._finish_menu_context()
    self.assertIsNone(d.menu_context_pending);self.assertEqual(d.gui.SendMessage.call_count,2)
+ def test_accepted_basic_has_bounded_completion_window_without_extending_unaccepted_reads(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.menu_context_pending.update(deadline=110,completion_deadline=130)
+   with patch('backend.desktop.time.monotonic',return_value=105):
+    self.result(folder,menu_phase='basic');d._finish_menu_context()
+   self.assertEqual(d.menu_context_pending['deadline'],130)
+   with patch('backend.desktop.time.monotonic',return_value=115):
+    self.result(folder,menu_phase='completed');d._finish_menu_context()
+   self.assertIsNone(d.menu_context_pending);self.assertEqual(d.gui.SendMessage.call_count,2)
+   d=self.ready(folder);d.menu_context_pending.update(deadline=110,completion_deadline=130)
+   with patch('backend.desktop.time.monotonic',return_value=115):
+    self.result(folder,menu_phase='basic');d._finish_menu_context()
+   self.assertIsNone(d.menu_context_pending);d.gui.SendMessage.assert_not_called()
  def test_enrichment_cannot_switch_the_already_frozen_identity(self):
   with tempfile.TemporaryDirectory() as folder:
    d=self.ready(folder);self.result(folder,menu_phase='basic');d._finish_menu_context()

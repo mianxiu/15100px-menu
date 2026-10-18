@@ -278,7 +278,8 @@ class UxpBridge(PhotoshopBridge):
             publish_request(temporary,folder/'menu-context-request.json')
         finally:
             if temporary.exists():temporary.unlink()
-        return {'id':request['id'],'session':request['session'],'folder':folder,'epoch':epoch,'deadline':deadline}
+        return {'id':request['id'],'session':request['session'],'folder':folder,'epoch':epoch,'deadline':deadline,
+                'completion_deadline':deadline+20 if version(heartbeat.get('probe_version'))>=(0,3,39) else deadline}
 
     def cancel_menu_context(self, request):
         # Read-only observation cancellation, never an operation cancellation.
