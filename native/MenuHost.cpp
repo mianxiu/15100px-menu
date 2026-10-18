@@ -2525,6 +2525,31 @@ int main() {
                 if(shapeEditor.draft!=beforePaintDraft || testedMaskEvents.size()!=beforePaintEvents+2)
                     throw std::runtime_error("Solid icon failed to restore retained paint in the owning preview");
                 testedMaskEvents.resize(beforePaintEvents);shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);
+                if(shapeEditor.rgbBounds[0].top!=shapeEditor.rgbBounds[2].top || shapeEditor.rgbBounds[2].top!=shapeEditor.hexBounds.top ||
+                   shapeEditor.rgbBounds[0].right!=shapeEditor.rgbBounds[1].left || shapeEditor.rgbBounds[1].right!=shapeEditor.rgbBounds[2].left ||
+                   shapeEditor.rgbBounds[2].right>=shapeEditor.hexBounds.left || shapeEditor.copyBounds.right>=shapeEditor.hexBounds.right ||
+                   shapeEditor.copyBounds.top<=shapeEditor.hexBounds.top)
+                    throw std::runtime_error("RGB/Hex must share one row with inset copy inside Hex");
+                const auto valueEvents=testedMaskEvents.size();const auto redRect=shapeEditor.rgbBounds[0];
+                auto valueMouse=[&](const RECT& r,bool down){io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);
+                    io.AddMousePosEvent((r.left+r.right)*.5f,(r.top+r.bottom)*.5f);io.AddMouseButtonEvent(ImGuiMouseButton_Left,down);numberFrame(ImGuiKey_None,false);};
+                GImGui->Time+=io.MouseDoubleClickTime+.1f;valueMouse(redRect,false);valueMouse(redRect,true);valueMouse(redRect,false);valueMouse(redRect,true);
+                if(!ImGui::TempInputIsActive(shapeEditor.rgbInputIDs[0]))throw std::runtime_error("RGB scalar did not enter numeric input");
+                io.AddInputCharactersUTF8("73");numberFrame(ImGuiKey_None,false);numberFrame(ImGuiKey_Enter,true);numberFrame(ImGuiKey_Enter,false);valueMouse(redRect,false);
+                if(shapeEditor.current()["rgb"]!=Json({73,34,56}) || testedActions.size()!=shapeCount)
+                    throw std::runtime_error("RGB numeric entry changed other channels or submitted an action");
+                auto enterHex=[&](const char* text){auto r=shapeEditor.hexBounds;r.right-=LONG(figmaDisplayIconWidth*scale);
+                    GImGui->Time+=io.MouseDoubleClickTime+.1f;valueMouse(r,false);valueMouse(r,true);valueMouse(r,false);
+                    io.AddKeyEvent(ImGuiKey_ModCtrl,true);numberFrame(ImGuiKey_A,true);numberFrame(ImGuiKey_A,false);io.AddKeyEvent(ImGuiKey_ModCtrl,false);
+                    io.AddInputCharactersUTF8(text);numberFrame(ImGuiKey_None,false);numberFrame(ImGuiKey_Enter,true);numberFrame(ImGuiKey_Enter,false);};
+                enterHex("#30d86f");
+                if(shapeEditor.current()["rgb"]!=Json({48,216,111}) || std::string(shapeEditor.hexInput)!="30D86F")
+                    throw std::runtime_error("Hex entry failed to filter hash and uppercase digits");
+                copyShapeHex(shapeEditor.current()["rgb"]);if(testedCopiedHex!="#30D86F")throw std::runtime_error("Hex copy lost canonical hash prefix");
+                enterHex("112233");
+                if(shapeEditor.current()["rgb"]!=Json({17,34,51}) || testedActions.size()!=shapeCount || testedMaskEvents.size()<=valueEvents)
+                    throw std::runtime_error("Unprefixed Hex failed to update only the owning preview");
+                testedMaskEvents.resize(valueEvents);shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);
                 const auto featherRect=shapeEditor.featherBounds,densityRect=shapeEditor.densityBounds;
                 RECT shapeWindow;GetWindowRect(window,&shapeWindow);
                 if(featherRect.right<=featherRect.left || densityRect.right<=densityRect.left || densityRect.bottom>shapeEditor.maskBounds.bottom ||
@@ -2628,8 +2653,11 @@ int main() {
                 auto gradientMouse=[&](float x,bool down){io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(x,markerY);io.AddMouseButtonEvent(ImGuiMouseButton_Left,down);numberFrame(ImGuiKey_None,false);};
                 gradientMouse(left+width*.5f,false);gradientMouse(left+width*.5f,true);
                 gradientMouse(left+width*.75f,true);gradientMouse(left+width*.75f,false);
-                if(shapeEditor.stop!=1 || std::abs(shapeEditor.current()["stops"][1]["location"].get<int>()-3072)>1 || !shapeEditor.dirty || testedActions.size()!=shapeCount)
-                    throw std::runtime_error("Gradient marker drag did not update only its local position");
+                const float actualStopX=left+shapeEditor.current()["stops"][1]["location"].get<float>()/4096.f*width+shapeEditor.gradientDragOffset;
+                if(shapeEditor.stop!=1 || std::abs(actualStopX-io.MousePos.x)>1.f ||
+                   std::abs(shapeEditor.current()["stops"][1]["location"].get<int>()-3072)>std::ceil(4096.f/width) || !shapeEditor.dirty || testedActions.size()!=shapeCount)
+                    throw std::runtime_error("Gradient marker drag did not update only its local position: stop="+std::to_string(shapeEditor.stop)+
+                        " location="+shapeEditor.current()["stops"][1]["location"].dump()+" dirty="+std::to_string(shapeEditor.dirty));
                 shapeEditor.stop=0;moveGradientStop(4096);
                 if(shapeEditor.current()["stops"][0]["location"]!=shapeEditor.current()["stops"][1]["location"])
                     throw std::runtime_error("Gradient markers crossed their neighbours");

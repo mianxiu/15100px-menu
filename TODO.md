@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 185同排RGB／Hex代码／构建／实际入口：RGB共框三段输入，Hex同排独立外框和内嵌复制、固定#／过滤粘贴及自动大写；保留字体并按实际文字测宽，RGB支持拖动和双击输入。434回归、40前端、四主题24渲染、双逻辑处理器／Below Normal原生完整交互及冻结EXE启动／重启通过；覆盖RGB数值、带／不带#的Hex编辑、复制标准格式、预览未额外提交、渐变拖动和既有取消矩阵。实际185／UXP41，组件匹配，PS未重启、原稿／配置／资源／未知记录保持。早期小数像素导致渐变拖动断言失败已对齐修正，未将失败计为通过；实体鼠标和其他硬件视觉待验收。证据.runtime/recovery185/runtime.json、tests185.log、frontend185-test.log、native185-low.log、ui185-verified.json。
+- [ ] 185公开交付：待源码／标签、Wiki、匿名下载及备用更新核验；之后只保留185 Release，184附件本地备份、Git标签及历史保留。
+
 - [x] 184全图标布局代码／构建／实际入口：填充／描边与无／纯色／渐变／图案同排分组，孤立勾选框改为无图标；黑白、单格交换、外观复制／粘贴同排。434回归、40前端、四主题24份串行渲染、双逻辑处理器／Below Normal原生完整交互矩阵和EXE启动／重启通过，包含无／纯色保留值与预览合并检查。实际184／UXP41，入口及资源匹配；PS／UXP未重启，原稿／配置／未知保护保持。早期几何断言失败及不完整导出留档、不计通过；后续修正提示几何记录并核对24张图标区域，实体鼠标及其他硬件视觉仍待验收。证据.runtime/recovery184/runtime.json、tests184.log、frontend184-test.log、native184-low.log、ui184-verified.json、ui184。
 - [x] 184公开交付：源码／标签、Wiki四页与Release已推送，安装包／SHA／更新清单匿名下载及冻结更新器API403备用下载核验通过；只保留184 Release，183附件本地备份、Git标签／源码历史保留。实际184／UXP41，实体鼠标和其他电脑视觉仍待验收。证据.runtime/recovery184/runtime.json、release-0.4.184-public-verification.json、fallback184-live.json、wiki184-public.json、release184-cleanup.json。
 

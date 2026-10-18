@@ -9,14 +9,16 @@ struct ShapeColorEditor {
     std::string hexKey;
     ULONGLONG copiedAt=0;
     bool copyFailed=false;
-    RECT bounds{},maskBounds{},copyBounds{},gradientBounds{},featherBounds{},densityBounds{};
+    RECT bounds{},maskBounds{},copyBounds{},gradientBounds{},featherBounds{},densityBounds{},hexBounds{};
     bool gradientDragging=false;
     std::array<ImGuiID,2> maskInputIDs{};
+    std::array<ImGuiID,3> rgbInputIDs{};
+    std::array<RECT,3> rgbBounds{};
     float gradientDragOffset=0;
     void prepare(const Json& data) {
         maskPreviewStarted=false;shapeDraftOnly=false;livePreview=false;batchMask=false;batchCount=0;maskValues=maskMixed=Json::object();
-        lastPreview=Json();maskInputIDs={};
-        available=false;dirty=false;bounds=maskBounds=copyBounds=gradientBounds=featherBounds=densityBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
+        lastPreview=Json();maskInputIDs={};rgbInputIDs={};rgbBounds={};
+        available=false;dirty=false;bounds=maskBounds=copyBounds=gradientBounds=featherBounds=densityBounds=hexBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
         if(!data.value("available",false))return;
         if(data.value("mask_batch",false)) {
             batchCount=data.at("layer_ids").size();if(batchCount<2 || batchCount>128)return;
@@ -169,6 +171,64 @@ static void shapePaintToolbar(float width) {
         holdFinished=true;send(selected?"shape.pastePaint":"shape.copyPaint");
     }
 }
+static bool shapeRgbInputs(Json& rgb,float width) {
+    const auto at=ImGui::GetCursorScreenPos();auto* draw=ImGui::GetWindowDrawList();
+    const float height=menuControlHeight*scale,part=width/3,rounding=ImGui::GetStyle().FrameRounding;
+    draw->AddRectFilled(at,{at.x+width,at.y+height},ImGui::GetColorU32(ImGuiCol_FrameBg),rounding);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding,0.f);ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,0.f);
+    const auto pad=ImGui::GetStyle().FramePadding;ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,{menuControlPadding*scale,pad.y});
+    for(auto role:{ImGuiCol_FrameBg,ImGuiCol_FrameBgHovered,ImGuiCol_FrameBgActive})ImGui::PushStyleColor(role,ImVec4(0,0,0,0));
+    draw->ChannelsSplit(2);bool changed=false;const char* formats[]={"R:%d","G:%d","B:%d"};
+    for(int i=0;i<3;++i){
+        ImGui::PushID(i);draw->ChannelsSetCurrent(1);const ImVec2 a={at.x+i*part,at.y},b={at.x+(i+1)*part,at.y+height};
+        ImGui::SetCursorScreenPos(a);ImGui::SetNextItemWidth(part);int value=std::clamp(int(std::lround(rgb[i].get<double>())),0,255);
+        shapeEditor.rgbInputIDs[i]=ImGui::GetID("##rgb");
+        if(ImGui::DragInt("##rgb",&value,1.f,0,255,formats[i],ImGuiSliderFlags_AlwaysClamp)){rgb[i]=value;changed=true;}
+        shapeEditor.rgbBounds[i]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
+        if(ImGui::IsItemHovered() || ImGui::IsItemActive()){
+            draw->ChannelsSetCurrent(0);draw->AddRectFilled(a,b,ImGui::GetColorU32(ImGui::IsItemActive()?ImGuiCol_HeaderActive:ImGuiCol_HeaderHovered),rounding,
+                i==0?ImDrawFlags_RoundCornersLeft:i==2?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone);
+        }
+        ImGui::PopID();
+    }
+    draw->ChannelsMerge();ImGui::PopStyleColor(3);ImGui::PopStyleVar(3);
+    for(int i=1;i<3;++i)draw->AddLine({at.x+i*part,at.y},{at.x+i*part,at.y+height},ImGui::GetColorU32(ImGuiCol_Border),scale);
+    draw->AddRect(at,{at.x+width,at.y+height},ImGui::GetColorU32(ImGuiCol_Border),rounding,0,scale);
+    ImGui::SetCursorScreenPos({at.x,at.y+height+menuPanelGap*scale});return changed;
+}
+static void shapeHexInput(Json& rgb,float width) {
+    const auto at=ImGui::GetCursorScreenPos();auto* draw=ImGui::GetWindowDrawList();
+    const float height=menuControlHeight*scale,copyWidth=figmaDisplayIconWidth*scale,inputWidth=width-copyWidth,rounding=ImGui::GetStyle().FrameRounding;
+    const auto surface=ImGui::GetColorU32(ImGuiCol_FrameBg);
+    shapeEditor.hexBounds={LONG(at.x),LONG(at.y),LONG(at.x+width),LONG(at.y+height)};
+    draw->AddRectFilled(at,{at.x+width,at.y+height},surface,rounding);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding,0.f);ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,0.f);
+    const auto pad=ImGui::GetStyle().FramePadding;ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,{menuControlPadding*scale,pad.y});
+    for(auto role:{ImGuiCol_FrameBg,ImGuiCol_FrameBgHovered,ImGuiCol_FrameBgActive})ImGui::PushStyleColor(role,ImVec4(0,0,0,0));
+    draw->ChannelsSplit(2);draw->ChannelsSetCurrent(1);
+    const float prefixWidth=ImGui::CalcTextSize("#").x;
+    ImGui::SetCursorScreenPos(at);if(ImGui::InvisibleButton("##hex-prefix",{prefixWidth,height}))ImGui::SetKeyboardFocusHere();
+    ImGui::SetCursorScreenPos({at.x+prefixWidth,at.y});ImGui::SetNextItemWidth(inputWidth-prefixWidth);
+    if(ImGui::InputText("##hex",shapeEditor.hexInput,7,ImGuiInputTextFlags_CharsUppercase|ImGuiInputTextFlags_CharsHexadecimal)){
+        Json parsed;if(parseShapeHex(shapeEditor.hexInput,parsed)){rgb=parsed;shapeEditor.current()["enabled"]=true;shapeEditor.changed();}
+    }
+    if(ImGui::IsItemHovered() || ImGui::IsItemActive()){
+        draw->ChannelsSetCurrent(0);draw->AddRectFilled(at,{at.x+inputWidth,at.y+height},ImGui::GetColorU32(ImGui::IsItemActive()?ImGuiCol_HeaderActive:ImGuiCol_HeaderHovered),rounding,ImDrawFlags_RoundCornersLeft);
+    }
+    draw->ChannelsMerge();ImGui::PopStyleColor(3);ImGui::PopStyleVar(3);
+    draw->AddText({at.x+menuControlPadding*scale,at.y+pad.y},ImGui::GetColorU32(ImGuiCol_Text),"#");
+    Json parsed;ImGui::BeginDisabled(!parseShapeHex(shapeEditor.hexInput,parsed));
+    ImGui::SetCursorScreenPos({at.x+inputWidth+scale,at.y+scale});
+    const bool clicked=ImGui::InvisibleButton("##copy-hex",{copyWidth-2*scale,height-2*scale});shapeItemTip(7);
+    if(ImGui::IsItemHovered())draw->AddRectFilled({at.x+inputWidth,at.y},{at.x+width,at.y+height},ImGui::GetColorU32(ImGuiCol_HeaderHovered),rounding,ImDrawFlags_RoundCornersRight);
+    const bool disabled=(ImGui::GetItemFlags()&ImGuiItemFlags_Disabled)!=0;
+    drawStyledMenuIcon(draw,16,{at.x+inputWidth+(copyWidth-figmaDisplayIconSize*scale)*.5f,at.y+(height-figmaDisplayIconSize*scale)*.5f},figmaDisplayIconSize*scale,ImGui::GetColorU32(disabled?ImGuiCol_TextDisabled:ImGuiCol_Text),surface);
+    const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();shapeEditor.copyBounds={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
+    if(clicked)copyShapeHex(rgb);ImGui::EndDisabled();
+    draw->AddLine({at.x+inputWidth,at.y},{at.x+inputWidth,at.y+height},ImGui::GetColorU32(ImGuiCol_Border),scale);
+    draw->AddRect(at,{at.x+width,at.y+height},ImGui::GetColorU32(ImGuiCol_Border),rounding,0,scale);
+    ImGui::SetCursorScreenPos({at.x,at.y+height+menuPanelGap*scale});
+}
 static int gradientPosition(float x,float left,float width) {
     return width>0?std::clamp(int(std::lround((x-left)/width*4096.f)),0,4096):0;
 }
@@ -227,12 +287,18 @@ static void drawGradientBar(float width) {
 }
 static void drawShapeEditor() {
     shapeTipCandidate=-1;shapeTipRows={};
-    shapeEditor.bounds=shapeEditor.maskBounds=shapeEditor.copyBounds=shapeEditor.gradientBounds=shapeEditor.featherBounds=shapeEditor.densityBounds={};if(!shapeEditor.ready())return;
+    shapeEditor.bounds=shapeEditor.maskBounds=shapeEditor.copyBounds=shapeEditor.gradientBounds=shapeEditor.featherBounds=shapeEditor.densityBounds=shapeEditor.hexBounds={};shapeEditor.rgbBounds={};if(!shapeEditor.ready())return;
     const auto windowPos=ImGui::GetWindowPos(),windowSize=ImGui::GetWindowSize();
     const float available=pieCenter.x-windowPos.x-65*scale-basicLabelExtent(0).x-basicTextOffset()-figmaBasicRightPadding*scale-30*scale;
     if(available<140*scale)return;
     auto* panelFont=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
-    const float width=std::min(menuPanelWidth*scale,available),gap=menuPanelGap*scale;
+    const float gap=menuPanelGap*scale;
+    auto textWidth=[&](const char* value){return panelFont->CalcTextSizeA(panelFont->FontSize,FLT_MAX,0,value).x;};
+    const float rgbMinimum=std::max({textWidth("R:255"),textWidth("G:255"),textWidth("B:255")})+2*menuControlPadding*scale;
+    float hexGlyph=0;for(char ch:std::string("0123456789ABCDEF")){char text[]={ch,0};hexGlyph=std::max(hexGlyph,textWidth(text));}
+    const float hexMinimum=textWidth("#")+6*hexGlyph+(2*menuControlPadding+figmaDisplayIconWidth+2)*scale;
+    const float valuesWidth=3*rgbMinimum+gap+hexMinimum;
+    const float width=std::floor(std::min(shapeEditor.batchMask?menuPanelWidth*scale:std::max(menuPanelWidth*scale,valuesWidth+2*(menuControlPadding+1)*scale),available));
     const float row=menuControlHeight*scale+gap;
     const auto kind=shapeEditor.batchMask?std::string("mask"):shapeEditor.current().value("kind",std::string("solid"));
     const float iconRow=figmaDisplayWidgetHeight*scale+gap;
@@ -240,8 +306,9 @@ static void drawShapeEditor() {
     const float cell=figmaDisplayIconWidth*scale;
     const bool wrapTools=width-2*menuControlPadding*scale<(shapeEditor.vector?6:4)*cell+gap;
     const bool wrapActions=shapeEditor.vector && kind!="pattern" && width-2*menuControlPadding*scale<5*cell+2*gap;
+    const bool wrapValues=width-2*menuControlPadding*scale<valuesWidth;
     const float content=2*menuControlPadding*scale+iconRow*(wrapTools?2:1)+(shapeEditor.vector && shapeEditor.channel?row:0)+
-        (kind=="pattern"?row:colorSquare+2*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+iconRow*(wrapActions?2:1);
+        (kind=="pattern"?row:colorSquare+(wrapValues?2:1)*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+iconRow*(wrapActions?2:1);
     const float maskHeight=shapeEditor.hasMask()?2*menuControlPadding*scale+2*row+(shapeEditor.batchMask?iconRow:0):0;
     const float separation=shapeEditor.hasMask() && !shapeEditor.batchMask?gap:0;
     const float height=shapeEditor.batchMask?0:std::min(content,windowSize.y-24*scale-maskHeight-separation);
@@ -249,6 +316,7 @@ static void drawShapeEditor() {
     ImVec2 at={std::max(windowPos.x+16*scale,pieCenter.x-65*scale-basicLabelExtent(0).x-basicTextOffset()-figmaBasicRightPadding*scale-30*scale-width),std::max(windowPos.y+12*scale,pieCenter.y-238*scale)};
     at.y=std::max(windowPos.y+12*scale,std::min(at.y,windowPos.y+windowSize.y-totalHeight-12*scale));
     if(shapeEditor.batchMask)at.y=std::max(windowPos.y+12*scale,std::min(pieCenter.y-menuControlHeight*scale*.5f,windowPos.y+windowSize.y-maskHeight-12*scale));
+    at.x=std::round(at.x);at.y=std::round(at.y);
     if(!shapeEditor.batchMask)shapeEditor.bounds={LONG(at.x),LONG(at.y),LONG(at.x+width),LONG(at.y+height)};
     const auto saved=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos(at);
     ImGui::PushStyleColor(ImGuiCol_ChildBg,ImGui::GetStyle().Colors[ImGuiCol_WindowBg]);
@@ -304,26 +372,20 @@ static void drawShapeEditor() {
         }
         Json& c=paintKind=="solid"?p["rgb"]:p["stops"][shapeEditor.stop]["rgb"];
         float color[]={c[0].get<float>()/255,c[1].get<float>()/255,c[2].get<float>()/255,1};
-        const float reserve=ImGui::GetFrameHeightWithSpacing()+iconRow*(wrapActions?2:1);
+        const float reserve=(wrapValues?ImGui::GetFrameHeightWithSpacing():0)+iconRow*(wrapActions?2:1);
         ImGui::SetNextItemWidth(std::min(inner,std::max(90*scale,ImGui::GetContentRegionAvail().y-reserve)));
         if(ImGui::ColorPicker4("##paint",color,ImGuiColorEditFlags_NoAlpha|ImGuiColorEditFlags_NoSidePreview|ImGuiColorEditFlags_NoSmallPreview|
-            ImGuiColorEditFlags_NoOptions|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_DisplayRGB|ImGuiColorEditFlags_Uint8)){
+            ImGuiColorEditFlags_NoOptions|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_NoInputs|ImGuiColorEditFlags_Uint8)){
             c=Json::array({int(std::lround(std::clamp(color[0],0.f,1.f)*255)),int(std::lround(std::clamp(color[1],0.f,1.f)*255)),int(std::lround(std::clamp(color[2],0.f,1.f)*255))});p["enabled"]=true;shapeEditor.changed();}
         const std::string hexKey=std::to_string(shapeEditor.channel)+paintKind+std::to_string(shapeEditor.stop);
         const ImGuiID hexId=ImGui::GetID("##hex");
         if(shapeEditor.hexKey!=hexKey){if(ImGui::GetActiveID()==hexId)ImGui::ClearActiveID();shapeEditor.hexKey=hexKey;}
-        if(ImGui::GetActiveID()!=hexId){const auto value=shapeHex(c);std::copy(value.begin(),value.end(),shapeEditor.hexInput);shapeEditor.hexInput[7]=0;}
-        const float copyWidth=figmaDisplayIconWidth*scale;
-        ImGui::SetNextItemWidth(inner-copyWidth-gap);
-        if(ImGui::InputText("##hex",shapeEditor.hexInput,sizeof(shapeEditor.hexInput),ImGuiInputTextFlags_CharsUppercase|ImGuiInputTextFlags_CharsNoBlank)){
-            Json parsed;if(parseShapeHex(shapeEditor.hexInput,parsed)){c=parsed;p["enabled"]=true;shapeEditor.changed();}}
-        ImGui::SameLine(0,gap);Json parsed;
-        ImGui::BeginDisabled(!parseShapeHex(shapeEditor.hexInput,parsed));
-        const bool copied=shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900;
-        if(shapeIconButton("##copy-hex",16,7,copyWidth))copyShapeHex(c);
-        const auto ca=ImGui::GetItemRectMin(),cb=ImGui::GetItemRectMax();
-        shapeEditor.copyBounds={LONG(ca.x),LONG(ca.y),LONG(cb.x),LONG(cb.y)};
-        ImGui::EndDisabled();
+        if(ImGui::GetActiveID()!=hexId){const auto value=shapeHex(c).substr(1);std::copy(value.begin(),value.end(),shapeEditor.hexInput);shapeEditor.hexInput[6]=0;}
+        const auto valuesAt=ImGui::GetCursorScreenPos();const float rgbWidth=wrapValues?inner:inner-gap-hexMinimum;
+        if(shapeRgbInputs(c,rgbWidth)){p["enabled"]=true;shapeEditor.changed();const auto hex=shapeHex(c).substr(1);std::copy(hex.begin(),hex.end(),shapeEditor.hexInput);shapeEditor.hexInput[6]=0;}
+        ImGui::SetCursorScreenPos(wrapValues?ImVec2{valuesAt.x,valuesAt.y+row}:ImVec2{valuesAt.x+rgbWidth+gap,valuesAt.y});
+        shapeHexInput(c,wrapValues?inner:hexMinimum);
+        ImGui::SetCursorScreenPos({valuesAt.x,valuesAt.y+row*(wrapValues?2:1)});
     }
     const auto actionsAt=ImGui::GetCursorScreenPos();
     if(paintKind!="pattern"){

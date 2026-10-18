@@ -18,3 +18,5 @@
 183：layer-menu.png改为四主题矩阵中的empty-light-gray原生导出，复制可用、未复制时粘贴明显灰化；仅布局和绘制检查，不是PS实体鼠标验收。
 
 184：layer-menu.png更新为同宽两面板和紧凑图标分组的原生导出（ui184/solid-light-gray），不是PS实体屏幕验收。
+
+185：layer-menu.png为同排RGB／Hex及内嵌复制的原生导出（ui185/solid-light-gray），不是PS实体屏幕验收。
