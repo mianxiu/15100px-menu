@@ -1,5 +1,12 @@
 # Photoshop Menu TODO
 
+- [x] 187取消误报修复：恢复历史后恢复本次原选层，保留写前与写后校验；生产函数复现及双核／正常配置故意错开历史选层的取消实测通过。静止圆点不重复发预览，闲置不写PS。原186未知收据、待核对文件及完整历史未改；备份1.psd后按两次明确授权结束本项目后台组件并切换隔离187，PS与UXP未重启。一次前台变化安全暂停未计通过，其临时文档在已确认取消后清理。证据.runtime/unknown186-readonly/read-only-comparison.json、recovery187/preserved186-journals.json、approval.json及live-matrix.json。
+
+- [x] 187所有配色点进入色环、主色放大：移除配色模式栏和底部色块，九点同显、主色尺寸两倍，独立拾取／拖动联动，重合避让及真实锚点引线，拾取保留偏移；闲置缓存与原单事务预览保持。436回归、40前端、双核原生完整矩阵、四主题32份导出和四轮PS24.0.1事务（低CPU确认／取消、正常确认／取消）通过，核对恢复、一次撤销与资源还原。构建及实际187／UXP42入口和原生组件匹配，PS未重启，原稿／配置／历史未知记录保留；首次测试声明编译错误留档修复，未计通过。实体键鼠／画布及其他办公硬件待验收。证据.runtime/recovery187/runtime.json、live-matrix.json、tests187.log、native187-low.log、ui187-verified.json。
+- [ ] 187公开交付：待源码／标签、Wiki、匿名下载和API403备用更新核验；通过后仅保留187 Release，186附件与Git标签／历史保留。
+
+
+
 - [x] 186感知色轮／渐变代码、构建、实际运行：OKLCH／Oklab联动圆点、五种配色关系、感知明度与色块应用；新建／修改渐变默认感知，显式切换插值在本次菜单保留。PS原生填充与描边插值进入版本校验及写后读回；颜色预览首次提交即要求UXP42，防止中途切换渐变时旧执行端忽略插值参数；羽化单独修改保留渐变。436回归、40前端、双核原生完整交互、四主题24渲染及冻结EXE启动／重启通过；PS24.0.1真实事务4组（双核／Below Normal 3、正常1），覆盖感知填充＋描边确认、取消、仅改蒙版、一次撤销与路径／顺序恢复；资源已还原。实际186／UXP42、入口与原生／JSX资源匹配，原稿备份后恢复、配置与历史未知记录保留。早期色域精度和构建并发占用失败已留档修正，不计通过。实体Caps／鼠标到画布视觉、其他PS与真实办公i5／集显仍待对应验收。证据.runtime/recovery186/runtime.json、live-matrix.json、tests186.log、native186-low.log、ui186-verified.json。
 - [x] 186公开交付：源码／标签及Wiki五页和侧栏已推送，安装包／SHA／清单匿名下载与冻结更新器API403备用通道真实下载核验通过。仅保留186 Release；184全部附件本地备份、Git标签／源码历史保留，185的RGB／Hex功能并入本次发行。实际186／UXP42，dist仅保留当前发行物；实体键鼠／画布与其他硬件范围仍按上项待验收。证据.runtime/recovery186/runtime.json、release-0.4.186-public-verification.json、manifest186-verification.json、fallback186-live.json、wiki186-public.json、release186-cleanup.json。
 

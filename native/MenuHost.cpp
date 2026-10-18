@@ -1012,7 +1012,7 @@ static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidge
 static const char* actionTipText(int action) {
     if(action==205)return shapeEditor.channel?"无描边":"无填充";
     if(action==222){const auto method=shapeEditor.current().value("method",std::string("classic"));return method=="perceptual"?"感知渐变；点击切换线性":method=="linear"?"线性渐变；点击切换经典":"经典渐变；点击切换感知";}
-    if(action>=200 && action<225)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
+    if(action>=200 && action<234)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
     if(action>=12 && action<12+int(recentTips.size()) && panelKind==4)return recentTips[action-12].c_str();
     if(action>=40 && action<47)return capsLabels[action-40];
     if(action>=32 && action<39)return quickLabels[action-32];
@@ -1066,7 +1066,7 @@ static ImVec4 actionTipBounds(int action) {
     auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text);
     const float width=extent.x+2*padding,height=extent.y+2*padding;
     const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
-    if(action>=200 && action<225){
+    if(action>=200 && action<234){
         const RECT group=tipGroupRect(action),anchor=shapeTipRows[action-200];
         const float x=std::clamp((anchor.left+anchor.right-width)*.5f,pos.x+8*scale,std::max(pos.x+8*scale,pos.x+size.x-width-8*scale));
         const ImVec4 above={x,group.top-gap-height,x+width,group.top-gap};
@@ -2504,10 +2504,21 @@ int main() {
                 for(int h=0;h<360;h+=10){const auto mapped=perceptual::fromLch(.7,.5,h),p=perceptual::lch(mapped);
                     if(std::abs(p[0]-.7)>.0001 || std::abs(perceptual::hue(p[2]-h+180)-180)>.01)
                         throw std::runtime_error("Perceptual gamut map changed hue or lightness");}
-                PerceptualPickerState harmony;harmony.base={.65,.12,40};harmony.rule=1;harmony.dragPoint(220,.6,1);
+                PerceptualPickerState harmony;harmony.base={.65,.12,40};harmony.dragPoint(220,.6,3);
                 if(std::abs(harmony.base[2]-40)>.001)throw std::runtime_error("Complementary handle did not rotate linked base");
                 harmony.cache();auto builds=harmony.meshBuilds;harmony.base[2]=80;harmony.cache();
                 if(harmony.meshBuilds!=builds)throw std::runtime_error("Hue drag rebuilt unchanged wheel mesh");
+                for(const auto& rgb:std::vector<perceptual::Color>{{0,0,0},{255,255,255},{128,128,128},{1,1,1},{254,254,254},{255,0,0},{0,255,0},{0,0,255},{48,216,111}})
+                    for(float radius:{38.f,60.f,100.f})for(float uiScale:{1.f,2.f}){
+                        harmony.base=perceptual::lch(rgb);harmony.layout({300,300},radius*uiScale,uiScale);
+                        const auto layouts=harmony.layoutBuilds;harmony.layout({300,300},radius*uiScale,uiScale);
+                        if(harmony.layoutBuilds!=layouts)throw std::runtime_error("Idle wheel rebuilt its handle layout");
+                        for(int i=0;i<perceptual::wheelCount;++i){
+                            if(harmony.hit(harmony.points[i],uiScale)!=i)throw std::runtime_error("Simultaneous wheel handles overlap or cannot be selected: "+std::to_string(i));
+                            for(int j=0;j<i;++j)if(std::hypot(harmony.points[i].x-harmony.points[j].x,harmony.points[i].y-harmony.points[j].y)<(harmony.markerRadius(i)+harmony.markerRadius(j)+3.5f)*uiScale)
+                                throw std::runtime_error("Wheel handles lost visible separation");
+                        }
+                    }
                 Json shapeFixture={{"available",true},{"live_preview",true},{"revision","test:1"},
                     {"mask",{{"feather",0},{"density",100}}},
                     {"fill",{{"kind","solid"},{"enabled",true},{"rgb",{12,34,56}}}},
@@ -2533,6 +2544,10 @@ int main() {
                         {shapeTipRows[9].left,shapeTipRows[9].top,shapeTipRows[9].right},
                         {shapeTipRows[10].left,shapeTipRows[10].top,shapeTipRows[10].right},
                         {shapeTipRows[11].left,shapeTipRows[11].top,shapeTipRows[11].right}}).dump()+" scale="+std::to_string(scale));
+                for(int i=17;i<=21;++i)if(shapeTipRows[i].right || shapeTipRows[i].bottom)
+                    throw std::runtime_error("Removed harmony mode retained a hidden hit target");
+                if(PerceptualPickerState::markerRadius(0)<1.9f*PerceptualPickerState::markerRadius(1))
+                    throw std::runtime_error("Main perceptual color marker lost its emphasis");
                 const auto beforePaintEvents=testedMaskEvents.size();const auto beforePaintDraft=shapeEditor.draft;
                 auto clickPaintChoice=[&](int tip){const auto r=shapeTipRows[tip];
                     io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent((r.left+r.right)*.5f,(r.top+r.bottom)*.5f);
@@ -2570,13 +2585,30 @@ int main() {
                 enterHex("112233");
                 if(shapeEditor.current()["rgb"]!=Json({17,34,51}) || testedActions.size()!=shapeCount || testedMaskEvents.size()<=valueEvents)
                     throw std::runtime_error("Unprefixed Hex failed to update only the owning preview");
-                shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);clickPaintChoice(16);clickPaintChoice(18);
-                const auto wheelDraft=shapeEditor.draft;const auto dot=perceptualPicker.points[1];
+                shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);clickPaintChoice(16);
+                const auto idleDraft=shapeEditor.draft;const auto idleEvents=testedMaskEvents.size();
+                for(int frame=0;frame<120;++frame)numberFrame(ImGuiKey_None,false);
+                if(shapeEditor.draft!=idleDraft || testedMaskEvents.size()!=idleEvents)
+                    throw std::runtime_error("Idle perceptual picker issued a preview without input");
+                for(int i=0;i<perceptual::wheelCount;++i){
+                    const auto point=perceptualPicker.points[i];const auto base=perceptualPicker.base;
+                    io.AddMousePosEvent(point.x,point.y);numberFrame(ImGuiKey_None,false);
+                    if(shapeTipCandidate!=225+i)throw std::runtime_error("Wheel point tooltip did not identify its visible role");
+                    io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
+                    const auto heldDraft=shapeEditor.draft;const auto heldEvents=testedMaskEvents.size();
+                    for(int frame=0;frame<30;++frame)numberFrame(ImGuiKey_None,false);
+                    if(shapeEditor.draft!=heldDraft || testedMaskEvents.size()!=heldEvents)
+                        throw std::runtime_error("Stationary wheel handle issued repeated previews");
+                    io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
+                    if(perceptualPicker.active!=i || perceptualPicker.base!=base || testedActions.size()!=shapeCount)
+                        throw std::runtime_error("Wheel point pickup changed the base or dispatched a second task");
+                }
+                const auto wheelDraft=shapeEditor.draft;const auto dot=perceptualPicker.points[3];
                 io.AddMousePosEvent(dot.x,dot.y);numberFrame(ImGuiKey_None,false);io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
                 const auto wb=perceptualPicker.wheelBounds;const float cx=(wb.left+wb.right)*.5f,cy=(wb.top+wb.bottom)*.5f;
                 io.AddMousePosEvent(cx+(wb.right-wb.left)*.25f,cy+(wb.bottom-wb.top)*.2f);numberFrame(ImGuiKey_None,false);
                 io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
-                if(shapeEditor.draft==wheelDraft || testedActions.size()!=shapeCount || !maskPreviewStarted || perceptualPicker.active!=1)
+                if(shapeEditor.draft==wheelDraft || testedActions.size()!=shapeCount || !maskPreviewStarted || perceptualPicker.active!=3)
                     throw std::runtime_error("Perceptual companion drag did not update only its owning preview");
                 shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);clickPaintChoice(15);
                 if(shapeEditor.perceptualPicker || shapeEditor.dirty)throw std::runtime_error("RGB picker mode toggle changed paint");

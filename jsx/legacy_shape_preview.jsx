@@ -230,7 +230,17 @@
     }
     var commit=false,leaseUntil=new Date().getTime()+4000;
     function invariants() { target();var d=layerDescriptor();if(parentID()!==originalParent || order().join(',')!==originalOrder.join(',') || pathStream()!==originalPath || !same(pixelMask(d),originalPixel))throw Error('Document structure or pixel mask changed');return d; }
-    function rollback() { restoring=true;progress('restore',0,0,true);target();var current=layerDescriptor(),dirty=changed || !same(raw(current),raw(baseline)) || prepared.raw.vector && !maskClose(mask(current),originalMask);doc.activeHistoryState=originalHistory;if(dirty){progress('redraw',0,0,true);app.refresh();redraws++;}progress('verify',0,1,true);var d=invariants();if(!same(raw(d),raw(baseline)) || prepared.raw.vector && !maskClose(mask(d),originalMask))throw Error('Legacy rollback readback mismatch');progress('verify',1,1,true); }
+    function restoreSingleSelection() {
+        // History states also store the selection at their creation. A later
+        // selection without a history step must survive our own rollback.
+        // Only called immediately after restoring our captured history, with
+        // target() checked before that write. Never repair an external change.
+        if(app.activeDocument.id!==request.target.document_id)throw Error('Preview document changed during rollback');
+        var r=new ActionReference(),d=new ActionDescriptor();
+        r.putIdentifier(c('Lyr '),request.target.active_layer_id);r.putIdentifier(s('document'),request.target.document_id);
+        d.putReference(c('null'),r);d.putBoolean(c('MkVs'),false);executeAction(c('slct'),d,DialogModes.NO);target();
+    }
+    function rollback() { restoring=true;progress('restore',0,0,true);target();var current=layerDescriptor(),dirty=changed || !same(raw(current),raw(baseline)) || prepared.raw.vector && !maskClose(mask(current),originalMask);stage='restore-history';doc.activeHistoryState=originalHistory;restoreSingleSelection();if(dirty){progress('redraw',0,0,true);stage='restore-redraw';app.refresh();redraws++;}progress('verify',0,1,true);stage='restore-verify';var d=invariants();if(!same(raw(d),raw(baseline)) || prepared.raw.vector && !maskClose(mask(d),originalMask))throw Error('Legacy rollback readback mismatch');progress('verify',1,1,true); }
     function batchRun() {
         var records=[],batchHistory=null,batchStarted=false,batchChanged=false,batchCommit=false,batchSeq=0,batchUpdates=0,batchRedraws=0,batchLatest=request.paint;
         var batchAbort={},actionResidue='',batchNativeCalls=0,nativeReads=false;
@@ -467,9 +477,10 @@
         result.preview={updates:updates,redraws:redraws,last_seq:lastSeq,engine:'standalone-extendscript'};
         result={schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'completed',result:result};
     } catch(error) {
-        var unknown=false;
-        if(historyStarted){try{rollback();}catch(_){unknown=true;}}
-        result={schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'failed',error:String(error),stage:stage,result_unknown:unknown};
+        var unknown=false,failureStage=stage,rollbackError='';
+        if(historyStarted){try{rollback();}catch(restoreError){unknown=true;rollbackError=String(restoreError);}}
+        result={schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'failed',error:String(error),stage:failureStage,result_unknown:unknown};
+        if(rollbackError){result.rollback_error=rollbackError;result.rollback_stage=stage;}
     }
     var text=encode(result),temporary=new File(folder+'/legacy-result-'+request.id+'.tmp');
     if(receipt.exists)throw Error('Native receipt already exists; never overwrite');

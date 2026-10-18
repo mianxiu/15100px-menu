@@ -22,3 +22,5 @@
 185：layer-menu.png为同排RGB／Hex及内嵌复制的原生导出（ui185/solid-light-gray），不是PS实体屏幕验收。
 
 186：layer-menu.png为感知色轮、联动圆点、配色方案与RGB／Hex同排的原生导出；不代替实体PS目视验收。
+
+187：layer-menu.png为九点同显、主色放大的色环原生导出，不代替PS实体键鼠目视验收。

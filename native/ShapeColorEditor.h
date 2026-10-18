@@ -12,7 +12,7 @@ struct ShapeColorEditor {
     std::string hexKey;
     ULONGLONG copiedAt=0;
     bool copyFailed=false;
-    bool perceptualPicker=true;int harmonyRule=1;
+    bool perceptualPicker=true;
     RECT bounds{},maskBounds{},copyBounds{},gradientBounds{},featherBounds{},densityBounds{},hexBounds{};
     bool gradientDragging=false;
     std::array<ImGuiID,2> maskInputIDs{};
@@ -80,9 +80,10 @@ struct ShapeColorEditor {
 static ShapeColorEditor shapeEditor;
 static bool shapeClipboardReady=false,shapeClipboardAvailable=false;
 static int shapeTipCandidate=-1;
-static std::array<RECT,25> shapeTipRows{};
+static std::array<RECT,34> shapeTipRows{};
 static const char* shapeTipNames[]={"填充","描边","纯色","渐变","图案","无填充／无描边","描边宽度：双击输入","复制当前Hex颜色","黑色","白色","交换填充与描边","复制形状填充与描边","粘贴到当前选中的形状图层","羽化：双击数值输入","密度：双击数值输入",
-    "RGB取色器","感知配色色轮：拖动圆点联动","邻近色","互补色","分裂互补色","三色配色","强调色：同时调整感知明度","切换渐变插值：感知／线性／经典","拖动圆点调整配色；点击色块使用颜色","主色感知明度"};
+    "RGB取色器","感知配色色轮：拖动圆点联动","邻近色","互补色","分裂互补色","三色配色","强调色：同时调整感知明度","切换渐变插值：感知／线性／经典","点击配色圆点使用颜色；拖动时全部联动","主色感知明度",
+    "主色：拖动时全部配色点联动","邻近色 −30°","邻近色 +30°","互补色","分裂互补色 150°","分裂互补色 210°","三色配色 120°","三色配色 240°","强调色：同时调整感知明度"};
 static void shapeItemTip(int index,bool allowHover=true) {
     const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();shapeTipRows[index]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
     if(allowHover && ImGui::IsItemHovered() && !ImGui::IsItemActive())shapeTipCandidate=200+index;
@@ -329,9 +330,8 @@ static void drawShapeEditor() {
     const bool wrapTools=width-2*menuControlPadding*scale<(shapeEditor.vector?6:4)*cell+gap;
     const bool wrapActions=shapeEditor.vector && kind!="pattern" && width-2*menuControlPadding*scale<5*cell+2*gap;
     const bool wrapValues=width-2*menuControlPadding*scale<valuesWidth;
-    const bool wrapPicker=shapeEditor.perceptualPicker && width-2*menuControlPadding*scale<7*cell+gap;
     const float content=2*menuControlPadding*scale+iconRow*(wrapTools?2:1)+(shapeEditor.vector && shapeEditor.channel?row:0)+
-        (kind=="pattern"?row:colorSquare+iconRow*(wrapPicker?2:1)+(shapeEditor.perceptualPicker?row:0)+(wrapValues?2:1)*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+iconRow*(wrapActions?2:1);
+        (kind=="pattern"?row:colorSquare+iconRow+(wrapValues?2:1)*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+iconRow*(wrapActions?2:1);
     const float maskHeight=shapeEditor.hasMask()?2*menuControlPadding*scale+2*row+(shapeEditor.batchMask?iconRow:0):0;
     const float separation=shapeEditor.hasMask() && !shapeEditor.batchMask?gap:0;
     const float height=shapeEditor.batchMask?0:std::min(content,windowSize.y-24*scale-maskHeight-separation);
@@ -401,12 +401,10 @@ static void drawShapeEditor() {
         Json& c=paintKind=="solid"?p["rgb"]:p["stops"][shapeEditor.stop]["rgb"];
         const auto pickerAt=ImGui::GetCursorScreenPos();int picker=shapeEditor.perceptualPicker?1:0;
         if(shapeSegment("picker-mode",{"RGB","感知色轮"},picker,2*cell,false,{24,25},15))shapeEditor.perceptualPicker=picker==1;
-        if(shapeEditor.perceptualPicker){ImGui::SetCursorScreenPos({wrapPicker?pickerAt.x:pickerAt.x+inner-5*cell,pickerAt.y+(wrapPicker?iconRow:0)});
-            shapeSegment("harmony-mode",{"邻近","互补","分裂互补","三色","强调"},shapeEditor.harmonyRule,5*cell,false,{26,27,28,29,30},17);}
-        ImGui::SetCursorScreenPos({pickerAt.x,pickerAt.y+iconRow*(wrapPicker?2:1)});
+        ImGui::SetCursorScreenPos({pickerAt.x,pickerAt.y+iconRow});
         float color[]={c[0].get<float>()/255,c[1].get<float>()/255,c[2].get<float>()/255,1};
         const float reserve=(wrapValues?ImGui::GetFrameHeightWithSpacing():0)+iconRow*(wrapActions?2:1);
-        const float pickerWidth=std::min(inner,std::max(90*scale,ImGui::GetContentRegionAvail().y-reserve-(shapeEditor.perceptualPicker?row:0)));
+        const float pickerWidth=std::min(inner,std::max(90*scale,ImGui::GetContentRegionAvail().y-reserve));
         ImGui::SetNextItemWidth(pickerWidth);
         if(shapeEditor.perceptualPicker){if(drawPerceptualPicker(c,pickerWidth)){p["enabled"]=true;shapeEditor.changed();}}
         else if(ImGui::ColorPicker4("##paint",color,ImGuiColorEditFlags_NoAlpha|ImGuiColorEditFlags_NoSidePreview|ImGuiColorEditFlags_NoSmallPreview|

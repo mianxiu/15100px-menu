@@ -50,4 +50,12 @@ inline Color role(Color base,int rule,int i){
     if(rule==4 && i){l=base[0]>.6?.35:.8;c*=1.15;}
     return fromLch(l,c,h);
 }
+// Every relationship is visible together. Shared main colors are one node.
+inline constexpr int wheelCount=9;
+inline constexpr std::array<double,wheelCount> wheelOffsets={0,-30,30,180,150,210,120,240,180};
+inline Color wheelColor(Color base,int index){
+    constexpr int rules[]={0,0,0,1,2,2,3,3,4};
+    constexpr int points[]={0,1,2,1,1,2,1,2,1};
+    return role(base,rules[index],points[index]);
+}
 }
