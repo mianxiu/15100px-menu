@@ -734,7 +734,8 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
       const colors=raw.gradient?.colors;
       if(!Array.isArray(colors) || colors.length<2 || colors.length>32)return null;
       const stops=colors.map(v=>({rgb:rgb(v.color),location:Math.round(v.location)}));
-      return stops.every(v=>v.rgb && v.rgb.every(Number.isFinite))?{kind:'gradient',stops}:null;
+      const method=raw.gradientsInterpolationMethod?._value ?? 'classic';
+      return stops.every(v=>v.rgb && v.rgb.every(Number.isFinite)) && ['classic','linear','perceptual'].includes(method)?{kind:'gradient',stops,method}:null;
     }
     if(raw?._obj==='patternLayer' && typeof raw.pattern?.name==='string')return {kind:'pattern',name:raw.pattern.name};
     return null;
@@ -817,6 +818,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
     if(value.kind==='gradient' && (!Array.isArray(value.stops) || value.stops.length<2 || value.stops.length>32 ||
       value.stops.some((s,i)=>!color(s.rgb) || !Number.isInteger(s.location) || s.location<0 || s.location>4096 || i && s.location<value.stops[i-1].location)))throw Error('Invalid gradient stops');
     if(value.kind==='pattern' && (typeof value.name!=='string' || !value.name || value.name.length>128))throw Error('Invalid pattern name');
+    if(value.kind==='gradient' && value.method!==undefined && !['classic','linear','perceptual'].includes(value.method))throw Error('Invalid gradient interpolation');
   }
   function build(value,previous) {
     if(value.kind==='solid')return {_obj:'solidColorLayer',color:{_obj:'RGBColor',red:value.rgb[0],grain:value.rgb[1],blue:value.rgb[2]}};
@@ -828,6 +830,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
     const next=previous?._obj==='gradientLayer'?clone(previous):{_obj:'gradientLayer',type:{_enum:'gradientType',_value:'linear'},
       angle:{_unit:'angleUnit',_value:0},scale:{_unit:'percentUnit',_value:100}};
     const old=next.gradient || {};
+    if(value.method!==undefined)next.gradientsInterpolationMethod={_enum:'gradientInterpolationMethodType',_value:value.method};
     next.gradient={...old,_obj:'gradientClassEvent',name:old.name || 'Menu gradient',gradientForm:{_enum:'gradientForm',_value:'customStops'},
       interfaceIconFrameDimmed:4096,colors:value.stops.map((s,i)=>({_obj:'colorStop',
         color:{_obj:'RGBColor',red:s.rgb[0],grain:s.rgb[1],blue:s.rgb[2]},type:{_enum:'colorStopType',_value:'userStop'},
@@ -840,7 +843,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
     const close=(a,b)=>a.length===b.length && a.every((v,i)=>Math.abs(v-b[i])<=1);
     if(actual.kind==='solid')return close(actual.rgb,wanted.rgb);
     if(actual.kind==='pattern')return actual.name===wanted.name;
-    return actual.stops.length===wanted.stops.length && actual.stops.every((s,i)=>s.location===wanted.stops[i].location && close(s.rgb,wanted.stops[i].rgb));
+    return (wanted.method===undefined || actual.method===wanted.method) && actual.stops.length===wanted.stops.length && actual.stops.every((s,i)=>s.location===wanted.stops[i].location && close(s.rgb,wanted.stops[i].rgb));
   }
   function validateParams(params) {
     if(!params || typeof params.revision!=='string' || params.revision.length>128)throw Error('Missing shape revision');
@@ -962,7 +965,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
       const rawKey=raw=>JSON.stringify([raw.fill,raw.stroke,raw.vector]);
       let appliedRawKey=rawKey(original);
       const preparePaint=()=>{
-        const key=p=>JSON.stringify([p.kind,p.enabled,p.rgb,p.stops?.map(s=>[s.location,...s.rgb]),p.name,p.width]);
+        const key=p=>JSON.stringify([p.kind,p.enabled,p.rgb,p.stops?.map(s=>[s.location,...s.rgb]),p.name,p.width,p.method]);
         const fillChanged=key(params.fill)!==key(appliedPaint.fill),strokeChanged=key(params.stroke)!==key(appliedPaint.stroke);
         const paintChanged=fillChanged || strokeChanged;
         // Vector-backed content must use Photoshop's shapeStyle setter.

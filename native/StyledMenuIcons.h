@@ -111,6 +111,58 @@ static constexpr FigmaPathCommand styledPath23_1[] = {
     {'M', 1.00000000f, 8.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
     {'L', 8.00000000f, 1.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
 };
+static constexpr FigmaPathCommand styledPath24_1[] = {
+    {'M', 1.00000000f, 8.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 8.00000000f, 1.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath25_0[] = {
+    {'M', 4.50000000f, 0.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'C', 6.70000000f, 0.50000000f, 8.50000000f, 2.30000000f, 8.50000000f, 4.50000000f},
+    {'C', 8.50000000f, 6.70000000f, 6.70000000f, 8.50000000f, 4.50000000f, 8.50000000f},
+    {'C', 2.30000000f, 8.50000000f, 0.50000000f, 6.70000000f, 0.50000000f, 4.50000000f},
+    {'C', 0.50000000f, 2.30000000f, 2.30000000f, 0.50000000f, 4.50000000f, 0.50000000f},
+    {'Z', 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath25_1[] = {
+    {'M', 1.50000000f, 6.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 4.50000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 7.50000000f, 3.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath26_0[] = {
+    {'M', 7.35800000f, 2.85000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 7.80000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 7.35800000f, 6.15000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath27_0[] = {
+    {'M', 7.80000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 1.20000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath28_0[] = {
+    {'M', 7.80000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 1.64200000f, 6.15000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 1.64200000f, 2.85000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath29_0[] = {
+    {'M', 7.80000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 2.85000000f, 7.35800000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 2.85000000f, 1.64200000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath30_0[] = {
+    {'M', 7.80000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 1.20000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath31_0[] = {
+    {'M', 0.50000000f, 8.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 2.50000000f, 6.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 4.50000000f, 5.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 6.50000000f, 3.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 8.50000000f, 0.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath31_1[] = {
+    {'M', 0.50000000f, 0.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 0.50000000f, 8.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 8.50000000f, 8.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
 
 static void styledPath(ImDrawList* draw,const FigmaPathCommand* path,int count,ImVec2 at,float unit,ImU32 ink,float stroke) {
     auto point=[&](float x,float y){return ImVec2{at.x+x*unit,at.y+y*unit};};
@@ -264,6 +316,50 @@ static void drawStyledMenuIcon(ImDrawList* draw,int icon,ImVec2 at,float size,Im
         draw->AddRectFilled(p(0.00000000f,0.00000000f),p(9.00000000f,9.00000000f),color(1.00000000f),0.00000000f*unit);
         draw->AddRect(p(0.50000000f,0.50000000f),p(8.50000000f,8.50000000f),ink,0,0,1.00000000f*unit);
         styledPath(draw,styledPath23_1,sizeof(styledPath23_1)/sizeof(*styledPath23_1),at,unit,color(0.00000000f),1.00000000f);
+        break;
+    case 24:
+        draw->AddRectFilled(p(0.00000000f,0.00000000f),p(9.00000000f,9.00000000f),color(0.53000000f),0.00000000f*unit);
+        draw->AddRect(p(0.50000000f,0.50000000f),p(8.50000000f,8.50000000f),ink,0,0,1.00000000f*unit);
+        styledPath(draw,styledPath24_1,sizeof(styledPath24_1)/sizeof(*styledPath24_1),at,unit,color(0.00000000f),1.00000000f);
+        break;
+    case 25:
+        styledPath(draw,styledPath25_0,sizeof(styledPath25_0)/sizeof(*styledPath25_0),at,unit,color(0.00000000f),1.00000000f);
+        styledPath(draw,styledPath25_1,sizeof(styledPath25_1)/sizeof(*styledPath25_1),at,unit,color(0.00000000f),1.00000000f);
+        draw->AddCircleFilled(p(1.50000000f,6.00000000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddCircleFilled(p(7.50000000f,3.00000000f),0.65000000f*unit,color(0.00000000f),32);
+        break;
+    case 26:
+        styledPath(draw,styledPath26_0,sizeof(styledPath26_0)/sizeof(*styledPath26_0),at,unit,color(0.00000000f),1.00000000f);
+        draw->AddCircleFilled(p(7.35800000f,2.85000000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddCircleFilled(p(7.80000000f,4.50000000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddCircleFilled(p(7.35800000f,6.15000000f),0.65000000f*unit,color(0.00000000f),32);
+        break;
+    case 27:
+        styledPath(draw,styledPath27_0,sizeof(styledPath27_0)/sizeof(*styledPath27_0),at,unit,color(0.00000000f),1.00000000f);
+        draw->AddCircleFilled(p(7.80000000f,4.50000000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddCircleFilled(p(1.20000000f,4.50000000f),0.65000000f*unit,color(0.00000000f),32);
+        break;
+    case 28:
+        styledPath(draw,styledPath28_0,sizeof(styledPath28_0)/sizeof(*styledPath28_0),at,unit,color(0.00000000f),1.00000000f);
+        draw->AddCircleFilled(p(7.80000000f,4.50000000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddCircleFilled(p(1.64200000f,6.15000000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddCircleFilled(p(1.64200000f,2.85000000f),0.65000000f*unit,color(0.00000000f),32);
+        break;
+    case 29:
+        styledPath(draw,styledPath29_0,sizeof(styledPath29_0)/sizeof(*styledPath29_0),at,unit,color(0.00000000f),1.00000000f);
+        draw->AddCircleFilled(p(7.80000000f,4.50000000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddCircleFilled(p(2.85000000f,7.35800000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddCircleFilled(p(2.85000000f,1.64200000f),0.65000000f*unit,color(0.00000000f),32);
+        break;
+    case 30:
+        styledPath(draw,styledPath30_0,sizeof(styledPath30_0)/sizeof(*styledPath30_0),at,unit,color(0.00000000f),1.00000000f);
+        draw->AddCircleFilled(p(7.80000000f,4.50000000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddCircleFilled(p(1.20000000f,4.50000000f),0.65000000f*unit,color(0.00000000f),32);
+        draw->AddRectFilled(p(3.50000000f,3.50000000f),p(5.50000000f,5.50000000f),color(0.00000000f),0.00000000f*unit);
+        break;
+    case 31:
+        styledPath(draw,styledPath31_0,sizeof(styledPath31_0)/sizeof(*styledPath31_0),at,unit,color(0.00000000f),1.00000000f);
+        styledPath(draw,styledPath31_1,sizeof(styledPath31_1)/sizeof(*styledPath31_1),at,unit,color(0.00000000f),1.00000000f);
         break;
     }
 }

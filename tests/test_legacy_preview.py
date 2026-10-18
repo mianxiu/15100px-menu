@@ -13,7 +13,7 @@ class LegacyTransportTests(unittest.TestCase):
   self.transport.pending.storage=self.transport.storage;self.transport.task_id='a'*32
   self.folder=self.transport.storage/'24/External/com.15100px.menu.offline-probe/PluginData';self.folder.mkdir(parents=True)
   self.transport.config.write_text(json.dumps({'token':'t'*64}),'utf-8')
-  self.heartbeat={'session':'session','probe_version':'0.3.32','photoshop_version':'24.0.1','legacy_preview_available':True,'document_redraw_available':False,'plugin_time_ms':time.time()*1000}
+  self.heartbeat={'session':'session','probe_version':'0.3.42','photoshop_version':'24.0.1','legacy_preview_available':True,'document_redraw_available':False,'plugin_time_ms':time.time()*1000}
   self.save_heartbeat();self.preview=SimpleNamespace(bind=Mock(),trace=False)
  def tearDown(self):self.temp.cleanup()
  def save_heartbeat(self):(self.folder/'probe-last.json').write_text(json.dumps(self.heartbeat),'utf-8')

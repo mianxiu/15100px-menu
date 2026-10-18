@@ -19,3 +19,5 @@ native/vendor/manifest.json 保存直接纳入的 C++ 依赖版本与哈希。�
 frontend/package-lock.json 与 requirements*.txt 记录安装／构建依赖；它们由上游独立维护，适用上游许可。更新依赖或字体时，同时核对并更新相关声明。
 
 统一后台分发 ZIP 随附项目 LICENSE、本文件、licenses/ 中的声明，以及 C++ 库与字体的原始版权／许可。仅安装 Photoshop 插件不提供 Photoshop 或 Adobe 软件许可。
+
+感知颜色数学参考 Björn Ottosson 发布的 [Oklab 转换矩阵与说明](https://bottosson.github.io/posts/oklab/)及 [W3C OKLCH 定义](https://www.w3.org/TR/css-color-4/#ok-lab)，本项目在 native/PerceptualColor.h 中实现本地计算与色域映射。

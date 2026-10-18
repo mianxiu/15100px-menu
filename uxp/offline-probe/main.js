@@ -208,7 +208,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.41', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.42', session, transport: 'plugin-data-files',
         layer_observation:observation,
         shape_clipboard_available:labels.paintClipboardAvailable?.()===true,
         ...await labels.interfacePreferences(),
@@ -277,13 +277,13 @@ async function probe(reason) {
       // and making the caller wait forever for an outcome. Existing accepted
       // records above, other sessions and malformed packets are never changed.
       seen.add(request.id);
-      const rejected={schema:1,session,id:request.id,probe_version:'0.3.41',operation:request.operation,
+      const rejected={schema:1,session,id:request.id,probe_version:'0.3.42',operation:request.operation,
         phase:'failed',error:'请求在执行前已过期；未修改 Photoshop',not_executed:true,result_unknown:false,completed_at_ms:Date.now()};
       pendingResponse=rejected;await finishResponse(folder,rejected);
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.41', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.42', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

@@ -304,11 +304,67 @@
       "asset": "native/figma-inspired-assets/shape-none.svg",
       "sha256": "48d51e355cfadf8c14f68e07ea0b78b4054d654d1c7880d0afe0f4fa19a55a23",
       "adaptation": "Project-authored no-paint extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.rgbPicker",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-rgbPicker.svg",
+      "sha256": "8c440d2c3517fb7eed63b7184fcfab1ac3962f41f314315284b28c67993afd66",
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "operation": "shape.perceptualPicker",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-perceptualPicker.svg",
+      "sha256": "4c2a171642541f861936daa121f694a480c07ae7fdd065441d940ba35ec188ca",
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "operation": "shape.harmony.analogous",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-harmony-analogous.svg",
+      "sha256": "6b4023726cdb439b3c5b122fe9a640ad6c8c49dcad5850189907568e41b67164",
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "operation": "shape.harmony.complementary",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-harmony-complementary.svg",
+      "sha256": "5f0bb1bf5f4a7bdfabc120f00e69b2c6a2d6171de72dcd884a5932d53d7a8803",
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "operation": "shape.harmony.split",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-harmony-split.svg",
+      "sha256": "ad6b533fd905a0c0cc66a53b67b500ae25421ce0ebf632e778e35df90939ce1a",
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "operation": "shape.harmony.triadic",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-harmony-triadic.svg",
+      "sha256": "ba91192e2e4842be18f9b7d807e034fd955fa8750a2953efbf4da41e54af8b14",
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "operation": "shape.harmony.accent",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-harmony-accent.svg",
+      "sha256": "1983383218fb0de3c7ba5dfc929a99b5e83057e6729a2d4e047f578907759000",
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "operation": "shape.perceptualGradient",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-perceptualGradient.svg",
+      "sha256": "178a669af19ab22148b0ec6725380e4394950bde0d491c9c6246a191fdf207d2",
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
     }
   ],
   "extension_source": {
     "file": "native/figma-inspired-icons.json",
-    "sha256": "6dfd501ad332eb4280b5627f1e4d20001fd75b662faba696747addb90c99a17f",
+    "sha256": "ebd75941bd4f9caf8f003467133d1c0682e8bc965b9b4eb66f99c86b7e4c58d2",
     "reference_nodes": [
       "809:619",
       "346:6",

@@ -84,6 +84,18 @@ class ShapePaintTests(unittest.TestCase):
             self.value['fill']={'kind':'pattern','enabled':True,'name':name}
             with self.assertRaises(ValueError):parameters(self.value)
 
+    def test_gradient_method_is_explicit_bounded_and_preserved(self):
+        value={'kind':'gradient','enabled':True,'stops':[{'rgb':[255,0,0],'location':0},{'rgb':[0,0,255],'location':4096}]}
+        self.value['fill']=value
+        self.assertNotIn('method',parameters(self.value)['fill'])
+        for method in ('perceptual','linear','classic'):
+            value['method']=method
+            self.assertEqual(parameters(self.value)['fill']['method'],method)
+            self.assertTrue(metadata({'available':True,**self.value})['available'])
+        for method in (None,True,0,'Perceptual','oklab',''):
+            value['method']=method
+            with self.assertRaises(ValueError):parameters(self.value)
+
     def test_preview_capability_is_explicit_and_does_not_change_submission_parameters(self):
         value={'available':True,**self.value}
         self.assertFalse(metadata(value)['live_preview'])

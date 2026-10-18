@@ -58,6 +58,14 @@ async function main(){
  fill.angle._value=40;fill.gradient.colors[0].midpoint=37;fill.gradient.transparency[0].opacity._value=80;
  data=await inspect();r=request(data);r.paint.fill.stops[0].rgb=[0,20,40];await api.setLabel(r);
  assert.equal(fill.angle._value,40);assert.equal(fill.gradient.colors[0].midpoint,37);assert.equal(fill.gradient.transparency[0].opacity._value,80);
+ data=await inspect();r=request(data);r.paint.fill.method='perceptual';await api.setLabel(r);
+ assert.deepEqual(fill.gradientsInterpolationMethod,{_enum:'gradientInterpolationMethodType',_value:'perceptual'});
+ data=await inspect();assert.equal(data.fill.method,'perceptual');
+ const perceptualHistory=history;r=request(data);r.paint.fill.method='oklab';await assert.rejects(api.setLabel(r),/Invalid gradient interpolation/);assert.equal(history,perceptualHistory);
+ r=request(data);r.paint.fill.method='linear';fill.gradientsInterpolationMethod._value='classic';
+ await assert.rejects(api.setLabel(r),/已改变/);assert.equal(history,perceptualHistory);
+ data=await inspect();r=request(data);r.paint.fill.method='linear';await api.setLabel(r);assert.equal(fill.gradientsInterpolationMethod._value,'linear');
+ assert.equal(fill.angle._value,40);assert.equal(fill.gradient.colors[0].midpoint,37);assert.equal(fill.gradient.transparency[0].opacity._value,80);
  data=await inspect();r=request(data);r.paint.fill={kind:'pattern',enabled:true,name:'Loaded Pattern'};await api.setLabel(r);assert.equal(fill.pattern.name,'Loaded Pattern');
  data=await inspect();r=request(data);r.paint.fill.name='Removed Pattern';const before=history;await assert.rejects(api.setLabel(r),/图案预设/);assert.equal(history,before);
  layer.allLocked=true;assert.equal((await inspect()).available,false);layer.allLocked=false;

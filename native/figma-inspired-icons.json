@@ -795,6 +795,287 @@
         }
       ],
       "adaptation": "Project-authored no-paint extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 24,
+      "operation": "shape.rgbPicker",
+      "name": "RGB取色器",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 0.53,
+          "border": 1
+        },
+        {
+          "kind": "path",
+          "data": "M 1 8 L 8 1",
+          "tone": 0,
+          "stroke": 1
+        }
+      ],
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "index": 25,
+      "operation": "shape.perceptualPicker",
+      "name": "感知配色色轮",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 4.5 .5 C 6.7 .5 8.5 2.3 8.5 4.5 C 8.5 6.7 6.7 8.5 4.5 8.5 C 2.3 8.5 .5 6.7 .5 4.5 C .5 2.3 2.3 .5 4.5 .5 Z",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "path",
+          "data": "M 1.5 6 L 4.5 4.5 L 7.5 3",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            1.5,
+            6
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            7.5,
+            3
+          ],
+          "radius": 0.65,
+          "tone": 0
+        }
+      ],
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "index": 26,
+      "operation": "shape.harmony.analogous",
+      "name": "邻近色",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 7.358 2.85 L 7.8 4.5 L 7.358 6.15",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            7.358,
+            2.85
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            7.8,
+            4.5
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            7.358,
+            6.15
+          ],
+          "radius": 0.65,
+          "tone": 0
+        }
+      ],
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "index": 27,
+      "operation": "shape.harmony.complementary",
+      "name": "互补色",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 7.8 4.5 L 1.2 4.5",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            7.8,
+            4.5
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            1.2,
+            4.5
+          ],
+          "radius": 0.65,
+          "tone": 0
+        }
+      ],
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "index": 28,
+      "operation": "shape.harmony.split",
+      "name": "分裂互补色",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 7.8 4.5 L 1.642 6.15 L 1.642 2.85",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            7.8,
+            4.5
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            1.642,
+            6.15
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            1.642,
+            2.85
+          ],
+          "radius": 0.65,
+          "tone": 0
+        }
+      ],
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "index": 29,
+      "operation": "shape.harmony.triadic",
+      "name": "三色配色",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 7.8 4.5 L 2.85 7.358 L 2.85 1.642",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            7.8,
+            4.5
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            2.85,
+            7.358
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            2.85,
+            1.642
+          ],
+          "radius": 0.65,
+          "tone": 0
+        }
+      ],
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "index": 30,
+      "operation": "shape.harmony.accent",
+      "name": "强调色",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 7.8 4.5 L 1.2 4.5",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            7.8,
+            4.5
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "circle",
+          "centre": [
+            1.2,
+            4.5
+          ],
+          "radius": 0.65,
+          "tone": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            3.5,
+            3.5,
+            2,
+            2
+          ],
+          "tone": 0,
+          "border": 0
+        }
+      ],
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
+    },
+    {
+      "index": 31,
+      "operation": "shape.perceptualGradient",
+      "name": "渐变插值方式",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M .5 8 L 2.5 6 L 4.5 5 L 6.5 3 L 8.5 .5",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "path",
+          "data": "M .5 .5 L .5 8.5 L 8.5 8.5",
+          "tone": 0,
+          "stroke": 1
+        }
+      ],
+      "adaptation": "Project-authored perceptual color extension in the existing nine-unit Figma family; not an original export."
     }
   ]
 }

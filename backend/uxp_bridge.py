@@ -103,6 +103,8 @@ class UxpTransport:
                     raise RuntimeError('请更新并重新加载 UXP 0.3.18，以支持转换智能对象；未提交操作')
                 if payload.get('command') in ('shape.copyPaint','shape.pastePaint') and version(heartbeat.get('probe_version'))<(0,3,41):
                     raise RuntimeError('复制／粘贴形状外观需要更新并加载UXP0.3.41；未提交操作')
+                if any('method' in payload.get('paint',{}).get(k,{}) for k in ('fill','stroke')) and version(heartbeat.get('probe_version'))<(0,3,42):
+                    raise RuntimeError('感知渐变需要更新并加载UXP0.3.42；未提交操作')
                 if payload.get('paint',{}).get('mask_batch') and version(heartbeat.get('probe_version'))<(0,3,35):
                     raise RuntimeError('批量羽化／密度需要更新并加载UXP0.3.35；未提交')
                 if payload.get('command')=='shape.paint' and 'mask' in payload.get('paint',{}) and version(heartbeat.get('probe_version'))<(0,3,20):
@@ -116,6 +118,10 @@ class UxpTransport:
                         heartbeat.get('legacy_preview_available') is not True or heartbeat.get('document_redraw_available') is not False or
                         not (24,0,1)<=version_tuple(heartbeat.get('photoshop_version'))<(24,1,0)):
                     raise RuntimeError('旧版独立预览能力未就绪；未提交修改')
+                # A solid preview may switch to gradient within this transaction.
+                # Reject old executors before binding or publishing any request.
+                if payload.get('command') in ('shape.paint','shape.preview','shape.legacy.preview') and not payload.get('paint',{}).get('mask_batch') and version(heartbeat.get('probe_version'))<(0,3,42):
+                    raise RuntimeError('颜色编辑需要更新并加载UXP0.3.42，以支持预览中切换感知渐变；未提交操作')
                 if preview is not None and getattr(preview,'trace',False):payload['preview_trace']=True
                 request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
                 encoded=json.dumps(request)

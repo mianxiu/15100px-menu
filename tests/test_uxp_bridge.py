@@ -193,7 +193,7 @@ class UxpDiscoveryTests(unittest.TestCase):
         from types import SimpleNamespace
         folder=self.heartbeat(26)
         self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
-        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.31',
+        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.42',
             'photoshop_version':'26.0.0','document_redraw_available':True,'plugin_time_ms':time.time()*1000}),'utf-8')
         self.transport.pending.storage=self.transport.storage
         self.transport.task_id='b'*32
@@ -215,7 +215,7 @@ class UxpDiscoveryTests(unittest.TestCase):
         from types import SimpleNamespace
         folder=self.heartbeat(26)
         self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
-        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.31',
+        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.42',
             'photoshop_version':'26.0.0','document_redraw_available':True,'plugin_time_ms':time.time()*1000}),'utf-8')
         self.transport.pending.storage=self.transport.storage
         self.transport.task_id='c'*32
@@ -224,6 +224,28 @@ class UxpDiscoveryTests(unittest.TestCase):
                 self.transport.call('set_label',preview=SimpleNamespace(bind=Mock(),trace=False),command='shape.preview',target={'session':'s'})
         self.assertIsNotNone(self.transport.pending.value)
         self.assertTrue((folder/'probe-request.json').exists())
+
+    def test_solid_preview_requires_gradient_capable_executor_before_any_request(self):
+        folder=self.heartbeat(26)
+        self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.41',
+            'photoshop_version':'26.0.0','document_redraw_available':True,'plugin_time_ms':time.time()*1000}),'utf-8')
+        for command in ('shape.paint','shape.preview'):
+            with patch('backend.uxp_bridge.publish_request') as publish:
+                with self.assertRaisesRegex(RuntimeError,'0.3.42'):
+                    self.transport.call('set_label',preview=object(),command=command,
+                        paint={'fill':{'kind':'solid','enabled':True,'rgb':[12,34,56]}},target={'session':'s'})
+                publish.assert_not_called()
+            self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
+
+        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.41',
+            'photoshop_version':'24.0.1','document_redraw_available':False,'legacy_preview_available':True,
+            'plugin_time_ms':time.time()*1000}),'utf-8')
+        native=Mock()
+        with self.assertRaisesRegex(RuntimeError,'0.3.42'):
+            self.transport.call('set_label',preview=object(),native_preview=native,
+                command='shape.legacy.preview',target={'session':'s'})
+        native.assert_not_called();self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
 
     def test_batch_masks_reject_old_plugin_before_publication(self):
         folder=self.heartbeat(24)

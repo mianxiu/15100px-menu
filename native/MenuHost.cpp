@@ -1011,7 +1011,8 @@ static ImVec4 footerBounds{};
 static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidgetHeight-quickGroupGap;}
 static const char* actionTipText(int action) {
     if(action==205)return shapeEditor.channel?"无描边":"无填充";
-    if(action>=200 && action<215)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
+    if(action==222){const auto method=shapeEditor.current().value("method",std::string("classic"));return method=="perceptual"?"感知渐变；点击切换线性":method=="linear"?"线性渐变；点击切换经典":"经典渐变；点击切换感知";}
+    if(action>=200 && action<225)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
     if(action>=12 && action<12+int(recentTips.size()) && panelKind==4)return recentTips[action-12].c_str();
     if(action>=40 && action<47)return capsLabels[action-40];
     if(action>=32 && action<39)return quickLabels[action-32];
@@ -1025,7 +1026,7 @@ static bool tipOverlaps(ImVec4 tip,RECT r,float gap=0) {
     return r.right>r.left && r.bottom>r.top && tip.x<r.right+gap && tip.z>r.left-gap && tip.y<r.bottom+gap && tip.w>r.top-gap;
 }
 static int tipFamily(int action) {
-    if(action>=200)return action>=213?213:200;
+    if(action>=200)return action==213 || action==214?213:200;
     if(panelKind==2 && ((action>=45 && action<47) || action==2 || action==3))return 2;
     if(action>=40 && action<47)return 40;
     if(action>=32)return 32;
@@ -1033,7 +1034,7 @@ static int tipFamily(int action) {
     return action;
 }
 static RECT tipGroupRect(int action) {
-    if(action>=200)return action>=213?shapeEditor.maskBounds:shapeEditor.bounds;
+    if(action>=200)return action==213 || action==214?shapeEditor.maskBounds:shapeEditor.bounds;
     if(panelKind==2 && capsReady && layerAware && tipFamily(action)==2)return {holdRows[2].left,holdRows[2].top,capsRows[6].right,capsRows[6].bottom};
     if(action>=40 && action<47){
         const int first=panelKind==2 && action>=45?5:0;
@@ -1065,7 +1066,7 @@ static ImVec4 actionTipBounds(int action) {
     auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text);
     const float width=extent.x+2*padding,height=extent.y+2*padding;
     const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
-    if(action>=200 && action<215){
+    if(action>=200 && action<225){
         const RECT group=tipGroupRect(action),anchor=shapeTipRows[action-200];
         const float x=std::clamp((anchor.left+anchor.right-width)*.5f,pos.x+8*scale,std::max(pos.x+8*scale,pos.x+size.x-width-8*scale));
         const ImVec4 above={x,group.top-gap-height,x+width,group.top-gap};
@@ -2493,12 +2494,32 @@ int main() {
                 if (busyFeedback || !canExecute() || !pieReady)
                     throw std::runtime_error("Explicit reopen did not restore idle menu");
                 const auto shapeCount=testedActions.size();
+                for(int r=0;r<=255;r+=51)for(int g=0;g<=255;g+=51)for(int b=0;b<=255;b+=51){
+                    perceptual::Color source={double(r),double(g),double(b)},back=perceptual::fromLab(perceptual::lab(source));
+                    for(int i=0;i<3;++i)if(std::abs(back[i]-source[i])>.01)throw std::runtime_error("Oklab sRGB roundtrip failed");
+                }
+                const auto perceptualMid=perceptual::mix({255,0,0},{0,0,255},.5,"perceptual");
+                if(std::abs(perceptualMid[0]-140.36)>1 || std::abs(perceptualMid[1]-83.03)>1 || std::abs(perceptualMid[2]-162.31)>1)
+                    throw std::runtime_error("Oklab reference midpoint failed");
+                for(int h=0;h<360;h+=10){const auto mapped=perceptual::fromLch(.7,.5,h),p=perceptual::lch(mapped);
+                    if(std::abs(p[0]-.7)>.0001 || std::abs(perceptual::hue(p[2]-h+180)-180)>.01)
+                        throw std::runtime_error("Perceptual gamut map changed hue or lightness");}
+                PerceptualPickerState harmony;harmony.base={.65,.12,40};harmony.rule=1;harmony.dragPoint(220,.6,1);
+                if(std::abs(harmony.base[2]-40)>.001)throw std::runtime_error("Complementary handle did not rotate linked base");
+                harmony.cache();auto builds=harmony.meshBuilds;harmony.base[2]=80;harmony.cache();
+                if(harmony.meshBuilds!=builds)throw std::runtime_error("Hue drag rebuilt unchanged wheel mesh");
                 Json shapeFixture={{"available",true},{"live_preview",true},{"revision","test:1"},
                     {"mask",{{"feather",0},{"density",100}}},
                     {"fill",{{"kind","solid"},{"enabled",true},{"rgb",{12,34,56}}}},
                     {"stroke",{{"kind","solid"},{"enabled",false},{"rgb",{0,0,0}},{"width",1}}},
                     {"patterns",{"Test Pattern"}}};
                 shapeEditor.prepare(shapeFixture);setHoldMode(true);panelKind=2;layerAware=true;layerKind=6;layerCount=1;layerLocked=layerBackground=false;
+                {ShapeColorEditor isolated;isolated.prepare(shapeFixture);isolated.mode(1);
+                    isolated.current()["method"]="classic";isolated.methodExplicit[0]=true;
+                    isolated.current()["stops"][0]["rgb"][0]=120;isolated.changed();
+                    if(isolated.current()["method"]!="classic")throw std::runtime_error("Explicit interpolation choice was overwritten by color edit");
+                    isolated.methodExplicit[0]=false;isolated.current()["stops"][0]["rgb"][0]=121;isolated.changed();
+                    if(isolated.current()["method"]!="perceptual")throw std::runtime_error("Default gradient edit did not use perceptual method");}
                 SetWindowPos(window,nullptr,0,0,int(920*scale),int(menuShapeWindowHeight*scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
                 ImGui_ImplWin32_NewFrame();
                 numberFrame(ImGuiKey_None,false);holdMoved=true;
@@ -2549,6 +2570,17 @@ int main() {
                 enterHex("112233");
                 if(shapeEditor.current()["rgb"]!=Json({17,34,51}) || testedActions.size()!=shapeCount || testedMaskEvents.size()<=valueEvents)
                     throw std::runtime_error("Unprefixed Hex failed to update only the owning preview");
+                shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);clickPaintChoice(16);clickPaintChoice(18);
+                const auto wheelDraft=shapeEditor.draft;const auto dot=perceptualPicker.points[1];
+                io.AddMousePosEvent(dot.x,dot.y);numberFrame(ImGuiKey_None,false);io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
+                const auto wb=perceptualPicker.wheelBounds;const float cx=(wb.left+wb.right)*.5f,cy=(wb.top+wb.bottom)*.5f;
+                io.AddMousePosEvent(cx+(wb.right-wb.left)*.25f,cy+(wb.bottom-wb.top)*.2f);numberFrame(ImGuiKey_None,false);
+                io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
+                if(shapeEditor.draft==wheelDraft || testedActions.size()!=shapeCount || !maskPreviewStarted || perceptualPicker.active!=1)
+                    throw std::runtime_error("Perceptual companion drag did not update only its owning preview");
+                shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);clickPaintChoice(15);
+                if(shapeEditor.perceptualPicker || shapeEditor.dirty)throw std::runtime_error("RGB picker mode toggle changed paint");
+                clickPaintChoice(16);if(!shapeEditor.perceptualPicker || shapeEditor.dirty)throw std::runtime_error("Perceptual picker toggle changed paint");
                 testedMaskEvents.resize(valueEvents);shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);
                 const auto featherRect=shapeEditor.featherBounds,densityRect=shapeEditor.densityBounds;
                 RECT shapeWindow;GetWindowRect(window,&shapeWindow);

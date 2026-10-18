@@ -19,6 +19,10 @@ def paint(value,stroke=False):
         for item in stops:
             if not isinstance(item,dict) or set(item)!={'rgb','location'} or type(item['location']) is not int or not previous<=item['location']<=4096:raise ValueError('无效渐变位置')
             result['stops'].append({'rgb':rgb(item['rgb']),'location':item['location']});previous=item['location']
+        if 'method' in value:
+            keys.add('method')
+            if value['method'] not in ('perceptual','linear','classic'):raise ValueError('无效渐变插值方式')
+            result['method']=value['method']
     elif kind=='pattern':
         keys.add('name');name=value.get('name')
         if not isinstance(name,str) or not name or len(name)>128:raise ValueError('无效图案预设名称')

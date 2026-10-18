@@ -124,13 +124,14 @@
         if (type !== s('gradientLayer')) throw Error('Unsupported paint kind');
         var colors = d.getObjectValue(s('gradient')).getList(s('colors')), stops = [], i, stop;
         for (i = 0; i < colors.count; i++) { stop = colors.getObjectValue(i); stops.push({rgb:rgb(stop.getObjectValue(c('Clr '))), location:stop.getInteger(s('location'))}); }
-        return {kind:'gradient', stops:stops};
+        return {kind:'gradient', stops:stops, method:d.hasKey(s('gradientsInterpolationMethod'))?typeIDToStringID(d.getEnumerationValue(s('gradientsInterpolationMethod'))):'classic'};
     }
     function samePaint(actual, wanted) {
         if (actual.kind !== wanted.kind) return false;
         function colors(a, b) { return Math.abs(a[0]-b[0])<=1 && Math.abs(a[1]-b[1])<=1 && Math.abs(a[2]-b[2])<=1; }
         if (actual.kind === 'solid') return colors(actual.rgb, wanted.rgb);
         if (actual.kind === 'pattern') return actual.name === wanted.name;
+        if (wanted.method !== undefined && actual.method !== wanted.method) return false;
         if (actual.stops.length !== wanted.stops.length) return false;
         for (var i = 0; i < actual.stops.length; i++) if (actual.stops[i].location !== wanted.stops[i].location || !colors(actual.stops[i].rgb, wanted.stops[i].rgb)) return false;
         return true;
@@ -142,6 +143,7 @@
             if (!v || typeof v.enabled !== 'boolean') throw Error('Invalid paint');
             if (v.kind === 'solid') { if (!color(v.rgb)) throw Error('Invalid RGB'); }
             else if (v.kind === 'gradient') {
+                if (v.method !== undefined && v.method!=='classic' && v.method!=='linear' && v.method!=='perceptual') throw Error('Invalid gradient interpolation');
                 if (!(v.stops instanceof Array) || v.stops.length < 2 || v.stops.length > 32) throw Error('Invalid gradient');
                 for (var i=0;i<v.stops.length;i++) if (!color(v.stops[i].rgb) || !range(v.stops[i].location,0,4096) || Math.floor(v.stops[i].location)!==v.stops[i].location || i && v.stops[i].location<v.stops[i-1].location) throw Error('Invalid gradient stop');
             } else if (v.kind === 'pattern') { if (typeof v.name !== 'string' || !v.name || v.name.length > 128) throw Error('Invalid pattern'); }
@@ -166,6 +168,7 @@
             if (!allowed) throw Error('Pattern catalog changed');
             if (!existing) { var pattern = new ActionDescriptor(); pattern.putString(c('Nm  '), value.name); d.putObject(s('pattern'),s('pattern'),pattern); }
         } else {
+            if (value.method !== undefined) d.putEnumerated(s('gradientsInterpolationMethod'),s('gradientInterpolationMethodType'),s(value.method));
             if (type !== previousType) { d.putEnumerated(c('Type'),s('gradientType'),s('linear')); d.putUnitDouble(c('Angl'),c('#Ang'),0); d.putUnitDouble(c('Scl '),c('#Prc'),100); }
             var g = d.hasKey(s('gradient')) ? clone(d.getObjectValue(s('gradient'))) : new ActionDescriptor();
             if (!g.hasKey(c('Nm  '))) g.putString(c('Nm  '),'Menu gradient');

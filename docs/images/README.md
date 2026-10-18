@@ -20,3 +20,5 @@
 184：layer-menu.png更新为同宽两面板和紧凑图标分组的原生导出（ui184/solid-light-gray），不是PS实体屏幕验收。
 
 185：layer-menu.png为同排RGB／Hex及内嵌复制的原生导出（ui185/solid-light-gray），不是PS实体屏幕验收。
+
+186：layer-menu.png为感知色轮、联动圆点、配色方案与RGB／Hex同排的原生导出；不代替实体PS目视验收。
