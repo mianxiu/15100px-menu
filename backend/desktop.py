@@ -801,7 +801,7 @@ class Desktop:
         except (OSError,ValueError,KeyError):return
 
     def require_menu_layer_target(self,name,target):
-        if name=='shape.paint' and not getattr(self,'color_editor_active',False):
+        if name in ('shape.paint','shape.copyPaint','shape.pastePaint') and not getattr(self,'color_editor_active',False):
             from .tasks import TaskCancelled
             raise TaskCancelled('形状颜色仅在图层面板菜单可用；本次未修改')
         if self.layer_context_provider:

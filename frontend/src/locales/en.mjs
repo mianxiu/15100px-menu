@@ -87,6 +87,7 @@ export default {
   "向上扩展图层多选":"Extend layer selection upward", "向下扩展图层多选":"Extend layer selection downward",
   "上移一层":"Move up one layer", "下移一层":"Move down one layer",
   "复制图层样式":"Copy layer style", "粘贴图层样式":"Paste layer style", "打开图层样式":"Open layer style",
+  "复制形状填充与描边":"Copy shape fill and stroke", "粘贴形状填充与描边":"Paste shape fill and stroke",
   "更新说明":"Update details",
   "关闭 PS 后不会反复重开。":"Closing Photoshop does not cause it to reopen repeatedly.",
   "未连接":"Not connected",

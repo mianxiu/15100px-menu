@@ -489,7 +489,7 @@ class Application(web.Application):
             from .commands import CAPS_ACTIONS
             if name in CAPS_ACTIONS and not isinstance(self.bridge,UxpBridge):
                 raise ValueError("参考Caps快捷键需要更新并重载UXP 0.3.16")
-            if name=='shape.paint' and not isinstance(self.bridge,UxpBridge):raise ValueError('形状颜色需要UXP执行插件')
+            if name in ('shape.paint','shape.copyPaint','shape.pastePaint') and not isinstance(self.bridge,UxpBridge):raise ValueError('形状颜色需要UXP执行插件')
             if name=='editStyle' and not args.get('_wait_for_dialog'):
                 if self._dialog_tasks or self.operation_lock.locked() or self.bridge.busy:
                     raise RuntimeError('请先结束当前操作或关闭图层样式窗口')
@@ -527,9 +527,9 @@ class Application(web.Application):
                             return {"message":"已忽略旧菜单操作"}
                         frozen_target=None
                         snapshot=getattr(self.desktop,'menu_layer_context',None)
-                        if isinstance(self.bridge,UxpBridge) and 'menu_epoch' in args and snapshot and (len(snapshot.get('layer_ids',[]))==1 or name=='shape.paint' and snapshot.get('shape_editor',{}).get('mask_batch') is True):
+                        if isinstance(self.bridge,UxpBridge) and 'menu_epoch' in args and snapshot and (len(snapshot.get('layer_ids',[]))==1 or name in ('shape.paint','shape.pastePaint') and snapshot.get('shape_editor',{}).get('mask_batch') is True):
                             frozen_target={key:snapshot.get(key) for key in ('session','document_id','layer_ids')}
-                            frozen_target['active_layer_id']=(snapshot.get('shape_editor',{}).get('active_layer_id') if name=='shape.paint' and snapshot.get('shape_editor',{}).get('mask_batch') else snapshot['layer_ids'][0])
+                            frozen_target['active_layer_id']=(snapshot.get('shape_editor',{}).get('active_layer_id') if name in ('shape.paint','shape.pastePaint') and snapshot.get('shape_editor',{}).get('mask_batch') else snapshot['layer_ids'][0])
                     async def before_dispatch(target):
                         async with self.panel_lock:
                             if name in ('moveToTop','moveToBottom','moveUp','moveDown'):

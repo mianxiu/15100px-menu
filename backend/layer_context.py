@@ -50,11 +50,15 @@ def flags(value):
             (value.get('quick_mask',0)<<32))
 
 def require_menu_target(value,name,target):
-    if name=='shape.paint':
+    if name in ('shape.paint','shape.copyPaint','shape.pastePaint'):
         from .shape_paint import editor_matches
         if (not value or not editor_matches(value.get('shape_editor',{}),value) or value.get('locked')
                 or value.get('background') or not value.get('shape_editor',{}).get('available')):
             raise TaskCancelled('颜色／蒙版调整目标不可用，请重新打开菜单')
+        if name=='shape.copyPaint' and (len(value.get('layer_ids',[]))!=1 or not value.get('shape_editor',{}).get('vector')):
+            raise TaskCancelled('请单选形状图层复制填充与描边')
+        if name=='shape.pastePaint' and not value.get('shape_editor',{}).get('vector'):
+            raise TaskCancelled('仅支持向形状图层粘贴填充与描边')
         if any(value.get(k)!=target.get(k) for k in ('session','document_id','layer_ids')):raise TaskCancelled('文档或图层选择已改变，请重新打开菜单；本次未修改图层')
         return
     if name in CAPS_ACTIONS:

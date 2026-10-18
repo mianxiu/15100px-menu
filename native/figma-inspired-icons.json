@@ -340,6 +340,436 @@
           "stroke": 1
         }
       ]
+    },
+    {
+      "index": 11,
+      "operation": "shape.fill",
+      "name": "填充",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 0.67431195,
+          "border": 1
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 12,
+      "operation": "shape.stroke",
+      "name": "描边",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 1,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            2,
+            2,
+            5,
+            5
+          ],
+          "tone": 1,
+          "border": 1
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 13,
+      "operation": "shape.solid",
+      "name": "纯色",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            1,
+            1,
+            7,
+            7
+          ],
+          "tone": 0,
+          "border": 0
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 14,
+      "operation": "shape.gradient",
+      "name": "渐变",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 1,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            1,
+            1,
+            1,
+            7
+          ],
+          "tone": 0.0,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            2,
+            1,
+            1,
+            7
+          ],
+          "tone": 0.16666666666666666,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            3,
+            1,
+            1,
+            7
+          ],
+          "tone": 0.3333333333333333,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            4,
+            1,
+            1,
+            7
+          ],
+          "tone": 0.5,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            5,
+            1,
+            1,
+            7
+          ],
+          "tone": 0.6666666666666666,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            6,
+            1,
+            1,
+            7
+          ],
+          "tone": 0.8333333333333334,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            7,
+            1,
+            1,
+            7
+          ],
+          "tone": 1.0,
+          "border": 0
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 15,
+      "operation": "shape.pattern",
+      "name": "图案",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 1,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            1,
+            1,
+            2,
+            2
+          ],
+          "tone": 0,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            5,
+            1,
+            2,
+            2
+          ],
+          "tone": 0,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            3,
+            3,
+            2,
+            2
+          ],
+          "tone": 0,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            1,
+            5,
+            2,
+            2
+          ],
+          "tone": 0,
+          "border": 0
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            5,
+            5,
+            2,
+            2
+          ],
+          "tone": 0,
+          "border": 0
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 16,
+      "operation": "shape.copyPaint",
+      "name": "复制形状填充与描边",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            6,
+            6
+          ],
+          "tone": 0.67431195,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            3,
+            3,
+            6,
+            6
+          ],
+          "tone": 1,
+          "border": 1
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 17,
+      "operation": "shape.pastePaint",
+      "name": "粘贴形状填充与描边",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            1,
+            1,
+            7,
+            8
+          ],
+          "tone": 0.67431195,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            3,
+            0,
+            3,
+            2
+          ],
+          "tone": 1,
+          "border": 1
+        },
+        {
+          "kind": "path",
+          "data": "M 3 4 L 6 4",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "path",
+          "data": "M 3 6 L 6 6",
+          "tone": 0,
+          "stroke": 1
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 18,
+      "operation": "shape.swapPaint",
+      "name": "交换填充与描边",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 0 2 L 8 2 L 6 0",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "path",
+          "data": "M 8 6 L 0 6 L 2 8",
+          "tone": 0,
+          "stroke": 1
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 19,
+      "operation": "shape.black",
+      "name": "黑色",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 0,
+          "border": 1
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 20,
+      "operation": "shape.white",
+      "name": "白色",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 1,
+          "border": 1
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 21,
+      "operation": "shape.feather",
+      "name": "羽化：双击数值输入",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 0 8 L 8 0 L 8 4 L 4 8 L 0 8",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "path",
+          "data": "M 3 5 L 3 8",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "path",
+          "data": "M 5 3 L 5 7",
+          "tone": 0,
+          "stroke": 1
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 22,
+      "operation": "shape.density",
+      "name": "密度：双击数值输入",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 1,
+          "border": 1
+        },
+        {
+          "kind": "rect",
+          "bounds": [
+            1,
+            1,
+            3.5,
+            7
+          ],
+          "tone": 0,
+          "border": 0
+        },
+        {
+          "kind": "path",
+          "data": "M 4.5 1 L 4.5 8",
+          "tone": 0,
+          "stroke": 1
+        }
+      ],
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
     }
   ]
 }

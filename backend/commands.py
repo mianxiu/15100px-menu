@@ -28,7 +28,8 @@ CAPS_ACTIONS = {
     "editStyle":{"label":"打开图层样式"},
     "convertSmartObject":{"label":"转换为智能对象"},
 }
-COMMANDS = {**CAPS_ACTIONS,**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS,'shape.paint':{'label':'调整形状填充与描边'}}
+COMMANDS = {**CAPS_ACTIONS,**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS,'shape.paint':{'label':'调整形状填充与描边'},
+    'shape.copyPaint':{'label':'复制形状填充与描边'},'shape.pastePaint':{'label':'粘贴形状填充与描边'}}
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,8 @@ REGISTRY = MappingProxyType({
         target_document='captured-UXP-session-and-document-set; cancel-if-changed', target_layers='not-applicable'),
     'shape.paint':Command('shape.paint','调整形状填充与描边','paint-and-vector-identity-read-back',
         channel='uxp-local-files',parameters=('revision','fill','stroke')),
+    **{name:Command(name,COMMANDS[name]['label'],'native-paint-path-mask-order-read-back',channel='uxp-local-files')
+       for name in ('shape.copyPaint','shape.pastePaint')},
 })
 
 

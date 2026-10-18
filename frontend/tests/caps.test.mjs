@@ -17,7 +17,8 @@ function setup(){
   return {};
  })}};
  const factory=vm.runInNewContext(source.slice(source.indexOf('function createCapsActions'))+'\ncreateCapsActions;');
- const caps=factory(ps,'s',async()=>target(),()=>({layer_ids:[state.selected]}));
+ const capture=async()=>target();
+ const caps=factory(ps,'s',capture,()=>({document_id:10,layer_ids:[state.selected]}),undefined,capture);
  return {state,run:command=>caps.execute({command,target:target(),expires_at_ms:Date.now()+10000}),caps};
 }
 test('Caps select preserves layer topology and copy does not add document history',async()=>{

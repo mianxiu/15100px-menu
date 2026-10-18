@@ -484,6 +484,8 @@ static void accept(const Json& event) {
         const auto& data=event.at("data"); const auto& ps=data.at("photoshop");
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);capsReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=16);}
         recentReady=ps.value("uxp_ready",false) && ps.value("uxp_version",std::string())!="0.3.1";
+        {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);shapeClipboardReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=41);}
+        shapeClipboardAvailable=ps.value("shape_clipboard_available",false);
         if (data.contains("recent_documents")) {
             recentPresets.clear();const auto& recent=data["recent_documents"];
             recentMessage=recent.value("message","");
@@ -516,6 +518,8 @@ static void accept(const Json& event) {
             for (int i=0;i<4;++i) if (action==actions[i]) taskName=labels[i];
             if (action=="document.recent")taskName="按最近预设新建文档";
             if (action=="shape.paint")taskName="调整形状填充与描边";
+            if (action=="shape.copyPaint")taskName="复制形状填充与描边";
+            if (action=="shape.pastePaint")taskName="粘贴形状填充与描边";
             for (const auto& label:labelColors) if (action==std::string("label.")+label.id) taskName=std::string(label.name)+"标签";
             for(int i=0;i<7;++i)if(action==quickActions[i])taskName=quickLabels[i];
             for(int i=0;i<7;++i)if(action==capsActions[i])taskName=capsLabels[i];
@@ -1006,6 +1010,7 @@ static ImVec4 footerBounds{};
 // Secondary icons keep the confirmed compact right column beside the ring.
 static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidgetHeight-quickGroupGap;}
 static const char* actionTipText(int action) {
+    if(action>=200 && action<215)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
     if(action>=12 && action<12+int(recentTips.size()) && panelKind==4)return recentTips[action-12].c_str();
     if(action>=40 && action<47)return capsLabels[action-40];
     if(action>=32 && action<39)return quickLabels[action-32];
@@ -1019,6 +1024,7 @@ static bool tipOverlaps(ImVec4 tip,RECT r,float gap=0) {
     return r.right>r.left && r.bottom>r.top && tip.x<r.right+gap && tip.z>r.left-gap && tip.y<r.bottom+gap && tip.w>r.top-gap;
 }
 static int tipFamily(int action) {
+    if(action>=200)return action>=213?213:200;
     if(panelKind==2 && ((action>=45 && action<47) || action==2 || action==3))return 2;
     if(action>=40 && action<47)return 40;
     if(action>=32)return 32;
@@ -1026,6 +1032,7 @@ static int tipFamily(int action) {
     return action;
 }
 static RECT tipGroupRect(int action) {
+    if(action>=200)return action>=213?shapeEditor.maskBounds:shapeEditor.bounds;
     if(panelKind==2 && capsReady && layerAware && tipFamily(action)==2)return {holdRows[2].left,holdRows[2].top,capsRows[6].right,capsRows[6].bottom};
     if(action>=40 && action<47){
         const int first=panelKind==2 && action>=45?5:0;
@@ -1057,6 +1064,25 @@ static ImVec4 actionTipBounds(int action) {
     auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text);
     const float width=extent.x+2*padding,height=extent.y+2*padding;
     const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
+    if(action>=200 && action<215){
+        const RECT group=tipGroupRect(action),anchor=shapeTipRows[action-200];
+        const float x=std::clamp((anchor.left+anchor.right-width)*.5f,pos.x+8*scale,std::max(pos.x+8*scale,pos.x+size.x-width-8*scale));
+        const ImVec4 above={x,group.top-gap-height,x+width,group.top-gap};
+        auto valid=[&](ImVec4 tip){
+            if(tip.x<pos.x+8*scale || tip.y<pos.y+8*scale || tip.z>pos.x+size.x-8*scale || tip.w>pos.y+size.y-8*scale)return false;
+            if(tipOverlaps(tip,shapeEditor.bounds,2*scale) || tipOverlaps(tip,shapeEditor.maskBounds,2*scale))return false;
+            for(const auto& row:holdRows)if(tipOverlaps(tip,row,2*scale))return false;
+            for(const auto& row:quickRows)if(tipOverlaps(tip,row,2*scale))return false;
+            for(const auto& row:capsRows)if(tipOverlaps(tip,row,2*scale))return false;
+            if(tipOverlaps(tip,{LONG(footerBounds.x),LONG(footerBounds.y),LONG(footerBounds.z),LONG(footerBounds.w)},2*scale))return false;
+            return true;
+        };
+        if(valid(above))return above;
+        const float left=group.left-gap-width;
+        const float y=std::clamp(float(anchor.top),pos.y+8*scale,std::max(pos.y+8*scale,pos.y+size.y-height-8*scale));
+        for(const auto& candidate:std::array<ImVec4,3>{{{left,y,left+width,y+height},{group.right+gap,y,group.right+gap+width,y+height},{x,group.bottom+gap,x+width,group.bottom+gap+height}}})if(valid(candidate))return candidate;
+        return {};
+    }
     RECT anchor=action>=40?capsRows[action-40]:action>=32?quickRows[action-32]:action>=12?recentRows[action-12]:action>=4?labelRows[action-4]:holdRows[action];
     RECT group=anchor;
     if(action>=40)group=tipGroupRect(action);
@@ -1431,7 +1457,7 @@ static void drawPie() {
     if(shapeEditor.ready() && shapeEditor.copyFailed)messages.push_back("剪贴板暂时不可用，未复制颜色");
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
     drawFooter(messages,pieCenter.y+(capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
-    const int tipAction=actionTipText(selected)?selected:-1;
+    const int tipAction=shapeEditor.ready() && shapeTipCandidate>=200?shapeTipCandidate:actionTipText(selected)?selected:-1;
     const bool showTip=!pieAnimating && !holdFinished && canExecute();
     const int displayed=!preview.empty()?(showTip?tipAction:-1):hoverTip.update(tipAction,tipFamily(tipAction),GetTickCount64(),tipGapAt(hoverTip.shown,cursor),showTip);
     if(displayed>=0)drawActionTip(displayed);else tipVisual.reset();
@@ -1690,6 +1716,7 @@ int main() {
         else if (i+1<argc && arg==L"--preview-shape") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
             shapeEditor.prepare(data);previewShape=true;previewKind="hold";
+            shapeClipboardReady=data.value("clipboard_ready",false);shapeClipboardAvailable=data.value("clipboard_available",false);
             layerAware=true;layerKind=6;layerCount=shapeEditor.batchMask?shapeEditor.batchCount:1;layerMask=15;quickMask=127;panelKind=2;
         }
         else if (i+1<argc && arg==L"--preview-layer-context") {
@@ -2495,6 +2522,15 @@ int main() {
                     throw std::runtime_error("Mask sliders must change the local draft without submitting");
                 if(!maskPreviewStarted || !shapeEditor.ready() || canExecute() || capsEnabled(0))
                     throw std::runtime_error("Preview must preserve only its owning editor, rejecting other actions");
+                GImGui->Time+=ImGui::GetIO().MouseDoubleClickTime+.1f;
+                maskMouse(featherRect,.65f,false);maskMouse(featherRect,.65f,true);maskMouse(featherRect,.65f,false);maskMouse(featherRect,.65f,true);
+                if(!ImGui::TempInputIsActive(shapeEditor.maskInputIDs[0]))throw std::runtime_error("Feather double click must open numeric input");
+                io.AddInputCharactersUTF8("17.25");numberFrame(ImGuiKey_None,false);
+                const auto inputPaintKind=shapeEditor.current().at("kind");numberFrame(ImGuiKey_Tab,true);numberFrame(ImGuiKey_Tab,false);
+                if(shapeEditor.current().at("kind")!=inputPaintKind)throw std::runtime_error("Numeric input Tab switched paint type");
+                numberFrame(ImGuiKey_Enter,true);numberFrame(ImGuiKey_Enter,false);
+                maskMouse(featherRect,.65f,false);
+                if(std::abs(shapeEditor.draft["mask"]["feather"].get<float>()-17.25f)>.01f)throw std::runtime_error("Numeric feather input did not update preview");
                 POINT maskPoint={(densityRect.left+densityRect.right)/2,(densityRect.top+densityRect.bottom)/2};
                 const auto maskDraft=shapeEditor.draft;const auto maskGrants=testedShapeGrants;renderedHit=100;finishHold(maskPoint,true,&maskPoint);const auto maskSubmitted=testedActions.size();finishHold(maskPoint);
                 if(testedShapeGrants!=maskGrants+1)throw std::runtime_error("Preview confirmation must grant its backend focus exactly once");

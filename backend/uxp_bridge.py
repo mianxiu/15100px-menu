@@ -101,6 +101,8 @@ class UxpTransport:
                     raise RuntimeError('请更新并重新加载 UXP 0.3.16，以支持单选与Shift多选；未提交操作')
                 if payload.get('command')=='convertSmartObject' and version(heartbeat.get('probe_version'))<(0,3,18):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.18，以支持转换智能对象；未提交操作')
+                if payload.get('command') in ('shape.copyPaint','shape.pastePaint') and version(heartbeat.get('probe_version'))<(0,3,41):
+                    raise RuntimeError('复制／粘贴形状外观需要更新并加载UXP0.3.41；未提交操作')
                 if payload.get('paint',{}).get('mask_batch') and version(heartbeat.get('probe_version'))<(0,3,35):
                     raise RuntimeError('批量羽化／密度需要更新并加载UXP0.3.35；未提交')
                 if payload.get('command')=='shape.paint' and 'mask' in payload.get('paint',{}) and version(heartbeat.get('probe_version'))<(0,3,20):
@@ -329,6 +331,8 @@ class UxpBridge(PhotoshopBridge):
             capability=heartbeat.get('document_redraw_available')
             value['document_redraw_available']=capability if type(capability) is bool else None
             value['legacy_preview_available']=heartbeat.get('legacy_preview_available') is True
+            value['shape_clipboard_available']=(heartbeat.get('shape_clipboard_available') is True or
+                bool(heartbeat.get('session')) and getattr(self,'_paint_clipboard_session',None)==heartbeat.get('session'))
             value['layer_observation']=heartbeat.get('layer_observation',{})
         except (OSError,ValueError,RuntimeError):value['uxp_ready']=False
         return value
@@ -360,6 +364,8 @@ class UxpBridge(PhotoshopBridge):
             # do not reuse the pre-creation cache in a freshly opened menu.
             context=validate(response.get('layer_context'),self._captured_app)
             self.layer_context=context if fresh(context) else unavailable()
+            if action=='shape.copyPaint' and response.get('result',{}).get('shape_clipboard_available') is True:
+                self._paint_clipboard_session=self._captured_app
             return json.dumps({**response['result'],**({'captured_target':bound} if direct else {})})
         finally:self._uxp_worker_active=False
 
@@ -402,7 +408,7 @@ class UxpBridge(PhotoshopBridge):
             # session/document/active selection inside its modal before writes;
             # another capture IPC would only rediscover the same identity.
             frozen={**frozen_target,'layer_ids':list(frozen_target.get('layer_ids',[]))}
-            return await self._execute_task(action,before_dispatch,capture=lambda:self._bind_menu_target(frozen))
+            return await self._execute_task(action,before_dispatch,capture=lambda:(self._bind_batch_mask_target if action=='shape.pastePaint' and len(frozen['layer_ids'])>1 else self._bind_menu_target)(frozen))
         if capture_current and action in DIRECT_CAPS:
             return await self._execute_task(action,before_dispatch,capture=self._prepare_direct_caps,result_target=self._direct_caps_result_target)
         return await super().execute(action,before_dispatch,enqueue=False)

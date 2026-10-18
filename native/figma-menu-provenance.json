@@ -116,7 +116,7 @@
     "adjustment.colorBalance",
     "adjustment.blackAndWhite"
   ],
-  "unmatched_reason": "No original components for these six operations; user authorized matching-style authored extensions.",
+  "unmatched_reason": "Missing operation components use project-authored extensions of the same Figma icon family, including the compact shape editor toolbar.",
   "ui_reference": {
     "node_ids": [
       "326:514",
@@ -213,11 +213,95 @@
       "asset": "native/figma-inspired-assets/moveDown.svg",
       "sha256": "860a3077beb8ece9286bddca8512a576aa8a6391562f02f3e492bcb637d2d56d",
       "adaptation": "Project-authored one-grid-unit directional arrow matching the Figma sorting icon family; omits endpoint bar for one-layer movement."
+    },
+    {
+      "operation": "shape.fill",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-fill.svg",
+      "sha256": "0a7794f537042934480bd51ece848ea0c5a48d739ce77235a6cc97dab2a2c42a",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.stroke",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-stroke.svg",
+      "sha256": "d678de8fdd81a85eddbc383be7acf82e6ee94df903e0bd34e190c8017f8e5f82",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.solid",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-solid.svg",
+      "sha256": "39dc14a1875c7f7423a7970454d7d1960d228fbde2851041004176197ecfe4ca",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.gradient",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-gradient.svg",
+      "sha256": "ec607f1c3f4f8b73d88f97dbf2a4a703be3425e864c9d14f5440f2b81ce47963",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.pattern",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-pattern.svg",
+      "sha256": "d55e1ac00bb30020b3f6d3ff1fdd6f9200d3182cadebdc6555093b4e5df28ed1",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.copyPaint",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-copyPaint.svg",
+      "sha256": "51ce1befab0aad630deb89775bfb64b266b35398739d39917f129ed91c593af0",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.pastePaint",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-pastePaint.svg",
+      "sha256": "3cf444c8f17537322d093f9a2c142a65eead0fd21995a3631c8c91409704e6b9",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.swapPaint",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-swapPaint.svg",
+      "sha256": "90e7f5ccb7f7647f0ef65b6e5dbe66f464e1c544711d3e7e613f006e72d1d3ec",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.black",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-black.svg",
+      "sha256": "681c4550d8f4efff7286d8a718ff34dcb7bf7427feb2a0e533f329b4814e451a",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.white",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-white.svg",
+      "sha256": "04bb16ad7761e9156d364338e9b896543970b5de300a9f3ca3ea177459298dee",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.feather",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-feather.svg",
+      "sha256": "6ab3959f900c6907c7798fa06fc605367ac47329f5f19cd6505a77974eaf64c1",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.density",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-density.svg",
+      "sha256": "78a864d42b26931068256ce8543c1d4a29412ef79c2c46919453556830dfb58a",
+      "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
     }
   ],
   "extension_source": {
     "file": "native/figma-inspired-icons.json",
-    "sha256": "cecb070a1809b3899f47ed304ba7747ab260c851eccf1d15d269cc4962e2e72a",
+    "sha256": "9e92cffb3ecb086986322a09c993662b5ba03587461e2637cb07f20a93980a6c",
     "reference_nodes": [
       "809:619",
       "346:6",

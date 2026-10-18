@@ -3,6 +3,7 @@ module.exports = function createLabels(ps, session, options={}) {
   const caps=createCapsActions(ps,session,capture,selectionContext,capsTree,captureSelection);
   const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
   const shapePaint=createShapePaint(ps,session,capture,selectionContext,options.legacyPreview===true);
+  const paintClipboard=createPaintClipboard(ps,session,captureSelection,selectionContext,creationTree);
   const quickCommands=['layer.new','layer.solid','layer.group','adjustment.curves',
     'adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite'];
   // Scalar lookup hints only, bounded for long sessions. A hint never supplies
@@ -319,6 +320,7 @@ module.exports = function createLabels(ps, session, options={}) {
     return ps.app.activeDocument.id===doc.id && doc.id===value.document_id && ids.join(',')===value.layer_ids.join(',');
   }
   async function setLabel(request,previewIO=null) {
+    if(['shape.copyPaint','shape.pastePaint'].includes(request.command))return paintClipboard.execute(request);
     if(caps.commands.includes(request.command))return caps.execute(request);
     if(request.command==='shape.paint' || request.command==='shape.preview')return shapePaint.apply(request,previewIO);
     const command = request.command || 'label';
@@ -606,9 +608,119 @@ module.exports = function createLabels(ps, session, options={}) {
     return {...interfaceState};
   }
   return {capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:shapePaint.observe,
+    paintClipboardAvailable:paintClipboard.available,
     prepareLegacyShape:shapePaint.prepareLegacy,finishLegacyShape:shapePaint.finishLegacy};
 };
 
+
+// Session-local native paint clipboard. No pixels, geometry, effects or mask
+// parameters are pasted; native gradient/transparency/dash attributes survive.
+function createPaintClipboard(ps,session,capture,selectionContext,readTree) {
+  let clipboard=null;
+  const clone=v=>JSON.parse(JSON.stringify(v));
+  const stable=v=>JSON.stringify(v,(k,x)=>x && !Array.isArray(x) && typeof x==='object'?
+    Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x);
+  const same=(a,b)=>stable(a)===stable(b);
+  const invariantKeys=['layerKind','hasVectorMask','hasUserMask','userMaskFeather','userMaskDensity','vectorMaskFeather','vectorMaskDensity',
+    'layerEffects','fillOpacity','opacity','mode','group','visible','name','layerLocking'];
+  const target=(id,doc)=>[{_ref:'layer',_id:id},{_ref:'document',_id:doc}];
+  async function batch(commands) {
+    const values=await ps.action.batchPlay(commands,{});
+    if(values.length!==commands.length || values.some(v=>!v || v._obj==='error'))throw Error(values.find(v=>v?._obj==='error')?.message || '形状外观读写失败');
+    return values;
+  }
+  function locked(layer){for(let p=layer;p;p=p.parent)if(p.allLocked || p.locked || p.pixelsLocked || p.positionLocked || p.transparentPixelsLocked || p.isBackgroundLayer)return true;return false;}
+  function guard(context,request,accepted=false){if(context.isCancelled || !accepted && Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');}
+  async function identity(expected){const now=await capture();if(!same(now,expected))throw Error('形状外观目标已改变');return now;}
+  async function snapshot(expected,context,request,accepted=false) {
+    guard(context,request,accepted);await identity(expected);
+    const doc=ps.app.activeDocument;
+    if(doc.mode!==ps.constants.DocumentMode.RGB || ![ps.constants.BitsPerChannelType.EIGHT,ps.constants.BitsPerChannelType.SIXTEEN].includes(doc.bitsPerChannel))throw Error('形状外观仅支持RGB8／16位文档');
+    const ids=expected.layer_ids;if(!ids.length || ids.length>128)throw Error('请选择1至128个未锁定形状图层');
+    const rows=[];
+    for(let start=0;start<ids.length;start+=8){guard(context,request,accepted);
+      rows.push(...await batch(ids.slice(start,start+8).map(id=>({_obj:'get',_target:target(id,doc.id),_options:{dialogOptions:'dontDisplay'}}))));}
+    if(rows.some((v,i)=>v.layerID!==ids[i] || !v.hasVectorMask || !['solidColorLayer','gradientLayer','patternLayer'].includes(v.adjustment?.[0]?._obj)))
+      throw Error('整批仅支持带矢量蒙版的形状填充图层；未修改');
+    const tree=await readTree(doc),parents=new Map(tree.rows.map(v=>[v.layerID,v.parentLayerID>0?v.parentLayerID:null])),descriptors=new Map(rows.map(v=>[v.layerID,v])),checked=new Set();
+    async function check(id){if(checked.has(id))return;let row=descriptors.get(id);if(!row){[row]=await batch([{_obj:'get',_target:target(id,doc.id),_options:{dialogOptions:'dontDisplay'}}]);descriptors.set(id,row);}
+      const locks=row.layerLocking;if(!locks || row.layerID!==id || locks.protectAll || !tree.groups.get(id) && (row.background || locks.protectComposite || locks.protectPosition || locks.protectTransparency))throw Error('形状或祖先已锁定');
+      if(!parents.has(id))throw Error('形状成员已改变');checked.add(id);const parent=parents.get(id);if(parent!==null)await check(parent);}
+    for(const id of ids)await check(id);
+    const paths=[];for(let start=0;start<ids.length;start+=8){guard(context,request,accepted);
+      paths.push(...await batch(ids.slice(start,start+8).map(id=>({_obj:'get',_target:[{_ref:'property',_property:'pathContents'},
+        {_ref:'path',_enum:'path',_value:'vectorMask'},...target(id,doc.id)],_options:{dialogOptions:'dontDisplay'}}))));}
+    const orders=new Map();
+    for(const row of tree.rows){const parent=parents.get(row.layerID);if(!orders.has(parent))orders.set(parent,[]);orders.get(parent).push(row.layerID);}
+    const members=rows.map((v,i)=>{
+      const id=ids[i],parent=parents.get(id);
+      if(!paths[i]?.pathContents)throw Error('形状路径读取不完整');
+      return {id,parent,order:orders.get(parent),path:paths[i].pathContents,
+        invariants:Object.fromEntries(invariantKeys.map(k=>[k,v[k]??null])),
+        fill:v.adjustment[0],stroke:v.AGMStrokeStyleInfo??null};
+    });
+    await identity(expected);
+    const result={identity:expected,members};if(stable(result).length>4000000)throw Error('形状外观过于复杂，请减少批量图层');return result;
+  }
+  async function choose(ids,active,doc) {
+    const ordered=ids.filter(id=>id!==active).concat(active);
+    await batch(ordered.map((id,i)=>({_obj:'select',_target:target(id,doc),makeVisible:false,
+      ...(i?{selectionModifier:{_enum:'selectionModifierType',_value:'addToSelection'}}:{}),_options:{dialogOptions:'dontDisplay'}})));
+  }
+  async function execute(request) {
+    const copying=request.command==='shape.copyPaint';
+    if(!copying && request.command!=='shape.pastePaint')throw Error('Unknown paint clipboard command');
+    return ps.core.executeAsModal(async context=>{
+      guard(context,request);const expected=request.target;
+      if(expected?.session!==session)throw Error('形状剪贴板会话已改变');
+      const before=await snapshot(expected,context,request),doc=expected.document_id;
+      if(copying){
+        if(before.members.length!==1)throw Error('复制形状外观需要单选');
+        const {fill,stroke}=before.members[0];
+        // Missing native stroke is the standard disabled stroke. A concrete
+        // descriptor is needed when replacing a target's existing stroke.
+        const defaultStroke={_obj:'strokeStyle',strokeStyleVersion:2,strokeEnabled:false,fillEnabled:true,
+          strokeStyleLineWidth:{_unit:'pixelsUnit',_value:1},strokeStyleContent:{_obj:'solidColorLayer',color:{_obj:'RGBColor',red:0,grain:0,blue:0}}};
+        const next=clone({fill,stroke:stroke??defaultStroke});if(stable(next).length>524288)throw Error('形状外观过于复杂');
+        clipboard=next;return {verified:true,count:1,shape_clipboard_available:true,selection_context:selectionContext()};
+      }
+      if(!clipboard)throw Error('请先复制形状填充与描边；重启PS后需要重新复制');
+      const wanted=clone(clipboard);let open=false,uncertain=false,history;
+      try {
+        guard(context,request);await identity(expected);
+        history=await context.hostControl.suspendHistory({documentID:doc,name:'粘贴形状填充与描边'});open=true;
+        let accepted=false;
+        for(const member of before.members){
+          guard(context,request,accepted);accepted=true;
+          await batch([{_obj:'select',_target:target(member.id,doc),makeVisible:false,_options:{dialogOptions:'dontDisplay'}}]);
+          const current=await capture();
+          if(current.document_id!==doc || current.active_layer_id!==member.id || current.layer_ids.join(',')!==String(member.id))throw Error('形状粘贴目标已改变');
+          await batch([{_obj:'set',_target:[{_ref:'contentLayer',_enum:'ordinal',_value:'targetEnum'}],
+            to:{_obj:'shapeStyle',fillContents:clone(wanted.fill),strokeStyle:clone(wanted.stroke)},_options:{dialogOptions:'dontDisplay'}}]);
+        }
+        await choose(expected.layer_ids,expected.active_layer_id,doc);
+        const after=await snapshot(expected,context,request,true);
+        for(let i=0;i<before.members.length;i++){
+          const {fill:a,stroke:b,...rest}=after.members[i],{fill,stroke,...original}=before.members[i];
+          if(!same(rest,original) || !same(a,wanted.fill) || !same(b,wanted.stroke))throw Error('形状外观／路径／蒙版／顺序读回不符');
+        }
+        guard(context,request,true);open=false;uncertain=true;await context.hostControl.resumeHistory(history,true);uncertain=false;
+        return {verified:true,count:before.members.length,placement_moves:0,shape_clipboard_available:true,selection_context:selectionContext()};
+      } catch(error){
+        if(open)try {
+          open=false;await context.hostControl.resumeHistory(history,false);
+          await choose(expected.layer_ids,expected.active_layer_id,doc);
+          // Cancellation/expiry stops writes, but never suppresses rollback
+          // verification. Only the original owned transaction is inspected.
+          const restored=await snapshot(expected,{isCancelled:false},{...request,expires_at_ms:Date.now()+30000});
+          if(!same(restored,before))uncertain=true;
+        }catch(_){uncertain=true;}
+        if(uncertain)error.resultUnknown=true;throw error;
+      }
+    },{commandName:copying?'复制形状填充与描边':'粘贴形状填充与描边',timeOut:0});
+  }
+  return {execute,available:()=>clipboard!==null};
+}
 
 // Cached vector-paint metadata and request-bound, one-history preview writes.
 function createShapePaint(ps,session,capture,selectionContext,legacyPreview=false) {
