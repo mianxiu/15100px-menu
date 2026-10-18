@@ -12,16 +12,18 @@ from quiet_ps_session import inventory,select,ResourceLease
 from benchmark_read_helpers import special
 n=int(sys.argv[1]);mode=sys.argv[2];normal='normal' in sys.argv;varied='varied' in sys.argv
 assert 2<=n<=128 and mode in ('feather','density','both','cancel'), 'Invalid batch verification arguments'
-work=r/'.runtime'/('batch171-'+str(n)+'-'+mode+'-'+('varied-' if varied else '')+('normal-' if normal else 'low-')+str(time.time_ns()));work.mkdir()
+baseline='full-prepare' in sys.argv
+work=r/'.runtime'/(('baseline172final-' if baseline else 'batch172final-')+str(n)+'-'+mode+'-'+('varied-' if varied else '')+('normal-' if normal else 'low-')+str(time.time_ns()));work.mkdir()
 READ=r'''(function(){function quote(v){return '"'+String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\r/g,'\\r').replace(/\n/g,'\\n')+'"';}
 function json(v){if(v===null)return 'null';if(v instanceof Array){var a=[];for(var i=0;i<v.length;i++)a.push(json(v[i]));return '['+a.join(',')+']';}if(typeof v==='object'){var a=[];for(var k in v)a.push(quote(k)+':'+json(v[k]));return '{'+a.join(',')+'}';}return typeof v==='string'?quote(v):String(v);}
 var stage='selection';try{var d=app.activeDocument,s=stringIDToTypeID,c=charIDToTypeID;function hex(v){var t='';for(var i=0;i<v.length;i++)t+=('00'+(v.charCodeAt(i)&255).toString(16)).slice(-2);return t;}var r=new ActionReference();r.putProperty(s('property'),s('targetLayersIDs'));r.putEnumerated(s('document'),s('ordinal'),s('targetEnum'));var a=executeActionGet(r).getList(s('targetLayersIDs')),out=[],ids=[];for(var i=0;i<a.count;i++)ids.push(a.getReference(i).getIdentifier());ids.sort(function(a,b){return a-b;});var keys=['adjustment','AGMStrokeStyleInfo','layerEffects','hasVectorMask','hasUserMask','userMaskFeather','userMaskDensity'];for(var i=0;i<ids.length;i++){r=new ActionReference();r.putIdentifier(s('layer'),ids[i]);stage='layer:'+ids[i];var v=executeActionGet(r),values=[];for(var k=0;k<keys.length;k++){stage='content:'+keys[k];var key=s(keys[k]),z=new ActionDescriptor();if(v.hasKey(key)){var t=v.getType(key);if(t===DescValueType.OBJECTTYPE)z.putObject(key,v.getObjectType(key),v.getObjectValue(key));else if(t===DescValueType.LISTTYPE)z.putList(key,v.getList(key));else if(t===DescValueType.BOOLEANTYPE)z.putBoolean(key,v.getBoolean(key));else if(t===DescValueType.DOUBLETYPE)z.putDouble(key,v.getDouble(key));else if(t===DescValueType.INTEGERTYPE)z.putInteger(key,v.getInteger(key));}if(v.hasKey(key))values.push(hex(z.toStream()));else values.push(null);}stage='path:'+ids[i];r=new ActionReference();r.putProperty(s('property'),s('pathContents'));r.putEnumerated(s('path'),s('path'),s('vectorMask'));r.putIdentifier(s('layer'),ids[i]);out.push({id:ids[i],feather:v.getDouble(s('vectorMaskFeather')),density:v.getInteger(s('vectorMaskDensity'))*100/255,content:values,path:hex(executeActionGet(r).toStream())});}var tree=[];function walk(ls,parent){for(var i=0;i<ls.length;i++){tree.push([ls[i].id,parent]);if(ls[i].typename==='LayerSet')walk(ls[i].layers,ls[i].id);}}walk(d.layers,0);var cursor=-1;for(var i=0;i<d.historyStates.length;i++)if(d.historyStates[i]==d.activeHistoryState)cursor=i;return json({document:d.id,active:d.activeLayer.id,selected:ids,members:out,tree:tree,cursor:cursor});}catch(e){return json({read_error:String(e),stage:stage});}})()'''
 ACTIONS="(function(){var out=[],s=stringIDToTypeID;function hex(v){var t='';for(var k=0;k<v.length;k++)t+=('00'+(v.charCodeAt(k)&255).toString(16)).slice(-2);return t;}for(var i=1;i<=1000;i++){var r=new ActionReference();r.putIndex(s('actionSet'),i);var d;try{d=executeActionGet(r);}catch(e){return out.join('|');}out.push(hex(d.toStream()));var n=d.getInteger(s('numberOfChildren'));for(var j=1;j<=n;j++){r=new ActionReference();r.putIndex(s('action'),j);r.putIndex(s('actionSet'),i);out.push(hex(executeActionGet(r).toStream()));}}throw Error('Action inventory limit');})()"
 async def main():
- s=json.load(urlopen('http://127.0.0.1:15151/api/status',timeout=5));assert s['version']=='0.4.171' and s['photoshop']['uxp_version']=='0.3.36' and not s['photoshop']['busy'] and not s['menu']['visible'] and not s['photoshop']['uxp_recovery']['active']
+ s=json.load(urlopen('http://127.0.0.1:15151/api/status',timeout=5));assert s['version']=='0.4.172' and s['photoshop']['uxp_version']=='0.3.37' and not s['photoshop']['busy'] and not s['menu']['visible'] and not s['photoshop']['uxp_recovery']['active']
  app=win32com.client.GetActiveObject('Photoshop.Application');ps,_=select(inventory());previous=app.ActiveDocument if app.Documents.Count else None
  # All edits here are in a named disposable document, never in the user's document.
- fixture='app.documents.add(UnitValue(64,"px"),UnitValue(64,"px"),72,"Batch171 '+str(n)+' '+mode+'",NewDocumentMode.RGB,DocumentFill.TRANSPARENT);var d=app.activeDocument;'+special('shape')+'var a=d.activeLayer,ls=[a];for(var i=1;i<'+str(n)+';i++)ls.push(a.duplicate());var s=stringIDToTypeID,c=charIDToTypeID;for(var i=0;i<ls.length;i++){d.activeLayer=ls[i];function set(k,u,v){var r=new ActionReference();r.putIdentifier(s("layer"),ls[i].id);var z=new ActionDescriptor(),to=new ActionDescriptor();z.putReference(s("null"),r);to.putUnitDouble(s(k),s(u),v);z.putObject(s("to"),s("layer"),to);executeAction(s("set"),z,DialogModes.NO);}set("vectorMaskFeather","pixelsUnit",1+i%3);set("vectorMaskDensity","percentUnit",65+i%20);}'
+ fixture='app.documents.add(UnitValue(64,"px"),UnitValue(64,"px"),72,"Batch172 '+str(n)+' '+mode+'",NewDocumentMode.RGB,DocumentFill.TRANSPARENT);var d=app.activeDocument;'+special('shape')+'var a=d.activeLayer,ls=[a];for(var i=1;i<'+str(n)+';i++)ls.push(a.duplicate());var s=stringIDToTypeID,c=charIDToTypeID;for(var i=0;i<ls.length;i++){d.activeLayer=ls[i];function set(k,u,v){var r=new ActionReference();r.putIdentifier(s("layer"),ls[i].id);var z=new ActionDescriptor(),to=new ActionDescriptor();z.putReference(s("null"),r);to.putUnitDouble(s(k),s(u),v);z.putObject(s("to"),s("layer"),to);executeAction(s("set"),z,DialogModes.NO);}set("vectorMaskFeather","pixelsUnit",1+i%3);set("vectorMaskDensity","percentUnit",65+i%20);}'
+ if 'fractional' in sys.argv:fixture=fixture.replace('1+i%3','1.2345+(i%3)/7')
  if varied:
   shape="var q=new ActionDescriptor();q.putUnitDouble(s('top'),s('pixelsUnit'),8);q.putUnitDouble(s('left'),s('pixelsUnit'),8);q.putUnitDouble(s('bottom'),s('pixelsUnit'),48);q.putUnitDouble(s('right'),s('pixelsUnit'),40);u.putObject(s('shape'),s('rectangle'),q);"
   gradient=special('gradient').replace("z.putObject(s('using'),s('contentLayer'),u);",shape+"z.putObject(s('using'),s('contentLayer'),u);")
@@ -30,7 +32,7 @@ async def main():
  if mode=='both':fixture+='var g=d.layerSets.add();for(var i=0;i<ls.length;i+=2)ls[i].move(g,ElementPlacement.INSIDE);'
  fixture+='for(var i=0;i<ls.length;i++){var r=new ActionReference();r.putIdentifier(s("layer"),ls[i].id);var z=new ActionDescriptor();z.putReference(s("null"),r);z.putBoolean(s("makeVisible"),false);if(i)z.putEnumerated(s("selectionModifier"),s("selectionModifierType"),s("addToSelection"));executeAction(s("select"),z,DialogModes.NO);}'
  cut=fixture.index(';var d=app.activeDocument;')+1
- fixture=fixture[:cut]+'app.activeDocument.suspendHistory("Batch171 fixture",'+json.dumps(fixture[cut:])+');'
+ fixture=fixture[:cut]+'app.activeDocument.suspendHistory("Batch172 fixture",'+json.dumps(fixture[cut:])+');'
  app.DoJavaScript(fixture);owned=app.ActiveDocument;atomic_json(work/'owned.json',{'id':owned.ID,'name':owned.Name});foreground=win32gui.GetForegroundWindow()
  shutil.copy2(Path(s['data_dir'])/'uxp-config.json',work/'uxp-config.json');bridge=UxpBridge(work/'tasks.json',work/'uxp-config.json');progress=[];preview=None;stop=threading.Event();paused=threading.Event();thread=None
  try:
@@ -46,6 +48,12 @@ async def main():
   before=json.loads(app.DoJavaScript(READ));atomic_json(work/'before.json',before);assert 'read_error' not in before,before
   await asyncio.sleep(.6) # Resume UXP heartbeat after the synchronous native oracle.
   target=await asyncio.to_thread(bridge._capture_target);assert target['active_layer_id']==before['active'] and target['layer_ids']==before['selected']
+  if baseline:
+   original_call=bridge.transport.call
+   def complete_prepare(operation,**payload):
+    payload.pop('native_batch_validation',None) # Exercise old-backend compatibility, with full UXP preparation.
+    return original_call(operation,**payload)
+   bridge.transport.call=complete_prepare
   initial={'density':35} if mode=='density' else {'feather':7.5}
   final={'density':42} if mode=='density' else {'feather':12.5,**({'density':42} if mode in ('both','cancel') else {})}
   params={'mask_batch':True,'revision':data['revision'],'mask':initial};preview=MaskPreview(1,params,trace=True)
@@ -97,7 +105,7 @@ async def main():
    assert after['cursor']==before['cursor']+1,(before['cursor'],after['cursor'])
    app.DoJavaScript("executeAction(charIDToTypeID('undo'),undefined,DialogModes.NO);")
    restored=json.loads(app.DoJavaScript(READ));atomic_json(work/'restored.json',restored);assert restored==before,{k:(before.get(k),restored.get(k)) for k in before if before.get(k)!=restored.get(k)}
-  atomic_json(work/'verified.json',{'layers':n,'mode':mode,'varied_gradient_pixel_masks':varied,'low_cpu':not normal,'target_content_path_order_preserved':True,'unmodified_property_preserved':True,'one_undo_or_cancel_restored':True,'result':json.loads(result['result']),'action_palette_preserved':True,'native_action_files_cleaned':True,'physical_mouse':False,'live_readback_redraw_before_confirmation':True})
+  atomic_json(work/'verified.json',{'layers':n,'mode':mode,'full_uxp_prepare':baseline,'fractional_originals':'fractional' in sys.argv,'varied_gradient_pixel_masks':varied,'low_cpu':not normal,'target_content_path_order_preserved':True,'unmodified_property_preserved':True,'one_undo_or_cancel_restored':True,'result':json.loads(result['result']),'action_palette_preserved':True,'native_action_files_cleaned':True,'physical_mouse':False,'live_readback_redraw_before_confirmation':True})
   print(json.dumps({'folder':str(work),'layers':n,'mode':mode,'verified':True,'updates':json.loads(result['result'])['preview']['updates']}),flush=True)
  finally:
   stop.set()
@@ -108,7 +116,7 @@ async def main():
    owned.Close(2)
    if previous:app.ActiveDocument=previous
   atomic_json(work/'finished.json',{'unknown':unknown,'paused':paused.is_set()})
-with (r/'.runtime/ps171-test.lock').open('a+b') as lease:
+with (r/'.runtime/ps172-test.lock').open('a+b') as lease:
  lease.seek(0);lease.write(b'0');lease.flush();lease.seek(0);msvcrt.locking(lease.fileno(),msvcrt.LK_NBLCK,1)
  try:asyncio.run(main())
  finally:lease.seek(0);msvcrt.locking(lease.fileno(),msvcrt.LK_UNLCK,1)

@@ -3,7 +3,7 @@ const copy=v=>JSON.parse(JSON.stringify(v));
 async function fixture(n=2,legacy=false){
  const layers=Array.from({length:n},(_,i)=>({id:30+i,kind:'solid',parent:null,vectorMaskFeather:i+1,vectorMaskDensity:80-i%50,
   content:{layerKind:4,adjustment:[{_obj:'solidColorLayer',color:{red:i*7,grain:34,blue:56}}],AGMStrokeStyleInfo:{strokeEnabled:!!i},hasVectorMask:true,hasUserMask:!!i,userMaskFeather:2,userMaskDensity:190},path:{_obj:'pathClass',points:[i,2,4]}}));
- const doc={id:12,activeLayers:layers,layers,mode:'rgb',bitsPerChannel:8,resolution:72};let active=layers[n-1].id,saved,sets=0,histories=0,commits=0,rollbacks=0,redraws=0,failSet=0,failRollback=false,failCommit=false,historyResetsSelection=false;
+ const doc={id:12,activeLayers:layers,layers,mode:'rgb',bitsPerChannel:8,resolution:72};let active=layers[n-1].id,saved,sets=0,histories=0,commits=0,rollbacks=0,redraws=0,failSet=0,failRollback=false,failCommit=false,historyResetsSelection=false,fullReads=0;
  const ps={constants:{LayerKind:{SOLIDFILL:'solid'},DocumentMode:{RGB:'rgb'},BitsPerChannelType:{EIGHT:8,SIXTEEN:16}},app:{documents:[doc],activeDocument:doc},
  action:{batchPlay:async commands=>commands.map(c=>{
   if(c._target[0]._property==='layerID')return {layerID:active};
@@ -17,17 +17,17 @@ async function fixture(n=2,legacy=false){
    else throw Error('Unexpected non-mask write');return {};
   }
   if(c._target[0]._property==='pathContents')return {pathContents:copy(l.path)};
-  return {layerID:l.id,...copy(l.content)};
+  fullReads++;return {layerID:l.id,...copy(l.content)};
  })},core:{executeAsModal:async fn=>{try{return await fn({isCancelled:false,hostControl:{
   suspendHistory:async()=>{histories++;saved=layers.map(l=>({feather:l.vectorMaskFeather,density:l.vectorMaskDensity}));return 1;},
   resumeHistory:async(id,commit)=>{assert.equal(id,1);if(commit){if(failCommit)throw Error('commit unknown');commits++;}else {rollbacks++;if(failRollback)throw Error('rollback unknown');layers.forEach((l,i)=>{l.vectorMaskFeather=saved[i].feather;l.vectorMaskDensity=saved[i].density;});if(historyResetsSelection){doc.activeLayers=[layers[0]];active=layers[0].id;}}}
  } });}catch(e){throw Error(e.message);}}}};
  if(!legacy)ps.core.redrawDocument=async()=>{redraws++;};
  const api=create(ps,'session',{legacyPreview:legacy});const context=api.selectionContext(),data=await api.observeShape(context,true);assert.equal(data.available,true,JSON.stringify(data));
- const target=await api.capture(),paint={revision:data.revision,mask_batch:true,mask:{feather:12.5}},request={command:legacy?'shape.legacy.preview':'shape.preview',id:'a'.repeat(32),session:'session',token:'test',expires_at_ms:Date.now()+10000,target,paint};
+ const target=await api.capture(),paint={revision:data.revision,mask_batch:true,mask:{feather:12.5}},request={command:legacy?'shape.legacy.preview':'shape.preview',id:'a'.repeat(32),session:'session',...(legacy?{native_batch_validation:2}:{}),token:'test',expires_at_ms:Date.now()+10000,target,paint};
  const packet=(seq,phase='preview',mask={feather:12.5})=>({id:request.id,session:'session',token:'test',seq,phase,lease_until_ms:Date.now()+4000,paint:{...paint,mask}});
  const progress=[];const run=async packets=>api.setLabel(request,{read:async()=>packets.shift()||null,progress:async(stage,done,total,frame)=>{assert(done>=0&&done<=total);progress.push({stage,done,total,frame});}});
- return {api,data,layers,doc,request,packet,run,progress,resetSelectionOnRollback:()=>{historyResetsSelection=true;},state:()=>({sets,histories,commits,rollbacks,redraws}),fail:(where)=>{if(where==='set')failSet=2;else if(where==='rollback'){failSet=2;failRollback=true;}else failCommit=true;},select:ids=>{doc.activeLayers=layers.filter(l=>ids.includes(l.id));active=ids.at(-1);}};
+ return {api,data,layers,doc,request,packet,run,progress,resetSelectionOnRollback:()=>{historyResetsSelection=true;},state:()=>({sets,histories,commits,rollbacks,redraws,fullReads}),fail:(where)=>{if(where==='set')failSet=2;else if(where==='rollback'){failSet=2;failRollback=true;}else failCommit=true;},select:ids=>{doc.activeLayers=layers.filter(l=>ids.includes(l.id));active=ids.at(-1);}};
 }
 (async()=>{
  let cases=0;
@@ -63,5 +63,26 @@ async function fixture(n=2,legacy=false){
  for(const cancel of [false,true]){const f=await fixture(8);await f.run([f.packet(1),f.packet(2,cancel?'cancel':'commit')]);
   assert(f.progress.some(p=>p.stage==='redraw'&&p.total===0));assert(f.progress.some(p=>p.stage==='verify'&&p.done===8));
   assert(f.progress.some(p=>p.stage===(cancel?'restore':'commit')));assert.equal(f.state().histories,1);cases++;}
+ // Legacy handoff reads fresh identity, freezes the observed expected values,
+ // and leaves the complete fresh content check to the native pre-write guard.
+ for(const n of [2,128]){const f=await fixture(n,true),reads=f.state().fullReads;
+  const observed=copy(f.layers.map(l=>l.content));f.layers[0].content.adjustment[0].color.red=234;
+  const prepared=await f.api.prepareLegacyShape(f.request);
+  assert.equal(prepared.native_batch_validation,2);assert.match(prepared.members[0].mask_exact.feather,/^[a-f0-9]{16}$/);assert.equal(prepared.members[0].mask_exact.density,Math.round(prepared.members[0].mask.density*255/100));
+  assert.equal(f.state().fullReads,reads);assert.equal(f.state().histories,0);assert.equal(f.state().sets,0);
+  assert.deepEqual(prepared.members[0].content,observed[0]);
+  prepared.members[0].content.adjustment[0].color.red=123;
+  assert.deepEqual((await f.api.prepareLegacyShape(f.request)).members[0].content,observed[0]);cases++;
+ }
+ for(const change of ['selection','document','revision','expired','session']){const f=await fixture(8,true);
+  if(change==='selection')f.select([30,31]);if(change==='document')f.doc.id=99;
+  if(change==='revision')f.request.paint.revision='old';if(change==='expired')f.request.expires_at_ms=0;
+  if(change==='session')f.request.target.session='other';
+  await assert.rejects(f.api.prepareLegacyShape(f.request));assert.equal(f.state().sets,0);assert.equal(f.state().histories,0);cases++;
+ }
+ for(const marker of [undefined,1,'2']){const f=await fixture(8,true);f.request.native_batch_validation=marker;const reads=f.state().fullReads;
+  await f.api.prepareLegacyShape(f.request);assert(f.state().fullReads>reads);
+  f.layers[0].vectorMaskFeather+=.001;await assert.rejects(f.api.prepareLegacyShape(f.request));assert.equal(f.state().sets,0);cases++;
+ }
  console.log('PASS batch masks: '+cases+' cases, 2/8/128 layers, independent values, one history, cancel/rollback, path/content/order, stale and unknown guards');
 })().catch(e=>{console.error(e);process.exit(1);});

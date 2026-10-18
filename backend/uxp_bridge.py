@@ -421,7 +421,12 @@ class UxpBridge(PhotoshopBridge):
                         from .legacy_preview import invoke
                         native=lambda folder,request,ready:invoke(application,folder,request,ready)
                         command='shape.legacy.preview'
-                response=self.transport.call('set_label',preview=preview,native_preview=native,command=command,target=self._captured_target,paint=params)
+                # Versioned handshake: UXP may reuse the observed expectation
+                # only when this executor performs an exact fresh native
+                # baseline check before history or writes. Old plugins ignore
+                # this field and retain their complete preparation.
+                native_contract={'native_batch_validation':2} if native and params.get('mask_batch') else {}
+                response=self.transport.call('set_label',preview=preview,native_preview=native,command=command,target=self._captured_target,paint=params,**native_contract)
                 value=validate(response.get('layer_context'),self._captured_app)
                 self.layer_context=value if fresh(value) else unavailable()
                 return json.dumps(response['result'])

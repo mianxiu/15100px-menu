@@ -69,3 +69,20 @@ console.log('PASS legacy batch selection: live reads, exact stream equality, reo
  assert(box.compare(b,semantic,b.mask));assert(!box.compare({...b,path:[9]},semantic,b.mask));
 }
 console.log('PASS legacy invariant snapshots: complete typed fields, nested values, presence, units, exact bytes, initial semantic comparison and structural guards');
+
+{
+ const code=source.slice(source.indexOf('        function sameMember('),source.indexOf('        function verify(wanted)'));
+ const hex=n=>{const b=Buffer.alloc(8);b.writeDoubleBE(n);return b.toString('hex');};
+ class Descriptor {putDouble(k,v){this.v=v;}toStream(){return 'native-prefix'+Buffer.from(hex(this.v),'hex').toString('latin1');}}
+ const box={s:v=>v,ActionDescriptor:Descriptor,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),maskClose:(a,b)=>Math.abs(a.feather-b.feather)<.01&&Math.abs(a.density-b.density)<.4};
+ vm.runInNewContext(code+'this.compare=samePreparedMember;',box);
+ const original={id:3,mask:{feather:1.2345+1/7,density:166*100/255},content:{fill:[1,2]},path:[3,4],parent_id:null,order:[3,5]};
+ original.mask_exact={feather:hex(original.mask.feather),density:166};
+ assert(box.compare(original,original));
+ // Decimal parsing noise in the transported numeric field does not alter the
+ // independently preserved exact bytes; even one real ULP change is rejected.
+ assert(box.compare(original,{...original,mask:{...original.mask,feather:Number(original.mask.feather.toPrecision(15))}}));
+ for(const change of [{mask:{...original.mask,feather:original.mask.feather+Number.EPSILON}},{mask:{...original.mask,feather:original.mask.feather+.001}},{mask:{...original.mask,density:167*100/255}},{content:{fill:[1,3]}},{path:[3,9]},{parent_id:7},{order:[5,3]},{id:9}])assert(!box.compare({...original,...change},original));
+ for(const exact of [null,{}, {feather:'invalid',density:166},{feather:hex(original.mask.feather),density:167}])assert(!box.compare(original,{...original,mask_exact:exact}));
+}
+console.log('PASS native dispatch: exact double bytes, decimal interoperability, one-ULP/one-density-tick and structural changes rejected');

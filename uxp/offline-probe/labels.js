@@ -931,7 +931,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
   }
   async function prepareLegacy(request) {
     if(!legacyPreview || typeof ps.core.redrawDocument==='function')throw Error('Legacy preview channel unavailable');
-    if(request.paint?.mask_batch)return batchMasks.prepare(request);
+    if(request.paint?.mask_batch)return batchMasks.prepareLegacy(request);
     validateParams(request.paint);
     const actual=await capture(),expected=request.target;
     if(Date.now()>request.expires_at_ms || expected?.session!==session || actual.document_id!==expected.document_id ||
@@ -1139,6 +1139,26 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
     if(!before.available || before.revision!==request.paint.revision || !targetSame(cache.snap.identity,request.target))throw Error('批量蒙版或选择已改变，请重新打开菜单');
     return {before:clone(before),members:clone(cache.snap.members),identity:clone(cache.snap.identity)};
   }
+  async function prepareLegacy(request) {
+    // Older backends do not promise the exact native baseline check. Keep
+    // their original complete preparation, including after a plugin-only update.
+    if(request.native_batch_validation!==2)return prepare(request);
+    validate(request.paint);
+    const observed=cache;
+    if(Date.now()>request.expires_at_ms || !observed || observed.data.revision!==request.paint.revision ||
+        !targetSame(observed.snap.identity,request.target))throw Error('批量蒙版预览已失效，请重新打开菜单');
+    // The observed snapshot supplies the expected values, never authority to
+    // write. The standalone executor rereads every member/content/path/order
+    // and checks exact original masks before opening history or mutating PS.
+    // Do not duplicate that complete host read here or start a second modal.
+    if(!targetSame(await capture(),request.target) || Date.now()>request.expires_at_ms)throw Error('批量蒙版选择已改变');
+    // Preserve the observed double without decimal parsing in ExtendScript.
+    // Its number-to-string/parser precision differs from the UXP runtime.
+    const doubleHex=value=>{const view=new DataView(new ArrayBuffer(8));view.setFloat64(0,value,false);
+      return Array.from({length:8},(_,i)=>view.getUint8(i).toString(16).padStart(2,'0')).join('');};
+    const members=clone(observed.snap.members).map(m=>({...m,mask_exact:{feather:doubleHex(m.mask.feather),density:Math.round(m.mask.density*255/100)}}));
+    return {before:clone(observed.data),members,identity:clone(observed.snap.identity),native_batch_validation:2};
+  }
   function check(actual,baseline,masks) {
     if(!targetSame(actual.identity,baseline.identity) || actual.members.length!==baseline.members.length)throw Error('Batch identity changed');
     for(let i=0;i<actual.members.length;i++){
@@ -1217,5 +1237,5 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
     },{commandName:'批量羽化／密度',timeOut:0,...(preview?{interactive:true}:{})});}
     catch(error){if(uncertain){const e=Error(String(error));e.resultUnknown=true;throw e;}throw error;}
   }
-  return {observe,apply,prepare,finishLegacy};
+  return {observe,apply,prepare,prepareLegacy,finishLegacy};
 }

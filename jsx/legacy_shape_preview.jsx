@@ -285,6 +285,11 @@
                 content_bytes:contentStream(d),path_bytes:path.toStream(),parent_id:parent,order:orders[key]};
         }
         function sameMember(a,b,wanted){return a.id===b.id && maskClose(a.mask,wanted) && (typeof b.content_bytes==='string' ? a.content_bytes===b.content_bytes && a.path_bytes===b.path_bytes : same(a.content,b.content) && same(a.path,b.path)) && a.parent_id===b.parent_id && same(a.order,b.order);}
+        // Dispatch compares exact observed originals. Decimal numbers parsed
+        // by ExtendScript can lose precision; compare IEEE-754 bytes instead
+        // of widening the tolerance. A one-double descriptor ends in its value.
+        function maskDoubleHex(value){var d=new ActionDescriptor();d.putDouble(s('value'),value);var bytes=d.toStream().slice(-8),hex='';for(var i=0;i<bytes.length;i++)hex+=('00'+(bytes.charCodeAt(i)&255).toString(16)).slice(-2);return hex;}
+        function samePreparedMember(a,b){var exact=b.mask_exact;return sameMember(a,b,b.mask) && exact && /^[0-9a-f]{16}$/.test(exact.feather) && maskDoubleHex(a.mask.feather)===exact.feather && Math.round(a.mask.density*255/100)===exact.density;}
         function verify(wanted){progress('verify',0,records.length,true);batchTarget();var orders={};for(var j=0;j<records.length;j++){if(!sameMember(readMember(records[j].layer,orders,true),records[j].original,wanted[j]))throw Error('Batch mask/content/path/order mismatch');progress('verify',j+1,records.length);}}
         function setter(id,key,value){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);r.putIdentifier(s('document'),request.target.document_id);var d=new ActionDescriptor(),v=new ActionDescriptor();d.putReference(c('null'),r);v.putUnitDouble(s(key==='feather'?'vectorMaskFeather':'vectorMaskDensity'),c(key==='feather'?'#Pxl':'#Prc'),value);d.putObject(c('T   '),c('Lyr '),v);return d;}
         function set(id,key,value){executeAction(c('setd'),setter(id,key,value),DialogModes.NO);}
@@ -371,7 +376,8 @@
             var found={};function walk(layers){var n=layers.length;for(var j=0;j<n;j++){var l=layers[j],id=l.id;if(wantedIDs[id])found[id]=l;if(l.typename==='LayerSet')walk(l.layers);}}walk(doc.layers);
             progress('read',0,ids.length,true);stage='batch-baseline';var baselineOrders={};for(var j=0;j<ids.length;j++){
                 var l=found[ids[j]];if(!l)throw Error('Batch target missing');var baseline=readMember(l,baselineOrders);
-                if(!sameMember(baseline,prepared.members[j],prepared.members[j].mask))throw Error('Batch changed before native dispatch');records.push({layer:l,original:baseline,touched:false});progress('read',j+1,ids.length);
+                var matches=prepared.native_batch_validation===2?samePreparedMember(baseline,prepared.members[j]):sameMember(baseline,prepared.members[j],prepared.members[j].mask);
+                if(!matches)throw Error('Batch changed before native dispatch');records.push({layer:l,original:baseline,touched:false});progress('read',j+1,ids.length);
             }
             batchTarget();records.mapMask=originals();batchHistory=doc.activeHistoryState;
             var key='__psMenuBatch_'+request.id;if($.global[key])throw Error('Batch request already active');$.global[key]=batchLoop;batchStarted=true;
