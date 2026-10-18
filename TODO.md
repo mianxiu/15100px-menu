@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 171 原生批次加速：8–128层每批最多16层，明确文档／图层ID，批次前新鲜身份和锁定检查，完整帧核验／重绘、取消恢复和一次撤销保持。实际171／UXP36；398回归、18脚本、8真实事务（低CPU7／正常1）、另1项64层写入中取消和4保护检查通过。动作面板与临时文件清理已核验。证据.runtime/recovery171/runtime.json、live-matrix.json、tests171.log、js171.log；原失败记录保留。
-- [ ] 171 公开交付：等待Release附件／备用更新下载、Wiki匿名核验及旧Release清理。
+- [x] 171 公开交付：Release附件／更新清单匿名下载、冻结更新器API403备用通道、Wiki已核验；只保留171 Release，旧附件本地备份，Git标签／源码历史保留。实际171／UXP36与dist一致。证据.runtime/recovery171/runtime.json、release-0.4.171-public-verification.json、fallback171-live.json、wiki171-public.json、release171-cleanup.json。
 - [ ] 171 后续：首次准备／全量核验仍慢；真实低配、现代PS及实体Caps／鼠标画布观感仍待实机验收。
 
 - [x] 170 低配批量读取优化及运行入口：精确原生快照比较、同步读取内DOM复用；完整新鲜目标／内容／路径／顺序／锁定核验、实时预览、取消恢复和一次撤销保持。实际170／UXP36，398回归、17脚本、8最终真实事务（低CPU7／正常1）、另1刷新中取消和4保护检查通过。同会话128层首帧27.38→24.25秒、下一帧21.33→18.70秒；小文档收益有限，不宣称即时。证据.runtime/recovery170/runtime.json、live-matrix.json、tests170.log、js170.log；合并属性写入失败原型及进度采样失败记录保留。
