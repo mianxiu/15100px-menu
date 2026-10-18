@@ -81,7 +81,7 @@ struct PreviewProgress {
             stage=="latest"?"正在应用最新调整":stage=="commit"?"正在确认调整":stage=="ready"?"当前预览已更新":"正在准备预览";
         if(total>0)text+=" · "+std::to_string(done)+"/"+std::to_string(total);
         if(stage!="ready" && GetTickCount64()-changedAt>3000)text+=" · 等待 Photoshop";
-        return operation.empty()?text:operation+"\n"+text;
+        return operation.empty()?text:operation+" · "+text;
     }
     float advance(float dt){
         float actual=total>0?std::min(1.f,float(done)/total):0.f;
@@ -98,10 +98,10 @@ static std::string taskStatus() {
         (taskQueueCount>0?" · 等待 "+std::to_string(taskQueueCount)+" 项":"");
     if(shapeDraftOnly)return "本地草稿 · 确认后生效（兼容模式）";
     if (taskHasResult && taskFailed && taskError.find("背景图层")!=std::string::npos)
-        return "空闲 · 背景图层请先解锁，再设置标签";
-    if (taskHasResult) return std::string(taskFailed?"空闲 · 上次失败：":"空闲 · 上次已完成：")+
+        return "背景图层请先解锁，再设置标签";
+    if (taskHasResult && taskFailed) return std::string("操作失败：")+
         (taskName.empty()?std::string("Photoshop 操作"):taskName);
-    return "空闲 · 无菜单任务运行";
+    return "";
 }
 static void updateBusy(bool busy,bool queueReady=false,int queueCount=0) {
     if (busy && !taskBusy) taskStarted=GetTickCount64();
@@ -1129,8 +1129,8 @@ static void drawFooter(const std::vector<std::string>& messages,float y,bool avo
         height+=extent.y+(lines.empty()?0:gap);lines.push_back(text);
     }
     if(lines.empty()){footerBounds={};return;}
-    const bool progress=previewProgress.active && taskRecovery.empty();
-    if(progress){width=std::max(width,std::min(220.f*scale,maxWidth));height+=12*scale;}
+    const bool progress=previewProgress.active && previewProgress.stage!="ready" && taskRecovery.empty();
+    if(progress)height+=(menuCompactGap+menuProgressHeight)*scale;
     width+=2*padding;height+=2*padding;
     float x=std::min(pieCenter.x-width*.5f,right-width);
     x=std::max(pos.x+8*scale,x);
@@ -1147,16 +1147,19 @@ static void drawFooter(const std::vector<std::string>& messages,float y,bool avo
         textY+=font->CalcTextSizeA(font->FontSize,FLT_MAX,maxWidth,line.c_str()).y+gap;
     }
     if(progress){
-        const ImVec2 left={a.x+padding,b.y-padding-4*scale},right={b.x-padding,b.y-padding};
+        const ImVec2 left={a.x+padding,b.y-padding-menuProgressHeight*scale},right={std::min(b.x-padding,a.x+padding+menuProgressMaxWidth*scale),b.y-padding};
         const float w=right.x-left.x,rounding=ImGui::GetStyle().FrameRounding;
-        draw->AddRectFilled(left,right,tint(ImGuiCol_FrameBg),rounding);
+        auto ink=ImGui::GetStyleColorVec4(ImGuiCol_SliderGrabActive);ink.w*=.65f;
+        auto track=ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);track.w*=.22f;
+        draw->AddRectFilled(left,right,ImGui::ColorConvertFloat4ToU32(track),rounding);
         if(previewProgress.total>0){
             float value=previewProgress.advance(ImGui::GetIO().DeltaTime);
-            if(value>0)draw->AddRectFilled(left,{left.x+w*value,right.y},tint(ImGuiCol_SliderGrabActive),rounding);
+            if(value>0)draw->AddRectFilled(left,{left.x+w*value,right.y},ImGui::ColorConvertFloat4ToU32(ink),rounding);
         }else{
-            float t=float(GetTickCount64()%1600)/1600.f;
-            float x=(.5f-.5f*cosf(t*6.2831853f))*.72f;
-            draw->AddRectFilled({left.x+w*x,left.y},{left.x+w*(x+.28f),right.y},tint(ImGuiCol_SliderGrabActive),rounding);
+            // Fixed short activity mark: no sweeping motion or fake percent.
+            float t=float(GetTickCount64()%menuProgressPulseMs)/float(menuProgressPulseMs);
+            ink.w*=.65f+.15f*sinf(t*6.2831853f);
+            draw->AddRectFilled(left,{left.x+std::min(w,menuControlHeight*scale),right.y},ImGui::ColorConvertFloat4ToU32(ink),rounding);
         }
     }
 }
@@ -1396,7 +1399,7 @@ static void drawPie() {
     }
     drawQuickGroups(selected,fac);
     // Only show exceptional state; the normal pie has no tutorial banner.
-    const char* hint=pinned?"已固定":panelKind==3 || inputFocused?"输入框编辑中":!canExecute()?"当前不可执行":nullptr;
+    const char* hint=panelKind==3 || inputFocused?"输入框编辑中":!canExecute() && !previewProgress.active?"当前不可执行":nullptr;
     std::vector<std::string> messages;
     if(panelKind!=4 && !document.empty())messages.push_back(document);
     if(layerAware && panelKind!=4) {
@@ -1405,7 +1408,7 @@ static void drawPie() {
         messages.push_back(layerTitle()+(restriction[0]?std::string(" · ")+restriction:""));
     }
     if(hint)messages.push_back(hint);
-    if(shapeEditor.ready() && shapeEditor.dirty)messages.push_back("形状颜色待应用");
+    if(shapeEditor.ready() && shapeEditor.dirty && !previewProgress.active && !maskPreviewStarted)messages.push_back("调整待应用");
     if(shapeEditor.ready() && shapeEditor.copyFailed)messages.push_back("剪贴板暂时不可用，未复制颜色");
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
     drawFooter(messages,pieCenter.y+(capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
@@ -1876,7 +1879,7 @@ int main() {
             accept({{"type","operation"},{"busy",true},{"action","select"}});
             accept({{"type","notice"},{"scope","operation"},{"ok",true},{"message","Completed"}});
             accept({{"type","operation"},{"busy",false}});resetMenu();
-            if (!canExecute() || taskStatus().find("已完成")==std::string::npos)
+            if (!canExecute() || !taskStatus().empty() || !taskHasResult || taskFailed)
                 throw std::runtime_error("Completion state failed");
             notice.clear();taskFailed=false;taskHasResult=false;
             accept({{"type","notice"},{"scope","interaction"},{"ok",false},{"message","Focus changed"}});
@@ -1885,7 +1888,7 @@ int main() {
             accept({{"type","operation"},{"busy",true},{"action","label.gray"}});
             accept({{"type","notice"},{"scope","operation"},{"ok",false},{"message","Verification failed"}});
             accept({{"type","operation"},{"busy",false}});resetMenu();
-            if (taskStatus().find("上次失败：灰色标签")==std::string::npos)
+            if (taskStatus().find("操作失败：灰色标签")==std::string::npos)
                 throw std::runtime_error("Historical failure must identify its action");
             auto previousResult=taskStatus();
             accept({{"type","notice"},{"scope","interaction"},{"ok",false},{"message","Menu cancelled"}});

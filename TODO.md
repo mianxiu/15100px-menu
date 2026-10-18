@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 173低干扰反馈本机交付：2单位细进度线、固定短线轻微明暗变化；去掉已固定／空闲／上次成功及预览期间重复待应用。398回归、20份四主题渲染与EXE启动／重启通过，实际173／UXP37及原生组件匹配，PS未重启，配置和历史未知记录保持。证据.runtime/recovery173/runtime.json、tests173.log、progress173-ui。实体键鼠视觉仍待验收；公开Release保持172。
+
 - [x] 172 首次批量预览读取：减少重复UXP完整准备，原生写前完整新鲜校验，精确双精度／密度交接和旧版本兼容保持。实际172／UXP37；398回归、18脚本、8最终真实事务（低CPU7／正常1）、128层同会话旧准备对照、64层写入中取消及8保护检查通过。首次22.22→12.59秒，后续10.98秒；小数原值、实时读回重绘、取消恢复及一次撤销核验。证据.runtime/recovery172/runtime.json、live-matrix.json、tests172.log、js172.log；早期小数拒绝记录保留。
 - [x] 172 公开交付：Release附件／更新清单匿名下载、冻结更新器API403备用通道、Wiki已核验；只保留172 Release，旧附件本地备份，Git标签／源码历史保留。实际172／UXP37与dist一致。证据.runtime/recovery172/runtime.json、release-0.4.172-public-verification.json、fallback172-live.json、wiki172-public.json、release172-cleanup.json。
 - [ ] 172 后续：初始菜单取样和后续完整核验仍有优化空间；实体Caps／鼠标、真实低配及现代PS仍待对应实机验收。
