@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 183禁用图标辨识代码／构建／实际入口：统一禁用主题灰，形状编辑器按真实禁用状态绘制，禁用项去掉蓝色选中底，后台同令牌；434回归、40前端、四主题24渲染、双逻辑处理器／Below Normal原生完整矩阵和冻结EXE启动／重启通过。实际183／UXP41，入口／组件／前端匹配；PS未重启、原稿／配置／历史未知记录保持。此次仅外观修改，未新增PS写入测试；实体鼠标和其他电脑视觉待验收。证据.runtime/recovery183/runtime.json、tests183.log、frontend183-test.log、native183-low.log、ui183。
+- [ ] 183公开交付：待源码／标签、Wiki与匿名下载／备用更新通道核验，之后仅保留183 Release，旧182附件保留本地备份和Git标签。
+
 - [x] 182形状外观复制／单层及批量粘贴、无标题图标面板、羽化／密度双击输入已实现并切换实际入口182／UXP41。434项后台／原生回归、20套脚本、四主题16渲染、9组真实PS复制／粘贴（低CPU6／正常3）、2项整批拒绝和2组实时预览确认／取消通过；128层低CPU渐变粘贴约7.67秒。已实际运行182／UXP41，原稿、配置、资源及历史未知记录保留。实体鼠标／Caps／画布视觉、真实办公低配和现代PS仍待对应验收。 正常重启后插件和后台剪贴板均清空，测试用外观未留给用户。早期夹具map／历史游标断言失败保留未计通过；菜单初次完整取样和闲置快捷键性能仍是下一轮。证据.runtime/recovery182/runtime.json、live-matrix.json、clipboard-restart-verified.json、tests182.log、js182.log、native182-selftest.log、ui182。
 - [x] 182公开交付：源码／标签、Release与Wiki已推送，安装包／SHA／最新更新清单匿名下载、冻结更新器API403备用下载及6个Wiki内容页核验通过；只保留182 Release，181附件本地备份，Git标签及历史保留。实际182／UXP41，434后台、40前端、20脚本与真实PS矩阵通过；测试剪贴板已在正常重启后清空、原稿恢复，实体鼠标／Caps视觉与其他硬件仍单列待验收。证据.runtime/recovery182/runtime.json、release-0.4.182-public-verification.json、fallback182-live.json、wiki182-public.json、release182-cleanup.json。
 

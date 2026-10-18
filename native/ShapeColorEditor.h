@@ -130,14 +130,17 @@ static bool shapeSegment(const char* id,const std::vector<std::string>& names,in
         const bool disabled=(lockSelection && selected!=i) || (!enabled.empty() && !enabled[i]);
         ImGui::BeginDisabled(disabled);
         ImGui::SetCursorScreenPos(a);bool click=ImGui::InvisibleButton("segment",{part,height});
+        const bool itemDisabled=(ImGui::GetItemFlags()&ImGuiItemFlags_Disabled)!=0;
         const auto mouse=ImGui::GetIO().MousePos;
         bool divider=(i && mouse.x<a.x+scale) || (i+1<int(names.size()) && mouse.x>=b.x-scale);
         if(click && !divider && selected!=i){selected=i;changed=true;}
-        auto color=ImGui::GetColorU32(selected==i?ImGuiCol_FrameBgActive:ImGui::IsItemHovered()?ImGuiCol_FrameBgHovered:ImGuiCol_FrameBg);
+        auto color=ImGui::GetColorU32(!itemDisabled && selected==i?ImGuiCol_FrameBgActive:ImGui::IsItemHovered()?ImGuiCol_FrameBgHovered:ImGuiCol_FrameBg);
+        const auto ink=ImGui::GetColorU32(itemDisabled?ImGuiCol_TextDisabled:ImGuiCol_Text);
+        const bool swatch=!itemDisabled && (icons.size()>i && (icons[i]==19 || icons[i]==20));
         ImDrawFlags corners=i==0?ImDrawFlags_RoundCornersLeft:i+1==int(names.size())?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone;
         draw->AddRectFilled(a,b,color,rounding,corners);
-        if(icons.empty()){const auto size=ImGui::CalcTextSize(names[i].c_str());draw->AddText({a.x+(part-size.x)*.5f,a.y+(height-size.y)*.5f},ImGui::GetColorU32(ImGuiCol_Text),names[i].c_str());}
-        else drawStyledMenuIcon(draw,icons[i],{a.x+(part-figmaDisplayIconSize*scale)*.5f,a.y+(height-figmaDisplayIconSize*scale)*.5f},figmaDisplayIconSize*scale,icons[i]==19 || icons[i]==20?IM_COL32(37,37,37,255):ImGui::GetColorU32(ImGuiCol_Text),icons[i]==19 || icons[i]==20?IM_COL32_WHITE:ImGui::GetColorU32(ImGuiCol_FrameBg));
+        if(icons.empty()){const auto size=ImGui::CalcTextSize(names[i].c_str());draw->AddText({a.x+(part-size.x)*.5f,a.y+(height-size.y)*.5f},ink,names[i].c_str());}
+        else drawStyledMenuIcon(draw,icons[i],{a.x+(part-figmaDisplayIconSize*scale)*.5f,a.y+(height-figmaDisplayIconSize*scale)*.5f},figmaDisplayIconSize*scale,swatch?IM_COL32(37,37,37,255):ink,swatch?IM_COL32_WHITE:ImGui::GetColorU32(ImGuiCol_FrameBg));
         if(tipBase>=0 && !divider)shapeItemTip(tipBase+i);
         if(i)draw->AddLine(a,{a.x,b.y},ImGui::GetColorU32(ImGuiCol_Border),scale);
         ImGui::EndDisabled();
@@ -159,11 +162,12 @@ static bool shapeEnabledControl(bool& enabled) {
 static bool shapeIconButton(const char* id,int icon,int tip,float width,bool enabled=true,bool swatch=false) {
     ImGui::BeginDisabled(!enabled);const auto at=ImGui::GetCursorScreenPos();
     const bool clicked=ImGui::InvisibleButton(id,{width,menuControlHeight*scale});shapeItemTip(tip);
+    const bool itemDisabled=(ImGui::GetItemFlags()&ImGuiItemFlags_Disabled)!=0;
     auto* draw=ImGui::GetWindowDrawList();const auto color=ImGui::GetColorU32(ImGui::IsItemHovered()?ImGuiCol_FrameBgHovered:ImGuiCol_FrameBg);
     draw->AddRectFilled(at,{at.x+width,at.y+menuControlHeight*scale},color,ImGui::GetStyle().FrameRounding);
     draw->AddRect(at,{at.x+width,at.y+menuControlHeight*scale},ImGui::GetColorU32(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
     drawStyledMenuIcon(draw,icon,{at.x+(width-figmaDisplayIconSize*scale)*.5f,at.y+(menuControlHeight-figmaDisplayIconSize)*scale*.5f},figmaDisplayIconSize*scale,
-        swatch?IM_COL32(37,37,37,255):ImGui::GetColorU32(ImGuiCol_Text),swatch?IM_COL32_WHITE:color);
+        swatch && !itemDisabled?IM_COL32(37,37,37,255):ImGui::GetColorU32(itemDisabled?ImGuiCol_TextDisabled:ImGuiCol_Text),swatch && !itemDisabled?IM_COL32_WHITE:color);
     ImGui::EndDisabled();return clicked;
 }
 static void shapePaintToolbar(float width) {

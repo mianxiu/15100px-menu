@@ -3,7 +3,7 @@
   font-family:Inter,"Noto Sans CJK SC","Segoe UI","Microsoft YaHei",sans-serif;
   font-size:13px;color-scheme:dark;
   --ui-background:#323232;--ui-fill:#292929;--ui-text:#e1e1e1;--ui-muted:#adadad;
-  --ui-disabled:#737373;--ui-border:#474747;--ui-divider:#262626;
+  --ui-disabled:#5a5a5a;--ui-border:#474747;--ui-divider:#262626;
   --ui-hover:#2e4054;--ui-active:#27384c;--ui-accent:#4da6ff;
   --ui-danger:#ffb5b5;--ui-good:#a6ddbc;--ui-warn:#eed397;
   --ui-radius:4px;--ui-body-size:13px;--ui-body-line:20px;

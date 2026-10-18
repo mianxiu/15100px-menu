@@ -738,7 +738,7 @@ static void theme() {
     if (i<2) ImGui::StyleColorsLight();else ImGui::StyleColorsDark();
     auto gray=[](int v){float f=v/255.f;return ImVec4(f,f,f,1);};
     const int background[]={240,184,83,50},fill[]={252,209,69,41};
-    const int text[]={41,15,240,225},muted[]={84,56,214,173},disabled[]={168,128,135,115};
+    const int text[]={41,15,240,225},muted[]={84,56,214,173},disabled[]={190,150,112,90};
     const int border[]={204,148,102,71},divider[]={217,153,62,38};
     // Less saturated blue on light themes; subdued blue on dark themes.
     // Keep the theme's normal text readable on every hover surface.

@@ -1,9 +1,9 @@
 // Match native/MenuHost.cpp::theme(). Reuse the status heartbeat; never query PS.
 export const menuThemes = Object.freeze({
-  light: ['#f0f0f0','#fcfcfc','#292929','#545454','#a8a8a8','#cccccc','#d9d9d9','#dceeff','#c3ddf8','#1473e6'],
-  'light-gray': ['#b8b8b8','#d1d1d1','#0f0f0f','#383838','#808080','#949494','#999999','#a8c7e2','#92b7d8','#1473e6'],
-  'dark-gray': ['#535353','#454545','#f0f0f0','#d6d6d6','#878787','#666666','#3e3e3e','#354f6c','#2c4460','#4da6ff'],
-  dark: ['#323232','#292929','#e1e1e1','#adadad','#737373','#474747','#262626','#2e4054','#27384c','#4da6ff'],
+  light: ['#f0f0f0','#fcfcfc','#292929','#545454','#bebebe','#cccccc','#d9d9d9','#dceeff','#c3ddf8','#1473e6'],
+  'light-gray': ['#b8b8b8','#d1d1d1','#0f0f0f','#383838','#969696','#949494','#999999','#a8c7e2','#92b7d8','#1473e6'],
+  'dark-gray': ['#535353','#454545','#f0f0f0','#d6d6d6','#707070','#666666','#3e3e3e','#354f6c','#2c4460','#4da6ff'],
+  dark: ['#323232','#292929','#e1e1e1','#adadad','#5a5a5a','#474747','#262626','#2e4054','#27384c','#4da6ff'],
 });
 const tokens = ['background','fill','text','muted','disabled','border','divider','hover','active','accent'];
 export function applyMenuTheme(root, requested) {
