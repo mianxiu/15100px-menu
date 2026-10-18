@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import time
+import threading
 from .operation_target import validate_target
 
 
@@ -20,6 +21,7 @@ class PendingUxp:
         self.storage = Path(storage).resolve()
         self.value = None
         self.error = ''
+        self._execution_lock=threading.Lock()
         if self.path.exists():
             try:
                 value = json.loads(self.path.read_text('utf-8'))
@@ -39,6 +41,8 @@ class PendingUxp:
             raise ValueError('Invalid plugin data folder')
         if value.get('operation') not in ('set_label', 'new_document'):
             raise ValueError('Not a modifying request')
+        if 'preview_command' in value and value['preview_command'] not in ('shape.preview','shape.legacy.preview'):
+            raise ValueError('Invalid preview execution identity')
         if 'capture_current' in value and value['capture_current'] is not True:
             raise ValueError('Invalid target binding mode')
 
@@ -47,6 +51,7 @@ class PendingUxp:
             raise RuntimeError('上一项 UXP 操作结果待核对，未提交新任务')
         value = {key: request[key] for key in ('id', 'session', 'operation')}
         if request.get('capture_current') is True:value['capture_current']=True
+        if request.get('command') in ('shape.preview','shape.legacy.preview'):value['preview_command']=request['command']
         value.update(schema=1, folder=str(Path(folder).resolve()), task_id=task_id,
                      submitted_at_ms=int(time.time()*1000))
         self.validate(value)
@@ -101,6 +106,46 @@ class PendingUxp:
         except (OSError, ValueError, TypeError):
             return None
 
+    def execution_has_exited(self, native_returned=False):
+        with self._execution_lock:
+            return self._execution_has_exited(native_returned)
+
+    def _execution_has_exited(self, native_returned=False):
+        """Independent host-exit evidence; never clears pending or changes outcome.
+
+        A JSX receipt is written before DoJavaScript returns, so it alone is
+        insufficient. Modern UXP explicitly attests that its awaited modal
+        call exited. Only the original final receipt is read, never the host.
+        """
+        value=self.value
+        if not value or self.error:return False
+        command=value.get('preview_command')
+        if command not in ('shape.preview','shape.legacy.preview'):return False
+        identity={key:value[key] for key in ('id','session','operation')}
+        engine='standalone-extendscript' if command=='shape.legacy.preview' else 'uxp-modal'
+        path=self.path.parent/('uxp-execution-exit-'+value['id']+'.json')
+        try:
+            if path.stat().st_size<=4096:
+                proof=json.loads(path.read_text('utf-8'))
+                if (isinstance(proof,dict) and type(proof.get('schema')) is int and proof.get('schema')==1 and proof.get('exited') is True
+                        and proof.get('engine')==engine and all(proof.get(k)==v for k,v in identity.items())):return True
+        except (OSError,ValueError,TypeError):pass
+        if command=='shape.legacy.preview':
+            if native_returned is not True:return False
+        else:
+            response=self.read_result(allow_unknown=True)
+            if response is None:return False
+            from .plugins import version
+            try:modern=version(response.get('probe_version'))>=(0,3,43)
+            except (ValueError,TypeError):return False
+            marker=response.get('execution_exit')
+            if (not modern or not isinstance(marker,dict) or type(marker.get('schema')) is not int or marker.get('exited') is not True
+                    or marker!={'schema':1,'engine':'uxp-modal','exited':True}):return False
+        from .settings import atomic_json
+        try:atomic_json(path,{**identity,'schema':1,'engine':engine,'exited':True})
+        except OSError:return False
+        return True
+
     def snapshot(self):
         if self.error: return {'active':True, 'state':'invalid', 'message':self.error}
         if not self.value: return {'active':False}
@@ -115,5 +160,7 @@ class PendingUxp:
                 message = 'UXP 通讯中断，等待原任务最终记录；不自动重发'
         except (OSError, ValueError, TypeError):
             message = 'UXP 通讯不可用，等待原任务最终记录；不自动重发'
-        return {'active':True, 'state':'checking', 'message':message,
+        exited=self.execution_has_exited()
+        if exited:message='脚本已退出，PS可正常使用；恢复结果待核对，已暂停插件修改，不自动重发'
+        return {'active':True, 'state':'checking', 'message':message,'execution_exited':exited,
                 'task_id':value['task_id'], 'request_id':value['id']}

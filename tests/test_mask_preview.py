@@ -210,7 +210,7 @@ class PreviewPendingFeedbackTests(unittest.TestCase):
 
 
 class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
-    async def exercise(self,reopen,busy_after=False):
+    async def exercise(self,reopen,busy_after=False,host_exited=False):
         from unittest.mock import Mock
         focus=threading.Event();entered=threading.Event();calls=[];events=[]
         desktop=SimpleNamespace(menu_epoch=7,visible=True,color_editor_active=True,
@@ -228,6 +228,7 @@ class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
             await kw['before_dispatch'](kw['frozen_target']);calls.append(copy_value(kw['preview'].paint))
             if reopen:desktop.menu_epoch=8;desktop.visible=True
             if busy_after:bridge.busy=True
+            if host_exited:kw['preview'].execution_check=lambda:True
             return {'message':'confirmed'}
         bridge.execute_shape=execute
         async def broadcast(event):events.append(event)
@@ -243,7 +244,10 @@ class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(app.operation_lock.locked())
         self.assertIsNone(app._mask_preview)
         self.assertEqual(desktop.visible,reopen)
-        self.assertEqual(desktop.finish_preview_focus.call_count,0 if busy_after else 1)
+        self.assertEqual(desktop.finish_preview_focus.call_count,0 if busy_after and not host_exited else 1)
+
+    async def test_confirmed_host_exit_releases_focus_while_plugin_result_is_pending(self):
+        await self.exercise(False,busy_after=True,host_exited=True)
 
     async def test_unresolved_host_does_not_attempt_terminal_focus_handoff(self):
         await self.exercise(False,busy_after=True)

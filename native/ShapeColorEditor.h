@@ -82,7 +82,7 @@ static bool shapeClipboardReady=false,shapeClipboardAvailable=false;
 static int shapeTipCandidate=-1;
 static std::array<RECT,34> shapeTipRows{};
 static const char* shapeTipNames[]={"填充","描边","纯色","渐变","图案","无填充／无描边","描边宽度：双击输入","复制当前Hex颜色","黑色","白色","交换填充与描边","复制形状填充与描边","粘贴到当前选中的形状图层","羽化：双击数值输入","密度：双击数值输入",
-    "RGB取色器","感知配色色轮：拖动圆点联动","邻近色","互补色","分裂互补色","三色配色","强调色：同时调整感知明度","切换渐变插值：感知／线性／经典","点击配色圆点使用颜色；拖动时全部联动","主色感知明度",
+    "RGB取色器","方块取色与感知配色：拖动圆点联动","邻近色","互补色","分裂互补色","三色配色","强调色：同时调整感知明度","切换渐变插值：感知／线性／经典","点击配色圆点使用颜色；拖动时全部联动","主色感知明度",
     "主色：拖动时全部配色点联动","邻近色 −30°","邻近色 +30°","互补色","分裂互补色 150°","分裂互补色 210°","三色配色 120°","三色配色 240°","强调色：同时调整感知明度"};
 static void shapeItemTip(int index,bool allowHover=true) {
     const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();shapeTipRows[index]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
@@ -325,7 +325,7 @@ static void drawShapeEditor() {
     const float row=menuControlHeight*scale+gap;
     const auto kind=shapeEditor.batchMask?std::string("mask"):shapeEditor.current().value("kind",std::string("solid"));
     const float iconRow=figmaDisplayWidgetHeight*scale+gap;
-    const float colorSquare=std::max(menuControlHeight*scale,width-2*menuControlPadding*scale-menuControlHeight*scale-gap);
+    const float colorSquare=std::max(menuControlHeight*scale,width-2*menuControlPadding*scale-(shapeEditor.perceptualPicker?0:menuControlHeight*scale+gap));
     const float cell=figmaDisplayIconWidth*scale;
     const bool wrapTools=width-2*menuControlPadding*scale<(shapeEditor.vector?6:4)*cell+gap;
     const bool wrapActions=shapeEditor.vector && kind!="pattern" && width-2*menuControlPadding*scale<5*cell+2*gap;

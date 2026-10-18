@@ -1010,6 +1010,9 @@ static ImVec4 footerBounds{};
 // Secondary icons keep the confirmed compact right column beside the ring.
 static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidgetHeight-quickGroupGap;}
 static const char* actionTipText(int action) {
+    if(action==223 && POINT{LONG(ImGui::GetIO().MousePos.x),LONG(ImGui::GetIO().MousePos.y)}.x>=perceptualPicker.squareBounds.left &&
+       ImGui::GetIO().MousePos.x<=perceptualPicker.squareBounds.right && ImGui::GetIO().MousePos.y>=perceptualPicker.squareBounds.top &&
+       ImGui::GetIO().MousePos.y<=perceptualPicker.squareBounds.bottom)return "方块调整主色；外围圆点联动配色";
     if(action==205)return shapeEditor.channel?"无描边":"无填充";
     if(action==222){const auto method=shapeEditor.current().value("method",std::string("classic"));return method=="perceptual"?"感知渐变；点击切换线性":method=="linear"?"线性渐变；点击切换经典":"经典渐变；点击切换感知";}
     if(action>=200 && action<234)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
@@ -2610,6 +2613,20 @@ int main() {
                 io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
                 if(shapeEditor.draft==wheelDraft || testedActions.size()!=shapeCount || !maskPreviewStarted || perceptualPicker.active!=3)
                     throw std::runtime_error("Perceptual companion drag did not update only its owning preview");
+                const auto square=perceptualPicker.squareBounds;
+                if(square.right-square.left<40*scale || perceptualPicker.lightnessBounds.right)
+                    throw std::runtime_error("Large square or retired lightness hit bounds are wrong");
+                io.AddMousePosEvent(square.left+(square.right-square.left)*.8f,square.top+(square.bottom-square.top)*.3f);
+                numberFrame(ImGuiKey_None,false);io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
+                const auto squareDraft=shapeEditor.draft;
+                io.AddMousePosEvent(square.left+(square.right-square.left)*.3f,square.top+(square.bottom-square.top)*.6f);numberFrame(ImGuiKey_None,false);
+                io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
+                if(shapeEditor.draft==squareDraft || perceptualPicker.active!=0 || testedActions.size()!=shapeCount)
+                    throw std::runtime_error("Square value drag failed or dispatched another task");
+                const auto stillDraft=shapeEditor.draft;const auto stillEvents=testedMaskEvents.size();
+                for(int frame=0;frame<30;++frame)numberFrame(ImGuiKey_None,false);
+                if(shapeEditor.draft!=stillDraft || testedMaskEvents.size()!=stillEvents)
+                    throw std::runtime_error("Idle square issued repeated previews");
                 shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);clickPaintChoice(15);
                 if(shapeEditor.perceptualPicker || shapeEditor.dirty)throw std::runtime_error("RGB picker mode toggle changed paint");
                 clickPaintChoice(16);if(!shapeEditor.perceptualPicker || shapeEditor.dirty)throw std::runtime_error("Perceptual picker toggle changed paint");

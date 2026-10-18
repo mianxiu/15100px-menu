@@ -193,7 +193,7 @@ class UxpDiscoveryTests(unittest.TestCase):
         from types import SimpleNamespace
         folder=self.heartbeat(26)
         self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
-        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.42',
+        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.43',
             'photoshop_version':'26.0.0','document_redraw_available':True,'plugin_time_ms':time.time()*1000}),'utf-8')
         self.transport.pending.storage=self.transport.storage
         self.transport.task_id='b'*32
@@ -215,7 +215,7 @@ class UxpDiscoveryTests(unittest.TestCase):
         from types import SimpleNamespace
         folder=self.heartbeat(26)
         self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
-        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.42',
+        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.43',
             'photoshop_version':'26.0.0','document_redraw_available':True,'plugin_time_ms':time.time()*1000}),'utf-8')
         self.transport.pending.storage=self.transport.storage
         self.transport.task_id='c'*32

@@ -107,9 +107,17 @@ async function main(){
   request(files,'b'.repeat(32));await plugin.poll();await settle();
   assert.equal(control.executed,1);assert.equal(control.contextReads,blockedReads);
   assert.equal(JSON.parse(files.get('result-'+req.id+'.json')).phase,'accepted');
+  assert.equal(JSON.parse(files.get('result-'+req.id+'.json')).execution_exit,undefined,'A running modal cannot attest exit');
   control.release();await operation;assert.equal(JSON.parse(files.get('result-'+req.id+'.json')).phase,'completed');
+  assert.deepEqual(JSON.parse(files.get('result-'+req.id+'.json')).execution_exit,{schema:1,engine:'uxp-modal',exited:true});
   const afterFinal=files.get('execution-'+req.id+'.json');await plugin.pulse();
   assert.equal(files.get('execution-'+req.id+'.json'),afterFinal,'Persisted final receipt releases pulse ownership');
+  files=new Map();control={executed:0,created:0,unknown:true};plugin=host(files,control);await settle();
+  const uncertain={id:'e'.repeat(32),token:'secret',operation:'set_label',command:'shape.preview',expires_at_ms:Date.now()+5000};
+  files.set('probe-request.json',JSON.stringify(uncertain));await plugin.poll();await settle();
+  const failure=JSON.parse(files.get('result-'+uncertain.id+'.json'));
+  assert.equal(failure.phase,'failed');assert.equal(failure.result_unknown,true);
+  assert.deepEqual(failure.execution_exit,{schema:1,engine:'uxp-modal',exited:true},'Content uncertainty remains independent of awaited execution exit');
   console.log('PASS: durable acceptance before mutation; final-write retry without replay; reload dedupe; unknown retained; new-document receipt; disk failure prevents mutation');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

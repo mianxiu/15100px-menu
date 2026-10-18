@@ -257,7 +257,8 @@ class Desktop:
                 raise RuntimeError('图层点击保护未能识别列表；本次未开始预览')
             if self.preview_input_guard and self.preview_input_guard['preview'] is not preview:
                 raise RuntimeError('上一项预览仍在收尾；本次未开始预览')
-            self.preview_input_guard={'preview':preview,'owner':owner,'panel':panel,'epoch':preview.epoch}
+            self.preview_input_guard={'preview':preview,'owner':owner,'panel':panel,'epoch':preview.epoch,
+                                      'terminal_check':getattr(preview,'execution_finished',None)}
         seq=self._native_config()
         with self.native_applied:
             ready=bool(seq) and self.native_applied.wait_for(lambda:self.native_applied_sequence>=seq,.5)
@@ -272,6 +273,7 @@ class Desktop:
                 guard.update(unknown=True,terminal_check=terminal_check)
                 self.preview_pending_feedback();return
             guard['release']=True
+            guard.pop('unknown',None)
         seq=self._native_config()
         with self.native_applied:
             ready=bool(seq) and self.native_applied.wait_for(lambda:self.native_applied_sequence>=seq,.5)
@@ -284,7 +286,7 @@ class Desktop:
     def maintain_preview_input_guard(self):
         guard=self.preview_input_guard
         if not guard:return
-        if guard.get('unknown') and guard.get('terminal_check') and guard['terminal_check']():
+        if not guard.get('release') and guard.get('terminal_check') and guard['terminal_check']():
             self.finish_preview_input_guard(guard['preview']);return
         if guard.get('release'):
             seq=self._native_config()
@@ -402,7 +404,7 @@ class Desktop:
         if preview and event.get('type')=='preview.progress' and event.get('epoch')==preview.epoch:
             # A newly opened busy menu observes the same original transaction.
             event={**event,'epoch':self.menu_epoch}
-        if preview and preview.epoch==self.menu_epoch and preview.phase=='preview':
+        if preview and preview.epoch==self.menu_epoch and preview.phase=='preview' and not getattr(preview,'execution_exited',False):
             # Only the owning editor remains interactive. Other consumers still
             # receive the real busy/pending state and cannot submit operations.
             if event.get('type')=='status':
@@ -420,7 +422,7 @@ class Desktop:
         with self.window_lock:
             preview=getattr(self,'mask_preview',None)
             guard=self.preview_input_guard
-            active=bool((guard or preview and not preview.closed and preview.phase in ('commit','cancel'))
+            active=bool((guard or preview and not preview.closed and not getattr(preview,'execution_exited',False) and preview.phase in ('commit','cancel'))
                         and not self.visible and (guard or self.settings['enabled'])
                         and self.target and getattr(self,'preview_hint_anchor',None))
             value={'type':'preview.pending','active':active}

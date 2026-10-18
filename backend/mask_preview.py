@@ -27,13 +27,21 @@ class MaskPreview:
         self.feedback_shown = False
         self.progress_serial = -1
         self.progress_value = None
+        self.execution_check = None
+        self.execution_exited = False
+
+    def execution_finished(self):
+        if not self.execution_exited and self.execution_check:
+            try:self.execution_exited=self.execution_check() is True
+            except (OSError,ValueError,TypeError):return False
+        return self.execution_exited
 
     def update(self, paint, commit=False):
         value = parameters(paint)
         if value['revision'] != self.revision or ('mask' in value) != self.has_mask or value.get('mask_batch')!=self.paint.get('mask_batch'):
             raise ValueError('预览草稿身份已改变')
         with self.lock:
-            if self.closed or self.phase != 'preview':
+            if self.closed or self.execution_exited or self.phase != 'preview':
                 return False
             self.paint = value
             self.seq += 1
@@ -160,6 +168,7 @@ async def run_preview(app, preview, target):
         nonlocal last_progress
         while not stopped.is_set():
             try:
+                if preview.execution_exited:return
                 if preview.phase=='preview' and (not app.desktop.visible or app.desktop.menu_epoch!=preview.epoch
                         or not await asyncio.to_thread(app.desktop._scope)):
                     preview.cancel()
@@ -206,20 +215,23 @@ async def run_preview(app, preview, target):
         logging.exception('Mask preview ended with error')
     finally:
         stopped.set();await publisher
+        host_exited=not app.bridge.busy or await asyncio.to_thread(preview.execution_finished)
         finish_guard=getattr(app.desktop,'finish_preview_input_guard',None)
         if finish_guard:
             pending=getattr(getattr(app.bridge,'transport',None),'pending',None)
             identity=dict(pending.value or {}) if pending else {}
             def verified_terminal():
+                if preview.execution_finished():return True
                 if not identity or pending.value or pending.error:return False
                 try:task=app.bridge.tasks.get(identity['task_id'])
                 except (ValueError,KeyError):return False
                 return (task.get('state') in ('succeeded','failed') and
                     task.get('uxp_request_id')==identity['id'] and task.get('uxp_session')==identity['session'])
-            try:await asyncio.to_thread(finish_guard,preview,not app.bridge.busy,verified_terminal)
+            try:
+                await asyncio.to_thread(finish_guard,preview,host_exited,verified_terminal)
             except Exception:logging.exception('Preview input guard release pending; terminal unchanged')
         finish_focus=getattr(app.desktop,'finish_preview_focus',None)
-        if finish_focus and not app.bridge.busy:
+        if finish_focus and host_exited:
             try:await asyncio.to_thread(finish_focus,preview)
             except Exception:logging.exception('Preview focus feedback failed; terminal unchanged')
         preview.close()

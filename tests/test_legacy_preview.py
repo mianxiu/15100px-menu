@@ -13,7 +13,7 @@ class LegacyTransportTests(unittest.TestCase):
   self.transport.pending.storage=self.transport.storage;self.transport.task_id='a'*32
   self.folder=self.transport.storage/'24/External/com.15100px.menu.offline-probe/PluginData';self.folder.mkdir(parents=True)
   self.transport.config.write_text(json.dumps({'token':'t'*64}),'utf-8')
-  self.heartbeat={'session':'session','probe_version':'0.3.42','photoshop_version':'24.0.1','legacy_preview_available':True,'document_redraw_available':False,'plugin_time_ms':time.time()*1000}
+  self.heartbeat={'session':'session','probe_version':'0.3.43','photoshop_version':'24.0.1','legacy_preview_available':True,'document_redraw_available':False,'plugin_time_ms':time.time()*1000}
   self.save_heartbeat();self.preview=SimpleNamespace(bind=Mock(),trace=False)
  def tearDown(self):self.temp.cleanup()
  def save_heartbeat(self):(self.folder/'probe-last.json').write_text(json.dumps(self.heartbeat),'utf-8')
@@ -55,9 +55,9 @@ class LegacyTransportTests(unittest.TestCase):
    with self.assertRaises(UxpResultUnknown):self.call(callback)
   self.assertEqual(callback.call_count,1);self.assertIsNotNone(self.transport.pending.value)
  def test_old_plugin_modern_host_and_missing_capability_reject_before_publication(self):
-  for changes in ({'probe_version':'0.3.31'},{'photoshop_version':'24.2.0'},{'document_redraw_available':True},{'legacy_preview_available':False}):
+  for changes in ({'probe_version':'0.3.31'},{'probe_version':'0.3.42'},{'photoshop_version':'24.2.0'},{'document_redraw_available':True},{'legacy_preview_available':False}):
    before=dict(self.heartbeat);self.heartbeat.update(changes);self.save_heartbeat()
-   with self.assertRaisesRegex(RuntimeError,'未就绪'):self.call(Mock())
+   with self.assertRaisesRegex(RuntimeError,'未就绪|0.3.43'):self.call(Mock())
    self.assertIsNone(self.transport.pending.value);self.assertFalse((self.folder/'probe-request.json').exists());self.heartbeat=before
  def test_prepare_identity_rejected_before_com_and_unicode_is_data(self):
   request={'id':'a'*32,'session':'s','operation':'set_label','token':'t','paint':{'name':'quote"\\\u2028'}}
@@ -67,3 +67,22 @@ class LegacyTransportTests(unittest.TestCase):
   ready['session']='changed'
   with self.assertRaises(ValueError):invoke(app,self.folder,request,ready)
   self.assertEqual(app.DoJavaScript.call_count,1)
+ def test_unknown_rollback_with_normal_native_return_proves_exit_without_clearing_pending(self):
+  def native(folder,request,ready):
+   result={k:request[k] for k in ('id','session','operation')};result.update(schema=1,phase='failed',error='rollback uncertain',result_unknown=True)
+   (folder/('result-'+request['id']+'.json')).write_text(json.dumps(result),'utf-8')
+   return json.dumps({**result,'token':request['token']})
+  with patch('backend.uxp_bridge.publish_request',side_effect=self.publish):
+   with self.assertRaises(UxpResultUnknown):self.call(native)
+  original=self.transport.pending.path.read_bytes();self.assertTrue(self.preview.execution_check())
+  self.assertIsNone(self.transport.pending.read_result());self.assertEqual(original,self.transport.pending.path.read_bytes())
+  self.transport.pending.value={**self.transport.pending.value,'id':'c'*32}
+  self.assertFalse(self.preview.execution_check(),'An old callback cannot attest a later request')
+ def test_native_com_exception_with_original_unknown_receipt_does_not_claim_exit(self):
+  def native(folder,request,ready):
+   result={k:request[k] for k in ('id','session','operation')};result.update(schema=1,phase='failed',error='rollback uncertain',result_unknown=True)
+   (folder/('result-'+request['id']+'.json')).write_text(json.dumps(result),'utf-8')
+   raise OSError('COM channel failed')
+  with patch('backend.uxp_bridge.publish_request',side_effect=self.publish):
+   with self.assertRaises(UxpResultUnknown):self.call(native)
+  self.assertFalse(self.preview.execution_check());self.assertIsNotNone(self.transport.pending.value)

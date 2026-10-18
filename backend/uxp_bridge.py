@@ -122,12 +122,21 @@ class UxpTransport:
                 # Reject old executors before binding or publishing any request.
                 if payload.get('command') in ('shape.paint','shape.preview','shape.legacy.preview') and not payload.get('paint',{}).get('mask_batch') and version(heartbeat.get('probe_version'))<(0,3,42):
                     raise RuntimeError('颜色编辑需要更新并加载UXP0.3.42，以支持预览中切换感知渐变；未提交操作')
+                if preview is not None and version(heartbeat.get('probe_version'))<(0,3,43):
+                    raise RuntimeError('实时预览需要更新并加载UXP0.3.43，以核验脚本退出并恢复PS原生操作；未提交操作')
                 if preview is not None and getattr(preview,'trace',False):payload['preview_trace']=True
                 request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
                 encoded=json.dumps(request)
                 if len(encoded.encode('utf-8'))>4096:raise ValueError('UXP 请求超出本地协议长度，未提交操作')
                 temporary=folder/(identity+'.tmp')
                 if modifying:self.pending.begin(request,folder,self.task_id)
+                native_exit={'returned':False}
+                if preview is not None:
+                    def execution_check():
+                        current=self.pending.value
+                        return bool(current and all(current.get(k)==request[k] for k in ('id','session','operation'))
+                                    and self.pending.execution_has_exited(native_exit['returned']))
+                    preview.execution_check=execution_check
                 try:
                     if preview is not None:preview.bind(folder,request)
                     temporary.write_text(encoded,'utf-8');publish_request(temporary,folder/'probe-request.json')
@@ -141,6 +150,7 @@ class UxpTransport:
                     try:
                         response=self.pending.read_result(allow_unknown=True) if modifying else json.loads((folder/'probe-response.json').read_text('utf-8-sig'))
                         if response is not None and response.get('id')==identity:
+                            if preview is not None:getattr(preview,'execution_finished',preview.execution_check)()
                             if response.get('phase')!='completed':
                                 if response.get('result_unknown'):raise UxpResultUnknown(response.get('error','新建结果未知，请检查 Photoshop'))
                                 raise RuntimeError(response.get('error','UXP failed'))
@@ -154,7 +164,16 @@ class UxpTransport:
                         except (OSError,ValueError):pass
                         if isinstance(ready,dict) and ready.get('phase')=='prepared' and ready.get('schema')==1 and all(ready.get(k)==request[k] for k in ('id','session','operation','token')):
                             native_started=True  # A COM error never permits invoking this again.
-                            try:native_preview(folder,request,ready)
+                            try:
+                                from .legacy_preview import returned_result
+                                native_exit['returned']=returned_result(native_preview(folder,request,ready),request)
+                                if native_exit['returned']:
+                                    # UXP must not publish a final legacy outcome
+                                    # from a receipt written just before COM returns.
+                                    from .settings import atomic_json
+                                    try:atomic_json(folder/('legacy-exited-'+identity+'.json'),{
+                                        **{k:request[k] for k in ('id','session','operation','token')},'schema':1,'exited':True})
+                                    finally:getattr(preview,'execution_finished',preview.execution_check)()
                             except Exception:native_error_at=time.monotonic()
                             continue  # Read the original UXP terminal BEFORE checking host state.
                     if native_error_at is not None and time.monotonic()-native_error_at>5:

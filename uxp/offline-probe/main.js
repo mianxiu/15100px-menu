@@ -208,7 +208,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.42', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.43', session, transport: 'plugin-data-files',
         layer_observation:observation,
         shape_clipboard_available:labels.paintClipboardAvailable?.()===true,
         ...await labels.interfacePreferences(),
@@ -277,13 +277,13 @@ async function probe(reason) {
       // and making the caller wait forever for an outcome. Existing accepted
       // records above, other sessions and malformed packets are never changed.
       seen.add(request.id);
-      const rejected={schema:1,session,id:request.id,probe_version:'0.3.42',operation:request.operation,
+      const rejected={schema:1,session,id:request.id,probe_version:'0.3.43',operation:request.operation,
         phase:'failed',error:'请求在执行前已过期；未修改 Photoshop',not_executed:true,result_unknown:false,completed_at_ms:Date.now()};
       pendingResponse=rejected;await finishResponse(folder,rejected);
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.42', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.43', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -344,7 +344,11 @@ async function probe(reason) {
           let native=null;
           try {const raw=await(await folder.getEntry('legacy-result-'+request.id+'.json')).read();if(raw.length<=65536)native=JSON.parse(raw);}catch(_){}
           if(native?.schema===1 && native.id===request.id && native.session===session && native.operation===request.operation && native.token===token && ['completed','failed'].includes(native.phase)) {
-            response.result=await labels.finishLegacyShape(request,prepared,native);break;
+            let exited=null;
+            try{const raw=await(await folder.getEntry('legacy-exited-'+request.id+'.json')).read();if(raw.length<=4096)exited=JSON.parse(raw);}catch(_){}
+            if(exited?.schema===1 && exited.exited===true && exited.id===request.id && exited.session===session && exited.operation===request.operation && exited.token===token){
+              response.result=await labels.finishLegacyShape(request,prepared,native);break;
+            }
           }
           if(heartbeatValue && Date.now()-lastHeartbeat>=1000){lastHeartbeat=Date.now();await record(folder,'probe-last.json',{...heartbeatValue,phase:'preview',reason:'legacy-native',plugin_time_ms:lastHeartbeat});}
           await new Promise(resolve=>setTimeout(resolve,40));
@@ -374,6 +378,10 @@ async function probe(reason) {
         }:null);
       if (request.operation === 'new_document') response.result = await labels.createDocument(request);
     } catch (error) { response.phase = 'failed'; response.error = String(error); response.result_unknown=!!error.resultUnknown; }
+    // This executes after the awaited modal function (including its finally)
+    // returned or rejected. Content rollback can still be unknown independently.
+    if(request.operation==='set_label' && request.command==='shape.preview')
+      response.execution_exit={schema:1,engine:'uxp-modal',exited:true};
     response.completed_at_ms = Date.now();
     timings.operation_ms=Date.now()-operationStarted;
     if(modifying) {

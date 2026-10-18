@@ -3,6 +3,17 @@ import json
 from .paths import ROOT
 
 
+def returned_result(value, request):
+    """Only a matching, normally returned script result proves COM execution exit."""
+    try:
+        if not isinstance(value,str) or len(value)>65536:return False
+        result=json.loads(value)
+        return (isinstance(result,dict) and result.get('schema')==1 and
+                result.get('phase') in ('completed','failed') and
+                all(result.get(k)==request[k] for k in ('id','session','operation','token')))
+    except (ValueError,KeyError,TypeError):return False
+
+
 def invoke(application, folder, request, prepared):
     if any(prepared.get(k) != request.get(k) for k in ('id', 'session', 'operation')):
         raise ValueError('Legacy prepare identity mismatch')

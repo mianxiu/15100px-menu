@@ -17,7 +17,11 @@ async function exercise(failure=false){
  const count=queries.length;await tick();assert.equal(queries.length,count,'Worker reservation must suppress background PS reads');
  files.set('legacy-result-'+id+'.json',JSON.stringify({...request,schema:1,session:'forged',phase:'completed',result:{verified:true}}));
  await new Promise(r=>setTimeout(r,55));assert.equal(finishes,0,'Reject a wrong-session native receipt');
- files.set('legacy-result-'+id+'.json',JSON.stringify({...request,schema:1,phase:'completed',result:{verified:true}}));await pending;
+ files.set('legacy-result-'+id+'.json',JSON.stringify({...request,schema:1,phase:'completed',result:{verified:true}}));
+ await new Promise(r=>setTimeout(r,55));assert.equal(finishes,0,'A JSX receipt before normal COM return cannot finish the worker');
+ files.set('legacy-exited-'+id+'.json',JSON.stringify({...request,schema:1,exited:true,session:'other'}));
+ await new Promise(r=>setTimeout(r,55));assert.equal(finishes,0,'Exit acknowledgement must belong to this request/session/token');
+ files.set('legacy-exited-'+id+'.json',JSON.stringify({...request,schema:1,exited:true}));await pending;
  const terminal=JSON.parse(files.get('result-'+id+'.json'));assert.equal(finishes,1);assert.equal(terminal.phase,failure?'failed':'completed');
  if(failure)assert.equal(terminal.result_unknown,true);
  await tick();assert.equal(prepares,1,'Consumed request must not be replayed');

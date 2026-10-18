@@ -3,8 +3,9 @@ struct PerceptualPickerState {
     perceptual::Color base{},last{},layoutBase{};
     std::string key;int active=0,drag=-1;
     double cachedLightness=-1;
-    std::array<ImU32,49*9> mesh{};
-    RECT wheelBounds{},lightnessBounds{};
+    std::array<ImU32,193> mesh{};
+    RECT wheelBounds{},lightnessBounds{},squareBounds{};
+    float svHue=0;
     std::array<ImVec2,perceptual::wheelCount> points{},rawPoints{};
     ImVec2 layoutCenter{},dragOffset{},dragStart{},dragLast{};
     float layoutRadius=-1,layoutScale=-1;
@@ -22,32 +23,31 @@ struct PerceptualPickerState {
         const auto previous=color(rgb);bool equal=true;for(int i=0;i<3;++i)equal&=std::abs(value[i]-previous[i])<.001;
         if(equal){last=previous;return false;}last=value;rgb=value;return true;
     }
-    void dragPoint(double angle,double fraction,int index){
+    void dragPoint(double angle,double /*fraction*/,int index){
         active=index;base[2]=perceptual::hue(angle-perceptual::wheelOffsets[index]);
-        const double light=index==8?(base[0]>.6?.35:.8):base[0];
-        base[1]=perceptual::maxChroma(light,angle)*std::clamp(fraction,0.,1.)/(index==8?1.15:1.);
     }
-    // Only visual handles move to avoid overlap; colors keep their true anchors.
-    // Pickup offsets below preserve the original color until the pointer moves.
+    static ImVec2 railPoint(ImVec2 center,float radius,double degrees,float rounding){
+        double angle=degrees*perceptual::pi/180,x=std::cos(angle),y=std::sin(angle);
+        double t=radius/std::max(std::abs(x),std::abs(y)),corner=std::max(0.f,radius-rounding);
+        if(std::abs(t*x)>corner && std::abs(t*y)>corner){
+            double dot=corner*(std::abs(x)+std::abs(y));
+            t=dot+std::sqrt(std::max(0.,dot*dot-2*corner*corner+rounding*rounding));
+        }
+        return {center.x+float(t*x),center.y+float(t*y)};
+    }
+    // Independent rounded-square rail. Relocated handles retain true hue anchors.
     void layout(ImVec2 center,float radius,float uiScale){
         if(layoutBase==base && layoutCenter.x==center.x && layoutCenter.y==center.y && layoutRadius==radius && layoutScale==uiScale)return;
         layoutBase=base;layoutCenter=center;layoutRadius=radius;layoutScale=uiScale;++layoutBuilds;
-        auto square=[](float n){return n*n;};
         for(int i=0;i<perceptual::wheelCount;++i){
-            const double angle=(base[2]+perceptual::wheelOffsets[i])*perceptual::pi/180;
-            auto value=perceptual::lch(perceptual::wheelColor(base,i),perceptual::hue(base[2]+perceptual::wheelOffsets[i]));
-            double max=perceptual::maxChroma(value[0],value[2]);const float r=radius*std::clamp(max>1e-6?value[1]/max:0.,0.,1.);
-            rawPoints[i]={center.x+r*float(std::cos(angle)),center.y+r*float(std::sin(angle))};points[i]=rawPoints[i];if(!i)continue;
-            auto clear=[&](ImVec2 p){
-                if(square(p.x-center.x)+square(p.y-center.y)>square(radius)+.1f)return false;
-                for(int j=0;j<i;++j){const float gap=(markerRadius(i)+markerRadius(j)+4)*uiScale;
-                    if(square(p.x-points[j].x)+square(p.y-points[j].y)<square(gap))return false;}
-                return true;
-            };
+            const double angle=base[2]+perceptual::wheelOffsets[i];
+            rawPoints[i]=railPoint(center,radius,angle,12*uiScale);points[i]=rawPoints[i];
+            auto clear=[&](ImVec2 p){for(int j=0;j<i;++j){
+                const float gap=(markerRadius(i)+markerRadius(j)+4)*uiScale;
+                if(std::hypot(p.x-points[j].x,p.y-points[j].y)<gap)return false;}return true;};
             if(clear(points[i]))continue;bool found=false;
-            for(int step=1;step<=28 && !found;++step)for(int direction=0;direction<24;++direction){
-                double a=angle+direction*2*perceptual::pi/24;float distance=step*3*uiScale;
-                ImVec2 candidate={rawPoints[i].x+distance*float(std::cos(a)),rawPoints[i].y+distance*float(std::sin(a))};
+            for(int step=1;step<=180 && !found;++step)for(int sign:{1,-1}){
+                auto candidate=railPoint(center,radius,angle+step*sign,12*uiScale);
                 if(clear(candidate)){points[i]=candidate;found=true;break;}
             }
         }
@@ -57,69 +57,80 @@ struct PerceptualPickerState {
         return -1;
     }
     void cache(){
-        if(std::abs(cachedLightness-base[0])<.0001)return;
-        cachedLightness=base[0];++meshBuilds;
-        for(int a=0;a<=48;++a){double h=a*360./48,c=perceptual::maxChroma(base[0],h);
-            for(int ring=0;ring<=8;++ring)mesh[a*9+ring]=ink(perceptual::fromLch(base[0],c*ring/8,h));}
+        if(cachedLightness==.72)return;
+        cachedLightness=.72;++meshBuilds;
+        for(int a=0;a<=192;++a)mesh[a]=ink(perceptual::fromLch(.72,.18,a*360./192));
     }
 };
 static PerceptualPickerState perceptualPicker;
 static bool drawPerceptualPicker(Json& rgb,float width) {
     using State=PerceptualPickerState;
     auto& state=perceptualPicker;const auto at=ImGui::GetCursorScreenPos();auto* draw=ImGui::GetWindowDrawList();
-    const float gap=menuPanelGap*scale,bar=menuControlHeight*scale,side=std::max(50*scale,width-bar-gap),radius=side*.5f-12*scale;
-    const ImVec2 center={at.x+side*.5f,at.y+side*.5f};
+    const float gap=menuPanelGap*scale,side=std::max(50*scale,width),radius=side*.5f-12*scale,half=std::max(1.f,radius-15*scale);
+    const ImVec2 center={at.x+side*.5f,at.y+side*.5f},lo={center.x-half,center.y-half},hi={center.x+half,center.y+half};
     const auto identity=std::to_string(menuEpoch)+":"+std::to_string(shapeEditor.channel)+":"+std::to_string(shapeEditor.stop);
     state.reset(rgb,identity);state.layout(center,radius,scale);bool changed=false;
     ImGui::InvisibleButton("##perceptual-wheel",{side,side});shapeItemTip(23);
     state.wheelBounds={LONG(at.x),LONG(at.y),LONG(at.x+side),LONG(at.y+side)};
+    state.squareBounds={LONG(lo.x),LONG(lo.y),LONG(hi.x),LONG(hi.y)};state.lightnessBounds={};
     const auto mouse=ImGui::GetIO().MousePos;
     const int hovered=ImGui::IsItemHovered()?state.hit(mouse,scale):-1;
     if(hovered>=0 && !ImGui::IsItemActive()){
         const auto p=state.points[hovered];const float hit=(State::markerRadius(hovered)+2)*scale;
         shapeTipRows[25+hovered]={LONG(p.x-hit),LONG(p.y-hit),LONG(p.x+hit),LONG(p.y+hit)};shapeTipCandidate=225+hovered;
     }
+    auto inSquare=[&](ImVec2 p){return p.x>=lo.x && p.y>=lo.y && p.x<=hi.x && p.y<=hi.y;};
     if(ImGui::IsItemHovered() && ImGui::IsMouseClicked(0)){
-        state.dragHandle=hovered>=0;state.drag=hovered>=0?hovered:std::hypot(mouse.x-center.x,mouse.y-center.y)<=radius?0:-1;
+        state.dragHandle=hovered>=0;
+        const auto rail=State::railPoint(center,radius,std::atan2(mouse.y-center.y,mouse.x-center.x)*180/perceptual::pi,12*scale);
+        state.drag=hovered>=0?hovered:inSquare(mouse)?-2:std::hypot(mouse.x-rail.x,mouse.y-rail.y)<=8*scale?0:-1;
         state.dragStart=mouse;state.dragLast={-FLT_MAX,-FLT_MAX};state.dragOffset=hovered>=0?ImVec2{mouse.x-state.rawPoints[hovered].x,mouse.y-state.rawPoints[hovered].y}:ImVec2{};
         if(hovered>=0 && state.active!=hovered){state.active=hovered;changed|=state.apply(rgb);}
+        float h,s,v;ImGui::ColorConvertRGBtoHSV(rgb[0].get<float>()/255,rgb[1].get<float>()/255,rgb[2].get<float>()/255,h,s,v);
+        if(s>.0001f)state.svHue=h;
+        else {const auto chromatic=perceptual::fromLch(.72,.18,state.base[2]);ImGui::ColorConvertRGBtoHSV(float(chromatic[0]/255),float(chromatic[1]/255),float(chromatic[2]/255),state.svHue,s,v);}
     }
-    if(ImGui::IsItemActive() && ImGui::IsMouseDown(0) && state.drag>=0 && (mouse.x!=state.dragLast.x || mouse.y!=state.dragLast.y) &&
+    if(ImGui::IsItemActive() && ImGui::IsMouseDown(0) && state.drag!=-1 && (mouse.x!=state.dragLast.x || mouse.y!=state.dragLast.y) &&
        (!state.dragHandle || std::hypot(mouse.x-state.dragStart.x,mouse.y-state.dragStart.y)>.5f)){
-        state.dragLast=mouse;double x=mouse.x-state.dragOffset.x-center.x,y=mouse.y-state.dragOffset.y-center.y;
-        state.dragPoint(perceptual::hue(std::atan2(y,x)*180/perceptual::pi),std::hypot(x,y)/radius,state.drag);changed|=state.apply(rgb);
+        state.dragLast=mouse;
+        if(state.drag==-2){
+            float r,g,b;ImGui::ColorConvertHSVtoRGB(state.svHue,std::clamp((mouse.x-lo.x)/(2*half),0.f,1.f),std::clamp(1-(mouse.y-lo.y)/(2*half),0.f,1.f),r,g,b);
+            Json next=Json::array({int(std::lround(r*255)),int(std::lround(g*255)),int(std::lround(b*255))});
+            if(next!=rgb){rgb=next;state.last=State::color(rgb);state.base=perceptual::lch(state.last,state.base[2]);state.active=0;changed=true;}
+        }else{
+            double x=mouse.x-state.dragOffset.x-center.x,y=mouse.y-state.dragOffset.y-center.y;
+            state.dragPoint(perceptual::hue(std::atan2(y,x)*180/perceptual::pi),1,state.drag);changed|=state.apply(rgb);
+        }
     }
     if(!ImGui::IsMouseDown(0))state.drag=-1;
     state.cache();state.layout(center,radius,scale);
-    auto vertex=[&](int a,int ring){double h=a*2*perceptual::pi/48,r=radius*ring/8;return ImVec2{center.x+float(r*std::cos(h)),center.y+float(r*std::sin(h))};};
     const auto uv=ImGui::GetFontTexUvWhitePixel();
-    for(int a=0;a<48;++a)for(int ring=0;ring<8;++ring){
-        const ImVec2 p[]={vertex(a,ring),vertex(a+1,ring),vertex(a+1,ring+1),vertex(a,ring+1)};
-        const ImU32 colors[]={state.mesh[a*9+ring],state.mesh[(a+1)*9+ring],state.mesh[(a+1)*9+ring+1],state.mesh[a*9+ring+1]};
+    for(int a=0;a<192;++a){
+        double angle=a*360./192,next=(a+1)*360./192;
+        const ImVec2 p[]={State::railPoint(center,radius+3*scale,angle,15*scale),State::railPoint(center,radius+3*scale,next,15*scale),
+            State::railPoint(center,radius-3*scale,next,9*scale),State::railPoint(center,radius-3*scale,angle,9*scale)};
+        const ImU32 c=state.mesh[a],n=state.mesh[a+1];
         draw->PrimReserve(6,4);auto index=draw->_VtxCurrentIdx;
-        draw->PrimWriteIdx(index);draw->PrimWriteIdx(index+1);draw->PrimWriteIdx(index+2);draw->PrimWriteIdx(index);draw->PrimWriteIdx(index+2);draw->PrimWriteIdx(index+3);
-        for(int n=0;n<4;++n)draw->PrimWriteVtx(p[n],uv,colors[n]);
+        for(int i:{0,1,2,0,2,3})draw->PrimWriteIdx(index+i);
+        for(int i=0;i<4;++i)draw->PrimWriteVtx(p[i],uv,i==0||i==3?c:n);
     }
-    draw->AddCircle(center,radius,ImGui::GetColorU32(ImGuiCol_Border),64,scale);
+    float hue,saturation,value;ImGui::ColorConvertRGBtoHSV(rgb[0].get<float>()/255,rgb[1].get<float>()/255,rgb[2].get<float>()/255,hue,saturation,value);
+    if(state.drag==-2)hue=state.svHue;
+    else if(saturation<.0001f){const auto chromatic=perceptual::fromLch(.72,.18,state.base[2]);float ignoredS,ignoredV;
+        ImGui::ColorConvertRGBtoHSV(float(chromatic[0]/255),float(chromatic[1]/255),float(chromatic[2]/255),hue,ignoredS,ignoredV);}
+    float r,g,b;ImGui::ColorConvertHSVtoRGB(hue,1,1,r,g,b);const ImU32 hueColor=ImGui::ColorConvertFloat4ToU32({r,g,b,1});
+    draw->AddRectFilledMultiColor(lo,hi,IM_COL32_WHITE,hueColor,hueColor,IM_COL32_WHITE);
+    draw->AddRectFilledMultiColor(lo,hi,IM_COL32(0,0,0,0),IM_COL32(0,0,0,0),IM_COL32_BLACK,IM_COL32_BLACK);
+    draw->AddRect(lo,hi,ImGui::GetColorU32(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
+    const ImVec2 selected={lo.x+saturation*2*half,hi.y-value*2*half};
+    draw->AddCircle(selected,4*scale,IM_COL32_BLACK,24,2*scale);draw->AddCircle(selected,5*scale,IM_COL32_WHITE,24,scale);
     for(int i=1;i<perceptual::wheelCount;++i){auto p=state.points[i],anchor=state.rawPoints[i];
-        if(i==state.active || i==hovered)draw->AddLine(state.points[0],p,ImGui::GetColorU32(ImGuiCol_Border),scale);
         if(std::hypot(p.x-anchor.x,p.y-anchor.y)>scale){draw->AddLine(anchor,p,ImGui::GetColorU32(ImGuiCol_Border),scale);draw->AddCircleFilled(anchor,scale,ImGui::GetColorU32(ImGuiCol_TextDisabled));}}
     auto marker=[&](int i){const auto p=state.points[i];const float r=State::markerRadius(i)*scale;
         draw->AddCircleFilled(p,r,State::ink(perceptual::wheelColor(state.base,i)));
         draw->AddCircle(p,r,IM_COL32(0,0,0,220),24,2*scale);draw->AddCircle(p,r+scale,IM_COL32(255,255,255,240),24,scale);
         if(i==state.active)draw->AddCircle(p,r+2*scale,ImGui::GetColorU32(ImGuiCol_CheckMark),24,scale);};
     for(int i=1;i<perceptual::wheelCount;++i)marker(i);marker(0);
-    const ImVec2 lightAt={at.x+side+gap,at.y};ImGui::SetCursorScreenPos(lightAt);
-    ImGui::InvisibleButton("##perceptual-lightness",{bar,side});shapeItemTip(24);
-    state.lightnessBounds={LONG(lightAt.x),LONG(lightAt.y),LONG(lightAt.x+bar),LONG(lightAt.y+side)};
-    if(ImGui::IsItemActive() && ImGui::IsMouseDown(0)){
-        state.base[0]=std::clamp(1.-(ImGui::GetIO().MousePos.y-at.y)/side,0.,1.);state.active=0;changed|=state.apply(rgb);
-    }
-    for(int n=0;n<32;++n){double l1=1.-n/32.,l2=1.-(n+1)/32.;
-        auto c1=State::ink(perceptual::fromLch(l1,state.base[1],state.base[2])),c2=State::ink(perceptual::fromLch(l2,state.base[1],state.base[2]));
-        draw->AddRectFilledMultiColor({lightAt.x,at.y+side*n/32},{lightAt.x+bar,at.y+side*(n+1)/32},c1,c1,c2,c2);}
-    draw->AddRect(lightAt,{lightAt.x+bar,at.y+side},ImGui::GetColorU32(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
-    const float y=at.y+float(1-state.base[0])*side;draw->AddLine({lightAt.x,y},{lightAt.x+bar,y},IM_COL32_WHITE,2*scale);
     ImGui::SetCursorScreenPos({at.x,at.y+side+gap});
     return changed;
 }
