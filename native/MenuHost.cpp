@@ -1014,7 +1014,7 @@ static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidge
 static const char* actionTipText(int action) {
     if(action==223 && POINT{LONG(ImGui::GetIO().MousePos.x),LONG(ImGui::GetIO().MousePos.y)}.x>=perceptualPicker.squareBounds.left &&
        ImGui::GetIO().MousePos.x<=perceptualPicker.squareBounds.right && ImGui::GetIO().MousePos.y>=perceptualPicker.squareBounds.top &&
-       ImGui::GetIO().MousePos.y<=perceptualPicker.squareBounds.bottom)return "方块调整主色；外围圆点联动配色";
+       ImGui::GetIO().MousePos.y<=perceptualPicker.squareBounds.bottom)return "饱和度／明度";
     if(action==205)return shapeEditor.channel?"无描边":"无填充";
     if(action==222){const auto method=shapeEditor.current().value("method",std::string("classic"));return method=="perceptual"?"感知渐变；点击切换线性":method=="linear"?"线性渐变；点击切换经典":"经典渐变；点击切换感知";}
     if(action>=200 && action<200+shapeTipCount)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
@@ -1088,10 +1088,18 @@ static ImVec4 actionTipBounds(int action) {
             if(tipOverlaps(tip,{LONG(footerBounds.x),LONG(footerBounds.y),LONG(footerBounds.z),LONG(footerBounds.w)},2*scale))return false;
             return true;
         };
-        if(valid(above))return above;
+        if(action>=225){
+            const float nearX=group.right+gap;
+            const float nearY=std::clamp((anchor.top+anchor.bottom-height)*.5f,pos.y+8*scale,std::max(pos.y+8*scale,pos.y+size.y-height-8*scale));
+            const ImVec4 nearby={nearX,nearY,nearX+width,nearY+height};
+            if(valid(nearby))return nearby;
+        }
         const float left=group.left-gap-width;
         const float y=std::clamp(float(anchor.top),pos.y+8*scale,std::max(pos.y+8*scale,pos.y+size.y-height-8*scale));
-        for(const auto& candidate:std::array<ImVec4,3>{{{left,y,left+width,y+height},{group.right+gap,y,group.right+gap+width,y+height},{x,group.bottom+gap,x+width,group.bottom+gap+height}}})if(valid(candidate))return candidate;
+        if(action<225){
+            if(valid(above))return above;
+            for(const auto& candidate:std::array<ImVec4,3>{{{left,y,left+width,y+height},{group.right+gap,y,group.right+gap+width,y+height},{x,group.bottom+gap,x+width,group.bottom+gap+height}}})if(valid(candidate))return candidate;
+        }
         // A tall panel can touch the viewport edge. Search free side corridors
         // instead of silently suppressing the tip when all four anchors fail.
         std::vector<float> rows={float(group.top),float(anchor.top),pos.y+8*scale,pos.y+size.y-height-8*scale};
@@ -2556,8 +2564,7 @@ int main() {
                         }
                     }
                 if(harmonyMarkerRoles[0]!=harmonyMarkerRoles[1] || harmonyMarkerRoles[1]!=harmonyMarkerRoles[2] ||
-                   harmonyMarkerRoles[3]==harmonyMarkerRoles[4] || harmonyMarkerRoles[0]==harmonyMarkerRoles[3] ||
-                   harmonyMarkerRoles[0]==harmonyMarkerRoles[4])throw std::runtime_error("Harmony role shapes lost their semantic grouping");
+                   harmonyMarkerRoles[0]==harmonyMarkerRoles[3])throw std::runtime_error("Harmony role shapes lost their semantic grouping");
                 // Polygon corners extend beyond the old circular hit boundary.
                 for(int i=0;i<perceptual::wheelCount;++i){
                     const auto& g=PerceptualPickerState::geometry(i);const float u=PerceptualPickerState::markerRadius(i)/4.5f;
@@ -2670,6 +2677,10 @@ int main() {
                         if(hoverTip.shown!=225+i || !tipVisual.ready || tipVisual.bounds.z<=tipVisual.bounds.x ||
                            tipOverlaps(tipVisual.bounds,shapeEditor.bounds) || tipOverlaps(tipVisual.bounds,shapeEditor.maskBounds))
                             throw std::runtime_error("Live preview tooltip clipped or missing in theme/font/height matrix: "+std::to_string(i)+" "+themeName+" "+fontName+" "+std::to_string(panelHeight));
+                        const auto marker=shapeTipRows[25+i];const auto tip=tipVisual.bounds;
+                        const float tipDx=std::max({tip.x-marker.right,float(marker.left)-tip.z,0.f});
+                        const float tipDy=std::max({tip.y-marker.bottom,float(marker.top)-tip.w,0.f});
+                        if(std::hypot(tipDx,tipDy)>60*scale)throw std::runtime_error("Harmony tooltip drifted away from its marker");
                         if(canExecute() || capsEnabled(0) || holdActionAt({LONG((tipVisual.bounds.x+tipVisual.bounds.z)*.5f),LONG((tipVisual.bounds.y+tipVisual.bounds.w)*.5f)})!=-1)
                             throw std::runtime_error("Tooltip display changed input or operation permissions");
                     }
@@ -2682,11 +2693,23 @@ int main() {
                 inputFocused=false;numberFrame(ImGuiKey_None,false);
                 const auto wheelDraft=shapeEditor.draft;const auto dot=perceptualPicker.points[3];
                 io.AddMousePosEvent(dot.x,dot.y);numberFrame(ImGuiKey_None,false);io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
-                const auto wb=perceptualPicker.wheelBounds;const float cx=(wb.left+wb.right)*.5f,cy=(wb.top+wb.bottom)*.5f;
-                io.AddMousePosEvent(cx+(wb.right-wb.left)*.25f,cy+(wb.bottom-wb.top)*.2f);numberFrame(ImGuiKey_None,false);
+                const auto wb=perceptualPicker.hueBounds;
+                io.AddMousePosEvent(dot.x,dot.y+(wb.bottom-wb.top)*.2f);numberFrame(ImGuiKey_None,false);
                 io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
                 if(shapeEditor.draft==wheelDraft || testedActions.size()!=shapeCount || !maskPreviewStarted || perceptualPicker.active!=3)
                     throw std::runtime_error("Perceptual companion drag did not update only its owning preview");
+                const auto hb=perceptualPicker.hueBounds;
+                if(hb.left<=perceptualPicker.squareBounds.right ||
+                   perceptualPicker.points[0].x-PerceptualPickerState::markerExtent(0)*scale<=hb.right)
+                    throw std::runtime_error("Hue, SV and harmony markers overlap");
+                const auto hueBase=perceptualPicker.base;
+                io.AddMousePosEvent((hb.left+hb.right)*.5f,hb.top+(hb.bottom-hb.top)*.2f);numberFrame(ImGuiKey_None,false);
+                io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
+                io.AddMousePosEvent((hb.left+hb.right)*.5f,hb.top+(hb.bottom-hb.top)*.7f);numberFrame(ImGuiKey_None,false);
+                io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
+                if(std::abs(perceptualPicker.base[0]-hueBase[0])>.0001 || std::abs(perceptualPicker.base[1]-hueBase[1])>.0001 ||
+                   std::abs(perceptualPicker.base[2]-hueBase[2])<1 || perceptualPicker.active!=0 || testedActions.size()!=shapeCount)
+                    throw std::runtime_error("Independent hue strip changed lightness/chroma or dispatched another task");
                 const auto square=perceptualPicker.squareBounds;
                 if(square.right-square.left<40*scale || perceptualPicker.lightnessBounds.right)
                     throw std::runtime_error("Large square or retired lightness hit bounds are wrong");
@@ -2950,7 +2973,10 @@ int main() {
                 if(previewShapeHover>=0){auto report=std::filesystem::path(preview);report+=L".tooltip.json";
                     std::ofstream(report)<<Json{{"candidate",shapeTipCandidate},{"visible",tipVisual.ready},{"text",tipVisual.text},
                         {"bounds",{tipVisual.bounds.x,tipVisual.bounds.y,tipVisual.bounds.z,tipVisual.bounds.w}},
-                        {"preview_running",maskPreviewStarted},{"other_actions_enabled",canExecute()}}.dump();}
+                        {"preview_running",maskPreviewStarted},{"other_actions_enabled",canExecute()},
+                        {"anchor",previewShapeHover<shapeTipCount?Json({shapeTipRows[previewShapeHover].left,shapeTipRows[previewShapeHover].top,shapeTipRows[previewShapeHover].right,shapeTipRows[previewShapeHover].bottom}):Json()},
+                        {"hue_bounds",{perceptualPicker.hueBounds.left,perceptualPicker.hueBounds.top,perceptualPicker.hueBounds.right,perceptualPicker.hueBounds.bottom}},
+                        {"square_bounds",{perceptualPicker.squareBounds.left,perceptualPicker.squareBounds.top,perceptualPicker.squareBounds.right,perceptualPicker.squareBounds.bottom}}}.dump();}
                 if (!previewLive) break;
             }
             if (SUCCEEDED(swapChain->Present(1,0))) renderedHit=holdFinished?-1:pendingHit;

@@ -14,3 +14,6 @@ static constexpr float menuGradientHandleSize=menuCheckSize;
 static constexpr float menuGradientEditorHeight=menuGradientBarHeight+menuCompactGap+menuGradientHandleSize;
 
 static constexpr float menuShapeWindowHeight=620.f;
+
+static constexpr float menuHueBarWidth=14.f;
+static constexpr float menuHarmonyLaneWidth=24.f;

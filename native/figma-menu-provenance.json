@@ -364,7 +364,7 @@
   ],
   "extension_source": {
     "file": "native/figma-inspired-icons.json",
-    "sha256": "632868a964cfef0e575a656277da7c7482ca3c69d95b029a91d91a6a4cb203d9",
+    "sha256": "749c1a7ef8cf6e512c5fd729811a01c866d7407575b66a201ac6339a2e5b71aa",
     "reference_nodes": [
       "809:619",
       "346:6",
@@ -408,8 +408,7 @@
       "circle",
       "circle",
       "circle",
-      "diamond",
-      "star"
+      "diamond"
     ],
     "assets": [
       {
@@ -421,11 +420,6 @@
         "name": "diamond",
         "asset": "native/figma-inspired-assets/color-harmony-diamond.svg",
         "sha256": "22881515bbd464c16c958b2b0759ddfb5f3bf967f279ee767683887d6086a28f"
-      },
-      {
-        "name": "star",
-        "asset": "native/figma-inspired-assets/color-harmony-star.svg",
-        "sha256": "740623c0988438a811efa209a5396e7f0ca1d1c431c838f5f4b08b0a218a6c24"
       }
     ],
     "runtime": "Compiled geometry only; same source drives fill, hit testing and spacing. No runtime asset loading."

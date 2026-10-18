@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 192分离取色实际入口：色相条与饱和度／明度方块独立，四点标记置于条外，星形强调色及命中已移除；tip就近上下避让，仅解释配色含义。实际192／UXP43与原生组件匹配；双核完整矩阵＋64悬停场景、四主题32导出＋112张提示像素核对通过，48个标记提示最远17.03逻辑单位。初次8个过远案例留证，修复后重跑。最终两轮PS24.0.1低CPU取消／正常确认一次撤销通过，PS未重启、原稿／配置／资源和旧未知记录保留；Python452／前端40沿用未改基线，实体键鼠／画布与其他硬件仍待验。证据.runtime/recovery192/runtime.json、live-matrix.json、native192-low.log、tooltip192/proximity.json、pixels.json、tooltip192-first-position-failure.json。
+- [ ] 192公开交付：源码／标签、Wiki五页、公开下载和限流备用更新核验后仅保留最新Release。
+
 - [x] 191五点配色实际入口：分裂互补／三色配色四点和命中已移除，保留主色、两枚邻近色、互补色和星形强调色；强调色说明互补色相＋明暗反差。实际191／UXP43及原生组件匹配；双核完整矩阵＋80悬停场景、四主题32导出＋124张提示像素检查、PS24.0.1低CPU取消／正常确认一次撤销通过。执行端未改，452Python／40前端沿用已验基线；PS未重启，原稿／设置／资源与旧未知记录保持。实体键鼠／画布及其他办公硬件仍待对应验收。证据.runtime/recovery191/runtime.json、live-matrix.json、native191-low.log、tooltip191/pixels.json、tooltip191-batch/pixels.json。
 - [x] 191公开交付：源码／标签及Wiki五页已推送并公开核验，ZIP／SHA／更新清单匿名下载与冻结更新器API403备用通道真实下载通过。只保留191 Release；190附件已本地备份、标签／源码历史保留。实际191／UXP43及新原生组件匹配，dist仅当前发行物；实体画布／键鼠与其他硬件按待验收项保留。证据.runtime/recovery191/runtime.json、release-0.4.191-public-verification.json、manifest191-verification.json、fallback191-live.json、wiki191-public.json、release191-cleanup.json。
 

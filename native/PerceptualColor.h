@@ -42,13 +42,10 @@ inline Color mix(Color a,Color b,double t,const std::string& method){
     if(method=="linear"){for(int i=0;i<3;++i)a[i]=encoded(linear(a[i]/255)*(1-t)+linear(b[i]/255)*t)*255;return a;}
     for(int i=0;i<3;++i)a[i]+=(b[i]-a[i])*t;return a;
 }
-// Only the five visible relationships are selectable; no hidden harmony modes.
-inline constexpr int wheelCount=5;
-inline constexpr int accentIndex=4;
-inline constexpr std::array<double,wheelCount> wheelOffsets={0,-30,30,180,180};
+// Only visible relationships are selectable; no hidden harmony modes.
+inline constexpr int wheelCount=4;
+inline constexpr std::array<double,wheelCount> wheelOffsets={0,-30,30,180};
 inline Color wheelColor(Color base,int index){
-    double l=base[0],c=base[1];
-    if(index==accentIndex){l=base[0]>.6?.35:.8;c*=1.15;}
-    return fromLch(l,c,hue(base[2]+wheelOffsets.at(index)));
+    return fromLch(base[0],base[1],hue(base[2]+wheelOffsets.at(index)));
 }
 }

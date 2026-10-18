@@ -83,8 +83,8 @@ static int shapeTipCandidate=-1;
 static constexpr int shapeTipCount=25+perceptual::wheelCount;
 static std::array<RECT,shapeTipCount> shapeTipRows{};
 static const char* shapeTipNames[shapeTipCount]={"填充","描边","纯色","渐变","图案","无填充／无描边","描边宽度：双击输入","复制当前Hex颜色","黑色","白色","交换填充与描边","复制形状填充与描边","粘贴到当前选中的形状图层","羽化：双击数值输入","密度：双击数值输入",
-    "RGB取色器","方块取色与感知配色：拖动圆点联动","","","","","","切换渐变插值：感知／线性／经典","点击配色圆点使用颜色；拖动时全部联动","主色感知明度",
-    "主色（大圆）：拖动整组联动","邻近色 −30°（圆）","邻近色 +30°（圆）","互补色（菱形）","强调色（星形）：互补色相＋明暗反差"};
+    "RGB取色器","色相与饱和度分离取色","","","","","","切换渐变插值：感知／线性／经典","色相","",
+    "主色","邻近色 −30°","邻近色 +30°","互补色"};
 static void shapeItemTip(int index,bool allowHover=true) {
     const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();shapeTipRows[index]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
     if(allowHover && ImGui::IsItemHovered() && !ImGui::IsItemActive())shapeTipCandidate=200+index;
@@ -326,7 +326,7 @@ static void drawShapeEditor() {
     const float row=menuControlHeight*scale+gap;
     const auto kind=shapeEditor.batchMask?std::string("mask"):shapeEditor.current().value("kind",std::string("solid"));
     const float iconRow=figmaDisplayWidgetHeight*scale+gap;
-    const float colorSquare=std::max(menuControlHeight*scale,width-2*menuControlPadding*scale-(shapeEditor.perceptualPicker?0:menuControlHeight*scale+gap));
+    const float colorSquare=shapeEditor.perceptualPicker?perceptualSquareSide(width-2*menuControlPadding*scale):std::max(menuControlHeight*scale,width-2*menuControlPadding*scale-menuControlHeight*scale-gap);
     const float cell=figmaDisplayIconWidth*scale;
     const bool wrapTools=width-2*menuControlPadding*scale<(shapeEditor.vector?6:4)*cell+gap;
     const bool wrapActions=shapeEditor.vector && kind!="pattern" && width-2*menuControlPadding*scale<5*cell+2*gap;
@@ -401,11 +401,11 @@ static void drawShapeEditor() {
         }
         Json& c=paintKind=="solid"?p["rgb"]:p["stops"][shapeEditor.stop]["rgb"];
         const auto pickerAt=ImGui::GetCursorScreenPos();int picker=shapeEditor.perceptualPicker?1:0;
-        if(shapeSegment("picker-mode",{"RGB","感知色轮"},picker,2*cell,false,{24,25},15))shapeEditor.perceptualPicker=picker==1;
+        if(shapeSegment("picker-mode",{"RGB","感知配色"},picker,2*cell,false,{24,25},15))shapeEditor.perceptualPicker=picker==1;
         ImGui::SetCursorScreenPos({pickerAt.x,pickerAt.y+iconRow});
         float color[]={c[0].get<float>()/255,c[1].get<float>()/255,c[2].get<float>()/255,1};
         const float reserve=(wrapValues?ImGui::GetFrameHeightWithSpacing():0)+iconRow*(wrapActions?2:1);
-        const float pickerWidth=std::min(inner,std::max(90*scale,ImGui::GetContentRegionAvail().y-reserve));
+        const float pickerWidth=std::min(inner,std::max(120*scale,ImGui::GetContentRegionAvail().y-reserve+(shapeEditor.perceptualPicker?(2*menuPanelGap+menuHueBarWidth+menuHarmonyLaneWidth)*scale:0)));
         ImGui::SetNextItemWidth(pickerWidth);
         if(shapeEditor.perceptualPicker){if(drawPerceptualPicker(c,pickerWidth)){p["enabled"]=true;shapeEditor.changed();}}
         else if(ImGui::ColorPicker4("##paint",color,ImGuiColorEditFlags_NoAlpha|ImGuiColorEditFlags_NoSidePreview|ImGuiColorEditFlags_NoSmallPreview|

@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-中央方块精细取色，外围五点配色：主色、邻近色、互补色与强调色。操作说明见[Wiki](https://github.com/mianxiu/15100px-menu/wiki)。
+色相条与饱和度／明度方块分离，条外四点配色：主色、两枚邻近色与互补色。操作说明见[Wiki](https://github.com/mianxiu/15100px-menu/wiki)。
 
 为 Windows Photoshop 提供随鼠标唤出的快捷菜单，让选层、排序、创建图层与调色更顺手。
 
