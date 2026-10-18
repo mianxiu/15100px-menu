@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 170 低配批量读取优化及运行入口：精确原生快照比较、同步读取内DOM复用；完整新鲜目标／内容／路径／顺序／锁定核验、实时预览、取消恢复和一次撤销保持。实际170／UXP36，398回归、17脚本、8最终真实事务（低CPU7／正常1）、另1刷新中取消和4保护检查通过。同会话128层首帧27.38→24.25秒、下一帧21.33→18.70秒；小文档收益有限，不宣称即时。证据.runtime/recovery170/runtime.json、live-matrix.json、tests170.log、js170.log；合并属性写入失败原型及进度采样失败记录保留。
-- [ ] 170 公开交付：待Release附件／更新通道匿名核验、Wiki同步及旧Release清理；标签、历史、原记录及本地回退保留。
+- [x] 170 公开交付：Release／Wiki已同步，匿名ZIP／SHA／更新清单及冻结更新器模拟API403后的真实备用下载通过；只保留170 Release，旧Release／附件已清理，Git标签和本地回退保留。实际170／UXP36与dist一致。另1项低CPU原生刷新期间取消补测通过，等待／恢复／核验进度和原值均核对。证据.runtime/recovery170/runtime.json、release-0.4.170-public-verification.json、fallback170-live.json、release170-cleanup.json、wiki170-public.json。
 - [ ] 170 实体Caps／鼠标视觉、现代PS及故障i5／集显／Win10实机验收；CPU限制测试不能代替这些验收。
 
 - [x] 169 分阶段真实进度与取消恢复提示：实际入口169／UXP36，读取／写入／核验计数、顺滑进度条、刷新／恢复动画、等待原调用返回、关闭不重弹；不增加PS查询或改变事务。398回归、16插件JS套件、四主题、生产SetWindowPos恢复反馈及最终EXE通过；12项真实PS24.0.1事务（低CPU10／正常2）和4项保护检查通过，原文档／资源／配置恢复。证据.runtime/recovery169/runtime.json、live-matrix.json、tests169.log及progress169-ui；128层仍较慢，不能称即时响应。
