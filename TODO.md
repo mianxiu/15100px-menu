@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 182形状外观复制／单层及批量粘贴、无标题图标面板、羽化／密度双击输入已实现并切换实际入口182／UXP41。434项后台／原生回归、20套脚本、四主题16渲染、9组真实PS复制／粘贴（低CPU6／正常3）、2项整批拒绝和2组实时预览确认／取消通过；128层低CPU渐变粘贴约7.67秒。已实际运行182／UXP41，原稿、配置、资源及历史未知记录保留。实体鼠标／Caps／画布视觉、真实办公低配和现代PS仍待对应验收。 正常重启后插件和后台剪贴板均清空，测试用外观未留给用户。早期夹具map／历史游标断言失败保留未计通过；菜单初次完整取样和闲置快捷键性能仍是下一轮。证据.runtime/recovery182/runtime.json、live-matrix.json、clipboard-restart-verified.json、tests182.log、js182.log、native182-selftest.log、ui182。
-- [ ] 182公开交付：等待源码／标签、Release匿名下载、限流备用通道和Wiki核验；通过后仅保留182 Release，181附件及标签／历史保留备份。
+- [x] 182公开交付：源码／标签、Release与Wiki已推送，安装包／SHA／最新更新清单匿名下载、冻结更新器API403备用下载及6个Wiki内容页核验通过；只保留182 Release，181附件本地备份，Git标签及历史保留。实际182／UXP41，434后台、40前端、20脚本与真实PS矩阵通过；测试剪贴板已在正常重启后清空、原稿恢复，实体鼠标／Caps视觉与其他硬件仍单列待验收。证据.runtime/recovery182/runtime.json、release-0.4.182-public-verification.json、fallback182-live.json、wiki182-public.json、release182-cleanup.json。
 
 - [x] 181首次批量预览读取／实际运行入口：新鲜原生树和同步校验内描述符／祖先复用，小批及大树兼容保留；完整新鲜内容／路径／顺序／锁定与精确原值校验保持。428回归、19脚本、EXE启动／重启、7项最终真实PS事务（低CPU6／正常1）、4项外部修改及4项选择保护通过；128层同会话首次12.13→6.02秒、后续10.77→6.20秒。实时预览、Esc取消恢复和一次撤销保持，Esc路由矩阵通过；未模拟实体Esc或屏幕延迟。实际181／UXP40，配置／原稿／资源及历史未知保持。证据.runtime/recovery181/runtime.json、live-matrix.json、guards.json、tests181.log、js181.log。
 - [x] 181公开交付：源码／标签与Release已推送，安装包／SHA／最新更新清单匿名下载、冻结更新器API403备用通道及Wiki五页核验通过；只保留181 Release，180附件本地备份，Git标签与历史保留。实际181／UXP40，EXE文件版本同步，原稿／配置／CPU资源恢复。证据.runtime/recovery181/runtime.json、release-0.4.181-public-verification.json、fallback181-live.json、wiki181-public.json、release181-cleanup.json。
