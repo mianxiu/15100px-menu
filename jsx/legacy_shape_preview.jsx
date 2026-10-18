@@ -230,12 +230,13 @@
     function rollback() { restoring=true;progress('restore',0,0,true);target();var current=layerDescriptor(),dirty=changed || !same(raw(current),raw(baseline)) || prepared.raw.vector && !maskClose(mask(current),originalMask);doc.activeHistoryState=originalHistory;if(dirty){progress('redraw',0,0,true);app.refresh();redraws++;}progress('verify',0,1,true);var d=invariants();if(!same(raw(d),raw(baseline)) || prepared.raw.vector && !maskClose(mask(d),originalMask))throw Error('Legacy rollback readback mismatch');progress('verify',1,1,true); }
     function batchRun() {
         var records=[],batchHistory=null,batchStarted=false,batchChanged=false,batchCommit=false,batchSeq=0,batchUpdates=0,batchRedraws=0,batchLatest=request.paint;
+        var batchAbort={},actionResidue='',batchNativeCalls=0;
         var keys=['layerKind','adjustment','AGMStrokeStyleInfo','hasVectorMask','hasUserMask','userMaskFeather','userMaskDensity'];
         var ids=request.target.layer_ids.slice().sort(function(a,b){return a-b;}),lease=new Date().getTime()+4000;
         var selectionStream=null,selectionIDs=ids.join(',');
         function batchIdentity() {
             if(!app.documents.length || app.activeDocument.id!==request.target.document_id || doc.activeLayer.id!==request.target.active_layer_id)throw Error('Batch selection changed');
-            // Always read the live selection before each mutation. Exact native
+            // Always read the live selection before each direct write or native batch. Exact native
             // bytes avoid repeatedly decoding every selected reference; this is
             // not a hash, cached host read, or authority to skip a fresh read.
             var r=new ActionReference();r.putProperty(s('property'),s('targetLayersIDs'));r.putEnumerated(s('document'),s('ordinal'),s('targetEnum'));
@@ -285,12 +286,51 @@
         }
         function sameMember(a,b,wanted){return a.id===b.id && maskClose(a.mask,wanted) && (typeof b.content_bytes==='string' ? a.content_bytes===b.content_bytes && a.path_bytes===b.path_bytes : same(a.content,b.content) && same(a.path,b.path)) && a.parent_id===b.parent_id && same(a.order,b.order);}
         function verify(wanted){progress('verify',0,records.length,true);batchTarget();var orders={};for(var j=0;j<records.length;j++){if(!sameMember(readMember(records[j].layer,orders,true),records[j].original,wanted[j]))throw Error('Batch mask/content/path/order mismatch');progress('verify',j+1,records.length);}}
-        function set(id,key,value){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);var d=new ActionDescriptor(),v=new ActionDescriptor();d.putReference(c('null'),r);v.putUnitDouble(s(key==='feather'?'vectorMaskFeather':'vectorMaskDensity'),c(key==='feather'?'#Pxl':'#Prc'),value);d.putObject(c('T   '),c('Lyr '),v);executeAction(c('setd'),d,DialogModes.NO);}
+        function setter(id,key,value){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);r.putIdentifier(s('document'),request.target.document_id);var d=new ActionDescriptor(),v=new ActionDescriptor();d.putReference(c('null'),r);v.putUnitDouble(s(key==='feather'?'vectorMaskFeather':'vectorMaskDensity'),c(key==='feather'?'#Pxl':'#Prc'),value);d.putObject(c('T   '),c('Lyr '),v);return d;}
+        function set(id,key,value){executeAction(c('setd'),setter(id,key,value),DialogModes.NO);}
+        // Native action containers amortize per-executeAction dispatch. Only
+        // fixed document/layer IDs and the two validated mask properties enter.
+        // Format: ATN v16, no shortcuts or dialogs, opaque native descriptors.
+        function actionBytes(name,commands){
+            function number(v,n){var out='';for(var b=n-1;b>=0;b--)out+=String.fromCharCode((v>>>(b*8))&255);return out;}
+            function unicode(v){var out=number(v.length+1,4);for(var j=0;j<v.length;j++)out+=number(v.charCodeAt(j),2);return out+number(0,2);}
+            if(!commands.length || commands.length>32)throw Error('Invalid native batch size');
+            var out=number(16,4)+unicode(name)+number(0,1)+number(1,4)+number(0,2)+number(0,1)+number(0,1)+number(0,2)+unicode('Apply')+number(0,1)+number(commands.length,4);
+            for(var j=0;j<commands.length;j++){var bytes=commands[j].toStream();if(bytes.substr(0,4)!==number(16,4))throw Error('Unsupported native descriptor stream');out+=number(0,1)+number(1,1)+number(0,1)+number(0,1)+'long'+'setd'+number(3,4)+'Set'+number(-1,4)+bytes.substr(4);}
+            return out;
+        }
+        function nativeBatch(commands,members,chunk){
+            var name='PSMenuPreview_'+request.id+'_'+progressFrame+'_'+chunk,file=new File(folder+'/native-actions-'+request.id+'-'+progressFrame+'-'+chunk+'.atn');
+            if(file.exists)throw Error('Native batch already prepared');var bytes=actionBytes(name,commands);
+            file.encoding='BINARY';if(!file.open('w'))throw Error('Cannot prepare native batch');try{if(!file.write(bytes))throw Error('Cannot save native batch');}finally{file.close();}
+            var loaded=false;actionResidue=name;
+            try{
+                app.load(file);loaded=true;
+                // Loading can yield to PS. Recheck fresh identity and every
+                // affected layer/ancestor immediately before the bounded play.
+                batchIdentity();for(var j=0;j<members.length;j++){var record=records[members[j]];if(record.layer.id!==record.original.id)throw Error('Batch target changed');unlocked(record.layer);}
+                batchChanged=true;for(var j=0;j<members.length;j++)records[members[j]].touched=true;
+                app.doAction('Apply',name);batchNativeCalls++;
+            }finally{
+                if(loaded){var ref=new ActionReference(),remove=new ActionDescriptor();ref.putName(s('actionSet'),name);remove.putReference(s('null'),ref);executeAction(s('delete'),remove,DialogModes.NO);actionResidue='';file.remove();}
+            }
+            var packet=null,now=new Date().getTime();try{packet=readControl();}catch(_){}
+            if(packet && packet.id===request.id && packet.session===request.session && packet.token===request.token && range(packet.seq,progressFrame,2147483647) && Math.floor(packet.seq)===packet.seq && range(packet.lease_until_ms,now,now+5000) && packet.phase==='cancel')throw batchAbort;
+        }
+
         function applyBatch(p){
             batchValidate(p);stage='batch-verify-frame';verify(records.mapMask);var wanted=[],changedFrame=false;
             for(var j=0;j<records.length;j++){var base=records[j].original.mask;wanted.push({feather:p.mask.hasOwnProperty('feather')?p.mask.feather:base.feather,density:p.mask.hasOwnProperty('density')?p.mask.density:base.density});}
             progress('write',0,records.length,true);
-            for(var j=0;j<records.length;j++){for(var k=0;k<2;k++){var key=k?'density':'feather';if(Math.abs(wanted[j][key]-records.mapMask[j][key])>(k?100/255+.001:.00001)){stage='batch-write-'+key;batchIdentity();unlocked(records[j].layer);batchChanged=true;records[j].touched=true;set(records[j].layer.id,key,wanted[j][key]);changedFrame=true;}}progress('write',j+1,records.length);}
+            if(records.length<8){
+                for(var j=0;j<records.length;j++){for(var k=0;k<2;k++){var key=k?'density':'feather';if(Math.abs(wanted[j][key]-records.mapMask[j][key])>(k?100/255+.001:.00001)){stage='batch-write-'+key;batchIdentity();unlocked(records[j].layer);batchChanged=true;records[j].touched=true;set(records[j].layer.id,key,wanted[j][key]);changedFrame=true;}}progress('write',j+1,records.length);}
+            }else{
+                for(var first=0;first<records.length;first+=16){var commands=[],members=[],end=Math.min(first+16,records.length);
+                    for(var j=first;j<end;j++){var dirty=false;for(var k=0;k<2;k++){var key=k?'density':'feather';if(Math.abs(wanted[j][key]-records.mapMask[j][key])>(k?100/255+.001:.00001)){commands.push(setter(records[j].original.id,key,wanted[j][key]));dirty=true;}}if(dirty)members.push(j);}
+                    if(commands.length){stage='batch-native-write';nativeBatch(commands,members,first);changedFrame=true;}
+                    progress('write',end,records.length,true);
+                }
+            }
             stage='batch-readback';verify(wanted);records.mapMask=wanted;batchLatest=p;batchUpdates++;
             if(changedFrame){progress('redraw',0,0,true);stage='batch-redraw';app.refresh();batchRedraws++;verify(wanted);}progress('ready',records.length,records.length,true);
         }
@@ -306,7 +346,7 @@
                     if(packet.seq<batchSeq)throw Error('Batch sequence regressed');lease=packet.lease_until_ms;
                     if(packet.phase==='cancel')return;
                     if(packet.phase!=='preview'&&packet.phase!=='commit')throw Error('Invalid batch phase');
-                    if(packet.seq>batchSeq){progressFrame=packet.seq;applyBatch(packet.paint);batchSeq=packet.seq;batchAck(batchSeq);}
+                    if(packet.seq>batchSeq){progressFrame=packet.seq;try{applyBatch(packet.paint);}catch(e){if(e===batchAbort)return;throw e;}batchSeq=packet.seq;batchAck(batchSeq);}
                     if(packet.phase==='commit'){batchCommit=true;return;}
                 }
                 if(now>lease)return;$.sleep(20);
@@ -338,10 +378,10 @@
             stage='batch-history';try{doc.suspendHistory('批量羽化／密度','$.global['+encode(key)+']()');}finally{delete $.global[key];}
             if(!batchCommit)rollbackBatch();else {progress('commit',0,0,true);verify(records.mapMask);}
             var finalMasks=[],count=0;for(var j=0;j<records.length;j++){finalMasks.push({id:records[j].layer.id,mask:batchCommit?records.mapMask[j]:records[j].original.mask});if(batchCommit&&records[j].touched)count++;}
-            var value={verified:true,mask_batch:true,count:count,placement_moves:0,layer_ids:ids,paint:batchLatest,masks:finalMasks,preview:{updates:batchUpdates,redraws:batchRedraws,last_seq:batchSeq,engine:'standalone-extendscript'}};
+            var value={verified:true,mask_batch:true,count:count,placement_moves:0,layer_ids:ids,paint:batchLatest,masks:finalMasks,preview:{native_batches:batchNativeCalls,updates:batchUpdates,redraws:batchRedraws,last_seq:batchSeq,engine:'standalone-extendscript'}};
             if(!batchCommit){value.cancelled=true;value.rollback_verified=true;}return envelope(value);
         }catch(error){var unknown=false;if(batchStarted){try{rollbackBatch();}catch(_){unknown=true;}}
-            return {schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'failed',error:String(error),stage:stage,result_unknown:unknown};}
+            return {schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'failed',error:String(error),stage:stage,result_unknown:unknown||!!actionResidue,action_residue:actionResidue};}
     }
 
     progress('prepare',0,0,true);
