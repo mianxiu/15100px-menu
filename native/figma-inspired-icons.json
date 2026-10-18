@@ -770,6 +770,31 @@
         }
       ],
       "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "index": 23,
+      "operation": "shape.none",
+      "name": "无填充／无描边",
+      "shapes": [
+        {
+          "kind": "rect",
+          "bounds": [
+            0,
+            0,
+            9,
+            9
+          ],
+          "tone": 1,
+          "border": 1
+        },
+        {
+          "kind": "path",
+          "data": "M 1 8 L 8 1",
+          "tone": 0,
+          "stroke": 1
+        }
+      ],
+      "adaptation": "Project-authored no-paint extension; nine-unit grid, one-unit linework; not an exported original."
     }
   ]
 }

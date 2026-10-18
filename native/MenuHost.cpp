@@ -1010,6 +1010,7 @@ static ImVec4 footerBounds{};
 // Secondary icons keep the confirmed compact right column beside the ring.
 static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidgetHeight-quickGroupGap;}
 static const char* actionTipText(int action) {
+    if(action==205)return shapeEditor.channel?"无描边":"无填充";
     if(action>=200 && action<215)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
     if(action>=12 && action<12+int(recentTips.size()) && panelKind==4)return recentTips[action-12].c_str();
     if(action>=40 && action<47)return capsLabels[action-40];
@@ -2503,6 +2504,27 @@ int main() {
                 numberFrame(ImGuiKey_None,false);holdMoved=true;
                 if(!shapeEditor.ready() || shapeEditor.bounds.right<=shapeEditor.bounds.left || ImGui::GetDrawData()->TotalVtxCount<=0)
                     throw std::runtime_error("Shape editor did not render through production window path");
+                if(shapeTipRows[8].top!=shapeTipRows[10].top || shapeTipRows[10].top!=shapeTipRows[11].top ||
+                   shapeTipRows[9].right>=shapeTipRows[10].left || shapeTipRows[10].right>=shapeTipRows[11].left ||
+                   shapeTipRows[10].right-shapeTipRows[10].left>figmaDisplayIconWidth*scale+1)
+                    throw std::runtime_error("Shape action toolbar lost compact non-overlapping groups: "+Json({
+                        {shapeTipRows[8].left,shapeTipRows[8].top,shapeTipRows[8].right},
+                        {shapeTipRows[9].left,shapeTipRows[9].top,shapeTipRows[9].right},
+                        {shapeTipRows[10].left,shapeTipRows[10].top,shapeTipRows[10].right},
+                        {shapeTipRows[11].left,shapeTipRows[11].top,shapeTipRows[11].right}}).dump()+" scale="+std::to_string(scale));
+                const auto beforePaintEvents=testedMaskEvents.size();const auto beforePaintDraft=shapeEditor.draft;
+                auto clickPaintChoice=[&](int tip){const auto r=shapeTipRows[tip];
+                    io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent((r.left+r.right)*.5f,(r.top+r.bottom)*.5f);
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);numberFrame(ImGuiKey_None,false);
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);numberFrame(ImGuiKey_None,false);};
+                clickPaintChoice(5);
+                if(shapeEditor.current().value("enabled",true) || shapeEditor.current()["rgb"]!=beforePaintDraft["fill"]["rgb"] ||
+                   shapeEditor.draft["stroke"]!=beforePaintDraft["stroke"] || testedActions.size()!=shapeCount)
+                    throw std::runtime_error("No-paint icon lost retained paint or submitted an action");
+                clickPaintChoice(2);
+                if(shapeEditor.draft!=beforePaintDraft || testedMaskEvents.size()!=beforePaintEvents+2)
+                    throw std::runtime_error("Solid icon failed to restore retained paint in the owning preview");
+                testedMaskEvents.resize(beforePaintEvents);shapeEditor.prepare(shapeFixture);numberFrame(ImGuiKey_None,false);
                 const auto featherRect=shapeEditor.featherBounds,densityRect=shapeEditor.densityBounds;
                 RECT shapeWindow;GetWindowRect(window,&shapeWindow);
                 if(featherRect.right<=featherRect.left || densityRect.right<=densityRect.left || densityRect.bottom>shapeEditor.maskBounds.bottom ||

@@ -16,3 +16,5 @@
 182：layer-menu.png更新为本地原生渲染器的无标题图标面板示例，含形状外观复制／粘贴、数值轨道；来源.runtime/ui182/gradient-light.bmp（实际PNG数据）。不是PS实体屏幕验收。
 
 183：layer-menu.png改为四主题矩阵中的empty-light-gray原生导出，复制可用、未复制时粘贴明显灰化；仅布局和绘制检查，不是PS实体鼠标验收。
+
+184：layer-menu.png更新为同宽两面板和紧凑图标分组的原生导出（ui184/solid-light-gray），不是PS实体屏幕验收。

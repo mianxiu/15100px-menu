@@ -107,6 +107,10 @@ static constexpr FigmaPathCommand styledPath22_2[] = {
     {'M', 4.50000000f, 1.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
     {'L', 4.50000000f, 8.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
 };
+static constexpr FigmaPathCommand styledPath23_1[] = {
+    {'M', 1.00000000f, 8.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 8.00000000f, 1.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
 
 static void styledPath(ImDrawList* draw,const FigmaPathCommand* path,int count,ImVec2 at,float unit,ImU32 ink,float stroke) {
     auto point=[&](float x,float y){return ImVec2{at.x+x*unit,at.y+y*unit};};
@@ -255,6 +259,11 @@ static void drawStyledMenuIcon(ImDrawList* draw,int icon,ImVec2 at,float size,Im
         draw->AddRect(p(0.50000000f,0.50000000f),p(8.50000000f,8.50000000f),ink,0,0,1.00000000f*unit);
         draw->AddRectFilled(p(1.00000000f,1.00000000f),p(4.50000000f,8.00000000f),color(0.00000000f),0.00000000f*unit);
         styledPath(draw,styledPath22_2,sizeof(styledPath22_2)/sizeof(*styledPath22_2),at,unit,color(0.00000000f),1.00000000f);
+        break;
+    case 23:
+        draw->AddRectFilled(p(0.00000000f,0.00000000f),p(9.00000000f,9.00000000f),color(1.00000000f),0.00000000f*unit);
+        draw->AddRect(p(0.50000000f,0.50000000f),p(8.50000000f,8.50000000f),ink,0,0,1.00000000f*unit);
+        styledPath(draw,styledPath23_1,sizeof(styledPath23_1)/sizeof(*styledPath23_1),at,unit,color(0.00000000f),1.00000000f);
         break;
     }
 }

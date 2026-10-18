@@ -297,11 +297,18 @@
       "asset": "native/figma-inspired-assets/shape-density.svg",
       "sha256": "78a864d42b26931068256ce8543c1d4a29412ef79c2c46919453556830dfb58a",
       "adaptation": "Project-authored shape editor extension; nine-unit grid, one-unit linework; not an exported original."
+    },
+    {
+      "operation": "shape.none",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/shape-none.svg",
+      "sha256": "48d51e355cfadf8c14f68e07ea0b78b4054d654d1c7880d0afe0f4fa19a55a23",
+      "adaptation": "Project-authored no-paint extension; nine-unit grid, one-unit linework; not an exported original."
     }
   ],
   "extension_source": {
     "file": "native/figma-inspired-icons.json",
-    "sha256": "9e92cffb3ecb086986322a09c993662b5ba03587461e2637cb07f20a93980a6c",
+    "sha256": "6dfd501ad332eb4280b5627f1e4d20001fd75b662faba696747addb90c99a17f",
     "reference_nodes": [
       "809:619",
       "346:6",

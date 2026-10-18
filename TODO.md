@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 184全图标布局代码／构建／实际入口：填充／描边与无／纯色／渐变／图案同排分组，孤立勾选框改为无图标；黑白、单格交换、外观复制／粘贴同排。434回归、40前端、四主题24份串行渲染、双逻辑处理器／Below Normal原生完整交互矩阵和EXE启动／重启通过，包含无／纯色保留值与预览合并检查。实际184／UXP41，入口及资源匹配；PS／UXP未重启，原稿／配置／未知保护保持。早期几何断言失败及不完整导出留档、不计通过；后续修正提示几何记录并核对24张图标区域，实体鼠标及其他硬件视觉仍待验收。证据.runtime/recovery184/runtime.json、tests184.log、frontend184-test.log、native184-low.log、ui184-verified.json、ui184。
+- [ ] 184公开交付：待源码／标签、Wiki、匿名下载和备用更新通道核验；新版本通过后只保留184 Release，183附件本地备份、Git标签及历史保留。
+
 - [x] 183禁用图标辨识代码／构建／实际入口：统一禁用主题灰，形状编辑器按真实禁用状态绘制，禁用项去掉蓝色选中底，后台同令牌；434回归、40前端、四主题24渲染、双逻辑处理器／Below Normal原生完整矩阵和冻结EXE启动／重启通过。实际183／UXP41，入口／组件／前端匹配；PS未重启、原稿／配置／历史未知记录保持。此次仅外观修改，未新增PS写入测试；实体鼠标和其他电脑视觉待验收。证据.runtime/recovery183/runtime.json、tests183.log、frontend183-test.log、native183-low.log、ui183。
 - [x] 183公开交付：源码／标签、Wiki四页与Release已推送，安装包／SHA／更新清单匿名下载及冻结更新器API403备用下载核验通过；只保留183 Release，182附件本地备份、Git标签／源码历史保留。实际183／UXP41，实体鼠标和其他电脑视觉仍待验收。证据.runtime/recovery183/runtime.json、release-0.4.183-public-verification.json、fallback183-live.json、wiki183-public.json、release183-cleanup.json。
 
