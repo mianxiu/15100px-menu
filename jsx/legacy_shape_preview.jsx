@@ -232,22 +232,59 @@
         var records=[],batchHistory=null,batchStarted=false,batchChanged=false,batchCommit=false,batchSeq=0,batchUpdates=0,batchRedraws=0,batchLatest=request.paint;
         var keys=['layerKind','adjustment','AGMStrokeStyleInfo','hasVectorMask','hasUserMask','userMaskFeather','userMaskDensity'];
         var ids=request.target.layer_ids.slice().sort(function(a,b){return a-b;}),lease=new Date().getTime()+4000;
+        var selectionStream=null,selectionIDs=ids.join(',');
         function batchIdentity() {
-            if(!app.documents.length || app.activeDocument.id!==request.target.document_id || doc.activeLayer.id!==request.target.active_layer_id || selected().sort(function(a,b){return a-b;}).join(',')!==ids.join(','))throw Error('Batch selection changed');
+            if(!app.documents.length || app.activeDocument.id!==request.target.document_id || doc.activeLayer.id!==request.target.active_layer_id)throw Error('Batch selection changed');
+            // Always read the live selection before each mutation. Exact native
+            // bytes avoid repeatedly decoding every selected reference; this is
+            // not a hash, cached host read, or authority to skip a fresh read.
+            var r=new ActionReference();r.putProperty(s('property'),s('targetLayersIDs'));r.putEnumerated(s('document'),s('ordinal'),s('targetEnum'));
+            var d=executeActionGet(r),stream=d.toStream();
+            if(selectionStream!==null && stream===selectionStream)return;
+            // A different native encoding/order is accepted only after checking
+            // the full ID set from this same fresh descriptor. Failures propagate.
+            var list=d.getList(s('targetLayersIDs')),current=[];
+            for(var j=0;j<list.count;j++)current.push(list.getReference(j).getIdentifier());
+            if(current.sort(function(a,b){return a-b;}).join(',')!==selectionIDs)throw Error('Batch selection changed');
+            selectionStream=stream;
         }
-        function unlocked(l){while(l.typename==='ArtLayer'||l.typename==='LayerSet'){if(l.allLocked || l.typename==='ArtLayer' && (l.pixelsLocked||l.positionLocked||l.transparentPixelsLocked||l.isBackgroundLayer))throw Error('Batch layer locked');l=l.parent;}}
+        function unlocked(l){var kind=l.typename;while(kind==='ArtLayer'||kind==='LayerSet'){if(l.allLocked || kind==='ArtLayer' && (l.pixelsLocked||l.positionLocked||l.transparentPixelsLocked||l.isBackgroundLayer))throw Error('Batch layer locked');l=l.parent;kind=l.typename;}}
         function batchTarget(){batchIdentity();for(var i=0;i<records.length;i++)unlocked(records[i].layer);}
         function batchValidate(p) {
             if(!p || p.mask_batch!==true || p.revision!==request.paint.revision || !p.mask || p.fill || p.stroke)throw Error('Invalid batch parameters');
             var n=0;for(var k in p.mask)if(p.mask.hasOwnProperty(k)){if(k!=='feather'&&k!=='density' || !range(p.mask[k],0,k==='feather'?1000:100))throw Error('Invalid batch mask');n++;}if(!n)throw Error('Empty batch mask');
         }
         function desc(id){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);return executeActionGet(r);}
-        function batchPath(id){var r=new ActionReference();r.putProperty(s('property'),s('pathContents'));r.putEnumerated(s('path'),s('path'),s('vectorMask'));r.putIdentifier(c('Lyr '),id);var p=executeActionGet(r);return item(p,s('pathContents'));}
+        function batchPath(id){var r=new ActionReference();r.putProperty(s('property'),s('pathContents'));r.putEnumerated(s('path'),s('path'),s('vectorMask'));r.putIdentifier(c('Lyr '),id);var p=executeActionGet(r);return p;}
         function contents(d){var v={};for(var j=0;j<keys.length;j++){var k=s(keys[j]);v[keys[j]]=d.hasKey(k)?item(d,k):null;}return v;}
-        function membersOrder(layer){var v=[],ls=layer.parent.layers;for(var j=0;j<ls.length;j++)v.push(ls[j].id);return v;}
-        function readMember(layer,orders){var parent=layer.parent.typename==='LayerSet'?layer.parent.id:null,key='p'+parent;if(!orders.hasOwnProperty(key))orders[key]=membersOrder(layer);var d=desc(layer.id);if(!d.hasKey(s('hasVectorMask'))||!d.getBoolean(s('hasVectorMask')))throw Error('Vector mask missing');return {id:layer.id,mask:mask(d),content:contents(d),path:batchPath(layer.id),parent_id:parent,order:orders[key]};}
-        function sameMember(a,b,wanted){return a.id===b.id && maskClose(a.mask,wanted) && same(a.content,b.content) && same(a.path,b.path) && a.parent_id===b.parent_id && same(a.order,b.order);}
-        function verify(wanted){progress('verify',0,records.length,true);batchTarget();var orders={};for(var j=0;j<records.length;j++){if(!sameMember(readMember(records[j].layer,orders),records[j].original,wanted[j]))throw Error('Batch mask/content/path/order mismatch');progress('verify',j+1,records.length);}}
+        // Preserve all invariant values and their native types without decoding
+        // every nested path/style node on every frame. Bytes are compared exactly,
+        // never hashed. Initial dispatch still compares the semantic UXP snapshot.
+        function contentStream(d){
+            var out=new ActionDescriptor();
+            for(var j=0;j<keys.length;j++){
+                var k=s(keys[j]);if(!d.hasKey(k))continue;var t=d.getType(k);
+                if(t===DescValueType.OBJECTTYPE)out.putObject(k,d.getObjectType(k),d.getObjectValue(k));
+                else if(t===DescValueType.LISTTYPE)out.putList(k,d.getList(k));
+                else if(t===DescValueType.ENUMERATEDTYPE)out.putEnumerated(k,d.getEnumerationType(k),d.getEnumerationValue(k));
+                else if(t===DescValueType.UNITDOUBLE)out.putUnitDouble(k,d.getUnitDoubleType(k),d.getUnitDoubleValue(k));
+                else if(t===DescValueType.DOUBLETYPE)out.putDouble(k,d.getDouble(k));
+                else if(t===DescValueType.INTEGERTYPE)out.putInteger(k,d.getInteger(k));
+                else if(t===DescValueType.BOOLEANTYPE)out.putBoolean(k,d.getBoolean(k));
+                else if(t===DescValueType.STRINGTYPE)out.putString(k,d.getString(k));
+                else throw Error('Unsupported invariant descriptor');
+            }
+            return out.toStream();
+        }
+        // Reuse only local DOM values within this synchronous read; every verify
+        // starts a new orders map and rereads every layer, path and mask.
+        function membersOrder(parent){var v=[],ls=parent.layers,n=ls.length;for(var j=0;j<n;j++)v.push(ls[j].id);return v;}
+        function readMember(layer,orders,nativeOnly){var id=layer.id,container=layer.parent,parent=container.typename==='LayerSet'?container.id:null,key='p'+parent;if(!orders.hasOwnProperty(key))orders[key]=membersOrder(container);var d=desc(id);if(!d.hasKey(s('hasVectorMask'))||!d.getBoolean(s('hasVectorMask')))throw Error('Vector mask missing');
+            var path=batchPath(id);return {id:id,mask:mask(d),content:nativeOnly?null:contents(d),path:nativeOnly?null:item(path,s('pathContents')),
+                content_bytes:contentStream(d),path_bytes:path.toStream(),parent_id:parent,order:orders[key]};
+        }
+        function sameMember(a,b,wanted){return a.id===b.id && maskClose(a.mask,wanted) && (typeof b.content_bytes==='string' ? a.content_bytes===b.content_bytes && a.path_bytes===b.path_bytes : same(a.content,b.content) && same(a.path,b.path)) && a.parent_id===b.parent_id && same(a.order,b.order);}
+        function verify(wanted){progress('verify',0,records.length,true);batchTarget();var orders={};for(var j=0;j<records.length;j++){if(!sameMember(readMember(records[j].layer,orders,true),records[j].original,wanted[j]))throw Error('Batch mask/content/path/order mismatch');progress('verify',j+1,records.length);}}
         function set(id,key,value){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);var d=new ActionDescriptor(),v=new ActionDescriptor();d.putReference(c('null'),r);v.putUnitDouble(s(key==='feather'?'vectorMaskFeather':'vectorMaskDensity'),c(key==='feather'?'#Pxl':'#Prc'),value);d.putObject(c('T   '),c('Lyr '),v);executeAction(c('setd'),d,DialogModes.NO);}
         function applyBatch(p){
             batchValidate(p);stage='batch-verify-frame';verify(records.mapMask);var wanted=[],changedFrame=false;
@@ -291,7 +328,7 @@
             if(!app.documents.length || ids.length<2 || ids.length>128)throw Error('Invalid batch selection');doc=app.activeDocument;batchTarget();batchValidate(request.paint);
             if(prepared.before.revision!==request.paint.revision || !same(prepared.identity,request.target))throw Error('Prepared batch identity changed');
             var wantedIDs={};for(var j=0;j<ids.length;j++)wantedIDs[ids[j]]=true;
-            var found={};function walk(layers){for(var j=0;j<layers.length;j++){var l=layers[j];if(wantedIDs[l.id])found[l.id]=l;if(l.typename==='LayerSet')walk(l.layers);}}walk(doc.layers);
+            var found={};function walk(layers){var n=layers.length;for(var j=0;j<n;j++){var l=layers[j],id=l.id;if(wantedIDs[id])found[id]=l;if(l.typename==='LayerSet')walk(l.layers);}}walk(doc.layers);
             progress('read',0,ids.length,true);stage='batch-baseline';var baselineOrders={};for(var j=0;j<ids.length;j++){
                 var l=found[ids[j]];if(!l)throw Error('Batch target missing');var baseline=readMember(l,baselineOrders);
                 if(!sameMember(baseline,prepared.members[j],prepared.members[j].mask))throw Error('Batch changed before native dispatch');records.push({layer:l,original:baseline,touched:false});progress('read',j+1,ids.length);
