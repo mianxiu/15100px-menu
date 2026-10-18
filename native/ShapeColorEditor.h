@@ -80,10 +80,11 @@ struct ShapeColorEditor {
 static ShapeColorEditor shapeEditor;
 static bool shapeClipboardReady=false,shapeClipboardAvailable=false;
 static int shapeTipCandidate=-1;
-static std::array<RECT,34> shapeTipRows{};
-static const char* shapeTipNames[]={"填充","描边","纯色","渐变","图案","无填充／无描边","描边宽度：双击输入","复制当前Hex颜色","黑色","白色","交换填充与描边","复制形状填充与描边","粘贴到当前选中的形状图层","羽化：双击数值输入","密度：双击数值输入",
-    "RGB取色器","方块取色与感知配色：拖动圆点联动","邻近色","互补色","分裂互补色","三色配色","强调色：同时调整感知明度","切换渐变插值：感知／线性／经典","点击配色圆点使用颜色；拖动时全部联动","主色感知明度",
-    "主色（大圆）：拖动整组联动","邻近色 −30°（圆）","邻近色 +30°（圆）","互补色（菱形）","分裂互补色 150°（上三角）","分裂互补色 210°（下三角）","三色配色 120°（方形）","三色配色 240°（方形）","强调／明暗对比色（星形）"};
+static constexpr int shapeTipCount=25+perceptual::wheelCount;
+static std::array<RECT,shapeTipCount> shapeTipRows{};
+static const char* shapeTipNames[shapeTipCount]={"填充","描边","纯色","渐变","图案","无填充／无描边","描边宽度：双击输入","复制当前Hex颜色","黑色","白色","交换填充与描边","复制形状填充与描边","粘贴到当前选中的形状图层","羽化：双击数值输入","密度：双击数值输入",
+    "RGB取色器","方块取色与感知配色：拖动圆点联动","","","","","","切换渐变插值：感知／线性／经典","点击配色圆点使用颜色；拖动时全部联动","主色感知明度",
+    "主色（大圆）：拖动整组联动","邻近色 −30°（圆）","邻近色 +30°（圆）","互补色（菱形）","强调色（星形）：互补色相＋明暗反差"};
 static void shapeItemTip(int index,bool allowHover=true) {
     const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();shapeTipRows[index]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
     if(allowHover && ImGui::IsItemHovered() && !ImGui::IsItemActive())shapeTipCandidate=200+index;

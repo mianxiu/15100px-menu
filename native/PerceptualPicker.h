@@ -37,7 +37,7 @@ struct PerceptualPickerState {
         if(selected)draw->AddPolyline(vertices.data(),g.count,ImGui::GetColorU32(ImGuiCol_CheckMark),ImDrawFlags_Closed,5*uiScale);
         draw->AddPolyline(vertices.data(),g.count,IM_COL32(255,255,255,240),ImDrawFlags_Closed,3*uiScale);
         draw->AddPolyline(vertices.data(),g.count,IM_COL32(0,0,0,230),ImDrawFlags_Closed,uiScale);
-        if(index==8)draw->AddConcavePolyFilled(vertices.data(),g.count,color);
+        if(index==perceptual::accentIndex)draw->AddConcavePolyFilled(vertices.data(),g.count,color);
         else draw->AddConvexPolyFilled(vertices.data(),g.count,color);
     }
     void reset(const Json& rgb,const std::string& identity){

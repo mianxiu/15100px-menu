@@ -364,7 +364,7 @@
   ],
   "extension_source": {
     "file": "native/figma-inspired-icons.json",
-    "sha256": "91979835d00075e40f957af6c013d18c75559184993aa7a6633d0f60bbe1dea6",
+    "sha256": "632868a964cfef0e575a656277da7c7482ca3c69d95b029a91d91a6a4cb203d9",
     "reference_nodes": [
       "809:619",
       "346:6",
@@ -409,10 +409,6 @@
       "circle",
       "circle",
       "diamond",
-      "triangle-up",
-      "triangle-down",
-      "square",
-      "square",
       "star"
     ],
     "assets": [
@@ -425,21 +421,6 @@
         "name": "diamond",
         "asset": "native/figma-inspired-assets/color-harmony-diamond.svg",
         "sha256": "22881515bbd464c16c958b2b0759ddfb5f3bf967f279ee767683887d6086a28f"
-      },
-      {
-        "name": "triangle-up",
-        "asset": "native/figma-inspired-assets/color-harmony-triangle-up.svg",
-        "sha256": "cc934010ec32c9a8fd80323295a1ab6074bff7d546102232320e5951e707bc40"
-      },
-      {
-        "name": "triangle-down",
-        "asset": "native/figma-inspired-assets/color-harmony-triangle-down.svg",
-        "sha256": "f60d63e0499be97ba859dbf8bd78ebf64418c5283377a5f8bfc1ea708a9db527"
-      },
-      {
-        "name": "square",
-        "asset": "native/figma-inspired-assets/color-harmony-square.svg",
-        "sha256": "c4d01ad5e442d9c69add432f92ed080595de28553eb9b6400c8e622b86e37b17"
       },
       {
         "name": "star",

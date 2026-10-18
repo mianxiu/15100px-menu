@@ -42,20 +42,13 @@ inline Color mix(Color a,Color b,double t,const std::string& method){
     if(method=="linear"){for(int i=0;i<3;++i)a[i]=encoded(linear(a[i]/255)*(1-t)+linear(b[i]/255)*t)*255;return a;}
     for(int i=0;i<3;++i)a[i]+=(b[i]-a[i])*t;return a;
 }
-inline std::vector<double> offsets(int rule){
-    switch(rule){case 0:return {0,-30,30};case 1:return {0,180};case 2:return {0,150,210};case 3:return {0,120,240};default:return {0,180};}
-}
-inline Color role(Color base,int rule,int i){
-    auto values=offsets(rule);double l=base[0],c=base[1],h=hue(base[2]+values.at(i));
-    if(rule==4 && i){l=base[0]>.6?.35:.8;c*=1.15;}
-    return fromLch(l,c,h);
-}
-// Every relationship is visible together. Shared main colors are one node.
-inline constexpr int wheelCount=9;
-inline constexpr std::array<double,wheelCount> wheelOffsets={0,-30,30,180,150,210,120,240,180};
+// Only the five visible relationships are selectable; no hidden harmony modes.
+inline constexpr int wheelCount=5;
+inline constexpr int accentIndex=4;
+inline constexpr std::array<double,wheelCount> wheelOffsets={0,-30,30,180,180};
 inline Color wheelColor(Color base,int index){
-    constexpr int rules[]={0,0,0,1,2,2,3,3,4};
-    constexpr int points[]={0,1,2,1,1,2,1,2,1};
-    return role(base,rules[index],points[index]);
+    double l=base[0],c=base[1];
+    if(index==accentIndex){l=base[0]>.6?.35:.8;c*=1.15;}
+    return fromLch(l,c,hue(base[2]+wheelOffsets.at(index)));
 }
 }

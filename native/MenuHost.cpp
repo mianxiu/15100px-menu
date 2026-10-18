@@ -1017,7 +1017,7 @@ static const char* actionTipText(int action) {
        ImGui::GetIO().MousePos.y<=perceptualPicker.squareBounds.bottom)return "方块调整主色；外围圆点联动配色";
     if(action==205)return shapeEditor.channel?"无描边":"无填充";
     if(action==222){const auto method=shapeEditor.current().value("method",std::string("classic"));return method=="perceptual"?"感知渐变；点击切换线性":method=="linear"?"线性渐变；点击切换经典":"经典渐变；点击切换感知";}
-    if(action>=200 && action<234)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
+    if(action>=200 && action<200+shapeTipCount)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
     if(action>=12 && action<12+int(recentTips.size()) && panelKind==4)return recentTips[action-12].c_str();
     if(action>=40 && action<47)return capsLabels[action-40];
     if(action>=32 && action<39)return quickLabels[action-32];
@@ -1071,7 +1071,7 @@ static ImVec4 actionTipBounds(int action) {
     auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text);
     const float width=extent.x+2*padding,height=extent.y+2*padding;
     const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
-    if(action>=200 && action<234){
+    if(action>=200 && action<200+shapeTipCount){
         const RECT group=tipGroupRect(action),anchor=shapeTipRows[action-200];
         const auto heading=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,panelTitle());
         const RECT centre={LONG(pieCenter.x-std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y-40*scale),
@@ -1486,7 +1486,7 @@ static void drawPie() {
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
     drawFooter(messages,pieCenter.y+(capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
     const int tipAction=shapeEditor.ready() && shapeTipCandidate>=200?shapeTipCandidate:actionTipText(selected)?selected:-1;
-    const bool ownEditorTip=tipAction>=200 && tipAction<234 && shapeEditor.ready();
+    const bool ownEditorTip=tipAction>=200 && tipAction<200+shapeTipCount && shapeEditor.ready();
     const bool showTip=!pieAnimating && !holdFinished && !inputFocused && !ImGui::IsAnyItemActive() && (ownEditorTip || canExecute());
     const int displayed=!preview.empty()?(showTip?tipAction:-1):hoverTip.update(tipAction,tipFamily(tipAction),GetTickCount64(),tipGapAt(hoverTip.shown,cursor),showTip);
     if(displayed>=0)drawActionTip(displayed);else tipVisual.reset();
@@ -2083,7 +2083,7 @@ int main() {
                     io.AddMouseButtonEvent(ImGuiMouseButton_Left,frames==22);
                 }
             }
-            if(!preview.empty() && previewShapeHover>=0 && previewShapeHover<34 && frames>=2){
+            if(!preview.empty() && previewShapeHover>=0 && previewShapeHover<shapeTipCount && frames>=2){
                 const auto r=shapeTipRows[previewShapeHover];
                 const ImVec2 point=previewShapeHover>=25?perceptualPicker.points[previewShapeHover-25]:ImVec2{(r.left+r.right)*.5f,(r.top+r.bottom)*.5f};
                 io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(point.x,point.y);io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);
@@ -2556,8 +2556,8 @@ int main() {
                         }
                     }
                 if(harmonyMarkerRoles[0]!=harmonyMarkerRoles[1] || harmonyMarkerRoles[1]!=harmonyMarkerRoles[2] ||
-                   harmonyMarkerRoles[3]==harmonyMarkerRoles[4] || harmonyMarkerRoles[6]!=harmonyMarkerRoles[7] ||
-                   harmonyMarkerRoles[8]==harmonyMarkerRoles[3])throw std::runtime_error("Harmony role shapes lost their semantic grouping");
+                   harmonyMarkerRoles[3]==harmonyMarkerRoles[4] || harmonyMarkerRoles[0]==harmonyMarkerRoles[3] ||
+                   harmonyMarkerRoles[0]==harmonyMarkerRoles[4])throw std::runtime_error("Harmony role shapes lost their semantic grouping");
                 // Polygon corners extend beyond the old circular hit boundary.
                 for(int i=0;i<perceptual::wheelCount;++i){
                     const auto& g=PerceptualPickerState::geometry(i);const float u=PerceptualPickerState::markerRadius(i)/4.5f;

@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 191五点配色实际入口：分裂互补／三色配色四点和命中已移除，保留主色、两枚邻近色、互补色和星形强调色；强调色说明互补色相＋明暗反差。实际191／UXP43及原生组件匹配；双核完整矩阵＋80悬停场景、四主题32导出＋124张提示像素检查、PS24.0.1低CPU取消／正常确认一次撤销通过。执行端未改，452Python／40前端沿用已验基线；PS未重启，原稿／设置／资源与旧未知记录保持。实体键鼠／画布及其他办公硬件仍待对应验收。证据.runtime/recovery191/runtime.json、live-matrix.json、native191-low.log、tooltip191/pixels.json、tooltip191-batch/pixels.json。
+- [ ] 191公开交付：源码／标签、Wiki五页、Release下载与API限流备用通道核验、只保留最新版。
+
 - [x] 190提示修复代码／构建／实际入口：修复颜色／羽化实时预览开始后悬停tip消失：只读提示按当前编辑面板是否仍可用显示，不再被“其他图层操作禁用”的条件一并关闭。其他操作、目标、输入与未知结果保护保持。 原189条件已复现；双核原生完整矩阵＋144悬停场景、四主题32普通导出＋172张提示像素核对及两轮PS事务通过。实际190／UXP43，无需重启PS，原稿／配置／资源与未知记录保留。实体鼠标／画布仍待验收；未改Python／前端使用既有回归基线。证据.runtime/tooltip190-reproduced.json、tooltip190/pixels.json、tooltip190-batch/pixels.json、recovery190/runtime.json、live-matrix.json及native190-low.log。
 - [x] 190公开交付：源码／标签及Wiki五页已推送并公开核验，ZIP／SHA／更新清单匿名下载与冻结更新器API403备用通道真实下载通过。只保留190 Release；188／189附件已本地备份、标签／源码历史保留。实际190／UXP43及新原生组件匹配，dist仅当前发行物；实体画布／键鼠与其他硬件按待验收项保留。证据.runtime/recovery190/runtime.json、release-0.4.190-public-verification.json、manifest190-verification.json、fallback190-live.json、wiki190-public.json、release190-cleanup.json。
 

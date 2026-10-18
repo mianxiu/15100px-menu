@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+中央方块精细取色，外围五点配色：主色、邻近色、互补色与强调色。操作说明见[Wiki](https://github.com/mianxiu/15100px-menu/wiki)。
+
 为 Windows Photoshop 提供随鼠标唤出的快捷菜单，让选层、排序、创建图层与调色更顺手。
 
 [下载最新版](https://github.com/mianxiu/15100px-menu/releases/latest) · [使用文档](https://github.com/mianxiu/15100px-menu/wiki) · [安装指南](https://github.com/mianxiu/15100px-menu/wiki/Installation) · [反馈问题](https://github.com/mianxiu/15100px-menu/issues)
