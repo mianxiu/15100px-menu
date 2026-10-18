@@ -133,6 +133,8 @@ async def dispatch_preview(app, action, args):
     if snapshot.get('shape_editor',{}).get('live_preview') is not True:
         raise RuntimeError('当前PS使用本地草稿，请确认后一次提交')
     preview=MaskPreview(epoch,args.get('params'))
+    panel=getattr(app.desktop,'panel_context',None)
+    preview.panel_hint=dict(panel.current) if panel else None
     target={key:snapshot.get(key) for key in ('session','document_id','layer_ids')}
     shape=snapshot.get('shape_editor',{})
     if preview.paint.get('mask_batch'):
@@ -183,6 +185,8 @@ async def run_preview(app, preview, target):
     try:
         await app.broadcast({'type':'operation','busy':True,'action':'shape.paint'})
         await asyncio.to_thread(app.desktop.require_action_focus)
+        prepare_guard=getattr(app.desktop,'prepare_preview_input_guard',None)
+        if prepare_guard:await asyncio.to_thread(prepare_guard,preview)
         async def before_dispatch(captured):
             if (app.desktop.menu_epoch!=preview.epoch or preview.phase=='cancel'
                     or not app.desktop.visible and preview.phase!='commit'):
@@ -202,6 +206,18 @@ async def run_preview(app, preview, target):
         logging.exception('Mask preview ended with error')
     finally:
         stopped.set();await publisher
+        finish_guard=getattr(app.desktop,'finish_preview_input_guard',None)
+        if finish_guard:
+            pending=getattr(getattr(app.bridge,'transport',None),'pending',None)
+            identity=dict(pending.value or {}) if pending else {}
+            def verified_terminal():
+                if not identity or pending.value or pending.error:return False
+                try:task=app.bridge.tasks.get(identity['task_id'])
+                except (ValueError,KeyError):return False
+                return (task.get('state') in ('succeeded','failed') and
+                    task.get('uxp_request_id')==identity['id'] and task.get('uxp_session')==identity['session'])
+            try:await asyncio.to_thread(finish_guard,preview,not app.bridge.busy,verified_terminal)
+            except Exception:logging.exception('Preview input guard release pending; terminal unchanged')
         finish_focus=getattr(app.desktop,'finish_preview_focus',None)
         if finish_focus and not app.bridge.busy:
             try:await asyncio.to_thread(finish_focus,preview)

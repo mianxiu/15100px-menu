@@ -162,6 +162,10 @@ class Desktop:
         self.native = None
         self.native_lock = threading.Lock()
         self.native_payload = None
+        self.native_sequence=0
+        self.native_applied_sequence=0
+        self.native_applied=threading.Condition()
+        self.preview_input_guard=None
         self.menu_lock = threading.Lock()
         self.menu_thread = None
         self.menu_ready = threading.Event()
@@ -209,25 +213,85 @@ class Desktop:
 
     def _native_config(self):
         if not self.native or self.native.poll() is not None:
-            return
-        payload = json.dumps({"enabled": self.settings["enabled"],
+            return 0
+        guard=self.preview_input_guard
+        guarded=guard and not guard.get('release')
+        value={"enabled": self.settings["enabled"],
             "text_input": bool(self.panel_context and (self.panel_context.current['kind'] == 'text' or self.panel_context.current.get('input_focused'))),
             "color_editor": bool(self.visible and getattr(self,'color_editor_active',False)),
             "diagnostic_trace": bool(getattr(self,"diagnostic_trace",False)),
             "remote_compatibility": self.settings.get("remote_compatibility",False),
             "right_click_open": False,
             "hwnd": self.hwnd or 0, "visible": self.visible,
-            "bindings": {name: list(chord(value)) for name,value in self.settings["shortcuts"].items()}})
+            "preview_guard_owner":guard['owner'] if guarded else 0,
+            "preview_guard_panel":guard['panel'] if guarded else 0,
+            "bindings": {name: list(chord(value)) for name,value in self.settings["shortcuts"].items()}}
+        payload=json.dumps(value)
         with self.native_lock:
             if self.stop.is_set() or not self.native or self.native.poll() is not None:
-                return
+                return 0
+            # Re-read guard ownership after serialization: a late monitor must
+            # never re-arm a guard whose known terminal already requested release.
+            guard=self.preview_input_guard
+            guarded=guard and not guard.get('release')
+            value.update(preview_guard_owner=guard['owner'] if guarded else 0,
+                         preview_guard_panel=guard['panel'] if guarded else 0)
+            payload=json.dumps(value)
             if payload != self.native_payload:
                 try:
-                    self.native.stdin.write(payload + "\n")
+                    self.native_sequence+=1
+                    self.native.stdin.write(json.dumps({**value,'configuration_sequence':self.native_sequence}) + "\n")
                     self.native.stdin.flush()
                     self.native_payload = payload
                 except (OSError, ValueError):
                     logging.exception("Native hotkey settings failed")
+                    return 0
+            return self.native_sequence
+
+    def prepare_preview_input_guard(self,preview):
+        owner=self.target
+        hint=getattr(preview,'panel_hint',None) or (self.panel_context.current if self.panel_context else {})
+        panel=self.panel_context.layer_list_window(hint.get('hwnd',0),owner) if self.panel_context else 0
+        with self.window_lock:
+            if self.mask_preview is not preview or owner!=self.target or not panel or not self._is_photoshop(owner):
+                raise RuntimeError('图层点击保护未能识别列表；本次未开始预览')
+            if self.preview_input_guard and self.preview_input_guard['preview'] is not preview:
+                raise RuntimeError('上一项预览仍在收尾；本次未开始预览')
+            self.preview_input_guard={'preview':preview,'owner':owner,'panel':panel,'epoch':preview.epoch}
+        seq=self._native_config()
+        with self.native_applied:
+            ready=bool(seq) and self.native_applied.wait_for(lambda:self.native_applied_sequence>=seq,.5)
+        if not ready:raise RuntimeError('图层点击保护未就绪；本次未开始预览')
+        logging.info('Preview input guard armed: epoch=%s panel=%s sequence=%s',preview.epoch,panel,seq)
+
+    def finish_preview_input_guard(self,preview,known=True,terminal_check=None):
+        with self.window_lock:
+            guard=self.preview_input_guard
+            if not guard or guard['preview'] is not preview:return
+            if not known:
+                guard.update(unknown=True,terminal_check=terminal_check)
+                self.preview_pending_feedback();return
+            guard['release']=True
+        seq=self._native_config()
+        with self.native_applied:
+            ready=bool(seq) and self.native_applied.wait_for(lambda:self.native_applied_sequence>=seq,.5)
+        if ready:
+            with self.window_lock:
+                if self.preview_input_guard is guard:self.preview_input_guard=None
+            logging.info('Preview input guard released: epoch=%s sequence=%s',preview.epoch,seq)
+        self.preview_pending_feedback()
+
+    def maintain_preview_input_guard(self):
+        guard=self.preview_input_guard
+        if not guard:return
+        if guard.get('unknown') and guard.get('terminal_check') and guard['terminal_check']():
+            self.finish_preview_input_guard(guard['preview']);return
+        if guard.get('release'):
+            seq=self._native_config()
+            if seq and self.native_applied_sequence>=seq:
+                with self.window_lock:
+                    if self.preview_input_guard is guard:self.preview_input_guard=None
+        self.preview_pending_feedback()
 
     def _native_events(self):
         while not self.stop.is_set():
@@ -282,6 +346,9 @@ class Desktop:
                     self.activation_snapshot=event
                     logging.info('Photoshop activation foreground: %s', event)
                 elif event.get("type") == "configured":
+                    with self.native_applied:
+                        self.native_applied_sequence=max(self.native_applied_sequence,event.get('configuration_sequence',0))
+                        self.native_applied.notify_all()
                     logging.debug("Native hotkey settings acknowledged")
                 else:
                     logging.error("Native hotkey error: %s", event)
@@ -352,15 +419,18 @@ class Desktop:
         """A separate click-through indicator, never a reopened menu or PS query."""
         with self.window_lock:
             preview=getattr(self,'mask_preview',None)
-            active=bool(preview and not preview.closed and preview.phase in ('commit','cancel')
-                        and not self.visible and self.settings['enabled']
+            guard=self.preview_input_guard
+            active=bool((guard or preview and not preview.closed and preview.phase in ('commit','cancel'))
+                        and not self.visible and (guard or self.settings['enabled'])
                         and self.target and getattr(self,'preview_hint_anchor',None))
             value={'type':'preview.pending','active':active}
             if active:
-                progress=preview.progress(read=False)
+                progress=preview.progress(read=False) if preview else None
+                if guard and (guard.get('unknown') or guard.get('release')):
+                    progress={'stage':'unknown' if guard.get('unknown') else 'release','phase':'cancel','operation':'预览收尾','done':0,'total':0,'frame':0}
                 if progress:
                     value.update({key:progress[key] for key in ('stage','phase','operation','done','total','frame')})
-                    value.update(epoch=preview.epoch,owner=self.target,anchor=self.preview_hint_anchor)
+                    value.update(epoch=guard['epoch'] if guard else preview.epoch,owner=guard['owner'] if guard else self.target,anchor=self.preview_hint_anchor)
                 else:
                     active=False;value['active']=False
             now=time.monotonic()
@@ -508,6 +578,7 @@ class Desktop:
                     # Publish fresh input protection on this pass, rather
                     # than waiting an additional monitor interval.
                     self._native_config()
+                self.maintain_preview_input_guard()
             except Exception:
                 logging.exception("Window monitor failed")
 

@@ -29,13 +29,14 @@ class PreviewPendingHint {
     }
     static std::wstring label(){
         auto stage=state.value("stage",std::string());
-        std::string s=stage=="read"?"读取图层":stage=="write"?"写入调整":stage=="verify"?"核验图层":
+        std::string s=stage=="unknown"?"等待原操作最终结果":stage=="release"?"释放点击保护":stage=="read"?"读取图层":stage=="write"?"写入调整":stage=="verify"?"核验图层":
             stage=="redraw"?"刷新画布":stage=="restore"?"恢复原值":stage=="restore-verify"?"核验恢复结果":
             stage=="restore-redraw"?"刷新恢复后的画布":stage=="cancel-wait"?"取消中 · 等待当前步骤":
             stage=="commit"?"确认调整":stage=="latest"?"应用最新调整":"等待预览收尾";
         int total=state.value("total",0),done=state.value("done",0);
         if(total>0 && done>=0 && done<=total && total<=256)s+=" · "+std::to_string(done)+"/"+std::to_string(total);
         if(now()-changed>3000)s+=" · 等待 Photoshop";
+        if(now()-renewed>1800)s+=" · 状态连接中断";
         return wide(s);
     }
     static void paint(HWND hwnd,HDC dc){
@@ -74,7 +75,8 @@ class PreviewPendingHint {
     }
     static void tick(){
         if(!active || !hint)return;
-        if(now()-renewed>1800){trace("producer-expired");active=false;hide();return;} // Missing producer is not successful completion.
+        // Missing progress is never a terminal result. Keep a truthful waiting
+        // indicator until explicit completion, while foreground rules still apply.
         if(menu && IsWindowVisible(menu)){trace("menu-reopened");hide();return;}
         HWND fg=testForegroundMissing?nullptr:testForeground?testForeground:GetForegroundWindow();DWORD expected=0,actual=0;
         GetWindowThreadProcessId(owner,&expected);GetWindowThreadProcessId(fg,&actual);
@@ -102,7 +104,7 @@ class PreviewPendingHint {
         if(previous.right-previous.left!=w || previous.bottom-previous.top!=h){int radius=MulDiv(int(figmaCornerRadius*2),dpi,96);SetWindowRgn(hint,CreateRoundRectRgn(0,0,w+1,h+1,radius,radius),FALSE);}
         // This is the only show path. It must never activate or expose the menu.
         SetWindowPos(hint,HWND_TOPMOST,x,y,w,h,SWP_NOACTIVATE|SWP_SHOWWINDOW);
-        trace("visible");
+        trace(now()-renewed>1800?"producer-stale":"visible");
         InvalidateRect(hint,nullptr,FALSE);UpdateWindow(hint);
     }
 public:
@@ -176,7 +178,10 @@ public:
         update(Json{{"serial",7},{"active",false}},nullptr,style,11);v["serial"]=6;update(v,nullptr,style,11);
         if(IsWindowVisible(hint))throw std::runtime_error("Terminal or late progress reopened pending feedback");
         v["serial"]=8;v["epoch"]=11;update(v,nullptr,style,11);testNow+=200;tick();testNow+=1801;tick();
-        if(IsWindowVisible(hint) || active)throw std::runtime_error("Unrenewed pending display survived its lease");
+        if(!IsWindowVisible(hint) || !active || label().find(L"状态连接中断")==std::wstring::npos)
+            throw std::runtime_error("Missing progress masqueraded as a completed preview");
+        update(Json{{"serial",9},{"active",false}},nullptr,style,11);
+        if(IsWindowVisible(hint))throw std::runtime_error("Verified terminal did not clear stale waiting feedback");
         shutdown();DestroyWindow(underneath);
     }
 };

@@ -131,6 +131,28 @@ class PanelContext:
         thread = win32process.GetWindowThreadProcessId(root)[0]
         return info.hwndFocus if user.GetGUIThreadInfo(thread, ctypes.byref(info)) else 0
 
+    def layer_list_window(self, hwnd, root):
+        """Freeze only the verified Layers list, outside any input callback."""
+        gui=self.gui
+        if self.describe(hwnd,root)!='layers':return 0
+        palette=hwnd
+        for _ in range(32):
+            if not palette or palette==root:return 0
+            if gui.GetClassName(palette)=='OWL.Palette':break
+            palette=gui.GetParent(palette)
+        else:return 0
+        found=[]
+        def collect(child,_):
+            if (gui.GetClassName(child)!='PSViewC' or gui.GetDlgCtrlID(child)!=0
+                    or not gui.IsWindowVisible(child)):return
+            parent=gui.GetParent(child)
+            for _ in range(32):
+                if parent==palette:found.append(child);return
+                if not parent or gui.GetClassName(parent)=='OWL.Palette':return
+                parent=gui.GetParent(parent)
+        gui.EnumChildWindows(palette,collect,None)
+        return found[0] if len(found)==1 else 0
+
     def home_visible(self, root):
         found = False
         def collect(hwnd, unused):

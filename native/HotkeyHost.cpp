@@ -16,7 +16,7 @@
 enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal };
 static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr; std::array<Binding,16> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr; ULONGLONG sequence=0; std::array<Binding,16> bindings{}; };
 // Opt-in remote clicks qualify only on a matching release in the same verified
 // PS workspace. No hover, taskbar or injected Alt+Tab activation is added.
 struct RemoteClickIntent {
@@ -142,6 +142,11 @@ static KeyMachine keys;
 static HWND target=nullptr;
 static bool dismissPending=false;
 static std::array<bool,3> mouseConsumed{};
+static bool previewPointer(int index,bool up,bool hit) {
+    if(index<0 || index>=3)return false;
+    if(up){bool owned=mouseConsumed[index];mouseConsumed[index]=false;return owned;}
+    if(hit){mouseConsumed[index]=true;return true;}return false;
+}
 static std::atomic<bool> closing{false};
 static DWORD hookThread;
 static HANDLE available;
@@ -259,6 +264,7 @@ static void emit(Action action,HWND hwnd=nullptr,HWND root=nullptr) {
     POINT cursor{};
     if (action==HoldRelease && !GetCursorPos(&cursor)) action=HoldCancel;
     queue[head.load(std::memory_order_relaxed)]={action,hwnd,root,cursor};
+    if(action==Configured)queue[head.load(std::memory_order_relaxed)].gapMs=config.sequence;
     if(action==HoldBegin){queue[head.load(std::memory_order_relaxed)].gapMs=GetTickCount64();GetCursorPos(&intentOrigin);queue[head.load(std::memory_order_relaxed)].cursor=intentOrigin;intentRevealed=false;}
     head.store(next,std::memory_order_release); SetEvent(available);
 }
@@ -327,6 +333,20 @@ static bool photoshopProcessWindow(HWND hwnd) {
     for (const auto& p:photoshopProcesses)
         if (pid && pid==p.pid && p.handle && WaitForSingleObject(p.handle,0)==WAIT_TIMEOUT) return true;
     return false;
+}
+// Only the frozen, process-verified Layers list. No tree enumeration, COM,
+// UIA, filesystem, allocations or blocking messages in the mouse hook.
+static bool previewGuardWindow(HWND clicked) {
+    HWND owner=config.guardOwner,panel=config.guardPanel;
+    if(!owner || !panel || !clicked || IsWindowVisible(config.overlay) ||
+       !IsWindow(owner) || IsIconic(owner) || !IsWindowVisible(owner) ||
+       !IsWindow(panel) || !IsWindowVisible(panel) ||
+       (clicked!=panel && !IsChild(panel,clicked)) || !photoshopProcessWindow(owner))return false;
+    DWORD ownerPid=0,panelPid=0,clickPid=0;
+    GetWindowThreadProcessId(owner,&ownerPid);GetWindowThreadProcessId(panel,&panelPid);GetWindowThreadProcessId(clicked,&clickPid);
+    wchar_t ownerClass[32]{},panelClass[32]{};GetClassNameW(owner,ownerClass,32);GetClassNameW(panel,panelClass,32);
+    return ownerPid && ownerPid==panelPid && ownerPid==clickPid && wcscmp(ownerClass,L"Photoshop")==0 &&
+        wcscmp(panelClass,L"PSViewC")==0 && GetDlgCtrlID(panel)==0 && GetAncestor(panel,GA_ROOTOWNER)==owner;
 }
 static bool photoshopKeyScope(HWND foreground=GetForegroundWindow()) {
     if (!config.enabled) return false;
@@ -492,12 +512,10 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
             !(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->flags&LLMHF_INJECTED)) {
             activation.finishDirect(photoshopKeyScope(foreground),lastInputTick);
         }
-        if (index>=0 && up && mouseConsumed[index]) {
-            mouseConsumed[index]=false;
-            return 1;
-        }
+        if (up && previewPointer(index,true,false))return 1;
         if (index>=0 && !up) {
             POINT point=reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->pt;
+            if(previewPointer(index,false,previewGuardWindow(WindowFromPoint(point))))return 1;
             if (index==0 && !(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->flags&LLMHF_INJECTED)) {
                 HWND clicked=WindowFromPoint(point);
                 activationOrigin=foreground;
@@ -558,6 +576,9 @@ static Config parse(const std::string& line) {
     if (std::regex_search(line,match,std::regex("\"diagnostic_trace\"\\s*:\\s*(true|false)"))) next.diagnostic=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"remote_compatibility\"\\s*:\\s*(true|false)"))) next.remoteCompatibility=match[1]=="true";
     next.overlay=reinterpret_cast<HWND>(std::stoull(field("hwnd","([0-9]+)")));
+    if(std::regex_search(line,match,std::regex("\"configuration_sequence\"\\s*:\\s*([0-9]+)")))next.sequence=std::stoull(match[1]);
+    if(std::regex_search(line,match,std::regex("\"preview_guard_owner\"\\s*:\\s*([0-9]+)")))next.guardOwner=reinterpret_cast<HWND>(std::stoull(match[1]));
+    if(std::regex_search(line,match,std::regex("\"preview_guard_panel\"\\s*:\\s*([0-9]+)")))next.guardPanel=reinterpret_cast<HWND>(std::stoull(match[1]));
     const Action actions[]={Toggle,Hide,Select,Color,Top,Bottom,SelectAbove,SelectBelow,MoveUp,MoveDown,CopyStyle,PasteStyle,EditStyle,ExtendAbove,ExtendBelow,ConvertSmartObject};
     int index=0;
     for (Action a:actions) {
@@ -672,6 +693,7 @@ static void writeActions() {
             if (action==PanelClick) line="{\"type\":\"panel.click\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+"}\n";
             else {
                 line=std::string("{\"type\":\"")+type+"\",\"action\":\""+names[action]+"\"";
+                if(action==Configured)line+=",\"configuration_sequence\":"+std::to_string(event.gapMs);
                 if (action==HoldRelease || action==HoldBegin) line+=",\"cursor\":["+std::to_string(event.cursor.x)+","+std::to_string(event.cursor.y)+"]";
                 line+="}\n";
             }
@@ -704,6 +726,16 @@ static void sampleCapsState(bool force=false) {
     } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
 }
 static int selfTest() {
+    for(int button=0;button<3;++button){
+        check(!previewPointer(button,true,false));
+        check(!previewPointer(button,false,false));
+        check(previewPointer(button,false,true));
+        // A known terminal/config change between down and up cannot leak a
+        // half click. No replay and no synthetic release are needed.
+        check(previewPointer(button,true,false));
+        check(!previewPointer(button,true,false));
+        check(!previewPointer(button,false,false));
+    }
     for(Action command:{CopyStyle,PasteStyle,EditStyle,SelectAbove,SelectBelow,ExtendAbove,ExtendBelow,ConvertSmartObject}) {
         for(int i=0;i<1000;++i){
             InvocationGate gate;HookEvent begin{},action{},up{};
@@ -1032,6 +1064,12 @@ int main(int argc,char** argv) {
         std::cout<<(photoshopProcessWindow(hwnd)?"true":"false")<<"\n";return 0;
     }
     if (argc==2 && std::string(argv[1])=="--self-test") return selfTest();
+    if(argc==4 && std::string(argv[1])=="--inspect-preview-guard") {
+        refreshPhotoshopProcesses();config.guardOwner=reinterpret_cast<HWND>(std::stoull(argv[2]));config.guardPanel=reinterpret_cast<HWND>(std::stoull(argv[3]));
+        std::cout<<(previewGuardWindow(config.guardPanel)?"true":"false")<<"\n";
+        for(auto& p:photoshopProcesses)if(p.handle)CloseHandle(p.handle);
+        return 0;
+    }
     if (argc==3 && std::string(argv[1])=="--self-test-process-scope") {
         bool expected=std::string(argv[2])=="true";
         refreshPhotoshopProcesses();
@@ -1044,6 +1082,16 @@ int main(int argc,char** argv) {
             check(photoshopProcessWindow(hwnd)==expected);
             ShowWindow(hwnd,SW_SHOWNOACTIVATE);
             check((remoteWorkspace(hwnd)!=nullptr)==(expected && wcscmp(name,L"Photoshop")==0));
+            WNDCLASSW pc{};pc.lpfnWndProc=DefWindowProcW;pc.hInstance=wc.hInstance;pc.lpszClassName=L"PSViewC";RegisterClassW(&pc);
+            HWND list=CreateWindowW(L"PSViewC",L"Owned layer list",WS_CHILD|WS_VISIBLE,0,0,10,10,hwnd,nullptr,wc.hInstance,nullptr);
+            HWND row=CreateWindowW(L"STATIC",L"Owned row",WS_CHILD|WS_VISIBLE,0,0,5,5,list,nullptr,wc.hInstance,nullptr);
+            config.guardOwner=hwnd;config.guardPanel=list;
+            bool guarded=expected && wcscmp(name,L"Photoshop")==0;
+            check(previewGuardWindow(list)==guarded && previewGuardWindow(row)==guarded);
+            check(!previewGuardWindow(hwnd));
+            config.guardPanel=nullptr;check(!previewGuardWindow(list));config.guardPanel=list;
+            ShowWindow(list,SW_HIDE);check(!previewGuardWindow(list));ShowWindow(list,SW_SHOWNOACTIVATE);
+            config.guardOwner=nullptr;config.guardPanel=nullptr;DestroyWindow(list);UnregisterClassW(L"PSViewC",wc.hInstance);
             EnableWindow(hwnd,FALSE);check(photoshopProcessWindow(hwnd)==expected);
             check(remoteWorkspace(hwnd)==nullptr);
             auto previous=photoshopProcesses;
