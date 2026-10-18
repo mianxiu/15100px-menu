@@ -653,6 +653,16 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     // Read-only readiness query. The backend still validates scope and obtains
     // a new request-bound selection before the atomic COPYDATA transition.
     if (msg==WM_APP+24) return IsWindowVisible(hwnd) && completionReady();
+    if (msg==WM_APP+25) {
+        // The foreground menu process can hand activation back to its owner;
+        // the backend process often cannot, especially after a native script.
+        HWND target=reinterpret_cast<HWND>(wp),owner=GetWindow(hwnd,GW_OWNER),fg=GetForegroundWindow();
+        DWORD pid=0;GetWindowThreadProcessId(fg,&pid);wchar_t name[64]{};GetClassNameW(target,name,64);
+        if(target!=owner || !IsWindow(target) || !IsWindowEnabled(target) || IsIconic(target) ||
+           wcscmp(name,L"Photoshop")!=0 || pid!=GetCurrentProcessId())return FALSE;
+        SetForegroundWindow(target);
+        return GetForegroundWindow()==target;
+    }
     // One synchronous transition: no intermediate layout or repeated round trips.
     if (msg==WM_APP+17) {
         panelKind=(wp&32)?4:static_cast<int>(wp&3);inputFocused=(wp&4)!=0;
@@ -685,6 +695,11 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
             // Keep the composition surface attached while the HWND hides.
             // The next frame selects transparent pie or opaque regular mode.
             holdFinished=true;pieReady=false;holdRows={};labelRows={};quickRows={};closePopups();
+            // Closing during a slider drag must not leave an invisible window
+            // owning mouse capture. WM_CAPTURECHANGED clears the Win32 backend's
+            // tracked buttons; no input is synthesized or sent to Photoshop.
+            if(GetCapture()==hwnd)ReleaseCapture();
+            if(ImGui::GetCurrentContext())ImGui::ClearActiveID();
             setOpacity(0.f);
         }
     }
@@ -1786,6 +1801,11 @@ int main() {
             for(const char* name:{"light","light-gray","dark-gray","dark"}) {
                 uiTheme=name;theme();PreviewPendingHint::selfTest(name);
             }
+            SetWindowPos(window,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+            SetCapture(window);
+            if(GetCapture()!=window)throw std::runtime_error("Capture-close regression did not acquire test capture");
+            ShowWindow(window,SW_HIDE);
+            if(GetCapture()==window)throw std::runtime_error("Hidden menu retained mouse capture");
             if (!(io.ConfigFlags&ImGuiConfigFlags_NoMouseCursorChange))
                 throw std::runtime_error("Menu renderer must preserve the Photoshop tool cursor");
             for (int kind=0;kind<5;++kind) for (int input=0;input<2;++input) {

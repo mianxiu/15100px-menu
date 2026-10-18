@@ -190,19 +190,23 @@ async def run_preview(app, preview, target):
             await asyncio.to_thread(app.desktop.require_menu_layer_target,'shape.paint',captured)
         result=await app.bridge.execute_shape(preview.paint,before_dispatch=before_dispatch,
                                              frozen_target=target,preview=preview)
-        preview.close()
         app.desktop.layer_context=dict(app.bridge.layer_context)
         if app.desktop.menu_epoch==preview.epoch and app.desktop.visible:
             await asyncio.to_thread(app.desktop.hide)
         await app.broadcast({'type':'notice','scope':'operation','action':'shape.paint','ok':True,'message':result['message']})
     except Exception as error:
-        preview.cancel();preview.close()
+        preview.cancel()
         if app.desktop.menu_epoch==preview.epoch and app.desktop.visible:
             await asyncio.to_thread(app.desktop.hide,restore=False)
         await app.broadcast({'type':'notice','scope':'operation','action':'shape.paint','ok':False,'message':str(error)})
         logging.exception('Mask preview ended with error')
     finally:
-        stopped.set();await publisher;preview.close()
+        stopped.set();await publisher
+        finish_focus=getattr(app.desktop,'finish_preview_focus',None)
+        if finish_focus and not app.bridge.busy:
+            try:await asyncio.to_thread(finish_focus,preview)
+            except Exception:logging.exception('Preview focus feedback failed; terminal unchanged')
+        preview.close()
         app.operation_lock.release()
         app._mask_preview=app.desktop.mask_preview=None
         app.desktop.event({'type':'mask.preview','active':False})

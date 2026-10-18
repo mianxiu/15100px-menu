@@ -56,6 +56,11 @@ class PreviewPendingHint {
         return DefWindowProcW(hwnd,msg,wp,lp);
     }
     static void hide(){if(hint){ShowWindow(hint,SW_HIDE);KillTimer(hint,1);}}
+    static bool foregroundAllowed(HWND fg,DWORD expected,DWORD actual){
+        // Photoshop may accept the activation only after its script yields.
+        // Our own hidden menu is that handoff, not an external application.
+        return expected && (expected==actual || (menu && fg==menu && !IsWindowVisible(menu)));
+    }
     static void tick(){
         if(!active || !hint)return;
         if(now()-renewed>1800){active=false;hide();return;} // Missing producer is not successful completion.
@@ -63,7 +68,7 @@ class PreviewPendingHint {
         HWND fg=testForeground?testForeground:GetForegroundWindow();DWORD expected=0,actual=0;
         GetWindowThreadProcessId(owner,&expected);GetWindowThreadProcessId(fg,&actual);
         wchar_t ownerClass[64]{};GetClassNameW(owner,ownerClass,64);
-        if(!IsWindow(owner) || IsIconic(owner) || !expected || expected!=actual || (!testForeground && wcscmp(ownerClass,L"Photoshop")!=0)){dismissed=true;hide();return;}
+        if(!IsWindow(owner) || IsIconic(owner) || !foregroundAllowed(fg,expected,actual) || (!testForeground && wcscmp(ownerClass,L"Photoshop")!=0)){dismissed=true;hide();return;}
         if(dismissed)return;
         auto getDpi=reinterpret_cast<UINT(WINAPI*)(HWND)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"GetDpiForWindow"));
         int next=getDpi?int(getDpi(owner)):96;if(next<96)next=96;
@@ -133,6 +138,11 @@ public:
         v["serial"]=2;v["phase"]="cancel";v["stage"]="restore-verify";update(v,nullptr,style,11);render("restore");
         // Showing a new full menu hides the companion; it cannot reopen that menu.
         v["serial"]=3;update(v,nullptr,style,11);
+        HWND hiddenMenu=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,wc.lpszClassName,L"Hidden menu handoff test",WS_POPUP,0,0,1,1,nullptr,nullptr,wc.hInstance,nullptr);
+        menu=hiddenMenu;
+        if(!foregroundAllowed(hiddenMenu,1,2) || foregroundAllowed(underneath,1,2) || foregroundAllowed(hiddenMenu,0,2))
+            throw std::runtime_error("Hidden menu handoff was mistaken for external focus");
+        DestroyWindow(hiddenMenu);
         menu=underneath;tick();if(IsWindowVisible(hint))throw std::runtime_error("Pending hint overlapped reopened menu");menu=nullptr;
         testForeground=GetDesktopWindow();tick();testForeground=underneath;v["serial"]=4;update(v,nullptr,style,11);
         if(IsWindowVisible(hint))throw std::runtime_error("Pending hint returned after external focus dismissal");

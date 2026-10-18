@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 178候选代码／构建／实际入口：修正隐藏菜单焦点交接误判导致小转圈提前隐藏；关闭释放本菜单鼠标捕获／活动控件，由原生菜单进程交还PS焦点，已知终态再补交接，外部应用／新菜单／未知原请求不抢焦点。419回归、四主题16渲染、EXE启动／重启与3次真实PS组件事务（低CPU2／正常1）通过；实时预览、取消恢复、一次撤销及文档／配置／资源保持。实际178／UXP40，证据.runtime/recovery178/runtime.json、close178-rootcause.json、live-matrix.json。
+- [ ] 178原提示音闭环：用户已明确177转圈消失后仍响，178已加载，等待按原速度快速关闭／选层的听觉反馈。未采集声音，不能将419回归或API读回当作提示音已解决；尚未发布178，正式Release仍177。
+
 - [x] 177预览收尾提示：用户选择小转圈＋真实阶段文字，关闭后立即显示，点击穿透、不抢焦点，原事务结束隐藏，不重新打开完整菜单；外部应用不弹回。414回归、四主题16渲染、EXE启动／重启和3次真实PS组件联合事务（低CPU2／正常1）通过，确认一次撤销／取消恢复保持。实际177／UXP40，配置／原稿／旧未知记录及CPU恢复，无新增未知。证据.runtime/recovery177c/runtime.json、live-matrix.json。
 - [ ] 177实体快速点击图层与提示音验收：未采集声音，不能声称已消除提示音；PS仍可能在原确认／恢复期间拒绝选层。真实低配／Win10／现代PS、实体画布视觉仍待验证。
 - [x] 177公开交付：源码／标签、Release已推送；安装包／SHA／更新清单匿名下载和冻结更新器API403备用通道通过，Wiki三页公开核验；只保留177 Release，176附件本地备份，Git标签／源码历史保留。实际177／UXP40。证据.runtime/recovery177c/runtime.json、release-0.4.177-public-verification.json、fallback177-live.json、wiki177-public.json、release177-cleanup.json。

@@ -817,7 +817,9 @@ class Desktop:
         self._native_config()
         if restore and owned_foreground and self._is_photoshop(self.target):
             try:
-                self.gui.SetForegroundWindow(self.target)
+                if hasattr(self.gui,'PostMessage'):
+                    self.gui.PostMessage(self.hwnd,0x8019,self.target,0)
+                else:self.gui.SetForegroundWindow(self.target)
             except Exception:
                 logging.info('Photoshop focus restore refused: before=%s target=%s', foreground, self.target)
         self.preview_pending_feedback()
@@ -826,6 +828,28 @@ class Desktop:
 
     def dismiss(self):
         return self.hide(restore=False)
+
+    @window_transition
+    def finish_preview_focus(self, preview):
+        """Complete only our hidden-menu handoff after a known host terminal."""
+        if (getattr(self,'mask_preview',None) is not preview or self.visible
+                or not self.restore_pending or not self.target):return
+        foreground=self.gui.GetForegroundWindow()
+        if self._is_photoshop(foreground):
+            self.restore_pending=False;return
+        if not self._is_menu_window(foreground):
+            self.restore_pending=False;return
+        if not self._is_photoshop(self.target):return
+        # No foreign application is activated over; a refused OS request does
+        # not justify injected keys, thread attachment or retry loops.
+        try:
+            if self.hwnd and hasattr(self.gui,'SendMessageTimeout'):
+                self.gui.SendMessageTimeout(self.hwnd,0x8019,self.target,0,2,100)
+            else:self.gui.SetForegroundWindow(self.target)
+        except Exception:logging.info('Preview focus handoff was refused')
+        after=self.gui.GetForegroundWindow()
+        if self._is_photoshop(after):self.restore_pending=False
+        logging.info('Preview terminal focus handoff: before=%s after=%s target=%s',foreground,after,self.target)
 
     @window_transition
     def toggle(self):

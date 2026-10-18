@@ -169,15 +169,56 @@ class PreviewPendingFeedbackTests(unittest.TestCase):
         value=desktop._send_menu_event.call_args_list[0].args[0]
         self.assertEqual((value['epoch'],value['phase'],value['stage'],value['done']),(7,'cancel','restore-verify',2))
 
+    def test_terminal_focus_handoff_only_activates_ps_from_our_hidden_window(self):
+        from unittest.mock import Mock
+        desktop=self.desktop();desktop.restore_pending=True;foreground=[2]
+        desktop._is_menu_window=lambda h:h==2;desktop._is_photoshop=lambda h:h==41
+        desktop.gui=SimpleNamespace(GetForegroundWindow=lambda:foreground[0],
+            SetForegroundWindow=Mock(side_effect=lambda h:foreground.__setitem__(0,h)))
+        desktop.finish_preview_focus(desktop.mask_preview)
+        desktop.gui.SetForegroundWindow.assert_called_once_with(41)
+        self.assertFalse(desktop.restore_pending)
+
+    def test_terminal_focus_handoff_never_overrides_foreign_or_reopened_menu(self):
+        from unittest.mock import Mock
+        for foreground,visible,same in ((9,False,True),(2,True,True),(2,False,False)):
+            desktop=self.desktop();desktop.restore_pending=True;desktop.visible=visible
+            desktop._is_menu_window=lambda h:h==2;desktop._is_photoshop=lambda h:h==41
+            desktop.gui=SimpleNamespace(GetForegroundWindow=lambda:foreground,SetForegroundWindow=Mock())
+            desktop.finish_preview_focus(desktop.mask_preview if same else object())
+            desktop.gui.SetForegroundWindow.assert_not_called()
+
+    def test_refused_terminal_focus_handoff_does_not_retry_or_clear_ownership(self):
+        from unittest.mock import Mock
+        desktop=self.desktop();desktop.restore_pending=True
+        desktop._is_menu_window=lambda h:h==2;desktop._is_photoshop=lambda h:h==41
+        desktop.gui=SimpleNamespace(GetForegroundWindow=lambda:2,SetForegroundWindow=Mock(side_effect=RuntimeError('refused')))
+        desktop.finish_preview_focus(desktop.mask_preview)
+        desktop.gui.SetForegroundWindow.assert_called_once_with(41)
+        self.assertTrue(desktop.restore_pending)
+
+    def test_focus_handoff_uses_foreground_menu_process_instead_of_background_backend(self):
+        from unittest.mock import Mock
+        desktop=self.desktop();desktop.restore_pending=True;desktop.hwnd=2;foreground=[2]
+        desktop._is_menu_window=lambda h:h==2;desktop._is_photoshop=lambda h:h==41
+        desktop.gui=SimpleNamespace(GetForegroundWindow=lambda:foreground[0],
+            SendMessageTimeout=Mock(side_effect=lambda *_:foreground.__setitem__(0,41)),
+            SetForegroundWindow=Mock(side_effect=AssertionError('Background backend cannot activate owner')))
+        desktop.finish_preview_focus(desktop.mask_preview)
+        desktop.gui.SendMessageTimeout.assert_called_once_with(2,0x8019,41,0,2,100)
+        desktop.gui.SetForegroundWindow.assert_not_called();self.assertFalse(desktop.restore_pending)
+
 
 class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
-    async def exercise(self,reopen):
+    async def exercise(self,reopen,busy_after=False):
+        from unittest.mock import Mock
         focus=threading.Event();entered=threading.Event();calls=[];events=[]
         desktop=SimpleNamespace(menu_epoch=7,visible=True,color_editor_active=True,
             menu_layer_context={'session':'s','document_id':3,'layer_ids':[4],'shape_editor':{'live_preview':True}},
             _scope=lambda:True,event=events.append,require_menu_layer_target=lambda *_:None)
         def require_focus():entered.set();self.assertTrue(focus.wait(2))
         desktop.require_action_focus=require_focus
+        desktop.finish_preview_focus=Mock()
         def hide(restore=True):
             desktop.visible=False
             if getattr(desktop,'mask_preview',None):desktop.mask_preview.cancel()
@@ -186,6 +227,7 @@ class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
         async def execute(params,**kw):
             await kw['before_dispatch'](kw['frozen_target']);calls.append(copy_value(kw['preview'].paint))
             if reopen:desktop.menu_epoch=8;desktop.visible=True
+            if busy_after:bridge.busy=True
             return {'message':'confirmed'}
         bridge.execute_shape=execute
         async def broadcast(event):events.append(event)
@@ -201,6 +243,10 @@ class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(app.operation_lock.locked())
         self.assertIsNone(app._mask_preview)
         self.assertEqual(desktop.visible,reopen)
+        self.assertEqual(desktop.finish_preview_focus.call_count,0 if busy_after else 1)
+
+    async def test_unresolved_host_does_not_attempt_terminal_focus_handoff(self):
+        await self.exercise(False,busy_after=True)
 
     async def test_draft_only_menu_rejects_live_event_before_reserving_or_starting_task(self):
         for capability in (False,None):
