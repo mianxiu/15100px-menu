@@ -31,6 +31,13 @@ async function fixture(n=2,legacy=false){
 }
 (async()=>{
  let cases=0;
+ // A cooperative optional read never commits partial metadata or opens history.
+ for(const limit of [1,7,12,18]){
+  const f=await fixture(16),before=copy(f.layers);let checks=0;
+  await assert.rejects(f.api.observeShape(f.api.selectionContext(),true,null,async()=>{if(++checks===limit){const e=Error('closed');e.menuReadInterrupted=true;throw e;}}),e=>e.menuReadInterrupted===true);
+  assert.equal(f.state().histories,0);assert.equal(f.state().sets,0);assert.deepEqual(f.layers,before);
+  const fresh=await f.api.observeShape(f.api.selectionContext(),true,null,async()=>{});assert.equal(fresh.available,true);assert.equal(fresh.revision,f.data.revision);cases++;
+ }
  for(const n of [2,8,128]){
   const f=await fixture(n),original=f.layers.map(l=>[l.vectorMaskDensity,copy(l.content),copy(l.path)]);
   assert.equal(f.data.mixed.feather,true);assert.equal(f.data.active_layer_id,29+n);

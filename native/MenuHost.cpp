@@ -469,7 +469,7 @@ static void accept(const Json& event) {
     if(type=="preview.progress") {
         if(event.value("epoch",LPARAM(-1))!=menuEpoch)return;
         previewProgress.update(event);requireText(previewProgress.label());
-        if(event.value("compact",false)) {maskPreviewStarted=false;updateBusy(true);holdFinished=false;holdMode=true;pinned=true;pieReady=false;hoverTip.reset();tipVisual.reset();}
+        if(event.value("compact",false) && IsWindowVisible(window)) {maskPreviewStarted=false;updateBusy(true);holdFinished=false;holdMode=true;pinned=true;pieReady=false;hoverTip.reset();tipVisual.reset();}
         return;
     }
     if(type=="mask.preview") {maskPreviewStarted=event.value("active",false);if(!maskPreviewStarted)previewProgress.clear();return;}

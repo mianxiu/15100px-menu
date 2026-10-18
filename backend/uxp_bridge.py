@@ -280,6 +280,18 @@ class UxpBridge(PhotoshopBridge):
             if temporary.exists():temporary.unlink()
         return {'id':request['id'],'session':request['session'],'folder':folder,'epoch':epoch,'deadline':deadline}
 
+    def cancel_menu_context(self, request):
+        # Read-only observation cancellation, never an operation cancellation.
+        # Called by the layer monitor, outside the window/keyboard lock.
+        token=json.loads(self.transport.config.read_text('utf-8-sig'))['token']
+        value={'id':request['id'],'session':request['session'],'token':token}
+        folder=request['folder'];temporary=folder/(request['id']+'.cancel-menu.tmp')
+        try:
+            temporary.write_text(json.dumps(value),'utf-8')
+            publish_request(temporary,folder/'menu-context-cancel.json')
+        finally:
+            if temporary.exists():temporary.unlink()
+
     def read_layer_context(self):
         # Called by the desktop monitor, never by the low-level hook or open().
         try:

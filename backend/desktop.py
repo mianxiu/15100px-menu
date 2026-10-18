@@ -150,6 +150,8 @@ class Desktop:
         self.menu_epoch = 0
         self.menu_context_requester=None
         self.menu_context_pending=None
+        self.menu_context_active=None
+        self.menu_context_canceller=None
         self.document_caption = None
         self.caption_window = 0
         self.stop = threading.Event()
@@ -435,6 +437,7 @@ class Desktop:
         while not self.stop.is_set():
             try:
                 self.layer_context=self.layer_context_provider()
+                self._cancel_closed_menu_context()
                 self._resume_completed_menu()
                 self._publish_menu_context()
                 self._finish_menu_context()
@@ -605,6 +608,15 @@ class Desktop:
         self.menu_context_pending={'epoch':self.menu_epoch,'unpublished':True,
                                    'deadline':time.monotonic()+10,'resume':True}
 
+    def _cancel_closed_menu_context(self):
+        with self.window_lock:
+            request=getattr(self,'menu_context_active',None)
+            if not request or self.visible and request['epoch']==self.menu_epoch:return
+        cancel=getattr(self,'menu_context_canceller',None)
+        if cancel:cancel(request)
+        with self.window_lock:
+            if self.menu_context_active is request:self.menu_context_active=None
+
     def _publish_menu_context(self):
         with self.window_lock:
             pending=self.menu_context_pending
@@ -616,6 +628,9 @@ class Desktop:
         except Exception:
             logging.exception('Fresh menu context request failed');request=None
         with self.window_lock:
+            # Retain the published ID even if close/reopen raced publication.
+            # The monitor cancels it outside this lock on its next iteration.
+            if request:self.menu_context_active=request
             if self.menu_context_pending is not pending:return
             if request and self.visible and self.menu_epoch==pending['epoch'] and not self.stop.is_set():
                 request['deadline']=min(request['deadline'],pending['deadline'])
@@ -736,15 +751,9 @@ class Desktop:
         preview=getattr(self,'mask_preview',None)
         if preview:
             preview.cancel()
-            if (not preview.closed and not preview.feedback_shown and self.visible
-                    and preview.epoch==self.menu_epoch and self._scope()):
-                # Keep only compact feedback until the original transaction ends.
-                # A second close or a foreign foreground still hides immediately.
-                preview.feedback_shown=True
-                self.hold_active=False
-                progress=preview.progress(read=False)
-                if progress:self.event({**progress,'compact':True})
-                return {"message":"正在恢复原值" if preview.phase=='cancel' else "正在确认预览"}
+            # Explicit close hides immediately. Cancellation/restoration keeps
+            # its original transaction and remains observable in the backend.
+            preview.feedback_shown=True
 
         # Hiding the window can activate a different application's window.
         # Capture ownership before ShowWindow, including ImGui submenus.

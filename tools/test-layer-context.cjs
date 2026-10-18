@@ -62,9 +62,21 @@ async function main(){
         if(order.slice(-ids.length).join(',')!==chosen.join(','))expected|=8;
       }
       assert.equal(api.selectionContext().mask&12,expected,'background '+bg+' selection '+bits);
+      assert.deepEqual(await api.selectionContextFresh(async()=>{}),api.selectionContext());
       edgeChecks++;
     }
   }
+  doc.layers=Array.from({length:128},(_,i)=>({id:1000+i,kind:'fill',allLocked:i===73}));
+  doc.activeLayers=doc.layers.slice();
+  let checkpoints=0;
+  const full=await api.selectionContextFresh(async()=>{checkpoints++;});
+  assert.deepEqual(full,api.selectionContext());assert.ok(checkpoints>=96);
+  const sentinel=Error('command waiting');let stopped=0;
+  await assert.rejects(api.selectionContextFresh(async()=>{if(++stopped===3)throw sentinel;}),e=>e===sentinel);
+  assert.equal(stopped,3);assert.equal(writes,0);assert.equal(history,0);
+  let changed=false;
+  await assert.rejects(api.selectionContextFresh(async()=>{if(!changed){changed=true;return;}doc.activeLayers=[doc.layers[0]];}),/context changed/);
+  doc.activeLayers=doc.layers.slice();assert.deepEqual(await api.selectionContextFresh(async()=>{}),full);
   ps.app.documents=[];assert.equal(api.selectionContext().mask,0);
   console.log('PASS DOM type/selection/lock/parent; '+edgeChecks+' original/lazy edge comparisons; rejected sorting has no write/history');
 }

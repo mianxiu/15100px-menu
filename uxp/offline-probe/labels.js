@@ -49,6 +49,14 @@ module.exports = function createLabels(ps, session, options={}) {
   // DOM-only, read-only metadata. No batchPlay, executeAsModal, pixels or
   // thumbnails on the menu path. The executor uses this same eligibility rule.
   function selectionContext(quickOnly=false,onPositionMiss=null) {
+    const reader=readSelectionContext(quickOnly,onPositionMiss);
+    let step;do {step=reader.next();}while(!step.done);
+    return step.value;
+  }
+  // The same reader supplies synchronous transaction validation and cooperative
+  // background/menu snapshots. Yield only between completed property reads;
+  // retain all original checks, including the final fresh selection identity.
+  function* readSelectionContext(quickOnly=false,onPositionMiss=null) {
     if (!ps.app.documents.length) return {session,document_id:null,layer_ids:[],kind:'none',mask:0};
     const doc=ps.app.activeDocument,selected=Array.from(doc.activeLayers),k=ps.constants.LayerKind;
     // Host-backed DOM getters are costly. Reuse reads only within this one
@@ -108,7 +116,7 @@ module.exports = function createLabels(ps, session, options={}) {
       if(onPositionMiss && order.length>=32)onPositionMiss({session,document_id:doc.id,
         layer_ids:ids,parent_id:order.parentId,sibling_count:order.length});
     }
-    const kinds=selected.map(layer=>{
+    function layerKind(layer) {
       if(read(layer,'isBackgroundLayer'))return 'background';
       const kind=read(layer,'kind');
       for(const [key,name] of [['NORMAL','pixel'],['GROUP','group'],['TEXT','text'],['SMARTOBJECT','smart'],
@@ -119,17 +127,22 @@ module.exports = function createLabels(ps, session, options={}) {
         'POSTERIZE','SELECTIVECOLOR','THRESHOLD','VIBRANCE','GRAIN','CLARITY'];
       if(adjustment.some(key=>k[key]!==undefined && kind===k[key]))return 'adjustment';
       return Object.values(k).includes(kind)?'other':'unknown';
-    });
+    }
+    const kinds=[];
+    for(let i=0;i<selected.length;i++) {kinds.push(layerKind(selected[i]));if(i%4===3)yield;}
     const ids=selected.map(l=>read(l,'id')).sort((a,b)=>a-b),background=kinds.includes('background');
-    const parents=selected.map(l=>read(l,'parent'));
+    const parents=[];
+    for(let i=0;i<selected.length;i++) {parents.push(read(selected[i],'parent'));if(i%4===3)yield;}
     const parentIds=parents.map(parent=>parent?read(parent,'id'):null);
     const sameParent=parentIds.every(id=>id===parentIds[0]);
     let locked=false,parentLocked=false;
+    let lockReads=0;
     for(const layer of selected) {
       for(let node=layer,depth=0;node && depth<=64;node=read(node,'parent'),depth++) {
         const allLocked=read(node,'allLocked');
         if(depth<64 && (allLocked || read(node,'positionLocked')))locked=true;
         if(depth>0 && allLocked)parentLocked=true;
+        if(++lockReads%4===0)yield;
       }
     }
     let mask=0,singleIndex;
@@ -200,12 +213,19 @@ module.exports = function createLabels(ps, session, options={}) {
       kind:kinds.every(kind=>kind===kinds[0])?(kinds[0] || 'none'):'mixed',
       types:[...new Set(kinds)],background,locked,same_parent:sameParent,mask,quick_mask:quickMask};
   }
-  async function selectionContextFresh() {
+  async function selectionContextFresh(checkpoint=null) {
+    async function read(onMiss=null) {
+      if(!checkpoint)return selectionContext(false,onMiss);
+      await checkpoint();
+      const reader=readSelectionContext(false,onMiss);
+      let step;do {step=reader.next();await checkpoint();}while(!step.done);
+      return step.value;
+    }
     // Warm hints, small lists, edges and majority selections keep the original
     // synchronous DOM path. Only a genuine large-list miss requests native IDs.
-    if(Date.now()<nativeHintsRetryAt)return selectionContext();
+    if(Date.now()<nativeHintsRetryAt)return read();
     let missing;const miss={};
-    try {return selectionContext(false,value=>{missing=value;throw miss;});}
+    try {return await read(value=>{missing=value;throw miss;});}
     catch(error) {if(error!==miss)throw error;}
     let hints=[];
     try {
@@ -245,7 +265,7 @@ module.exports = function createLabels(ps, session, options={}) {
     for(const [id,index] of hints)if(selectedIds.has(id))rememberPosition(prefix+id,index);
     // Fetch NEW DOM objects/properties after the await. Native values are only
     // candidate indices: hintedIndex still verifies each exact fresh DOM ID.
-    return selectionContext();
+    return read();
   }
   async function capture() {
     if (!ps.app.documents.length) throw Error('No document');
@@ -591,10 +611,13 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
     } catch(error) {catalogInfo={error:String(error)};}
     return catalog;
   }
-  async function readCore(doc,id) {
+  async function readCore(doc,id,checkpoint=null) {
     const keys=['layerKind','hasVectorMask','adjustment','AGMStrokeStyleInfo'];
-    const result=await ps.action.batchPlay(keys.map(key=>({_obj:'get',_target:[{_ref:'property',_property:key},
-      {_ref:'layer',_id:id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})),{});
+    const descriptors=keys.map(key=>({_obj:'get',_target:[{_ref:'property',_property:key},
+      {_ref:'layer',_id:id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}}));
+    const result=[];
+    if(checkpoint){for(const descriptor of descriptors){await checkpoint();result.push(...await ps.action.batchPlay([descriptor],{}));}await checkpoint();}
+    else result.push(...await ps.action.batchPlay(descriptors,{}));
     const vector=result[1]?.hasVectorMask===true;
     const fill=result[2]?.adjustment?.[0],stroke=result[3]?.AGMStrokeStyleInfo;
     if(!paint(fill))return null;
@@ -618,15 +641,16 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
     }
     return raw;
   }
-  async function observe(context,force=false,frozenCatalog=null) {
-    if(context.layer_ids?.length>1)return batchMasks.observe(context);
+  async function observe(context,force=false,frozenCatalog=null,checkpoint=null) {
+    if(context.layer_ids?.length>1)return batchMasks.observe(context,checkpoint);
     if(context.kind!=='shape-fill' || context.layer_ids?.length!==1 || context.locked || !ps.app.documents.length)
       return {available:false};
     const doc=ps.app.activeDocument,id=context.layer_ids[0],key=doc.id+':'+id;
     if(!force && cache?.key===key && Date.now()-cache.at<500)return cache.data;
     if(doc.mode!==ps.constants.DocumentMode.RGB || ![ps.constants.BitsPerChannelType.EIGHT,ps.constants.BitsPerChannelType.SIXTEEN].includes(doc.bitsPerChannel))
       return {available:false};
-    const raw=await readCore(doc,id);
+    if(checkpoint)await checkpoint();
+    const raw=await readCore(doc,id,checkpoint);
     if(!raw) {cache={key,at:Date.now(),data:{available:false}};return cache.data;}
     if(ps.app.activeDocument.id!==doc.id || doc.activeLayers.length!==1 || doc.activeLayers[0].id!==id)
       return {available:false};
@@ -637,10 +661,12 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
     // A live transaction needs only the frozen editor catalog. Refreshing
     // application-wide presets mid-drag adds unrelated host work, and cannot
     // make a newly added pattern valid for the original frozen editor anyway.
+    if(checkpoint)await checkpoint();
     const data={available:true,vector:raw.vector,live_preview:typeof ps.core.redrawDocument==='function' || legacyPreview,
       ...(legacyPreview && typeof ps.core.redrawDocument!=='function'?{preview_engine:'legacy-com'}:{}),revision,fill,stroke,
       patterns:frozenCatalog?frozenCatalog.patterns:await patterns(),
       pattern_catalog:frozenCatalog?frozenCatalog.pattern_catalog:catalogInfo};
+    if(checkpoint)await checkpoint();
     if(raw.mask)data.mask=clone(raw.mask);
     cache={key,at:Date.now(),signature,raw,data};return data;
   }
@@ -1101,28 +1127,40 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
   }
   function locked(layer) {for(let p=layer;p;p=p.parent)if(p.locked || p.allLocked || p.pixelsLocked || p.positionLocked || p.transparentPixelsLocked || p.isBackgroundLayer)return true;return false;}
   function targetSame(a,b) {return a.session===b?.session && a.document_id===b.document_id && a.active_layer_id===b.active_layer_id && same(a.layer_ids,b.layer_ids);}
-  async function snapshot(expected=null) {
+  async function snapshot(expected=null,checkpoint=null) {
     const identity=await capture();if(expected && !targetSame(identity,expected))throw Error('批量蒙版选择已改变');
     const doc=ps.app.activeDocument,layers=Array.from(doc.activeLayers).sort((a,b)=>a.id-b.id);
-    if(layers.length<2 || layers.length>128 || layers.some(locked))throw Error('请选择2至128个未锁定的矢量蒙版图层');
-    const descriptors=await ps.action.batchPlay(layers.map(l=>({_obj:'get',_target:[{_ref:'layer',_id:l.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})),{});
+    async function checkLocks(){for(let i=0;i<layers.length;i++){if(checkpoint && i%4===0)await checkpoint();if(locked(layers[i]))return false;}return true;}
+    if(layers.length<2 || layers.length>128 || !await checkLocks())throw Error('请选择2至128个未锁定的矢量蒙版图层');
+    async function read(descriptors){
+      if(!checkpoint)return ps.action.batchPlay(descriptors,{});
+      const values=[];for(let i=0;i<descriptors.length;i+=4){await checkpoint();values.push(...await ps.action.batchPlay(descriptors.slice(i,i+4),{}));}await checkpoint();return values;
+    }
+    const descriptors=await read(layers.map(l=>({_obj:'get',_target:[{_ref:'layer',_id:l.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})));
     if(descriptors.length!==layers.length || descriptors.some((v,i)=>v?._obj==='error' || v?.layerID!==layers[i].id || v.hasVectorMask!==true))throw Error('所有选中图层都必须有矢量蒙版');
-    const paths=await ps.action.batchPlay(layers.map(l=>({_obj:'get',_target:[{_ref:'property',_property:'pathContents'},
-      {_ref:'path',_enum:'path',_value:'vectorMask'},{_ref:'layer',_id:l.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})),{});
+    const paths=await read(layers.map(l=>({_obj:'get',_target:[{_ref:'property',_property:'pathContents'},
+      {_ref:'path',_enum:'path',_value:'vectorMask'},{_ref:'layer',_id:l.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})));
     const parents=new Map();
-    const members=layers.map((l,i)=>{
+    const members=[];for(let i=0;i<layers.length;i++){
+      if(checkpoint && i%4===0)await checkpoint();
+      const l=layers[i];
       const mask={feather:l.vectorMaskFeather,density:l.vectorMaskDensity},parent=l.parent?.id??null;
       if(!Number.isFinite(mask.feather)||mask.feather<0||mask.feather>1000||!Number.isFinite(mask.density)||mask.density<0||mask.density>100 || !paths[i]?.pathContents)throw Error('矢量蒙版读回不可用');
-      if(!parents.has(parent))parents.set(parent,Array.from(l.parent?l.parent.layers:doc.layers,x=>x.id));
-      return {id:l.id,mask,content:Object.fromEntries(contentKeys.map(k=>[k,descriptors[i][k]??null])),path:paths[i].pathContents,parent_id:parent,order:parents.get(parent)};
-    });
-    if(!targetSame(await capture(),identity) || layers.some(locked))throw Error('批量蒙版读取期间选择已改变');
+      if(!parents.has(parent)){
+        const siblings=l.parent?l.parent.layers:doc.layers;
+        if(!checkpoint)parents.set(parent,Array.from(siblings,x=>x.id));
+        else {const order=[],count=siblings.length;for(let j=0;j<count;j++){if(j%8===0)await checkpoint();order.push(siblings[j].id);}parents.set(parent,order);}
+      }
+      members.push({id:l.id,mask,content:Object.fromEntries(contentKeys.map(k=>[k,descriptors[i][k]??null])),path:paths[i].pathContents,parent_id:parent,order:parents.get(parent)});
+    }
+    if(!targetSame(await capture(),identity) || !await checkLocks())throw Error('批量蒙版读取期间选择已改变');
     return {identity,members};
   }
-  async function observe(context) {
+  async function observe(context,checkpoint=null) {
     try {
       if(context.locked || context.background || !Array.isArray(context.layer_ids) || context.layer_ids.length<2 || context.layer_ids.length>128)return {available:false};
-      const snap=await snapshot();
+      if(checkpoint)await checkpoint();
+      const snap=await snapshot(null,checkpoint);
       if(snap.identity.document_id!==context.document_id || !same(snap.identity.layer_ids,context.layer_ids))return {available:false};
       const signature=JSON.stringify(snap);if(signature.length>524288)throw Error('所选矢量路径过于复杂，请减少批量图层');
       const revision=cache?.signature===signature?cache.data.revision:session+':batch:'+ ++serial;
@@ -1130,7 +1168,7 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
       const data={available:true,mask_batch:true,vector:true,revision,mask,mixed,layer_ids:snap.identity.layer_ids,active_layer_id:snap.identity.active_layer_id,
         live_preview:typeof ps.core.redrawDocument==='function'||legacyPreview,...(legacyPreview && typeof ps.core.redrawDocument!=='function'?{preview_engine:'legacy-com'}:{})};
       cache={signature,data,snap};return data;
-    } catch(error) {return {available:false,reason:String(error).slice(0,200)};}
+    } catch(error) {if(error.menuReadInterrupted)throw error;return {available:false,reason:String(error).slice(0,200)};}
   }
   async function prepare(request) {
     validate(request.paint);

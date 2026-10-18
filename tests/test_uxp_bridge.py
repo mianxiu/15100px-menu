@@ -4,6 +4,21 @@ from unittest.mock import Mock,patch
 from backend.uxp_bridge import UxpBridge,UxpResultUnknown,UxpTransport,publish_request,read_heartbeat
 
 class UxpStatusIsolationTests(unittest.TestCase):
+    def test_menu_read_cancel_does_not_touch_original_operation_or_new_menu(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as base:
+            root=Path(base);bridge=object.__new__(UxpBridge)
+            config=root/'config.json';config.write_text('{"token":"test"}','utf-8')
+            bridge.transport=SimpleNamespace(config=config)
+            original=b'{"id":"operation-result-unknown"}'
+            (root/'uxp-pending.json').write_bytes(original)
+            (root/'menu-context-request.json').write_text('{"id":"new-menu"}','utf-8')
+            bridge.cancel_menu_context({'id':'old-menu','session':'s','folder':root})
+            self.assertEqual(json.loads((root/'menu-context-cancel.json').read_text()),{'id':'old-menu','session':'s','token':'test'})
+            self.assertEqual((root/'uxp-pending.json').read_bytes(),original)
+            self.assertEqual(json.loads((root/'menu-context-request.json').read_text())['id'],'new-menu')
+            self.assertFalse(list(root.glob('*.tmp')))
+
     def exercise(self,running,heartbeat=None):
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as base:

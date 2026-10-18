@@ -70,9 +70,28 @@ async function refreshMenuContext(folder,now) {
   try {request=JSON.parse(await (await folder.getEntry('menu-context-request.json')).read());}catch(_){return false;}
   if(request.token!==token || request.session!==session || !/^[0-9a-f]{32}$/.test(request.id) || request.id===menuRefreshId || !Number.isFinite(request.expires_at_ms) || request.expires_at_ms<now || request.expires_at_ms>now+10000)return false;
   const started=Date.now();
+  // Yield only between read-only host calls. Never abandon a Photoshop call
+  // or consume/replay an operation here: the next poll owns its normal dispatch.
+  async function checkpoint() {
+    let current,cancel,command;
+    try {current=JSON.parse(await(await folder.getEntry('menu-context-request.json')).read());}catch(_){}
+    try {cancel=JSON.parse(await(await folder.getEntry('menu-context-cancel.json')).read());}catch(_){}
+    try {command=JSON.parse(await(await folder.getEntry('probe-request.json')).read());}catch(_){}
+    let reason='';
+    if(Date.now()>request.expires_at_ms)reason='expired';
+    else if(current?.token!==token || current?.session!==session || current?.id!==request.id)reason='superseded';
+    else if(cancel?.token===token && cancel?.session===session && cancel?.id===request.id)reason='closed';
+    else if(command?.token===token && (!command.session || command.session===session) &&
+        typeof command.id==='string' && !seen.has(command.id) &&
+        ['inspect','capture','set_label','new_document'].includes(command.operation) &&
+        Number.isFinite(command.expires_at_ms) && command.expires_at_ms>=Date.now() && command.expires_at_ms<=Date.now()+30000)reason='command';
+    if(reason){const error=Error('Menu read yielded: '+reason);error.menuReadInterrupted=true;
+      menuRefreshId=request.id;observation.menu={...observation.menu,interrupted:reason,elapsed_ms:Date.now()-started,completed_at_ms:Date.now()};throw error;}
+  }
   let context;
-  try {context=await labels.selectionContextFresh();}
+  try {await checkpoint();context=await labels.selectionContextFresh(checkpoint);await checkpoint();}
   catch(error) {
+    if(error.menuReadInterrupted)return true;
     menuRefreshId=request.id;
     observation.menu={selection_ms:Date.now()-started,error:String(error).slice(0,200),completed_at_ms:Date.now()};
     return true;
@@ -89,13 +108,17 @@ async function refreshMenuContext(folder,now) {
   observation.menu={selection_ms:readDone-started,completed_at_ms:readDone,phase:basic.menu_phase};
   if(needsShape) {
     let shape={available:false},error='';
-    try {shape=await labels.observeShape(context,true);}catch(e){error=String(e).slice(0,200);}
+    try {await checkpoint();shape=await labels.observeShape(context,true,null,checkpoint);await checkpoint();}
+    catch(e){if(e.menuReadInterrupted)return true;error=String(e).slice(0,200);}
     const matches=labels.selectionMatches(context),done=Date.now();
     observation.menu={...observation.menu,shape_ms:done-readDone,shape_error:error,selection_changed:!matches,phase:'completed'};
     // A slow optional read needs fresh eligibility, not a fresh timestamp on
     // old locks/capabilities. A changed identity never enables the editor.
     if(matches) {
-      const latest=done-readDone>=1000?await labels.selectionContextFresh():context;
+      let latest;
+      try {latest=done-readDone>=1000?await labels.selectionContextFresh(checkpoint):context;}
+      catch(error){if(error.menuReadInterrupted)return true;throw error;}
+      try {await checkpoint();}catch(error){if(error.menuReadInterrupted)return true;throw error;}
       if(latest.document_id===context.document_id && latest.layer_ids.join(',')===context.layer_ids.join(','))
         await record(folder,'menu-context-result.json',{...basic,...latest,plugin_time_ms:done-readDone>=1000?Date.now():readDone,
           shape_editor:shape,menu_phase:'completed',timings_ms:{...basic.timings_ms,shape_ms:done-readDone}});
@@ -118,13 +141,14 @@ async function finishResponse(folder,response) {
       try {await (await folder.getEntry(file)).delete();}catch(_){}
   }
 }
-async function updateLayerContext(folder,now,force=false,prepared=null) {
+async function updateLayerContext(folder,now,force=false,prepared=null,checkpoint=null) {
   if(!force && now-contextReadAt<contextInterval)return;
   contextReadAt=now;
   let value;
   let error='';
-  try {value=prepared && labels.selectionMatches(prepared)?prepared:await labels.selectionContextFresh();}
-  catch(e) {error=String(e).slice(0,200);value={session,document_id:null,layer_ids:[],kind:'unknown',mask:0};}
+  try {value=prepared && labels.selectionMatches(prepared)?prepared:await labels.selectionContextFresh(checkpoint);}
+  catch(e) {if(e.menuReadInterrupted){observation.background={interrupted:e.reason,elapsed_ms:Date.now()-now,completed_at_ms:Date.now()};return;}
+    error=String(e).slice(0,200);value={session,document_id:null,layer_ids:[],kind:'unknown',mask:0};}
   // Throttle from read completion: if DOM work itself takes over 100ms,
   // measuring from its start would immediately launch another costly read.
   const readDone=Date.now();contextReadAt=readDone;
@@ -169,7 +193,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.37', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.38', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
@@ -188,7 +212,18 @@ async function probe(reason) {
     async function idleRead() {
       if(now-lastWorkAt<80)return;
       if(await refreshMenuContext(folder,now))return;
-      await updateLayerContext(folder,now);
+      await updateLayerContext(folder,now,false,null,async()=>{
+        let command,menu;
+        try {command=JSON.parse(await(await folder.getEntry('probe-request.json')).read());}catch(_){}
+        try {menu=JSON.parse(await(await folder.getEntry('menu-context-request.json')).read());}catch(_){}
+        const pendingCommand=command?.token===token && (!command.session || command.session===session) &&
+          typeof command.id==='string' && !seen.has(command.id) &&
+          ['inspect','capture','set_label','new_document'].includes(command.operation) &&
+          Number.isFinite(command.expires_at_ms) && command.expires_at_ms>=Date.now() && command.expires_at_ms<=Date.now()+30000;
+        const pendingMenu=menu?.token===token && menu.session===session && /^[0-9a-f]{32}$/.test(menu.id) &&
+          menu.id!==menuRefreshId && Number.isFinite(menu.expires_at_ms) && menu.expires_at_ms>=Date.now() && menu.expires_at_ms<=Date.now()+10000;
+        if(pendingCommand || pendingMenu){const error=Error('Background read yielded');error.menuReadInterrupted=true;error.reason=pendingCommand?'command':'menu';throw error;}
+      });
     }
     let request;
     try {
@@ -200,7 +235,7 @@ async function probe(reason) {
     if (request.token !== token || !['inspect','capture','set_label','new_document'].includes(request.operation) ||
         typeof request.id !== 'string' || request.id.length > 128 ||
         seen.has(request.id) || !Number.isFinite(request.expires_at_ms) ||
-        request.expires_at_ms < Date.now() || request.expires_at_ms > Date.now() + 30000) {
+        request.expires_at_ms > Date.now() + 30000) {
       // Metadata DOM reads are comparatively costly. Pending work takes
       // priority; a short quiet period also lets capture's write arrive before
       // an unrelated cache refresh. Execution still rechecks fresh eligibility.
@@ -216,8 +251,20 @@ async function probe(reason) {
       try {await folder.getEntry('result-'+request.id+'.json');seen.add(request.id);return;}
       catch(_){}
     }
+    if(request.expires_at_ms<Date.now()) {
+      if(!modifying){await idleRead();return;}
+      // A valid, unseen request can expire behind a slow read. Give its
+      // original identity a durable rejection instead of silently dropping it
+      // and making the caller wait forever for an outcome. Existing accepted
+      // records above, other sessions and malformed packets are never changed.
+      seen.add(request.id);
+      const rejected={schema:1,session,id:request.id,probe_version:'0.3.38',operation:request.operation,
+        phase:'failed',error:'请求在执行前已过期；未修改 Photoshop',not_executed:true,result_unknown:false,completed_at_ms:Date.now()};
+      pendingResponse=rejected;await finishResponse(folder,rejected);
+      lastRequest=request.id;return;
+    }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.37', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.38', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

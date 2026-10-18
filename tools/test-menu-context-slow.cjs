@@ -11,8 +11,8 @@ async function host(){
    setLabel:async request=>{control.writes=(control.writes||0)+1;
      if(request.capture_current){const saved=JSON.parse(files.get('result-'+request.id+'.json'));assert.equal(saved.phase,'accepted');assert.deepEqual(saved.captured_target,request.target);assert.equal(request.target.active_layer_id,7);}
      return {verified:true,selection_context:context()};},
-   selectionContext:context,selectionContextFresh:async()=>{if(control.readBlock)await new Promise(r=>{releaseRead=r;});return context();},selectionMatches:()=>!control.changed,interfacePreferences:async()=>({}),
-   observeShape:async()=>{control.shapes++;if(control.block)await new Promise(r=>{release=r;});if(control.shapeFail)throw Error('color unavailable');
+   selectionContext:context,selectionContextFresh:async checkpoint=>{if(control.readBlock)await new Promise(r=>{releaseRead=r;});if(checkpoint)await checkpoint();return context();},selectionMatches:()=>!control.changed,interfacePreferences:async()=>({}),
+   observeShape:async(context,force,catalog,checkpoint)=>{control.shapes++;if(control.block)await new Promise(r=>{release=r;});if(checkpoint)await checkpoint();control.afterShape=(control.afterShape||0)+1;if(control.shapeFail)throw Error('color unavailable');
      return {available:true,revision:'s:1'};}};
  const sandbox={console:{log(){}},module:{exports:{}},Date:class extends Date{static now(){return control.now;}},setInterval(fn,ms){if(ms===16)poll=fn;},require(name){
    if(name==='./labels.js')return (ps,session)=>{control.session=session;return labels;};if(name==='./probe-config.js')return 'token';
@@ -50,9 +50,9 @@ async function main(){
    assert.equal((await sendDirect(String(i+1).repeat(32),extra)).phase,'failed');assert.equal(direct.control.writes,1);assert.equal(direct.control.captures,1);
  }
  let h=await host();assert.equal(h.control.shapes,0,'Idle polling must not read vector metadata or preset catalogs');
- h.control.cost=3400;h.control.block=true;h.request();h.poll();await settle();
+ h.control.cost=2400;h.control.block=true;h.request();h.poll();await settle();
  assert.equal(h.result().menu_phase,'basic','Slow color read must not block ordinary layer capabilities');
- assert.equal(h.result().mask,15);assert.equal(h.result().timings_ms.selection_ms,3400);
+ assert.equal(h.result().mask,15);assert.equal(h.result().timings_ms.selection_ms,2400);
  assert.equal(h.control.shapes,1);const before=h.control.reads;
  h.control.now+=3500;h.release();await settle();
  assert.equal(h.result().menu_phase,'completed');assert.equal(h.result().shape_editor.available,true);
@@ -70,9 +70,40 @@ async function main(){
  h=await host();h.control.kind='pixel';h.control.readBlock=true;
  h.request('a'.repeat(32));h.poll();await settle();
  h.request('b'.repeat(32));h.releaseRead();await settle();
- assert.equal(h.result().menu_request_id,'a'.repeat(32),'An awaited old read must retain its original request ID');
+ assert.equal(h.files.has('menu-context-result.json'),false,'Superseded read must not publish stale capabilities');
  h.control.readBlock=false;await h.poll();await settle();
  assert.equal(h.result().menu_request_id,'b'.repeat(32),'A newer menu gets its own fresh read, never the previous result');
+ // A queued command waits for the current host call, but skips remaining optional work.
+ h=await host();h.control.block=true;h.request();h.poll();await settle();
+ h.files.set('probe-request.json',JSON.stringify({id:'f'.repeat(32),operation:'set_label',command:'selectBelow',token:'token',session:h.control.session,expires_at_ms:h.control.now+9000}));
+ await h.poll();assert.equal(h.control.writes,undefined,'Do not race a host read');
+ h.release();await settle();assert.equal(h.control.afterShape,undefined,'Skip remaining optional calls');
+ await h.poll();await settle();assert.equal(h.control.writes,1);assert.equal(h.result().menu_phase,'basic');
+ // Background selection reads also yield before consuming the next DOM block.
+ h=await host();h.control.now+=200;h.control.readBlock=true;h.poll();await settle();
+ h.files.set('probe-request.json',JSON.stringify({id:'8'.repeat(32),operation:'set_label',command:'selectAbove',token:'token',session:h.control.session,expires_at_ms:h.control.now+9000}));
+ const earlierReads=h.control.reads;h.releaseRead();await settle();assert.equal(h.control.reads,earlierReads);
+ h.control.readBlock=false;await h.poll();await settle();assert.equal(h.control.writes,1);
+ // Closed menu cancels only its read; wrong session/token cannot suppress it.
+ for(const valid of [true,false]){
+  h=await host();h.control.block=true;h.request();h.poll();await settle();
+  h.files.set('menu-context-cancel.json',JSON.stringify({id:'a'.repeat(32),session:h.control.session,token:valid?'token':'wrong'}));
+  h.release();await settle();assert.equal(h.result().menu_phase,valid?'basic':'completed');
+ }
+ h=await host();h.request();h.files.set('menu-context-cancel.json',JSON.stringify({id:'a'.repeat(32),session:h.control.session,token:'token'}));
+ const reads=h.control.reads;await h.poll();await settle();assert.equal(h.control.reads,reads);assert.equal(h.control.shapes,0);
+ // Expired unseen mutation receives a matching failure, never a write;
+ // accepted/other-session records remain untouched.
+ h=await host();const expiredId='9'.repeat(32);
+ const expired={id:expiredId,operation:'set_label',command:'selectBelow',token:'token',session:h.control.session,expires_at_ms:h.control.now-1};
+ h.files.set('probe-request.json',JSON.stringify(expired));await h.poll();await settle();
+ const rejection=JSON.parse(h.files.get('result-'+expiredId+'.json'));assert.equal(rejection.phase,'failed');assert.equal(rejection.not_executed,true);assert.equal(h.control.writes,undefined);
+ h.files.set('probe-request.json',JSON.stringify({...expired,expires_at_ms:h.control.now+9000}));await h.poll();await settle();assert.equal(h.control.writes,undefined);
+ for(const accepted of [true,false]){
+  h=await host();h.files.set('probe-request.json',JSON.stringify({...expired,session:accepted?h.control.session:'old'}));
+  if(accepted)h.files.set('result-'+expiredId+'.json','{"phase":"accepted"}');
+  await h.poll();await settle();assert.equal(h.files.get('result-'+expiredId+'.json'),accepted?'{"phase":"accepted"}':undefined);assert.equal(h.control.writes,undefined);
+ }
  console.log('PASS: slow basic/paint reads; basic before paint; fresh eligibility; identity/expiry/token fences; paint failure; no idle color reads');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

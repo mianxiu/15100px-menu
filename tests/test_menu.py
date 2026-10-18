@@ -32,7 +32,7 @@ class MenuTests(unittest.TestCase):
             while message(0x8012)<1000 and time.monotonic()<deadline:time.sleep(.01)
             self.assertEqual(message(0x8012),1000,'Restoration feedback must not stay invisible after Caps release')
             win32gui.ShowWindow(hwnd,c.SW_HIDE)
-            process.stdin.write(json.dumps({**event,'compact':False,'done':20})+'\n');process.stdin.flush();time.sleep(.05)
+            process.stdin.write(json.dumps({**event,'compact':True,'done':20})+'\n');process.stdin.flush();time.sleep(.05)
             self.assertFalse(win32gui.IsWindowVisible(hwnd),'Progress must never reopen a dismissed menu')
         finally:
             process.stdin.close()

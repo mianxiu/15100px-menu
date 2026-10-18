@@ -691,6 +691,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             if isinstance(app.bridge,UxpBridge):
                 app.desktop.layer_context_provider=app.bridge.read_layer_context
                 app.desktop.menu_context_requester=app.bridge.request_menu_context
+                app.desktop.menu_context_canceller=app.bridge.cancel_menu_context
             await asyncio.to_thread(app.desktop.start)
             await asyncio.to_thread(app.tray.start)
             if app.tray.error:

@@ -98,6 +98,17 @@ class MenuFocusTests(unittest.TestCase):
         desktop.menu_context_requester.assert_called_once_with(7)
         self.assertEqual(desktop.menu_context_pending['deadline'],deadline)
 
+    def test_read_cancel_is_outside_window_lock_and_bound_to_original_request(self):
+        desktop=Desktop('http://localhost',Mock());desktop.menu_epoch=8;desktop.visible=False
+        original={'id':'old','epoch':7};desktop.menu_context_active=original
+        desktop.menu_context_canceller=Mock()
+        desktop._cancel_closed_menu_context()
+        desktop.menu_context_canceller.assert_called_once_with(original)
+        self.assertIsNone(desktop.menu_context_active)
+        desktop._cancel_closed_menu_context();self.assertEqual(desktop.menu_context_canceller.call_count,1)
+        desktop.visible=True;desktop.menu_context_active={'id':'new','epoch':8}
+        desktop._cancel_closed_menu_context();self.assertEqual(desktop.menu_context_canceller.call_count,1)
+
     def test_closed_or_expired_menu_never_publishes_and_failure_never_retries(self):
         import time
         for visible,deadline in [(False,time.monotonic()+10),(True,time.monotonic()-1)]:
@@ -253,7 +264,7 @@ class MenuFocusTests(unittest.TestCase):
         self.assertEqual(desktop.toggle()['message'], 'closed')
         desktop.require_action_focus.assert_not_called()
 
-    def test_preview_cancel_retains_feedback_only_once_and_never_over_foreign_app(self):
+    def test_preview_close_hides_immediately_and_preserves_cancel_transaction(self):
         from backend.mask_preview import MaskPreview
         from tests.test_mask_preview import paint
         for in_scope in (True,False):
@@ -268,13 +279,10 @@ class MenuFocusTests(unittest.TestCase):
             preview=MaskPreview(desktop.menu_epoch,paint());desktop.mask_preview=preview
             desktop.hide()
             self.assertEqual(preview.phase,'cancel')
-            self.assertEqual(desktop.visible,in_scope)
-            if in_scope:
-                self.assertTrue(desktop.event.call_args.args[0]['compact'])
-                self.assertEqual(desktop.event.call_args.args[0]['stage'],'cancel-wait')
-                desktop.gui.ShowWindow.assert_not_called()
-                desktop.hide();self.assertFalse(desktop.visible)
-            else:desktop.event.assert_not_called()
+            self.assertFalse(desktop.visible)
+            self.assertTrue(preview.feedback_shown)
+            desktop.event.assert_not_called()
+            desktop.gui.ShowWindow.assert_called_once_with(2,0)
             desktop.gui.SetForegroundWindow.assert_not_called()
 
     def test_hide_restores_ps_even_if_showwindow_changes_foreground(self):
