@@ -7,9 +7,20 @@ class PreviewPendingHint {
     inline static LPARAM epoch=-1;
     inline static ULONGLONG renewed=0,changed=0,testNow=0;
     inline static bool active=false,dismissed=false;
+    inline static bool testForegroundMissing=false;
     inline static int dpi=96,fontSize=11,paints=0;
     inline static POINT anchor{};
     inline static COLORREF background,text,border,accent;
+    inline static std::string lastTrace;
+    static void trace(const char* reason){
+        std::string key=std::to_string(epoch)+":"+reason;
+        if(key==lastTrace)return;lastTrace=key;
+        std::cerr<<Json{{"type","preview.hint.trace"},{"reason",reason},{"epoch",epoch},{"serial",serial},
+            {"tick_ms",GetTickCount64()},{"lease_age_ms",now()-renewed},
+            {"foreground",reinterpret_cast<uintptr_t>(GetForegroundWindow())},
+            {"owner",reinterpret_cast<uintptr_t>(owner)},{"menu_visible",bool(menu && IsWindowVisible(menu))},
+            {"hint_visible",bool(hint && IsWindowVisible(hint))}}.dump()<<std::endl;
+    }
     static ULONGLONG now(){return testNow?testNow:GetTickCount64();}
     static COLORREF color(const ImVec4& c){return RGB(int(c.x*255),int(c.y*255),int(c.z*255));}
     static std::wstring wide(const std::string& s){
@@ -63,12 +74,19 @@ class PreviewPendingHint {
     }
     static void tick(){
         if(!active || !hint)return;
-        if(now()-renewed>1800){active=false;hide();return;} // Missing producer is not successful completion.
-        if(menu && IsWindowVisible(menu)){hide();return;}
-        HWND fg=testForeground?testForeground:GetForegroundWindow();DWORD expected=0,actual=0;
+        if(now()-renewed>1800){trace("producer-expired");active=false;hide();return;} // Missing producer is not successful completion.
+        if(menu && IsWindowVisible(menu)){trace("menu-reopened");hide();return;}
+        HWND fg=testForegroundMissing?nullptr:testForeground?testForeground:GetForegroundWindow();DWORD expected=0,actual=0;
         GetWindowThreadProcessId(owner,&expected);GetWindowThreadProcessId(fg,&actual);
         wchar_t ownerClass[64]{};GetClassNameW(owner,ownerClass,64);
-        if(!IsWindow(owner) || IsIconic(owner) || !foregroundAllowed(fg,expected,actual) || (!testForeground && wcscmp(ownerClass,L"Photoshop")!=0)){dismissed=true;hide();return;}
+        // Windows may report NULL while a foreground window loses activation.
+        // Conceal the hint for that observation, but keep its timer/session so
+        // a known PS foreground can recover it. Only an identified foreign
+        // foreground latches dismissal for the remainder of this preview.
+        if(IsWindow(owner) && expected && !IsIconic(owner) && (!fg || !actual)){
+            trace("foreground-unavailable");ShowWindow(hint,SW_HIDE);return;
+        }
+        if(!IsWindow(owner) || IsIconic(owner) || !foregroundAllowed(fg,expected,actual) || (!testForeground && wcscmp(ownerClass,L"Photoshop")!=0)){trace(!fg?"foreground-unavailable":!IsWindow(owner)?"owner-invalid":IsIconic(owner)?"owner-minimized":"foreign-foreground");dismissed=true;hide();return;}
         if(dismissed)return;
         auto getDpi=reinterpret_cast<UINT(WINAPI*)(HWND)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"GetDpiForWindow"));
         int next=getDpi?int(getDpi(owner)):96;if(next<96)next=96;
@@ -84,12 +102,13 @@ class PreviewPendingHint {
         if(previous.right-previous.left!=w || previous.bottom-previous.top!=h){int radius=MulDiv(int(figmaCornerRadius*2),dpi,96);SetWindowRgn(hint,CreateRoundRectRgn(0,0,w+1,h+1,radius,radius),FALSE);}
         // This is the only show path. It must never activate or expose the menu.
         SetWindowPos(hint,HWND_TOPMOST,x,y,w,h,SWP_NOACTIVATE|SWP_SHOWWINDOW);
+        trace("visible");
         InvalidateRect(hint,nullptr,FALSE);UpdateWindow(hint);
     }
 public:
     static void update(const Json& v,HWND menuWindow,const ImGuiStyle& style,int logicalFont){
         auto next=v.value("serial",-1LL);if(next<=serial)return;serial=next;
-        if(!v.value("active",false)){active=false;hide();return;}
+        if(!v.value("active",false)){if(active)trace("producer-ended");active=false;hide();return;}
         auto nextEpoch=v.value("epoch",LPARAM(-1));auto phase=v.value("phase",std::string());
         if((phase!="commit" && phase!="cancel") || !v.contains("anchor") || v["anchor"].size()!=2)return;
         if(nextEpoch!=epoch)dismissed=false;
@@ -105,7 +124,7 @@ public:
         }
         SetTimer(hint,1,50,nullptr);tick();
     }
-    static void shutdown(){hide();if(hint){DestroyWindow(hint);hint=nullptr;}if(font){DeleteObject(font);font=nullptr;}active=false;testForeground=nullptr;testNow=0;serial=-1;epoch=-1;}
+    static void shutdown(){hide();if(hint){DestroyWindow(hint);hint=nullptr;}if(font){DeleteObject(font);font=nullptr;}active=false;testForeground=nullptr;testForegroundMissing=false;testNow=0;serial=-1;epoch=-1;lastTrace.clear();}
     static void selfTest(const char* name){
         HWND before=GetForegroundWindow();auto style=ImGui::GetStyle();
         WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"PhotoshopMenuPendingHintTest";RegisterClassW(&wc);
@@ -115,6 +134,10 @@ public:
                 {"phase","commit"},{"stage","verify"},{"frame",1},{"done",2},{"total",8}};
         update(v,nullptr,style,11);
         if(!IsWindowVisible(hint))throw std::runtime_error("Pending preview must be visible immediately after close");
+        testForegroundMissing=true;tick();
+        if(IsWindowVisible(hint) || dismissed || !active)throw std::runtime_error("Missing foreground ended or permanently dismissed the original preview hint");
+        testForegroundMissing=false;tick();
+        if(!IsWindowVisible(hint))throw std::runtime_error("Pending hint failed to recover after a transient missing foreground");
         testNow+=200;tick();RECT r{};GetWindowRect(hint,&r);
         SetWindowPos(underneath,hint,r.left,r.top,r.right-r.left,r.bottom-r.top,SWP_NOACTIVATE|SWP_SHOWWINDOW);
         tick();POINT point={r.left+10,r.top+10};

@@ -365,6 +365,10 @@ class Desktop:
                     active=False;value['active']=False
             now=time.monotonic()
             if value==self.preview_hint_value and (not active or now-self.preview_hint_at<.5):return
+            keys=('active','epoch','phase','stage')
+            if tuple(value.get(k) for k in keys)!=tuple(self.preview_hint_value.get(k) for k in keys):
+                logging.info('Preview finishing feedback: %s', {k:value[k] for k in
+                    ('active','epoch','phase','stage','owner','anchor') if k in value})
             self.preview_hint_value=dict(value);self.preview_hint_at=now
             self.preview_hint_serial+=1;value['serial']=self.preview_hint_serial
         self._send_menu_event(value)
