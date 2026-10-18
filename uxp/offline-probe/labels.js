@@ -1160,12 +1160,13 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
   async function apply(request,io) {
     validate(request.paint);const preview=request.command==='shape.preview';
     if(preview && (typeof ps.core.redrawDocument!=='function' || !io))throw Error('Batch live preview unavailable');
+    let progressFrame=0;const progress=async(stage,done=0,total=0)=>{if(io?.progress)await io.progress(stage,done,total,progressFrame);};
     let uncertain=false;
     try {return await ps.core.executeAsModal(async context=>{
-      const prepared=await prepare(request),baseline={identity:prepared.identity,members:prepared.members};
+      await progress('read');const prepared=await prepare(request),baseline={identity:prepared.identity,members:prepared.members};
       let applied=baseline.members.map(v=>clone(v.mask)),params=request.paint,seq=0,updates=0,changed=false,cancelled=false;
       let historyOpen=false,committed=false,history;const touched=new Set();
-      const verify=async masks=>check(await snapshot(baseline.identity),baseline,masks);
+      const verify=async masks=>{await progress('verify');check(await snapshot(baseline.identity),baseline,masks);await progress('verify',masks.length,masks.length);};
       async function restoreSelection() {
         const actual=await capture();if(actual.document_id!==baseline.identity.document_id)throw Error('Batch document changed during rollback');
         if(targetSame(actual,baseline.identity))return;
@@ -1182,9 +1183,9 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
           commands.push({_obj:'set',_target:[{_ref:'layer',_id:baseline.members[i].id},{_ref:'document',_id:baseline.identity.document_id}],
             to:{_obj:'layer',[k==='feather'?'vectorMaskFeather':'vectorMaskDensity']:{_unit:k==='feather'?'pixelsUnit':'percentUnit',_value:wanted[i][k]}},_options:{dialogOptions:'silent'}});touched.add(baseline.members[i].id);
         }
-        if(commands.length){changed=true;const results=await ps.action.batchPlay(commands,{});if(results.length!==commands.length || results.some(v=>v?._obj==='error'))throw Error('Batch mask setter failed');}
+        if(commands.length){await progress('write');changed=true;const results=await ps.action.batchPlay(commands,{});if(results.length!==commands.length || results.some(v=>v?._obj==='error'))throw Error('Batch mask setter failed');await progress('write',wanted.length,wanted.length);}
         await verify(wanted);applied=wanted;params=p;updates++;
-        if(preview && commands.length){await ps.core.redrawDocument({documentID:baseline.identity.document_id});await verify(applied);}
+        if(preview && commands.length){await progress('redraw');await ps.core.redrawDocument({documentID:baseline.identity.document_id});await verify(applied);}await progress('ready',wanted.length,wanted.length);
       }
       try {
         history=await context.hostControl.suspendHistory({documentID:baseline.identity.document_id,name:'批量羽化／密度'});historyOpen=true;
@@ -1198,19 +1199,19 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
               if(packet.id!==request.id||packet.session!==request.session||packet.token!==request.token||!Number.isSafeInteger(packet.seq)||packet.seq<seq||!Number.isFinite(packet.lease_until_ms)||packet.lease_until_ms>now+5000||!['preview','commit','cancel'].includes(packet.phase))throw Error('Invalid batch mailbox');
               lease=packet.lease_until_ms;if(lease<now || packet.phase==='cancel'){cancelled=true;break;}
               validate(packet.paint);if(packet.paint.revision!==prepared.before.revision || packet.seq===seq && !same(packet.paint,params))throw Error('Batch sequence payload changed');
-              if(packet.seq>seq){await frame(packet.paint);seq=packet.seq;if(io.applied)await io.applied({seq,updates,count:baseline.members.length,mask_batch:true,redraw_completed:true});}
+              if(packet.seq>seq){progressFrame=packet.seq;await frame(packet.paint);seq=packet.seq;if(io.applied)await io.applied({seq,updates,count:baseline.members.length,mask_batch:true,redraw_completed:true});}
               if(packet.phase==='commit')break;
             } else if(now>lease){cancelled=true;break;}
             await new Promise(resolve=>setTimeout(resolve,40));
           }
         }
-        await verify(applied);historyOpen=false;uncertain=true;await context.hostControl.resumeHistory(history,!cancelled);committed=!cancelled;uncertain=false;
-        if(cancelled){await restoreSelection();await verify(baseline.members.map(v=>v.mask));if(changed)await ps.core.redrawDocument({documentID:baseline.identity.document_id});await verify(baseline.members.map(v=>v.mask));}
+        await verify(applied);await progress(cancelled?'restore':'commit');historyOpen=false;uncertain=true;await context.hostControl.resumeHistory(history,!cancelled);committed=!cancelled;uncertain=false;
+        if(cancelled){await restoreSelection();await verify(baseline.members.map(v=>v.mask));if(changed){await progress('restore-redraw');await ps.core.redrawDocument({documentID:baseline.identity.document_id});}await verify(baseline.members.map(v=>v.mask));}
         cache=null;return {verified:true,mask_batch:true,count:cancelled?0:touched.size,placement_moves:0,layer_ids:baseline.identity.layer_ids,
           ...(cancelled?{cancelled:true,rollback_verified:true}:{}),preview:{updates,last_seq:seq},selection_context:selectionContext()};
       } catch(error){
         uncertain=uncertain||committed||!!error.resultUnknown;
-        if(historyOpen){historyOpen=false;try{await context.hostControl.resumeHistory(history,false);await restoreSelection();await verify(baseline.members.map(v=>v.mask));if(preview&&changed)await ps.core.redrawDocument({documentID:baseline.identity.document_id});await verify(baseline.members.map(v=>v.mask));}catch(_){uncertain=true;}}
+        if(historyOpen){historyOpen=false;try{await progress('restore');await context.hostControl.resumeHistory(history,false);await restoreSelection();await verify(baseline.members.map(v=>v.mask));if(preview&&changed){await progress('restore-redraw');await ps.core.redrawDocument({documentID:baseline.identity.document_id});}await verify(baseline.members.map(v=>v.mask));}catch(_){uncertain=true;}}
         cache=null;throw error;
       }
     },{commandName:'批量羽化／密度',timeOut:0,...(preview?{interactive:true}:{})});}

@@ -1,5 +1,9 @@
 # Photoshop Menu TODO
 
+- [x] 169 分阶段真实进度与取消恢复提示：实际入口169／UXP36，读取／写入／核验计数、顺滑进度条、刷新／恢复动画、等待原调用返回、关闭不重弹；不增加PS查询或改变事务。398回归、16插件JS套件、四主题、生产SetWindowPos恢复反馈及最终EXE通过；12项真实PS24.0.1事务（低CPU10／正常2）和4项保护检查通过，原文档／资源／配置恢复。证据.runtime/recovery169/runtime.json、live-matrix.json、tests169.log及progress169-ui；128层仍较慢，不能称即时响应。
+- [ ] 169 公开交付：发布与Wiki同步进行中，待公开下载／备用更新通道核验后清理旧Release。
+- [ ] 169 实体Caps／鼠标视觉、现代PS及故障i5／集显／Win10实机验收。自动事务、渲染和模拟消息测试不替代这些验收。
+
 - [x] 168 多选羽化／密度代码、构建、实际入口及本机真实事务：2–128 层、混合原值、只改指定项；修复历史回滚丢失多选，整批取消恢复和一次撤销。394 回归、16 份插件脚本（批量28组）、四主题、EXE 启动／重启通过；11 项真实事务（9低CPU／2正常）和4项保护检查通过。实际168／UXP35，配置／文档及资源恢复，旧失败记录保留。证据.runtime/recovery168/runtime.json、live-matrix.json；docs/BATCH-MASKS.md记录大批量延迟。
 - [x] 168 公开交付：Release／最终Wiki已同步，匿名ZIP／校验文件／备用清单及冻结更新器强制API403后的实网下载通过；仅保留168 Release，旧标签／源码／本地回退保留。dist仅168六项文件，实际入口168／UXP35匹配。证据.runtime/release-0.4.168-public-verification.json、fallback168-live.json、release168-cleanup.json、wiki168-public.json、recovery168/runtime.json。
 - [ ] 168 现代宿主、故障i5／集显、Win10／PS2024及实体Caps／鼠标验收。128层旧PS预览仍较慢，不按全配置即时响应交付。

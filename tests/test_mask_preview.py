@@ -75,6 +75,39 @@ class MaskPreviewTests(unittest.TestCase):
         preview.publish()
         self.assertEqual(json.loads(self.path.read_text())['phase'],'cancel')
 
+    def test_progress_is_bound_bounded_monotonic_and_presentation_only(self):
+        preview=MaskPreview(8,paint());preview.bind(self.folder,self.request)
+        path=self.folder/('preview-progress-'+self.request['id']+'.json')
+        base={**self.request,'serial':1,'stage':'write','done':3,'total':8,'frame':1}
+        path.write_text(json.dumps(base),'utf-8')
+        value=preview.progress();self.assertEqual(value['done'],3)
+        with patch.object(Path,'read_text',side_effect=AssertionError('UI close must use cached feedback')):
+            self.assertEqual(preview.progress(read=False)['done'],3)
+        self.assertFalse(set(self.request)&set(value))
+        for invalid in ({**base,'session':'old','serial':9},{**base,'serial':0,'done':1},
+                        {**base,'serial':4,'done':9},{**base,'serial':5,'total':999},[],None,{'serial':8}):
+            path.write_text(json.dumps(invalid),'utf-8')
+            self.assertEqual(preview.progress()['done'],3)
+        path.write_text('{"incomplete":','utf-8');self.assertEqual(preview.progress()['done'],3)
+        preview.cancel();self.assertEqual(preview.progress()['stage'],'cancel-wait')
+        path.write_text(json.dumps({**base,'serial':2,'stage':'restore-verify','done':2}),'utf-8')
+        self.assertEqual(preview.progress()['stage'],'restore-verify')
+        self.assertEqual(preview.phase,'cancel');self.assertEqual(preview.seq,2)
+        preview.close();self.assertIsNone(preview.progress())
+
+
+    def test_reopened_busy_menu_receives_original_request_progress(self):
+        from backend.desktop import Desktop
+        import io
+        desktop=Desktop('http://localhost',lambda action:None);desktop.menu_epoch=9
+        desktop.mask_preview=MaskPreview(8,paint());desktop.mask_preview.cancel()
+        desktop.process=SimpleNamespace(poll=lambda:None,stdin=io.StringIO())
+        desktop.event(desktop.mask_preview.progress())
+        result=json.loads(desktop.process.stdin.getvalue())
+        self.assertEqual(result['epoch'],9);self.assertEqual(result['stage'],'cancel-wait')
+        self.assertEqual(desktop.mask_preview.epoch,8)
+
+
 
 class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def exercise(self,reopen):

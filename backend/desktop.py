@@ -324,9 +324,12 @@ class Desktop:
                 self.menu_ready.clear()
 
     def event(self, event):
-        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress','mask.preview'):
+        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress','mask.preview','preview.progress'):
             return
         preview=getattr(self,'mask_preview',None)
+        if preview and event.get('type')=='preview.progress' and event.get('epoch')==preview.epoch:
+            # A newly opened busy menu observes the same original transaction.
+            event={**event,'epoch':self.menu_epoch}
         if preview and preview.epoch==self.menu_epoch and preview.phase=='preview':
             # Only the owning editor remains interactive. Other consumers still
             # receive the real busy/pending state and cannot submit operations.
@@ -731,7 +734,18 @@ class Desktop:
     @window_transition
     def hide(self, restore=True):
         preview=getattr(self,'mask_preview',None)
-        if preview:preview.cancel()
+        if preview:
+            preview.cancel()
+            if (not preview.closed and not preview.feedback_shown and self.visible
+                    and preview.epoch==self.menu_epoch and self._scope()):
+                # Keep only compact feedback until the original transaction ends.
+                # A second close or a foreign foreground still hides immediately.
+                preview.feedback_shown=True
+                self.hold_active=False
+                progress=preview.progress(read=False)
+                if progress:self.event({**progress,'compact':True})
+                return {"message":"正在恢复原值" if preview.phase=='cancel' else "正在确认预览"}
+
         # Hiding the window can activate a different application's window.
         # Capture ownership before ShowWindow, including ImGui submenus.
         foreground = self.gui.GetForegroundWindow()

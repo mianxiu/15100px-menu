@@ -169,7 +169,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.35', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.36', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
@@ -217,7 +217,7 @@ async function probe(reason) {
       catch(_){}
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.35', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.36', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -228,6 +228,28 @@ async function probe(reason) {
       activeExecution={folder,id:request.id,operation:request.operation,command:request.command,
         stage:'accepted',stageAt:Date.now(),seq:0,trace:request.preview_trace===true};
       await executionStage('dispatch');
+    }
+    let progressSerial=0,progressLast='',progressAt=0,progressFrame=0,progressRestoring=false;
+    function progressStage(name){
+      if(name.includes('rollback')){progressRestoring=true;return name.startsWith('verify')?'restore-verify':'restore';}
+      if(name==='redraw-native')return progressRestoring?'restore-redraw':'redraw';
+      if(name==='publish-frame')return 'ready';
+      if(name==='commit-history')return 'commit';
+      if(name.startsWith('write'))return 'write';
+      if(name.startsWith('verify') || name==='validate-frame')return progressRestoring?'restore-verify':'verify';
+      if(name==='capture-target' || name==='enter-modal')return 'prepare';
+      return null;
+    }
+    async function previewProgress(stage,done=0,total=0,frame){
+      if(Number.isSafeInteger(frame))progressFrame=frame;
+      if(progressRestoring && stage==='verify')stage='restore-verify';
+      if(progressRestoring && stage==='redraw')stage='restore-redraw';
+      if(stage==='restore')progressRestoring=true;
+      const now=Date.now(),key=stage+':'+progressFrame;
+      if(key===progressLast && now-progressAt<100 && done!==total)return;
+      progressLast=key;progressAt=now;
+      try{await record(folder,'preview-progress-'+request.id+'.json',{id:request.id,session,token,
+        serial:++progressSerial,stage,done,total,frame:progressFrame});}catch(_){}
     }
     try {
       if(request.capture_current!==undefined) {
@@ -264,7 +286,8 @@ async function probe(reason) {
       }
       if (request.operation === 'set_label' && request.command!=='shape.legacy.preview') response.result = await labels.setLabel(request,
         request.command==='shape.preview'?{
-          stage:executionStage,
+          stage:async(name,seq)=>{await executionStage(name,seq);const stage=progressStage(name);if(stage)await previewProgress(stage,0,0,seq);},
+          progress:previewProgress,
           read:boundedPreviewRead(async()=>{
             if(heartbeatValue && Date.now()-lastHeartbeat>=1000) {
               lastHeartbeat=Date.now();

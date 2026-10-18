@@ -253,6 +253,30 @@ class MenuFocusTests(unittest.TestCase):
         self.assertEqual(desktop.toggle()['message'], 'closed')
         desktop.require_action_focus.assert_not_called()
 
+    def test_preview_cancel_retains_feedback_only_once_and_never_over_foreign_app(self):
+        from backend.mask_preview import MaskPreview
+        from tests.test_mask_preview import paint
+        for in_scope in (True,False):
+            desktop=Desktop('http://localhost',lambda action:None)
+            desktop.hwnd,desktop.target,desktop.visible=2,1,True
+            desktop._scope=lambda:in_scope
+            desktop._is_menu_window=lambda h:False
+            desktop._is_photoshop=lambda h:h==1
+            desktop.gui=SimpleNamespace(GetForegroundWindow=lambda:1 if in_scope else 3,
+                IsWindow=lambda h:True,ShowWindow=Mock(),SetForegroundWindow=Mock())
+            desktop.event=Mock()
+            preview=MaskPreview(desktop.menu_epoch,paint());desktop.mask_preview=preview
+            desktop.hide()
+            self.assertEqual(preview.phase,'cancel')
+            self.assertEqual(desktop.visible,in_scope)
+            if in_scope:
+                self.assertTrue(desktop.event.call_args.args[0]['compact'])
+                self.assertEqual(desktop.event.call_args.args[0]['stage'],'cancel-wait')
+                desktop.gui.ShowWindow.assert_not_called()
+                desktop.hide();self.assertFalse(desktop.visible)
+            else:desktop.event.assert_not_called()
+            desktop.gui.SetForegroundWindow.assert_not_called()
+
     def test_hide_restores_ps_even_if_showwindow_changes_foreground(self):
         for initial in (2, 4):  # Main menu and floating ImGui submenu.
             desktop = Desktop('http://localhost', lambda action:None)

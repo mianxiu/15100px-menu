@@ -12,6 +12,34 @@ from backend.paths import ROOT
 
 
 class MenuTests(unittest.TestCase):
+    @unittest.skipUnless(os.name=='nt' and (ROOT/'native/MenuHost.exe').is_file(),'Windows native menu')
+    def test_progress_cancel_feedback_recovers_released_surface_without_reopening_operations(self):
+        import queue,threading,win32gui,win32con as c
+        ready=queue.Queue()
+        process=subprocess.Popen([str(ROOT/'native/MenuHost.exe')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,text=True,encoding='utf-8',creationflags=0x08000000)
+        threading.Thread(target=lambda:ready.put(process.stdout.readline()),daemon=True).start()
+        try:
+            hwnd=json.loads(ready.get(timeout=10))['hwnd']
+            message=lambda code,wp=0,lp=0:win32gui.SendMessageTimeout(hwnd,code,wp,lp,c.SMTO_ABORTIFHUNG,1000)[1]
+            message(0x8011,16|1|64|(15<<8)|(6<<12),901)
+            win32gui.SetWindowPos(hwnd,c.HWND_TOP,100,100,620,440,c.SWP_SHOWWINDOW|c.SWP_NOACTIVATE)
+            time.sleep(.15);message(0x800e)
+            self.assertEqual(message(0x8012),0)
+            event={'type':'preview.progress','epoch':901,'compact':True,'phase':'cancel','stage':'restore-verify','done':12,'total':32,'frame':3}
+            process.stdin.write(json.dumps(event)+'\n');process.stdin.flush()
+            deadline=time.monotonic()+2
+            while message(0x8012)<1000 and time.monotonic()<deadline:time.sleep(.01)
+            self.assertEqual(message(0x8012),1000,'Restoration feedback must not stay invisible after Caps release')
+            win32gui.ShowWindow(hwnd,c.SW_HIDE)
+            process.stdin.write(json.dumps({**event,'compact':False,'done':20})+'\n');process.stdin.flush();time.sleep(.05)
+            self.assertFalse(win32gui.IsWindowVisible(hwnd),'Progress must never reopen a dismissed menu')
+        finally:
+            process.stdin.close()
+            try:process.wait(timeout=5)
+            except subprocess.TimeoutExpired:process.kill();process.wait(timeout=5)
+            process.stdout.close()
+
     @unittest.skipUnless(os.name=='nt' and (ROOT/'native/HotkeyHost.exe').is_file(),'Windows native hook')
     def test_hook_renewal_recovers_removal_and_preserves_held_press(self):
         result=subprocess.run([str(ROOT/'native/HotkeyHost.exe'),'--self-test-hooks'],

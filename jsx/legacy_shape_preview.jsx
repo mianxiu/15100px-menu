@@ -19,6 +19,18 @@
         keys.sort(); for (i = 0; i < keys.length; i++) out.push(encode(keys[i]) + ':' + encode(value[keys[i]]));
         return '{' + out.join(',') + '}';
     }
+    // Presentation only: no host calls, no credentials leave the local mailbox.
+    var progressSerial=0,progressStage='',progressAt=0,progressFrame=0,restoring=false;
+    function progress(name,done,total,force){
+        if(restoring && name==='verify')name='restore-verify';
+        if(restoring && name==='redraw')name='restore-redraw';
+        var now=new Date().getTime();
+        if(!force && name===progressStage && done!==total && now-progressAt<100)return;
+        progressStage=name;progressAt=now;
+        var f=new File(folder+'/preview-progress-'+request.id+'.json');
+        try{f.encoding='UTF-8';if(f.open('w')){try{f.write(encode({id:request.id,session:request.session,token:request.token,
+            serial:++progressSerial,stage:name,done:done,total:total,frame:progressFrame}));}finally{f.close();}}}catch(_){}
+    }
     // Parse mailbox data, never eval it. Bound size, depth, duplicate keys and numbers.
     function decode(text) {
         if (text.length > 4096) throw Error('Mailbox size limit');
@@ -178,8 +190,9 @@
     }
     function setMaskProperty(key, unitID, value) { stage='write-'+key;target();var d=new ActionDescriptor(),r=new ActionReference(),v=new ActionDescriptor();r.putIdentifier(c('Lyr '),anchor.id);d.putReference(c('null'),r);v.putUnitDouble(s(key),c(unitID),value);d.putObject(c('T   '),c('Lyr '),v);executeAction(c('setd'),d,DialogModes.NO); }
     function apply(p) {
-        stage='read-before-frame';validate(p);target();var d=layerDescriptor();
+        progress('read',0,1,true);stage='read-before-frame';validate(p);target();var d=layerDescriptor();
         if(!same(raw(d),expectedRaw) || prepared.raw.vector && !maskClose(mask(d),applied.mask || originalMask))throw Error('Style changed outside preview');
+        progress('read',1,1);progress('write',0,1,true);
         var fillChanged=!same(p.fill,applied.fill),strokeChanged=!same(p.stroke,applied.stroke),frameChanged=false,to,newFill,newStroke,r,command;
         if(fillChanged || strokeChanged){
             to=prepared.raw.vector?new ActionDescriptor():null;
@@ -192,8 +205,8 @@
             stage='write-fill-stroke';target();command=new ActionDescriptor();r=new ActionReference();r.putEnumerated(s('contentLayer'),c('Ordn'),c('Trgt'));command.putReference(c('null'),r);command.putObject(c('T   '),prepared.raw.vector?s('shapeStyle'):newFill.type,to);executeAction(c('setd'),command,DialogModes.NO);changed=true;frameChanged=true;
         }
         if(p.mask){if(Math.abs(p.mask.feather-(applied.mask || originalMask).feather)>.00001){setMaskProperty('vectorMaskFeather','#Pxl',p.mask.feather);changed=true;frameChanged=true;}if(Math.abs(p.mask.density-(applied.mask || originalMask).density)>.00001){setMaskProperty('vectorMaskDensity','#Prc',p.mask.density);changed=true;frameChanged=true;}}
-        stage='verify-frame';target();d=layerDescriptor();verifyPaint(d,p);expectedRaw=raw(d);applied=p;updates++;
-        if(frameChanged){stage='redraw';app.refresh();redraws++;target();}
+        progress('write',1,1);progress('verify',0,1,true);stage='verify-frame';target();d=layerDescriptor();verifyPaint(d,p);expectedRaw=raw(d);applied=p;updates++;
+        progress('verify',1,1);if(frameChanged){progress('redraw',0,0,true);stage='redraw';app.refresh();redraws++;target();}progress('ready',1,1,true);
     }
     function readControl() {
         if(!mailbox.exists || mailbox.length>16384)return null;mailbox.encoding='UTF-8';if(!mailbox.open('r'))return null;var text;try{text=mailbox.read();}finally{mailbox.close();}return decode(text.replace(/^\uFEFF/,''));
@@ -206,7 +219,7 @@
                 leaseUntil=value.lease_until_ms;
                 if(value.phase==='cancel')return;
                 if(value.phase!=='preview' && value.phase!=='commit')throw Error('Invalid preview phase');
-                if(value.seq>lastSeq){apply(value.paint);latest=value.paint;lastSeq=value.seq;}
+                if(value.seq>lastSeq){progressFrame=value.seq;apply(value.paint);latest=value.paint;lastSeq=value.seq;}
                 if(value.phase==='commit'){commit=true;return;}
             }
             if(now>leaseUntil)return;$.sleep(20);
@@ -214,7 +227,7 @@
     }
     var commit=false,leaseUntil=new Date().getTime()+4000;
     function invariants() { target();var d=layerDescriptor();if(parentID()!==originalParent || order().join(',')!==originalOrder.join(',') || pathStream()!==originalPath || !same(pixelMask(d),originalPixel))throw Error('Document structure or pixel mask changed');return d; }
-    function rollback() { target();var current=layerDescriptor(),dirty=changed || !same(raw(current),raw(baseline)) || prepared.raw.vector && !maskClose(mask(current),originalMask);doc.activeHistoryState=originalHistory;if(dirty){app.refresh();redraws++;}var d=invariants();if(!same(raw(d),raw(baseline)) || prepared.raw.vector && !maskClose(mask(d),originalMask))throw Error('Legacy rollback readback mismatch'); }
+    function rollback() { restoring=true;progress('restore',0,0,true);target();var current=layerDescriptor(),dirty=changed || !same(raw(current),raw(baseline)) || prepared.raw.vector && !maskClose(mask(current),originalMask);doc.activeHistoryState=originalHistory;if(dirty){progress('redraw',0,0,true);app.refresh();redraws++;}progress('verify',0,1,true);var d=invariants();if(!same(raw(d),raw(baseline)) || prepared.raw.vector && !maskClose(mask(d),originalMask))throw Error('Legacy rollback readback mismatch');progress('verify',1,1,true); }
     function batchRun() {
         var records=[],batchHistory=null,batchStarted=false,batchChanged=false,batchCommit=false,batchSeq=0,batchUpdates=0,batchRedraws=0,batchLatest=request.paint;
         var keys=['layerKind','adjustment','AGMStrokeStyleInfo','hasVectorMask','hasUserMask','userMaskFeather','userMaskDensity'];
@@ -234,14 +247,15 @@
         function membersOrder(layer){var v=[],ls=layer.parent.layers;for(var j=0;j<ls.length;j++)v.push(ls[j].id);return v;}
         function readMember(layer,orders){var parent=layer.parent.typename==='LayerSet'?layer.parent.id:null,key='p'+parent;if(!orders.hasOwnProperty(key))orders[key]=membersOrder(layer);var d=desc(layer.id);if(!d.hasKey(s('hasVectorMask'))||!d.getBoolean(s('hasVectorMask')))throw Error('Vector mask missing');return {id:layer.id,mask:mask(d),content:contents(d),path:batchPath(layer.id),parent_id:parent,order:orders[key]};}
         function sameMember(a,b,wanted){return a.id===b.id && maskClose(a.mask,wanted) && same(a.content,b.content) && same(a.path,b.path) && a.parent_id===b.parent_id && same(a.order,b.order);}
-        function verify(wanted){batchTarget();var orders={};for(var j=0;j<records.length;j++)if(!sameMember(readMember(records[j].layer,orders),records[j].original,wanted[j]))throw Error('Batch mask/content/path/order mismatch');}
+        function verify(wanted){progress('verify',0,records.length,true);batchTarget();var orders={};for(var j=0;j<records.length;j++){if(!sameMember(readMember(records[j].layer,orders),records[j].original,wanted[j]))throw Error('Batch mask/content/path/order mismatch');progress('verify',j+1,records.length);}}
         function set(id,key,value){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);var d=new ActionDescriptor(),v=new ActionDescriptor();d.putReference(c('null'),r);v.putUnitDouble(s(key==='feather'?'vectorMaskFeather':'vectorMaskDensity'),c(key==='feather'?'#Pxl':'#Prc'),value);d.putObject(c('T   '),c('Lyr '),v);executeAction(c('setd'),d,DialogModes.NO);}
         function applyBatch(p){
             batchValidate(p);stage='batch-verify-frame';verify(records.mapMask);var wanted=[],changedFrame=false;
             for(var j=0;j<records.length;j++){var base=records[j].original.mask;wanted.push({feather:p.mask.hasOwnProperty('feather')?p.mask.feather:base.feather,density:p.mask.hasOwnProperty('density')?p.mask.density:base.density});}
-            for(var j=0;j<records.length;j++)for(var k=0;k<2;k++){var key=k?'density':'feather';if(Math.abs(wanted[j][key]-records.mapMask[j][key])>(k?100/255+.001:.00001)){stage='batch-write-'+key;batchIdentity();unlocked(records[j].layer);batchChanged=true;records[j].touched=true;set(records[j].layer.id,key,wanted[j][key]);changedFrame=true;}}
+            progress('write',0,records.length,true);
+            for(var j=0;j<records.length;j++){for(var k=0;k<2;k++){var key=k?'density':'feather';if(Math.abs(wanted[j][key]-records.mapMask[j][key])>(k?100/255+.001:.00001)){stage='batch-write-'+key;batchIdentity();unlocked(records[j].layer);batchChanged=true;records[j].touched=true;set(records[j].layer.id,key,wanted[j][key]);changedFrame=true;}}progress('write',j+1,records.length);}
             stage='batch-readback';verify(wanted);records.mapMask=wanted;batchLatest=p;batchUpdates++;
-            if(changedFrame){stage='batch-redraw';app.refresh();batchRedraws++;verify(wanted);}
+            if(changedFrame){progress('redraw',0,0,true);stage='batch-redraw';app.refresh();batchRedraws++;verify(wanted);}progress('ready',records.length,records.length,true);
         }
         function batchAck(seq){
             // Opt-in diagnostics only: publish after native readback and redraw.
@@ -255,7 +269,7 @@
                     if(packet.seq<batchSeq)throw Error('Batch sequence regressed');lease=packet.lease_until_ms;
                     if(packet.phase==='cancel')return;
                     if(packet.phase!=='preview'&&packet.phase!=='commit')throw Error('Invalid batch phase');
-                    if(packet.seq>batchSeq){applyBatch(packet.paint);batchSeq=packet.seq;batchAck(batchSeq);}
+                    if(packet.seq>batchSeq){progressFrame=packet.seq;applyBatch(packet.paint);batchSeq=packet.seq;batchAck(batchSeq);}
                     if(packet.phase==='commit'){batchCommit=true;return;}
                 }
                 if(now>lease)return;$.sleep(20);
@@ -271,21 +285,21 @@
             var ordered=[];for(var j=0;j<ids.length;j++)if(ids[j]!==request.target.active_layer_id)ordered.push(ids[j]);ordered.push(request.target.active_layer_id);
             for(var j=0;j<ordered.length;j++){var r=new ActionReference(),d=new ActionDescriptor();r.putIdentifier(c('Lyr '),ordered[j]);d.putReference(c('null'),r);d.putBoolean(s('makeVisible'),false);if(j)d.putEnumerated(s('selectionModifier'),s('selectionModifierType'),s('addToSelection'));executeAction(s('select'),d,DialogModes.NO);}
         }
-        function rollbackBatch(){batchTarget();doc.activeHistoryState=batchHistory;restoreBatchSelection();if(batchChanged){app.refresh();batchRedraws++;}verify(originals());}
+        function rollbackBatch(){restoring=true;progress('restore',0,0,true);batchTarget();doc.activeHistoryState=batchHistory;restoreBatchSelection();if(batchChanged){progress('redraw',0,0,true);app.refresh();batchRedraws++;}verify(originals());}
         function envelope(value){return {schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'completed',result:value};}
         try {
             if(!app.documents.length || ids.length<2 || ids.length>128)throw Error('Invalid batch selection');doc=app.activeDocument;batchTarget();batchValidate(request.paint);
             if(prepared.before.revision!==request.paint.revision || !same(prepared.identity,request.target))throw Error('Prepared batch identity changed');
             var wantedIDs={};for(var j=0;j<ids.length;j++)wantedIDs[ids[j]]=true;
             var found={};function walk(layers){for(var j=0;j<layers.length;j++){var l=layers[j];if(wantedIDs[l.id])found[l.id]=l;if(l.typename==='LayerSet')walk(l.layers);}}walk(doc.layers);
-            stage='batch-baseline';var baselineOrders={};for(var j=0;j<ids.length;j++){
+            progress('read',0,ids.length,true);stage='batch-baseline';var baselineOrders={};for(var j=0;j<ids.length;j++){
                 var l=found[ids[j]];if(!l)throw Error('Batch target missing');var baseline=readMember(l,baselineOrders);
-                if(!sameMember(baseline,prepared.members[j],prepared.members[j].mask))throw Error('Batch changed before native dispatch');records.push({layer:l,original:baseline,touched:false});
+                if(!sameMember(baseline,prepared.members[j],prepared.members[j].mask))throw Error('Batch changed before native dispatch');records.push({layer:l,original:baseline,touched:false});progress('read',j+1,ids.length);
             }
             batchTarget();records.mapMask=originals();batchHistory=doc.activeHistoryState;
             var key='__psMenuBatch_'+request.id;if($.global[key])throw Error('Batch request already active');$.global[key]=batchLoop;batchStarted=true;
             stage='batch-history';try{doc.suspendHistory('批量羽化／密度','$.global['+encode(key)+']()');}finally{delete $.global[key];}
-            if(!batchCommit)rollbackBatch();else verify(records.mapMask);
+            if(!batchCommit)rollbackBatch();else {progress('commit',0,0,true);verify(records.mapMask);}
             var finalMasks=[],count=0;for(var j=0;j<records.length;j++){finalMasks.push({id:records[j].layer.id,mask:batchCommit?records.mapMask[j]:records[j].original.mask});if(batchCommit&&records[j].touched)count++;}
             var value={verified:true,mask_batch:true,count:count,placement_moves:0,layer_ids:ids,paint:batchLatest,masks:finalMasks,preview:{updates:batchUpdates,redraws:batchRedraws,last_seq:batchSeq,engine:'standalone-extendscript'}};
             if(!batchCommit){value.cancelled=true;value.rollback_verified=true;}return envelope(value);
@@ -293,6 +307,7 @@
             return {schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'failed',error:String(error),stage:stage,result_unknown:unknown};}
     }
 
+    progress('prepare',0,0,true);
     if(request.paint && request.paint.mask_batch===true)result=batchRun();
     else try {
         if(!app.documents.length)throw Error('Preview document closed');doc=app.activeDocument;anchor=doc.activeLayer;originalHistory=doc.activeHistoryState;
@@ -304,7 +319,7 @@
         var key='__psMenuLegacy_'+request.id;if($.global[key])throw Error('Native request already active');$.global[key]=loop;historyStarted=true;
         stage='history-preview';try{doc.suspendHistory('Menu shape paint','$.global['+encode(key)+']()');}finally{delete $.global[key];}
         if(!commit){rollback();result={cancelled:true,rollback_verified:true,verified:true,paint:prepared.before};}
-        else {var finalDescriptor=invariants();verifyPaint(finalDescriptor,latest);result={verified:true,count:changed?1:0,placement_moves:0,fill_kind:latest.fill.kind,stroke_kind:latest.stroke.kind,paint:latest};if(latest.mask)result.mask=latest.mask;}
+        else {progress('commit',0,0,true);var finalDescriptor=invariants();verifyPaint(finalDescriptor,latest);result={verified:true,count:changed?1:0,placement_moves:0,fill_kind:latest.fill.kind,stroke_kind:latest.stroke.kind,paint:latest};if(latest.mask)result.mask=latest.mask;}
         result.preview={updates:updates,redraws:redraws,last_seq:lastSeq,engine:'standalone-extendscript'};
         result={schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'completed',result:result};
     } catch(error) {

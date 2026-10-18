@@ -26,8 +26,8 @@ async function fixture(n=2,legacy=false){
  const api=create(ps,'session',{legacyPreview:legacy});const context=api.selectionContext(),data=await api.observeShape(context,true);assert.equal(data.available,true,JSON.stringify(data));
  const target=await api.capture(),paint={revision:data.revision,mask_batch:true,mask:{feather:12.5}},request={command:legacy?'shape.legacy.preview':'shape.preview',id:'a'.repeat(32),session:'session',token:'test',expires_at_ms:Date.now()+10000,target,paint};
  const packet=(seq,phase='preview',mask={feather:12.5})=>({id:request.id,session:'session',token:'test',seq,phase,lease_until_ms:Date.now()+4000,paint:{...paint,mask}});
- const run=async packets=>api.setLabel(request,{read:async()=>packets.shift()||null});
- return {api,data,layers,doc,request,packet,run,resetSelectionOnRollback:()=>{historyResetsSelection=true;},state:()=>({sets,histories,commits,rollbacks,redraws}),fail:(where)=>{if(where==='set')failSet=2;else if(where==='rollback'){failSet=2;failRollback=true;}else failCommit=true;},select:ids=>{doc.activeLayers=layers.filter(l=>ids.includes(l.id));active=ids.at(-1);}};
+ const progress=[];const run=async packets=>api.setLabel(request,{read:async()=>packets.shift()||null,progress:async(stage,done,total,frame)=>{assert(done>=0&&done<=total);progress.push({stage,done,total,frame});}});
+ return {api,data,layers,doc,request,packet,run,progress,resetSelectionOnRollback:()=>{historyResetsSelection=true;},state:()=>({sets,histories,commits,rollbacks,redraws}),fail:(where)=>{if(where==='set')failSet=2;else if(where==='rollback'){failSet=2;failRollback=true;}else failCommit=true;},select:ids=>{doc.activeLayers=layers.filter(l=>ids.includes(l.id));active=ids.at(-1);}};
 }
 (async()=>{
  let cases=0;
@@ -60,5 +60,8 @@ async function fixture(n=2,legacy=false){
   assert.equal((await f.api.finishLegacyShape(f.request,prepared,{phase:'completed',result})).count,2);
   result.masks[0].mask.density=0;await assert.rejects(f.api.finishLegacyShape(f.request,prepared,{phase:'completed',result}),e=>e.resultUnknown===true);cases++;
  }
+ for(const cancel of [false,true]){const f=await fixture(8);await f.run([f.packet(1),f.packet(2,cancel?'cancel':'commit')]);
+  assert(f.progress.some(p=>p.stage==='redraw'&&p.total===0));assert(f.progress.some(p=>p.stage==='verify'&&p.done===8));
+  assert(f.progress.some(p=>p.stage===(cancel?'restore':'commit')));assert.equal(f.state().histories,1);cases++;}
  console.log('PASS batch masks: '+cases+' cases, 2/8/128 layers, independent values, one history, cancel/rollback, path/content/order, stale and unknown guards');
 })().catch(e=>{console.error(e);process.exit(1);});

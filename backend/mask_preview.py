@@ -24,6 +24,9 @@ class MaskPreview:
         self.published = None
         self.published_at = 0
         self.closed = False
+        self.feedback_shown = False
+        self.progress_serial = -1
+        self.progress_value = None
 
     def update(self, paint, commit=False):
         value = parameters(paint)
@@ -69,6 +72,36 @@ class MaskPreview:
             temporary.write_text(data, 'utf-8')
             publish_request(temporary, folder/('mask-preview-'+identity['id']+'.json'))
             self.published=key;self.published_at=time.monotonic()
+
+    def progress(self, read=True):
+        """Read presentation-only evidence. Never changes execution or terminal state."""
+        with self.lock:
+            binding, phase, closed, seq = self.binding, self.phase, self.closed, self.seq
+        if closed:return None
+        if binding and read:
+            folder, identity = binding
+            try:
+                path=folder/('preview-progress-'+identity['id']+'.json')
+                if path.stat().st_size>4096:raise ValueError('Progress size')
+                value=json.loads(path.read_text('utf-8-sig'))
+                if (isinstance(value,dict) and all(value.get(k)==identity[k] for k in identity)
+                    and type(value.get('serial')) is int and value['serial']>self.progress_serial
+                    and value.get('stage') in ('prepare','read','write','verify','redraw','ready','restore','restore-verify','restore-redraw','commit')
+                    and type(value.get('done')) is int and type(value.get('total')) is int
+                    and 0<=value['done']<=value['total']<=256
+                    and type(value.get('frame')) is int and 0<=value['frame']<=2147483647):
+                    self.progress_serial=value['serial']
+                    self.progress_value={k:value[k] for k in ('stage','done','total','frame','serial')}
+            except (OSError,ValueError,TypeError):pass
+        value=dict(self.progress_value or {'stage':'prepare','done':0,'total':0,'frame':0,'serial':0})
+        value.update(type='preview.progress',epoch=self.epoch,phase=phase,
+                     operation='批量羽化／密度' if self.paint.get('mask_batch') else '填充／描边／蒙版')
+        # Cancellation has been requested, not necessarily accepted by PS yet.
+        if phase=='cancel' and not value['stage'].startswith('restore'):
+            value.update(stage='cancel-wait',done=0,total=0)
+        elif phase=='preview' and value['stage']=='ready' and value['frame']<seq:value.update(stage='latest',done=0,total=0)
+        elif phase=='commit' and value['stage']=='ready':value.update(stage='commit',done=0,total=0)
+        return value
 
     def close(self):
         with self.lock:
@@ -120,13 +153,22 @@ async def dispatch_preview(app, action, args):
 
 async def run_preview(app, preview, target):
     stopped=asyncio.Event()
+    last_progress=None
     async def pump():
+        nonlocal last_progress
         while not stopped.is_set():
             try:
                 if preview.phase=='preview' and (not app.desktop.visible or app.desktop.menu_epoch!=preview.epoch
                         or not await asyncio.to_thread(app.desktop._scope)):
                     preview.cancel()
                 await asyncio.to_thread(preview.publish)
+                try:
+                    progress=await asyncio.to_thread(preview.progress)
+                    if progress:progress['epoch']=app.desktop.menu_epoch
+                    if progress and progress!=last_progress:
+                        app.desktop.event(progress);last_progress=progress
+                except Exception:
+                    logging.exception('Preview feedback unavailable; transaction unchanged')
             except Exception:
                 # Stop renewing the lease if publication fails. Photoshop owns
                 # rollback; a missing final receipt continues to block writes.
@@ -146,12 +188,13 @@ async def run_preview(app, preview, target):
             await asyncio.to_thread(app.desktop.require_menu_layer_target,'shape.paint',captured)
         result=await app.bridge.execute_shape(preview.paint,before_dispatch=before_dispatch,
                                              frozen_target=target,preview=preview)
+        preview.close()
         app.desktop.layer_context=dict(app.bridge.layer_context)
         if app.desktop.menu_epoch==preview.epoch and app.desktop.visible:
             await asyncio.to_thread(app.desktop.hide)
         await app.broadcast({'type':'notice','scope':'operation','action':'shape.paint','ok':True,'message':result['message']})
     except Exception as error:
-        preview.cancel()
+        preview.cancel();preview.close()
         if app.desktop.menu_epoch==preview.epoch and app.desktop.visible:
             await asyncio.to_thread(app.desktop.hide,restore=False)
         await app.broadcast({'type':'notice','scope':'operation','action':'shape.paint','ok':False,'message':str(error)})

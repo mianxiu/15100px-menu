@@ -65,7 +65,32 @@ static ULONGLONG completionStarted=0;
 static ULONGLONG taskStarted=0;
 static std::string taskName,taskError,taskRecovery;
 static int taskQueueCount=0;
+struct PreviewProgress {
+    bool active=false;std::string stage,phase,operation;int done=0,total=0,frame=0;float displayed=0;
+    ULONGLONG changedAt=0;
+    void clear(){*this=PreviewProgress{};}
+    void update(const Json& v){
+        const auto next=v.value("stage",std::string());const int f=v.value("frame",0),n=v.value("total",0);
+        if(stage!=next || frame!=f || total!=n)displayed=0;
+        active=true;stage=next;phase=v.value("phase",std::string());operation=v.value("operation",std::string());frame=f;total=n;done=v.value("done",0);changedAt=GetTickCount64();
+    }
+    std::string label() const {
+        std::string text=stage=="read"?"读取图层":stage=="write"?"写入调整":stage=="verify"?"核验图层":
+            stage=="redraw"?"正在刷新画布":stage=="restore"?"正在恢复原值":stage=="restore-verify"?"核验恢复结果":
+            stage=="restore-redraw"?"正在刷新恢复后的画布":stage=="cancel-wait"?"已请求取消 · 等待当前步骤返回":
+            stage=="latest"?"正在应用最新调整":stage=="commit"?"正在确认调整":stage=="ready"?"当前预览已更新":"正在准备预览";
+        if(total>0)text+=" · "+std::to_string(done)+"/"+std::to_string(total);
+        if(stage!="ready" && GetTickCount64()-changedAt>3000)text+=" · 等待 Photoshop";
+        return operation.empty()?text:operation+"\n"+text;
+    }
+    float advance(float dt){
+        float actual=total>0?std::min(1.f,float(done)/total):0.f;
+        displayed=std::min(actual,displayed+(actual-displayed)*std::min(1.f,dt/0.09f));return displayed;
+    }
+};
+static PreviewProgress previewProgress;
 static std::string taskStatus() {
+    if(previewProgress.active && taskRecovery.empty())return previewProgress.label();
     if(maskPreviewStarted && !taskBusy)return "预览中：填充／描边／蒙版";
     if (!taskRecovery.empty()) return taskRecovery;
     if (taskBusy) return "执行中："+(taskName.empty()?std::string("Photoshop 操作"):taskName)+
@@ -266,6 +291,7 @@ static int previewQuickHover=-1,previewActionHover=-1,previewCapsHover=-1;
 static bool previewLifecycle=false;
 static bool previewLive=false;
 static bool previewShape=false;
+static std::string previewProgressStage;
 static std::wstring shapeBenchmarkOutput;
 static bool selfTest=false;
 static std::vector<std::string> testedActions;
@@ -440,7 +466,13 @@ static std::string shortcut(const std::string& raw) {
 }
 static void accept(const Json& event) {
     std::string type=event.value("type","");
-    if(type=="mask.preview") {maskPreviewStarted=event.value("active",false);return;}
+    if(type=="preview.progress") {
+        if(event.value("epoch",LPARAM(-1))!=menuEpoch)return;
+        previewProgress.update(event);requireText(previewProgress.label());
+        if(event.value("compact",false)) {maskPreviewStarted=false;updateBusy(true);holdFinished=false;holdMode=true;pinned=true;pieReady=false;hoverTip.reset();tipVisual.reset();}
+        return;
+    }
+    if(type=="mask.preview") {maskPreviewStarted=event.value("active",false);if(!maskPreviewStarted)previewProgress.clear();return;}
     if (type=="diagnostic.progress") {DiagnosticHint::update(event);return;}
     if (type=="document") {
         if (event.contains("name") && event["name"].is_string()) document=event["name"].get<std::string>();
@@ -493,12 +525,13 @@ static void accept(const Json& event) {
     else if (type=="notice") {
         notice=event.value("message","");
         if (event.value("scope","")=="operation") {
+            previewProgress.clear();
             taskFailed=!event.value("ok",true);taskHasResult=true;
             taskError=taskFailed?notice:"";
             completionStarted=taskFailed?0:GetTickCount64();
         }
     }
-    else if (type=="popup.prepare") { contextMode=event.value("mode","quick")=="context";resetMenu(); }
+    else if (type=="popup.prepare") { previewProgress.clear();contextMode=event.value("mode","quick")=="context";resetMenu(); }
 }
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LPARAM);
 static bool quickDividerAt(int i,POINT point) {
@@ -1096,6 +1129,8 @@ static void drawFooter(const std::vector<std::string>& messages,float y,bool avo
         height+=extent.y+(lines.empty()?0:gap);lines.push_back(text);
     }
     if(lines.empty()){footerBounds={};return;}
+    const bool progress=previewProgress.active && taskRecovery.empty();
+    if(progress){width=std::max(width,std::min(220.f*scale,maxWidth));height+=12*scale;}
     width+=2*padding;height+=2*padding;
     float x=std::min(pieCenter.x-width*.5f,right-width);
     x=std::max(pos.x+8*scale,x);
@@ -1110,6 +1145,19 @@ static void drawFooter(const std::vector<std::string>& messages,float y,bool avo
     for(const auto& line:lines) {
         draw->AddText(font,font->FontSize,{a.x+padding,roundf(textY)},tint(ImGuiCol_Text),line.c_str(),nullptr,maxWidth);
         textY+=font->CalcTextSizeA(font->FontSize,FLT_MAX,maxWidth,line.c_str()).y+gap;
+    }
+    if(progress){
+        const ImVec2 left={a.x+padding,b.y-padding-4*scale},right={b.x-padding,b.y-padding};
+        const float w=right.x-left.x,rounding=ImGui::GetStyle().FrameRounding;
+        draw->AddRectFilled(left,right,tint(ImGuiCol_FrameBg),rounding);
+        if(previewProgress.total>0){
+            float value=previewProgress.advance(ImGui::GetIO().DeltaTime);
+            if(value>0)draw->AddRectFilled(left,{left.x+w*value,right.y},tint(ImGuiCol_SliderGrabActive),rounding);
+        }else{
+            float t=float(GetTickCount64()%1600)/1600.f;
+            float x=(.5f-.5f*cosf(t*6.2831853f))*.72f;
+            draw->AddRectFilled({left.x+w*x,left.y},{left.x+w*(x+.28f),right.y},tint(ImGuiCol_SliderGrabActive),rounding);
+        }
     }
 }
 static void quickIcon(int index,ImVec2 at,bool enabled,ImU32 surface) {
@@ -1616,6 +1664,7 @@ int main() {
         else if (i+1<argc && arg==L"--preview-action-hover") previewActionHover=std::stoi(argv[++i]);
         else if (i+1<argc && arg==L"--preview-caps-hover") previewCapsHover=std::stoi(argv[++i]);
         else if (i+1<argc && arg==L"--preview-quick-hover") previewQuickHover=std::stoi(argv[++i]);
+        else if (i+1<argc && arg==L"--preview-progress") previewProgressStage=std::filesystem::path(argv[++i]).u8string();
         else if (i+1<argc && arg==L"--preview-shape") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
             shapeEditor.prepare(data);previewShape=true;previewKind="hold";
@@ -1802,6 +1851,15 @@ int main() {
             accept({{"type","operation"},{"busy",true},{"action","select"}});
             auto started=taskStarted;resetMenu();
             accept({{"type","status"},{"data",{{"photoshop",{{"busy",true}}},{"settings",settings}}}});
+            { PreviewProgress progress;progress.update({{"stage","write"},{"done",12},{"total",32},{"frame",1}});
+              for(int n=0;n<40;n++){float x=progress.advance(.016f);if(x<0 || x>12.f/32)throw std::runtime_error("Progress invented unverified work");}
+              if(progress.displayed<.37f)throw std::runtime_error("Progress failed to approach evidence");
+              progress.update({{"stage","verify"},{"done",0},{"total",32},{"frame",1}});
+              if(progress.displayed!=0)throw std::runtime_error("Progress phase was not reset");
+              progress.update({{"stage","restore"},{"done",0},{"total",0},{"frame",1}});
+              if(progress.label().find("恢复")==std::string::npos)throw std::runtime_error("Missing restoration status");
+              accept({{"type","preview.progress"},{"epoch",menuEpoch+1},{"stage","write"}});
+              if(previewProgress.active)throw std::runtime_error("Stale menu progress accepted"); }
             if (canExecute() || taskStarted!=started || taskStatus().find("选择组内图层")==std::string::npos)
                 throw std::runtime_error("Running task status lost on reopen/status refresh");
             accept({{"type","operation"},{"busy",true},{"queue_ready",true},{"queue_count",2}});
@@ -1856,6 +1914,7 @@ int main() {
             SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?menuShapeWindowHeight:440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);
             if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
+            if(!previewProgressStage.empty())accept({{"type","preview.progress"},{"epoch",menuEpoch},{"phase","preview"},{"stage",previewProgressStage},{"done",12},{"total",previewProgressStage=="redraw"?0:32},{"frame",2}});
         }
     }
     int frames=0;
