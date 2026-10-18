@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 181首次批量预览读取／实际运行入口：新鲜原生树和同步校验内描述符／祖先复用，小批及大树兼容保留；完整新鲜内容／路径／顺序／锁定与精确原值校验保持。428回归、19脚本、EXE启动／重启、7项最终真实PS事务（低CPU6／正常1）、4项外部修改及4项选择保护通过；128层同会话首次12.13→6.02秒、后续10.77→6.20秒。实时预览、Esc取消恢复和一次撤销保持，Esc路由矩阵通过；未模拟实体Esc或屏幕延迟。实际181／UXP40，配置／原稿／资源及历史未知保持。证据.runtime/recovery181/runtime.json、live-matrix.json、guards.json、tests181.log、js181.log。
-- [ ] 181公开交付：等待源码／标签、Release匿名下载、备用更新及Wiki核验；核验后只保留181 Release，180附件本地备份、Git标签及历史保留。
+- [x] 181公开交付：源码／标签与Release已推送，安装包／SHA／最新更新清单匿名下载、冻结更新器API403备用通道及Wiki五页核验通过；只保留181 Release，180附件本地备份，Git标签与历史保留。实际181／UXP40，EXE文件版本同步，原稿／配置／CPU资源恢复。证据.runtime/recovery181/runtime.json、release-0.4.181-public-verification.json、fallback181-live.json、wiki181-public.json、release181-cleanup.json。
 - [ ] 下一轮性能TODO：128层首次打开菜单的完整UXP取样仍未加速；闲置后快捷键波动、真实i5／集显／低内存、Win10／PS2024和现代PS及实体画布验收仍待处理。181首次预览改善不等于这些项目已完成。
 
 - [x] 核验现有180的Esc取消颜色／羽化：菜单尚未确认时恢复本次填充、描边和羽化／密度，长按Caps直接Esc或固定后Esc均取消，后续松Caps不确认；已确认完成用一次撤销。原生路由矩阵、相关29回归及一个PS24.0.1低CPU接口事务（两次实时改色／描边／蒙版后恢复全部属性与活动历史位置）通过；配置／原稿／资源保持。菜单实测因写前焦点保护拒绝未计通过，未模拟实体Esc；本次仅核验和补说明，运行程序仍180／UXP40，不重新发布。证据.runtime/escape180-key.cpp、escape180-regression.log、escape180-engine-1792317809681686100/verified.json。
