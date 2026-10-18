@@ -29,6 +29,7 @@
 #include "FigmaMenuIcons.h"
 #include "StyledMenuIcons.h"
 #include "MenuUiMetrics.h"
+#include "ActivityIndicator.h"
 
 using Json=nlohmann::json;
 #include "DiagnosticHint.h"
@@ -79,7 +80,7 @@ struct PreviewProgress {
         std::string text=stage=="read"?"读取图层":stage=="write"?"写入调整":stage=="verify"?"核验图层":
             stage=="redraw"?"正在刷新画布":stage=="restore"?"正在恢复原值":stage=="restore-verify"?"核验恢复结果":
             stage=="restore-redraw"?"正在刷新恢复后的画布":stage=="cancel-wait"?"已请求取消 · 等待当前步骤返回":
-            stage=="latest"?"正在应用最新调整":stage=="commit"?"正在确认调整":stage=="ready"?"当前预览已更新":"正在准备预览";
+            stage=="move"?"正在移动图层":stage=="latest"?"正在应用最新调整":stage=="commit"?"正在确认调整":stage=="ready"?"当前预览已更新":"正在准备预览";
         if(total>0)text+=" · "+std::to_string(done)+"/"+std::to_string(total);
         if(stage!="ready" && GetTickCount64()-changedAt>3000)text+=" · 等待 Photoshop";
         return operation.empty()?text:operation+" · "+text;
@@ -234,14 +235,16 @@ static const char* rowLabel(int i) {return panelKind==4?"新建文档":i==2?"置
 static const char* rowShortcut(int i) {return panelKind==4?"Ctrl + N":shortcuts[i].c_str();}
 static bool inputFocused=false;
 static bool canExecute() {return !maskPreviewStarted && (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
+static bool previewMoveAllowed();
+static void sendPreviewMove(const char* action);
 static bool capsEnabled(int i) {
     if(i>=capsCount())return false;
-    if(!capsReady || !canExecute() || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
+    if(!capsReady || !(canExecute() || i>=5 && previewMoveAllowed()) || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
     if((i==0 || i==2) && layerCount!=1)return false;
     return !(i==1 || i==2 || i>=5) || (!layerLocked && !layerBackground && !layerCrossParents);
 }
 
-static bool rowEnabled(int i) {return !(panelKind==0 && i>=2) && canExecute() && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
+static bool rowEnabled(int i) {return !(panelKind==0 && i>=2) && (canExecute() || i>=2 && previewMoveAllowed()) && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
 static bool quickEnabled(int i) {return layerAware && panelKind!=4 && canExecute() && (quickMask & (1u<<i));}
 static std::string layerTitle() {
     const char* names[]={"图层识别待更新","背景图层","像素图层","图层组","文字图层","智能对象","形状／填充图层","调整图层","混合类型","其他图层"};
@@ -308,6 +311,10 @@ static void send(const char* action) {
         int row=std::string(action).rfind("label.",0)==0?1:-1;
         for(int i=0;i<4;++i)if(std::string(action)==actions[i])row=i;
         if(row>=0 && !rowEnabled(row))return;
+    }
+    if(maskPreviewStarted && (std::string(action)=="moveToTop" || std::string(action)=="moveToBottom" || std::string(action)=="moveUp" || std::string(action)=="moveDown")){
+        if(previewMoveAllowed())sendPreviewMove(action);
+        return;
     }
     if (selfTest) {testedActions.emplace_back(action);return;}
     // The foreground menu grants its own backend permission to return focus
@@ -1210,8 +1217,7 @@ static void drawFooter(const std::vector<std::string>& messages,float y,bool avo
         height+=extent.y+(lines.empty()?0:gap);lines.push_back(text);
     }
     if(lines.empty()){footerBounds={};return;}
-    const bool progress=previewProgress.active && previewProgress.stage!="ready" && taskRecovery.empty();
-    if(progress)height+=(menuCompactGap+menuProgressHeight)*scale;
+    // The centre owns the one running animation; progress remains truthful text.
     width+=2*padding;height+=2*padding;
     float x=std::min(pieCenter.x-width*.5f,right-width);
     x=std::max(pos.x+8*scale,x);
@@ -1227,22 +1233,7 @@ static void drawFooter(const std::vector<std::string>& messages,float y,bool avo
         draw->AddText(font,font->FontSize,{a.x+padding,roundf(textY)},tint(ImGuiCol_Text),line.c_str(),nullptr,maxWidth);
         textY+=font->CalcTextSizeA(font->FontSize,FLT_MAX,maxWidth,line.c_str()).y+gap;
     }
-    if(progress){
-        const ImVec2 left={a.x+padding,b.y-padding-menuProgressHeight*scale},right={std::min(b.x-padding,a.x+padding+menuProgressMaxWidth*scale),b.y-padding};
-        const float w=right.x-left.x,rounding=ImGui::GetStyle().FrameRounding;
-        auto ink=ImGui::GetStyleColorVec4(ImGuiCol_SliderGrabActive);ink.w*=.65f;
-        auto track=ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);track.w*=.22f;
-        draw->AddRectFilled(left,right,ImGui::ColorConvertFloat4ToU32(track),rounding);
-        if(previewProgress.total>0){
-            float value=previewProgress.advance(ImGui::GetIO().DeltaTime);
-            if(value>0)draw->AddRectFilled(left,{left.x+w*value,right.y},ImGui::ColorConvertFloat4ToU32(ink),rounding);
-        }else{
-            // Fixed short activity mark: no sweeping motion or fake percent.
-            float t=float(GetTickCount64()%menuProgressPulseMs)/float(menuProgressPulseMs);
-            ink.w*=.65f+.15f*sinf(t*6.2831853f);
-            draw->AddRectFilled(left,{left.x+std::min(w,menuControlHeight*scale),right.y},ImGui::ColorConvertFloat4ToU32(ink),rounding);
-        }
-    }
+
 }
 static void quickIcon(int index,ImVec2 at,bool enabled,ImU32 surface) {
     auto* d=ImGui::GetWindowDrawList();const auto color=tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled);
@@ -1407,7 +1398,9 @@ static void drawPie() {
     // Blender's centre is a 12..19-unit annulus with a direction segment.
     draw->AddCircle(pieCenter,15.5f*scale,tint(ImGuiCol_WindowBg),40,7*scale);
     float cursorX=float(cursor.x)-pieCenter.x,cursorY=float(cursor.y)-pieCenter.y;
-    if (cursorX*cursorX+cursorY*cursorY>=12*12*scale*scale && !holdFinished) {
+    const bool previewWorking=previewProgress.active && previewProgress.stage!="ready" && taskRecovery.empty();
+    if(previewWorking)activity::draw(draw,pieCenter,15.5f*scale,scale,tint(ImGuiCol_Border),tint(ImGuiCol_CheckMark),previewAnimationMs>=0?ULONGLONG(previewAnimationMs):GetTickCount64());
+    else if (cursorX*cursorX+cursorY*cursorY>=12*12*scale*scale && !holdFinished) {
         float desired=atan2f(cursorY,cursorX);
         ringAngle=ringAngleReady?followAngle(ringAngle,desired,ImGui::GetIO().DeltaTime):desired;
         ringAngleReady=true;
@@ -1495,7 +1488,8 @@ static void drawPie() {
     drawFooter(messages,pieCenter.y+(capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
     const int tipAction=shapeEditor.ready() && shapeTipCandidate>=200?shapeTipCandidate:actionTipText(selected)?selected:-1;
     const bool ownEditorTip=tipAction>=200 && tipAction<200+shapeTipCount && shapeEditor.ready();
-    const bool showTip=!pieAnimating && !holdFinished && !inputFocused && !ImGui::IsAnyItemActive() && (ownEditorTip || canExecute());
+    const bool moveTip=previewMoveAllowed() && (tipAction==2 || tipAction==3 || tipAction==45 || tipAction==46);
+    const bool showTip=!pieAnimating && !holdFinished && !inputFocused && !ImGui::IsAnyItemActive() && (ownEditorTip || moveTip || canExecute());
     const int displayed=!preview.empty()?(showTip?tipAction:-1):hoverTip.update(tipAction,tipFamily(tipAction),GetTickCount64(),tipGapAt(hoverTip.shown,cursor),showTip);
     if(displayed>=0)drawActionTip(displayed);else tipVisual.reset();
 }
@@ -1512,12 +1506,8 @@ static void drawBusyFeedback() {
     setOpacity(IsWindowVisible(window) && !holdFinished?fade:0.f);
     draw->AddCircle(pieCenter,15.5f*scale,tint(ImGuiCol_WindowBg),40,7*scale);
     if (taskBusy) {
-        // Indeterminate activity, not an invented percentage. Use elapsed
-        // system time so cursor motion and message rate cannot affect rotation.
-        float elapsed=previewAnimationMs>=0?previewAnimationMs:float(GetTickCount64()-taskStarted);
-        float angle=fmodf(elapsed,1100.f)*(6.2831853f/1100.f)-1.5707963f;
-        draw->PathArcTo(pieCenter,15.5f*scale,angle,angle+1.5707963f,12);
-        draw->PathStroke(tint(ImGuiCol_CheckMark),0,7*scale);
+        activity::draw(draw,pieCenter,15.5f*scale,scale,tint(ImGuiCol_Border),tint(ImGuiCol_CheckMark),
+            previewAnimationMs>=0?ULONGLONG(previewAnimationMs):GetTickCount64());
     } else if (taskHasResult) {
         if (taskFailed) {
             draw->AddLine({pieCenter.x-5*scale,pieCenter.y-5*scale},{pieCenter.x+5*scale,pieCenter.y+5*scale},tint(ImGuiCol_Text),2*scale);
@@ -2095,8 +2085,8 @@ int main() {
                 const auto r=shapeTipRows[previewShapeHover];
                 const ImVec2 point=previewShapeHover>=25?perceptualPicker.points[previewShapeHover-25]:ImVec2{(r.left+r.right)*.5f,(r.top+r.bottom)*.5f};
                 io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(point.x,point.y);io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);
-                if(previewOwningEditor)maskPreviewStarted=true;
             }
+            if(!preview.empty() && previewOwningEditor && frames>=2)maskPreviewStarted=true;
             ImGui::NewFrame();drawMenu();ImGui::Render();
             ++renderedFrames;
             if (!target) throw std::runtime_error("DX11 render target lost after window resize");
@@ -2844,6 +2834,25 @@ int main() {
                 renderedHit=100;finishHold(paintPoint,true,&paintPoint);
                 if(testedActions.back()!="hide")throw std::runtime_error("Unchanged paint submitted");
                 auto resetShape=[&]{shapeEditor.prepare(shapeFixture);setHoldMode(true);numberFrame(ImGuiKey_None,false);holdMoved=true;};
+                for(int move=0;move<4;++move)for(bool fixed:{false,true}){
+                    capsReady=true;layerMask=15;layerCrossParents=layerLocked=layerBackground=false;
+                    resetShape();pinned=fixed;shapeEditor.current()["rgb"]={91,82,73};shapeEditor.changed();numberFrame(ImGuiKey_None,false);
+                    if(!rowEnabled(2) || !rowEnabled(3) || !capsEnabled(5) || !capsEnabled(6) || quickEnabled(0) || capsEnabled(0) || canExecute())
+                        throw std::runtime_error("Preview must allow only its explicit move continuation: "+Json({{"row2",rowEnabled(2)},{"row3",rowEnabled(3)},{"caps5",capsEnabled(5)},{"caps6",capsEnabled(6)},{"quick0",quickEnabled(0)},{"caps0",capsEnabled(0)},{"mask",maskPreviewStarted},{"allowed",allowed},{"busy",taskBusy},{"feedback",busyFeedback},{"kind",layerKind},{"count",layerCount}}).dump());
+                    const auto commands=testedActions.size(),events=testedMaskEvents.size();const auto draft=shapeEditor.draft;
+                    const int action=move<2?move+2:move+43;const RECT r=move<2?holdRows[move+2]:capsRows[move+3];
+                    POINT point={(r.left+r.right)/2,(r.top+r.bottom)/2};
+                    if(fixed){io.AddMousePosEvent(float(point.x),float(point.y));numberFrame(ImGuiKey_None,false);
+                        io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);}
+                    else{renderedHit=action;finishHold(point,true,&point);finishHold(point);}
+                    const char* name=move<2?actions[move+2]:capsActions[move+3];
+                    send(name); // A duplicate must not append another compound gesture.
+                    if(testedActions.size()!=commands || testedMaskEvents.size()!=events+1 ||
+                       testedMaskEvents.back().value("action","")!="mask.preview.commit" ||
+                       testedMaskEvents.back().value("after_action","")!=name || testedMaskEvents.back()["params"]!=draft)
+                        throw std::runtime_error("Move gesture failed to commit latest preview exactly once");
+                }
+                resetShape();
                 // Old/missing host capability keeps the entire editor local.
                 for(const bool missing:{false,true}) {
                     auto local=shapeFixture;
@@ -2973,7 +2982,7 @@ int main() {
                 if(previewShapeHover>=0){auto report=std::filesystem::path(preview);report+=L".tooltip.json";
                     std::ofstream(report)<<Json{{"candidate",shapeTipCandidate},{"visible",tipVisual.ready},{"text",tipVisual.text},
                         {"bounds",{tipVisual.bounds.x,tipVisual.bounds.y,tipVisual.bounds.z,tipVisual.bounds.w}},
-                        {"preview_running",maskPreviewStarted},{"other_actions_enabled",canExecute()},
+                        {"preview_running",maskPreviewStarted},{"other_actions_enabled",canExecute()},{"preview_moves_enabled",previewMoveAllowed()},
                         {"anchor",previewShapeHover<shapeTipCount?Json({shapeTipRows[previewShapeHover].left,shapeTipRows[previewShapeHover].top,shapeTipRows[previewShapeHover].right,shapeTipRows[previewShapeHover].bottom}):Json()},
                         {"hue_bounds",{perceptualPicker.hueBounds.left,perceptualPicker.hueBounds.top,perceptualPicker.hueBounds.right,perceptualPicker.hueBounds.bottom}},
                         {"square_bounds",{perceptualPicker.squareBounds.left,perceptualPicker.squareBounds.top,perceptualPicker.squareBounds.right,perceptualPicker.squareBounds.bottom}}}.dump();}

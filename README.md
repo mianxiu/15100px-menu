@@ -1,7 +1,5 @@
 # Photoshop Menu
 
-色相条与饱和度／明度方块分离，条外四点配色：主色、两枚邻近色与互补色。操作说明见[Wiki](https://github.com/mianxiu/15100px-menu/wiki)。
-
 为 Windows Photoshop 提供随鼠标唤出的快捷菜单，让选层、排序、创建图层与调色更顺手。
 
 [下载最新版](https://github.com/mianxiu/15100px-menu/releases/latest) · [使用文档](https://github.com/mianxiu/15100px-menu/wiki) · [安装指南](https://github.com/mianxiu/15100px-menu/wiki/Installation) · [反馈问题](https://github.com/mianxiu/15100px-menu/issues)
@@ -10,7 +8,7 @@
 
 - **随处唤出**：按 CapsLock 打开环绕菜单，根据画布、图层面板或首页显示对应操作。
 - **快速处理图层**：选择相邻／组内图层、置顶置底、上下移动、颜色标签、复制粘贴样式及转换智能对象。
-- **创建与调色**：新建空白、填充与调整图层；方块取色、按形状区分的联动感知配色与渐变、形状填充／描边复制并批量粘贴，羽化／密度支持拖动和数值输入；实时预览、取消恢复及范围见 [Wiki](https://github.com/mianxiu/15100px-menu/wiki/Shape-paint-clipboard)。
+- **创建与调色**：新建空白、填充与调整图层；方块取色、按形状区分的联动感知配色与渐变、形状填充／描边复制并批量粘贴，羽化／密度支持拖动和数值输入；实时改色后可直接移动，取消恢复及范围见 [Wiki](https://github.com/mianxiu/15100px-menu/wiki/Shape-paint-clipboard)。
 - **版本自动自检**：版本或能力变化后自动检查、异常留证，在后台查看与导出；[范围与限制](https://github.com/mianxiu/15100px-menu/wiki/Version-health)。
 - **独立后台管理**：下拉配置快捷键，管理本地插件、检查更新、查看任务和导出诊断；菜单与后台跟随 PS 明暗主题。
 

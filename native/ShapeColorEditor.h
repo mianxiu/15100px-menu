@@ -1,7 +1,7 @@
 #include "PerceptualColor.h"
 // Frame-coalesced paint and mask updates share one rollbackable transaction.
 struct ShapeColorEditor {
-    bool available=false,dirty=false,vector=true,livePreview=false,batchMask=false;
+    bool available=false,dirty=false,vector=true,livePreview=false,batchMask=false,moveSubmitted=false;
     int batchCount=0;Json maskValues,maskMixed;
     int channel=0,stop=0;
     Json original,draft,patterns,lastPreview;
@@ -20,7 +20,7 @@ struct ShapeColorEditor {
     std::array<RECT,3> rgbBounds{};
     float gradientDragOffset=0;
     void prepare(const Json& data) {
-        maskPreviewStarted=false;shapeDraftOnly=false;livePreview=false;batchMask=false;batchCount=0;maskValues=maskMixed=Json::object();
+        maskPreviewStarted=false;shapeDraftOnly=false;livePreview=false;moveSubmitted=false;batchMask=false;batchCount=0;maskValues=maskMixed=Json::object();
         lastPreview=Json();maskInputIDs={};rgbInputIDs={};rgbBounds={};methodExplicit={};
         available=false;dirty=false;bounds=maskBounds=copyBounds=gradientBounds=featherBounds=densityBounds=hexBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
         if(!data.value("available",false))return;
@@ -92,14 +92,25 @@ static void shapeItemTip(int index,bool allowHover=true) {
 static Json testedShapePaint;
 static size_t testedShapeGrants=0;
 static std::vector<Json> testedMaskEvents;
-static void emitMaskPreview(bool commit=false) {
+static bool previewMoveAllowed() {
+    return maskPreviewStarted && shapeEditor.available && shapeEditor.livePreview && !shapeEditor.batchMask && !shapeEditor.moveSubmitted &&
+        holdMode && panelKind==2 && layerAware && layerKind==6 && layerCount==1 && allowed && !taskBusy && !busyFeedback &&
+        !inputFocused && !pieAnimating && !layerLocked && !layerBackground && !layerCrossParents && shapeEditor.valid();
+}
+static void emitMaskPreview(bool commit=false,const char* afterAction=nullptr) {
     if(!shapeEditor.livePreview)return;
     maskPreviewStarted=true;
     shapeEditor.lastPreview=shapeEditor.draft;
     Json event={{"type","action"},{"action",commit?"mask.preview.commit":"mask.preview.update"},
         {"session",menuEpoch},{"params",shapeEditor.draft}};
+    if(afterAction)event["after_action"]=afterAction;
     if(selfTest){testedMaskEvents.push_back(event);return;}
     std::cout<<event.dump()<<std::endl;
+}
+static void sendPreviewMove(const char* action) {
+    shapeEditor.moveSubmitted=true;
+    if(!selfTest && backendParent)AllowSetForegroundWindow(backendParent);
+    emitMaskPreview(true,action);
 }
 static std::string testedCopiedHex;
 static std::string shapeHex(const Json& rgb) {

@@ -32,7 +32,7 @@ class PreviewPendingHint {
         std::string s=stage=="unknown"?"等待原操作最终结果":stage=="release"?"释放点击保护":stage=="read"?"读取图层":stage=="write"?"写入调整":stage=="verify"?"核验图层":
             stage=="redraw"?"刷新画布":stage=="restore"?"恢复原值":stage=="restore-verify"?"核验恢复结果":
             stage=="restore-redraw"?"刷新恢复后的画布":stage=="cancel-wait"?"取消中 · 等待当前步骤":
-            stage=="commit"?"确认调整":stage=="latest"?"应用最新调整":"等待预览收尾";
+            stage=="move"?"移动图层":stage=="commit"?"确认调整":stage=="latest"?"应用最新调整":"等待预览收尾";
         int total=state.value("total",0),done=state.value("done",0);
         if(total>0 && done>=0 && done<=total && total<=256)s+=" · "+std::to_string(done)+"/"+std::to_string(total);
         if(now()-changed>3000)s+=" · 等待 Photoshop";
@@ -48,11 +48,12 @@ class PreviewPendingHint {
         auto outline=CreatePen(PS_SOLID,std::max(1,MulDiv(1,dpi,96)),border);auto oldPen=SelectObject(dc,outline);
         int rounding=MulDiv(int(figmaCornerRadius*2),dpi,96);
         RoundRect(dc,0,0,r.right,r.bottom,rounding,rounding);
+        const int stroke=int(std::lround(activity::stroke(float(radius),float(dpi)/96)));
+        auto track=CreatePen(PS_SOLID,stroke,border);SelectObject(dc,track);
         Ellipse(dc,cx-radius,cy-radius,cx+radius,cy+radius);
-        auto ink=CreatePen(PS_SOLID,std::max(1,MulDiv(2,dpi,96)),accent);SelectObject(dc,ink);
-        float angle=float(now()%1200)*(6.2831853f/1200.f)-1.5707963f;
-        POINT points[13];for(int i=0;i<13;++i){float a=angle+i*(1.5707963f/12);points[i]={cx+LONG(std::lround(cosf(a)*radius)),cy+LONG(std::lround(sinf(a)*radius))};}
-        Polyline(dc,points,13);SelectObject(dc,oldPen);DeleteObject(outline);DeleteObject(ink);SelectObject(dc,oldBrush);
+        auto ink=CreatePen(PS_SOLID,stroke,accent);SelectObject(dc,ink);
+        POINT points[activity::segments+1];for(int i=0;i<=activity::segments;++i){float a=activity::angle(now(),i);points[i]={cx+LONG(std::lround(cosf(a)*radius)),cy+LONG(std::lround(sinf(a)*radius))};}
+        Polyline(dc,points,activity::segments+1);SelectObject(dc,oldPen);DeleteObject(outline);DeleteObject(track);DeleteObject(ink);SelectObject(dc,oldBrush);
         auto oldFont=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,text);
         RECT bounds={pad*2+diameter,0,r.right-pad,r.bottom};auto s=label();
         DrawTextW(dc,s.c_str(),-1,&bounds,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);

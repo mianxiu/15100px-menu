@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 193代码／构建／实际入口：单选实时预览后可直接选置顶／置底／上移／下移，先确认颜色，再校验原目标移动；重复拒绝、两步各自撤销。中心／关闭提示共用1100ms环形动画，真实阶段／计数保留，工作流未结束不提前显示完成。458后端、双核原生（固定／长按8组合及GDI四主题）、32普通渲染＋128提示纹理＋16运行帧通过；PS24.0.1六轮复合流程（低CPU四移动、正常对照、换目标拒绝）及两轮原预览确认／取消通过，选层／内容／路径／顺序／撤销及资源恢复核验。原生模拟与真实接口分开，实体键鼠／提示音与其他硬件仍待验；一次前台变化安全停止未计通过。实际193／UXP43，无需重启PS；原稿／配置／历史未知记录保留。证据.runtime/recovery193/runtime.json、chain-matrix.json、live-matrix.json、tests193-final.log、native193-low.log、move193-tips/pixels.json、activity193/pixels.json。
+- [ ] 193公开交付：源码／标签、Wiki七页、公开下载与限流备用通道核验，随后仅保留最新版Release。
+
 - [x] 192分离取色实际入口：色相条与饱和度／明度方块独立，四点标记置于条外，星形强调色及命中已移除；tip就近上下避让，仅解释配色含义。实际192／UXP43与原生组件匹配；双核完整矩阵＋64悬停场景、四主题32导出＋112张提示像素核对通过，48个标记提示最远17.03逻辑单位。初次8个过远案例留证，修复后重跑。最终两轮PS24.0.1低CPU取消／正常确认一次撤销通过，PS未重启、原稿／配置／资源和旧未知记录保留；Python452／前端40沿用未改基线，实体键鼠／画布与其他硬件仍待验。证据.runtime/recovery192/runtime.json、live-matrix.json、native192-low.log、tooltip192/proximity.json、pixels.json、tooltip192-first-position-failure.json。
 - [x] 192公开交付：源码／标签及Wiki五页已推送并公开核验，ZIP／SHA／更新清单匿名下载与冻结更新器API403备用通道真实下载通过。只保留192 Release；191附件已本地备份、标签／源码历史保留。实际192／UXP43及新原生组件匹配，dist仅当前发行物；实体画布／键鼠与其他硬件按待验收项保留。证据.runtime/recovery192/runtime.json、release-0.4.192-public-verification.json、manifest192-verification.json、fallback192-live.json、wiki192-public.json、release192-cleanup.json。
 

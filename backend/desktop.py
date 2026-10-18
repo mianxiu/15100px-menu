@@ -387,7 +387,8 @@ class Desktop:
                 elif event.get('type') == 'action':
                     logging.info('Dear ImGui menu action: %s', event['action'])
                     self.notify({'action':event['action'], 'menu_epoch':event.get('session',self.menu_epoch),
-                        **({'params':event['params']} if 'params' in event else {})})
+                        **({'params':event['params']} if 'params' in event else {}),
+                        **({'after_action':event['after_action']} if 'after_action' in event else {})})
                 elif event.get('type') == 'selection':
                     logging.info('Menu release decision: %s', event)
         except Exception:
@@ -411,6 +412,12 @@ class Desktop:
                 event={**event,'data':{**event['data'],'photoshop':{**event['data']['photoshop'],
                     'busy':False,'uxp_recovery':{},'mask_preview':True}}}
             elif event.get('type')=='operation':event={**event,'busy':False}
+        if preview and getattr(preview,'after_action',None) and preview.phase=='commit' and not preview.closed:
+            # A verified first step is not completion of the compound gesture.
+            # Task/status callbacks must not flash an idle/check state between it
+            # and the reserved movement or while releasing its click guard.
+            if event.get('type')=='operation':event={**event,'busy':True}
+            elif event.get('type')=='status':event={**event,'data':{**event['data'],'photoshop':{**event['data']['photoshop'],'busy':True}}}
         if event.get('type')=='preview.progress':
             self.preview_pending_feedback()
         elif event.get('type')=='mask.preview' and not event.get('active'):
@@ -422,7 +429,7 @@ class Desktop:
         with self.window_lock:
             preview=getattr(self,'mask_preview',None)
             guard=self.preview_input_guard
-            active=bool((guard or preview and not preview.closed and not getattr(preview,'execution_exited',False) and preview.phase in ('commit','cancel'))
+            active=bool((guard or preview and not preview.closed and (not getattr(preview,'execution_exited',False) or getattr(preview,'continuation_running',False)) and preview.phase in ('commit','cancel'))
                         and not self.visible and (guard or self.settings['enabled'])
                         and self.target and getattr(self,'preview_hint_anchor',None))
             value={'type':'preview.pending','active':active}
