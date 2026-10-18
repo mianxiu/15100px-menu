@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 175实际入口／UXP39：保留174选层让行与关闭隐藏，补齐大菜单已接受只读完成窗口。401回归、18脚本、105真实事务（79低CPU／26正常）、4保护、真实过期回执及128层完整菜单通过；16层单选169–238ms，128层多选转单选678–1440ms。实时预览、取消恢复和一次撤销保持。证据.runtime/recovery175/runtime.json、live-matrix.json。
-- [ ] 175公开交付：等待Release下载／备用更新／Wiki匿名核验及旧Release清理。
+- [x] 175公开交付：源码／标签与Release已推送，ZIP／SHA／更新清单匿名下载和冻结更新器API403备用通道通过，Wiki已同步核验；只保留175 Release，172旧版及174未公开草稿附件已本地备份，Git标签／源码历史保留。实际175／UXP39。证据.runtime/recovery175/runtime.json、release-0.4.175-public-verification.json、fallback175-live.json、wiki175-public.json、release175-cleanup.json。
 - [ ] 175实体Caps／鼠标、真实低配／现代PS验收；128层完整菜单与预览仍需等待。
 
 - [x] 174选层读取让行／关闭反馈：基础与颜色／蒙版小批只读让行，关闭立即隐藏且迟到提示不重弹，合法未执行过期请求持久失败回执。实际174／UXP38与dist一致；400回归、18脚本、109真实PS事务（83低CPU／26正常）、4保护与1真实过期检查通过。16层单选161–215ms，128层多选转单选656–1410ms；不是实体键到屏幕耗时。实时预览、取消恢复和一次撤销保持。原51a59a…未知记录及早期失败原样保留，用户授权后正常重载，无强杀。证据.runtime/recovery174/runtime.json、live-matrix.json。
