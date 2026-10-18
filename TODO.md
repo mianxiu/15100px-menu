@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 核验现有180的Esc取消颜色／羽化：菜单尚未确认时恢复本次填充、描边和羽化／密度，长按Caps直接Esc或固定后Esc均取消，后续松Caps不确认；已确认完成用一次撤销。原生路由矩阵、相关29回归及一个PS24.0.1低CPU接口事务（两次实时改色／描边／蒙版后恢复全部属性与活动历史位置）通过；配置／原稿／资源保持。菜单实测因写前焦点保护拒绝未计通过，未模拟实体Esc；本次仅核验和补说明，运行程序仍180／UXP40，不重新发布。证据.runtime/escape180-key.cpp、escape180-regression.log、escape180-engine-1792317809681686100/verified.json。
+
 - [x] 180收尾点击保护与持续小状态：按用户选择实现冻结图层列表点击，不排队、不补点，宿主写前确认原生配置生效，原事务确定终态及保护解除确认后撤下提示；未知／进度中断继续等待。428回归、四主题16渲染、EXE启动／重启、两个低CPU10层组件事务及一个正常10层执行端对照通过，实时预览、取消恢复、一次撤销、内容／路径／顺序及配置／原稿保持。用户本机原场景确认“不再响，提示结束后消失，选层正常”。实际180／UXP40；前台暂停和写前拒绝轮次未计通过。证据.runtime/recovery180/runtime.json、live-matrix.json、manual180-acceptance.json。
 - [x] 180公开交付：源码／标签、Release已推送，安装包／SHA／最新更新清单匿名下载、冻结更新器API403备用通道及Wiki三页核验通过；只保留180 Release，177附件已本地备份，Git标签与历史保留。实际180／UXP40，用户原场景实体反馈通过。证据.runtime/recovery180/runtime.json、release-0.4.180-public-verification.json、fallback180-live.json、wiki180-public.json、release180-cleanup.json。
 
