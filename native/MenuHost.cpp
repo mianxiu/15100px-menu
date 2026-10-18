@@ -2518,10 +2518,23 @@ int main() {
                         if(harmony.layoutBuilds!=layouts)throw std::runtime_error("Idle wheel rebuilt its handle layout");
                         for(int i=0;i<perceptual::wheelCount;++i){
                             if(harmony.hit(harmony.points[i],uiScale)!=i)throw std::runtime_error("Simultaneous wheel handles overlap or cannot be selected: "+std::to_string(i));
-                            for(int j=0;j<i;++j)if(std::hypot(harmony.points[i].x-harmony.points[j].x,harmony.points[i].y-harmony.points[j].y)<(harmony.markerRadius(i)+harmony.markerRadius(j)+3.5f)*uiScale)
+                            for(int j=0;j<i;++j)if(std::hypot(harmony.points[i].x-harmony.points[j].x,harmony.points[i].y-harmony.points[j].y)<(harmony.markerExtent(i)+harmony.markerExtent(j)+5.f)*uiScale)
                                 throw std::runtime_error("Wheel handles lost visible separation");
                         }
                     }
+                if(harmonyMarkerRoles[0]!=harmonyMarkerRoles[1] || harmonyMarkerRoles[1]!=harmonyMarkerRoles[2] ||
+                   harmonyMarkerRoles[3]==harmonyMarkerRoles[4] || harmonyMarkerRoles[6]!=harmonyMarkerRoles[7] ||
+                   harmonyMarkerRoles[8]==harmonyMarkerRoles[3])throw std::runtime_error("Harmony role shapes lost their semantic grouping");
+                // Polygon corners extend beyond the old circular hit boundary.
+                for(int i=0;i<perceptual::wheelCount;++i){
+                    const auto& g=PerceptualPickerState::geometry(i);const float u=PerceptualPickerState::markerRadius(i)/4.5f;
+                    for(int n=0;n<g.count;++n){
+                        ImVec2 vertex={100+(g.points[n].x-4.5f)*u,100+(g.points[n].y-4.5f)*u};
+                        if(!PerceptualPickerState::markerHit(i,{100,100},vertex,1))throw std::runtime_error("Visible marker vertex has no hit");
+                    }
+                    if(PerceptualPickerState::markerHit(i,{100,100},{100+PerceptualPickerState::markerExtent(i)+3.f,100},1))
+                        throw std::runtime_error("Marker hit extends beyond its visible padded bounds");
+                }
                 Json shapeFixture={{"available",true},{"live_preview",true},{"revision","test:1"},
                     {"mask",{{"feather",0},{"density",100}}},
                     {"fill",{{"kind","solid"},{"enabled",true},{"rgb",{12,34,56}}}},

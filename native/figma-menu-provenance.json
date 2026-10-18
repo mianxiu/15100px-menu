@@ -364,7 +364,7 @@
   ],
   "extension_source": {
     "file": "native/figma-inspired-icons.json",
-    "sha256": "ebd75941bd4f9caf8f003467133d1c0682e8bc965b9b4eb66f99c86b7e4c58d2",
+    "sha256": "91979835d00075e40f957af6c013d18c75559184993aa7a6633d0f60bbe1dea6",
     "reference_nodes": [
       "809:619",
       "346:6",
@@ -395,5 +395,58 @@
       18
     ],
     "style": "Actual aspect ratio, same grey fill and one grid-unit inside border; clipboard cap uses matching linework"
+  },
+  "harmony_markers": {
+    "authorship": "Project-authored semantic color handles, adapted to the existing nine-unit Figma family; not original export components.",
+    "grid": 9,
+    "stroke": 1,
+    "root_size": [
+      18,
+      24
+    ],
+    "roles": [
+      "circle",
+      "circle",
+      "circle",
+      "diamond",
+      "triangle-up",
+      "triangle-down",
+      "square",
+      "square",
+      "star"
+    ],
+    "assets": [
+      {
+        "name": "circle",
+        "asset": "native/figma-inspired-assets/color-harmony-circle.svg",
+        "sha256": "84adf8f21c8f8284a112d8a476531ba20b159d1c84f06401bfcd8f4c16e2b863"
+      },
+      {
+        "name": "diamond",
+        "asset": "native/figma-inspired-assets/color-harmony-diamond.svg",
+        "sha256": "22881515bbd464c16c958b2b0759ddfb5f3bf967f279ee767683887d6086a28f"
+      },
+      {
+        "name": "triangle-up",
+        "asset": "native/figma-inspired-assets/color-harmony-triangle-up.svg",
+        "sha256": "cc934010ec32c9a8fd80323295a1ab6074bff7d546102232320e5951e707bc40"
+      },
+      {
+        "name": "triangle-down",
+        "asset": "native/figma-inspired-assets/color-harmony-triangle-down.svg",
+        "sha256": "f60d63e0499be97ba859dbf8bd78ebf64418c5283377a5f8bfc1ea708a9db527"
+      },
+      {
+        "name": "square",
+        "asset": "native/figma-inspired-assets/color-harmony-square.svg",
+        "sha256": "c4d01ad5e442d9c69add432f92ed080595de28553eb9b6400c8e622b86e37b17"
+      },
+      {
+        "name": "star",
+        "asset": "native/figma-inspired-assets/color-harmony-star.svg",
+        "sha256": "740623c0988438a811efa209a5396e7f0ca1d1c431c838f5f4b08b0a218a6c24"
+      }
+    ],
+    "runtime": "Compiled geometry only; same source drives fill, hit testing and spacing. No runtime asset loading."
   }
 }
