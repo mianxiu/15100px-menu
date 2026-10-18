@@ -230,7 +230,7 @@
     function rollback() { restoring=true;progress('restore',0,0,true);target();var current=layerDescriptor(),dirty=changed || !same(raw(current),raw(baseline)) || prepared.raw.vector && !maskClose(mask(current),originalMask);doc.activeHistoryState=originalHistory;if(dirty){progress('redraw',0,0,true);app.refresh();redraws++;}progress('verify',0,1,true);var d=invariants();if(!same(raw(d),raw(baseline)) || prepared.raw.vector && !maskClose(mask(d),originalMask))throw Error('Legacy rollback readback mismatch');progress('verify',1,1,true); }
     function batchRun() {
         var records=[],batchHistory=null,batchStarted=false,batchChanged=false,batchCommit=false,batchSeq=0,batchUpdates=0,batchRedraws=0,batchLatest=request.paint;
-        var batchAbort={},actionResidue='',batchNativeCalls=0;
+        var batchAbort={},actionResidue='',batchNativeCalls=0,nativeReads=false;
         var keys=['layerKind','adjustment','AGMStrokeStyleInfo','hasVectorMask','hasUserMask','userMaskFeather','userMaskDensity'];
         var ids=request.target.layer_ids.slice().sort(function(a,b){return a-b;}),lease=new Date().getTime()+4000;
         var selectionStream=null,selectionIDs=ids.join(',');
@@ -250,12 +250,65 @@
             selectionStream=stream;
         }
         function unlocked(l){var kind=l.typename;while(kind==='ArtLayer'||kind==='LayerSet'){if(l.allLocked || kind==='ArtLayer' && (l.pixelsLocked||l.positionLocked||l.transparentPixelsLocked||l.isBackgroundLayer))throw Error('Batch layer locked');l=l.parent;kind=l.typename;}}
-        function batchTarget(){batchIdentity();for(var i=0;i<records.length;i++)unlocked(records[i].layer);}
+        function batchTarget(){batchIdentity();if(nativeReads){nativeLocks(null);return;}for(var i=0;i<records.length;i++)unlocked(records[i].layer);}
         function batchValidate(p) {
             if(!p || p.mask_batch!==true || p.revision!==request.paint.revision || !p.mask || p.fill || p.stroke)throw Error('Invalid batch parameters');
             var n=0;for(var k in p.mask)if(p.mask.hasOwnProperty(k)){if(k!=='feather'&&k!=='density' || !range(p.mask[k],0,k==='feather'?1000:100))throw Error('Invalid batch mask');n++;}if(!n)throw Error('Empty batch mask');
         }
         function desc(id){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);return executeActionGet(r);}
+        // Native reads are scoped to ONE synchronous validation. No DOM proxy,
+        // descriptor, parent or lock survives a yield or a later validation.
+        // Small selections keep the original path. Scan the complete fresh AM
+        // tree (including section ends) to prove parents and sibling order.
+        function nativeLocked(d,group){
+            var locks=d.getObjectValue(s('layerLocking'));
+            if(locks.getBoolean(s('protectAll')))throw Error('Batch layer locked');
+            if(!group && (locks.getBoolean(s('protectComposite')) || locks.getBoolean(s('protectPosition')) || locks.getBoolean(s('protectTransparency')) || d.getBoolean(s('background'))))throw Error('Batch layer locked');
+        }
+        function nativeLocks(members){
+            var seen={};
+            function check(id){
+                if(seen[id]===1)throw Error('Invalid batch lock ancestry');if(seen[id]===2)return;var d=desc(id);
+                if(d.getInteger(s('layerID'))!==id)throw Error('Batch lock identity changed');
+                var section=name(d.getEnumerationValue(s('layerSection')));
+                if(section!=='layerSectionContent' && section!=='layerSectionStart')throw Error('Batch layer missing');
+                nativeLocked(d,section==='layerSectionStart');seen[id]=1;
+                var parent=d.getInteger(s('parentLayerID'));if(parent>0)check(parent);seen[id]=2;
+            }
+            if(members===null){for(var j=0;j<records.length;j++)check(records[j].original.id);}
+            else for(var j=0;j<members.length;j++)check(records[members[j]].original.id);
+        }
+        function nativeTree(){
+            var r=new ActionReference();r.putProperty(s('property'),s('numberOfLayers'));r.putIdentifier(s('document'),request.target.document_id);
+            var count=executeActionGet(r).getInteger(s('numberOfLayers')),first=1;
+            try{doc.backgroundLayer;first=0;}catch(_){}
+            var tree={},orders={},stack=[],total=count+(first===0?1:0);
+            if(count<1 || total>4096)throw Error('Native batch tree range unavailable');
+            for(var index=count;index>=first;index--){
+                r=new ActionReference();r.putIndex(s('layer'),index);r.putIdentifier(s('document'),request.target.document_id);
+                var d=executeActionGet(r),id=d.getInteger(s('layerID')),section=name(d.getEnumerationValue(s('layerSection'))),parent=d.getInteger(s('parentLayerID'));
+                if(d.getInteger(s('itemIndex'))!==index-first+1)throw Error('Native batch tree index changed');
+                if(section==='layerSectionEnd'){
+                    if(!stack.length || stack[stack.length-1]!==parent)throw Error('Unbalanced native batch tree');stack.pop();continue;
+                }
+                if((section!=='layerSectionContent' && section!=='layerSectionStart') || id<=0 || tree[id])throw Error('Invalid native batch tree');
+                if(parent<=0)parent=null;
+                if(parent!==(stack.length?stack[stack.length-1]:null))throw Error('Native batch parent changed');
+                var key='p'+parent;if(!orders.hasOwnProperty(key))orders[key]=[];orders[key].push(id);
+                tree[id]={id:id,parent:parent,descriptor:d,group:section==='layerSectionStart'};
+                if(section==='layerSectionStart')stack.push(id);
+            }
+            if(stack.length)throw Error('Unbalanced native batch tree');
+            var checked={};function check(id){if(checked[id])return;var row=tree[id];if(!row)throw Error('Batch target missing');nativeLocked(row.descriptor,row.group);checked[id]=true;if(row.parent!==null)check(row.parent);}
+            for(var j=0;j<ids.length;j++)check(ids[j]);
+            batchIdentity();return {tree:tree,orders:orders};
+        }
+        function nativeMember(id,snapshot,nativeOnly){
+            var row=snapshot.tree[id];if(!row)throw Error('Batch target missing');var d=row.descriptor;
+            if(!d.hasKey(s('hasVectorMask'))||!d.getBoolean(s('hasVectorMask')))throw Error('Vector mask missing');
+            var path=batchPath(id);return {id:id,mask:mask(d),content:nativeOnly?null:contents(d),path:nativeOnly?null:item(path,s('pathContents')),
+                content_bytes:contentStream(d),path_bytes:path.toStream(),parent_id:row.parent,order:snapshot.orders['p'+row.parent]};
+        }
         function batchPath(id){var r=new ActionReference();r.putProperty(s('property'),s('pathContents'));r.putEnumerated(s('path'),s('path'),s('vectorMask'));r.putIdentifier(c('Lyr '),id);var p=executeActionGet(r);return p;}
         function contents(d){var v={};for(var j=0;j<keys.length;j++){var k=s(keys[j]);v[keys[j]]=d.hasKey(k)?item(d,k):null;}return v;}
         // Preserve all invariant values and their native types without decoding
@@ -290,7 +343,7 @@
         // of widening the tolerance. A one-double descriptor ends in its value.
         function maskDoubleHex(value){var d=new ActionDescriptor();d.putDouble(s('value'),value);var bytes=d.toStream().slice(-8),hex='';for(var i=0;i<bytes.length;i++)hex+=('00'+(bytes.charCodeAt(i)&255).toString(16)).slice(-2);return hex;}
         function samePreparedMember(a,b){var exact=b.mask_exact;return sameMember(a,b,b.mask) && exact && /^[0-9a-f]{16}$/.test(exact.feather) && maskDoubleHex(a.mask.feather)===exact.feather && Math.round(a.mask.density*255/100)===exact.density;}
-        function verify(wanted){progress('verify',0,records.length,true);batchTarget();var orders={};for(var j=0;j<records.length;j++){if(!sameMember(readMember(records[j].layer,orders,true),records[j].original,wanted[j]))throw Error('Batch mask/content/path/order mismatch');progress('verify',j+1,records.length);}}
+        function verify(wanted){progress('verify',0,records.length,true);var snapshot=null;if(nativeReads){batchIdentity();snapshot=nativeTree();}else batchTarget();var orders={};for(var j=0;j<records.length;j++){var current=snapshot?nativeMember(records[j].original.id,snapshot,true):readMember(records[j].layer,orders,true);if(!sameMember(current,records[j].original,wanted[j]))throw Error('Batch mask/content/path/order mismatch');progress('verify',j+1,records.length);}}
         function setter(id,key,value){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);r.putIdentifier(s('document'),request.target.document_id);var d=new ActionDescriptor(),v=new ActionDescriptor();d.putReference(c('null'),r);v.putUnitDouble(s(key==='feather'?'vectorMaskFeather':'vectorMaskDensity'),c(key==='feather'?'#Pxl':'#Prc'),value);d.putObject(c('T   '),c('Lyr '),v);return d;}
         function set(id,key,value){executeAction(c('setd'),setter(id,key,value),DialogModes.NO);}
         // Native action containers amortize per-executeAction dispatch. Only
@@ -313,7 +366,7 @@
                 app.load(file);loaded=true;
                 // Loading can yield to PS. Recheck fresh identity and every
                 // affected layer/ancestor immediately before the bounded play.
-                batchIdentity();for(var j=0;j<members.length;j++){var record=records[members[j]];if(record.layer.id!==record.original.id)throw Error('Batch target changed');unlocked(record.layer);}
+                batchIdentity();if(nativeReads)nativeLocks(members);else for(var j=0;j<members.length;j++){var record=records[members[j]];if(record.layer.id!==record.original.id)throw Error('Batch target changed');unlocked(record.layer);}
                 batchChanged=true;for(var j=0;j<members.length;j++)records[members[j]].touched=true;
                 app.doAction('Apply',name);batchNativeCalls++;
             }finally{
@@ -373,9 +426,14 @@
             if(!app.documents.length || ids.length<2 || ids.length>128)throw Error('Invalid batch selection');doc=app.activeDocument;batchTarget();batchValidate(request.paint);
             if(prepared.before.revision!==request.paint.revision || !same(prepared.identity,request.target))throw Error('Prepared batch identity changed');
             var wantedIDs={};for(var j=0;j<ids.length;j++)wantedIDs[ids[j]]=true;
-            var found={};function walk(layers){var n=layers.length;for(var j=0;j<n;j++){var l=layers[j],id=l.id;if(wantedIDs[id])found[id]=l;if(l.typename==='LayerSet')walk(l.layers);}}walk(doc.layers);
+            // Large trees retain the established path rather than imposing a new
+            // document-size limit. The native path is a bounded optimization.
+            var sizeRef=new ActionReference();sizeRef.putProperty(s('property'),s('numberOfLayers'));sizeRef.putIdentifier(s('document'),request.target.document_id);
+            nativeReads=ids.length>=8 && executeActionGet(sizeRef).getInteger(s('numberOfLayers'))<4096 && request.legacy_dom_reads!==true;
+            var snapshot=nativeReads?nativeTree():null;
+            var found={};function walk(layers){var n=layers.length;for(var j=0;j<n;j++){var l=layers[j],id=l.id;if(wantedIDs[id])found[id]=l;if(l.typename==='LayerSet')walk(l.layers);}}if(!nativeReads)walk(doc.layers);
             progress('read',0,ids.length,true);stage='batch-baseline';var baselineOrders={};for(var j=0;j<ids.length;j++){
-                var l=found[ids[j]];if(!l)throw Error('Batch target missing');var baseline=readMember(l,baselineOrders);
+                var l=nativeReads?{id:ids[j]}:found[ids[j]];if(!l)throw Error('Batch target missing');var baseline=nativeReads?nativeMember(ids[j],snapshot,false):readMember(l,baselineOrders);
                 var matches=prepared.native_batch_validation===2?samePreparedMember(baseline,prepared.members[j]):sameMember(baseline,prepared.members[j],prepared.members[j].mask);
                 if(!matches)throw Error('Batch changed before native dispatch');records.push({layer:l,original:baseline,touched:false});progress('read',j+1,ids.length);
             }
@@ -384,7 +442,7 @@
             stage='batch-history';try{doc.suspendHistory('批量羽化／密度','$.global['+encode(key)+']()');}finally{delete $.global[key];}
             if(!batchCommit)rollbackBatch();else {progress('commit',0,0,true);verify(records.mapMask);}
             var finalMasks=[],count=0;for(var j=0;j<records.length;j++){finalMasks.push({id:records[j].layer.id,mask:batchCommit?records.mapMask[j]:records[j].original.mask});if(batchCommit&&records[j].touched)count++;}
-            var value={verified:true,mask_batch:true,count:count,placement_moves:0,layer_ids:ids,paint:batchLatest,masks:finalMasks,preview:{native_batches:batchNativeCalls,updates:batchUpdates,redraws:batchRedraws,last_seq:batchSeq,engine:'standalone-extendscript'}};
+            var value={verified:true,mask_batch:true,count:count,placement_moves:0,layer_ids:ids,paint:batchLatest,masks:finalMasks,preview:{native_reads:nativeReads,native_batches:batchNativeCalls,updates:batchUpdates,redraws:batchRedraws,last_seq:batchSeq,engine:'standalone-extendscript'}};
             if(!batchCommit){value.cancelled=true;value.rollback_verified=true;}return envelope(value);
         }catch(error){var unknown=false;if(batchStarted){try{rollbackBatch();}catch(_){unknown=true;}}
             return {schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'failed',error:String(error),stage:stage,result_unknown:unknown||!!actionResidue,action_residue:actionResidue};}

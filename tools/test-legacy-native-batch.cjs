@@ -8,7 +8,7 @@ function fixture(fault=''){
  class Desc {constructor(){this.values={};}putReference(k,v){this.values[k]=v;}putUnitDouble(k,...v){this.values[k]=v;}putObject(k,...v){this.values[k]=v;}toStream(){return '\0\0\0\x10'+JSON.stringify(this.values);} }
  class File {constructor(path){this.path=path;}get exists(){return files.has(this.path);}open(){events.push('open');return fault!=='open';}write(v){files.set(this.path,v);return fault!=='write';}close(){}remove(){events.push('remove');files.delete(this.path);return true;} }
  const box={request:{id:'owned',session:'session',token:'secret',target:{document_id:7}},folder:'test',progressFrame:3,
-  s:v=>v,c:v=>v,ActionReference:Ref,ActionDescriptor:Desc,File,DialogModes:{NO:0},records,batchChanged:false,batchNativeCalls:0,actionResidue:'',batchAbort:abort,
+  nativeReads:false,s:v=>v,c:v=>v,ActionReference:Ref,ActionDescriptor:Desc,File,DialogModes:{NO:0},records,batchChanged:false,batchNativeCalls:0,actionResidue:'',batchAbort:abort,
   range:(v,lo,hi)=>typeof v==='number'&&v>=lo&&v<=hi,
   batchIdentity(){events.push('identity');if(fault==='identity')throw Error('changed');},
   unlocked(){events.push('lock');if(fault==='lock')throw Error('locked');},
@@ -37,6 +37,14 @@ for(const fault of ['open','write','load','identity','lock','play','delete']){
  if(['identity','lock','play'].includes(fault)){assert(f.events.includes('delete'));assert.equal(f.box.actionResidue,'');assert.equal(f.files.size,0);}
  if(['load','delete'].includes(fault))assert(f.box.actionResidue); // conservative unknown, no retry
  if(['open','write','load','identity','lock'].includes(fault))assert(!f.events.includes('play'));
+}
+{
+ const f=fixture();f.box.nativeReads=true;
+ f.box.nativeLocks=members=>{assert.deepEqual([...members],[0]);f.events.push('native-locks');};
+ f.box.unlocked=()=>{throw Error('DOM must not be used on the native path');};
+ f.run();assert(f.events.includes('native-locks'));assert(f.events.includes('play'));
+ const blocked=fixture();blocked.box.nativeReads=true;blocked.box.nativeLocks=()=>{throw Error('fresh ancestor locked');};
+ assert.throws(()=>blocked.run(),/ancestor locked/);assert(!blocked.events.includes('play'));assert.equal(blocked.box.actionResidue,'');
 }
 for(const invalid of ['', 'id','session','token','seq','lease']){
  const f=fixture();const p={id:'owned',session:'session',token:'secret',seq:4,lease_until_ms:Date.now()+2000,phase:'cancel'};
