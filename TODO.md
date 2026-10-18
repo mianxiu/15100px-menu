@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 186感知色轮／渐变代码、构建、实际运行：OKLCH／Oklab联动圆点、五种配色关系、感知明度与色块应用；新建／修改渐变默认感知，显式切换插值在本次菜单保留。PS原生填充与描边插值进入版本校验及写后读回；颜色预览首次提交即要求UXP42，防止中途切换渐变时旧执行端忽略插值参数；羽化单独修改保留渐变。436回归、40前端、双核原生完整交互、四主题24渲染及冻结EXE启动／重启通过；PS24.0.1真实事务4组（双核／Below Normal 3、正常1），覆盖感知填充＋描边确认、取消、仅改蒙版、一次撤销与路径／顺序恢复；资源已还原。实际186／UXP42、入口与原生／JSX资源匹配，原稿备份后恢复、配置与历史未知记录保留。早期色域精度和构建并发占用失败已留档修正，不计通过。实体Caps／鼠标到画布视觉、其他PS与真实办公i5／集显仍待对应验收。证据.runtime/recovery186/runtime.json、live-matrix.json、tests186.log、native186-low.log、ui186-verified.json。
-- [ ] 186公开交付：待源码／标签、Wiki、匿名安装包／SHA／清单及API403备用更新核验；新下载通过后只保留186 Release，184附件与Git标签／历史保留。
+- [x] 186公开交付：源码／标签及Wiki五页和侧栏已推送，安装包／SHA／清单匿名下载与冻结更新器API403备用通道真实下载核验通过。仅保留186 Release；184全部附件本地备份、Git标签／源码历史保留，185的RGB／Hex功能并入本次发行。实际186／UXP42，dist仅保留当前发行物；实体键鼠／画布与其他硬件范围仍按上项待验收。证据.runtime/recovery186/runtime.json、release-0.4.186-public-verification.json、manifest186-verification.json、fallback186-live.json、wiki186-public.json、release186-cleanup.json。
 
 - [x] 185同排RGB／Hex代码／构建／实际入口：RGB共框三段输入，Hex同排独立外框和内嵌复制、固定#／过滤粘贴及自动大写；保留字体并按实际文字测宽，RGB支持拖动和双击输入。434回归、40前端、四主题24渲染、双逻辑处理器／Below Normal原生完整交互及冻结EXE启动／重启通过；覆盖RGB数值、带／不带#的Hex编辑、复制标准格式、预览未额外提交、渐变拖动和既有取消矩阵。实际185／UXP41，组件匹配，PS未重启、原稿／配置／资源／未知记录保持。早期小数像素导致渐变拖动断言失败已对齐修正，未将失败计为通过；实体鼠标和其他硬件视觉待验收。证据.runtime/recovery185/runtime.json、tests185.log、frontend185-test.log、native185-low.log、ui185-verified.json。
 - [x] 185源码／标签及Wiki已同步；RGB／Hex功能合并进入186发布，不单独新增185 Release。185本地构建与恢复副本、Git标签保留，公开附件核验见186交付项。
