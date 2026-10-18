@@ -171,6 +171,9 @@ class Desktop:
         self.layer_monitor=None
         self.layer_context={}
         self.menu_layer_context=None
+        self.preview_hint_serial=0
+        self.preview_hint_value={'type':'preview.pending','active':False}
+        self.preview_hint_at=0
 
     def start(self):
         import win32gui
@@ -339,6 +342,34 @@ class Desktop:
                 event={**event,'data':{**event['data'],'photoshop':{**event['data']['photoshop'],
                     'busy':False,'uxp_recovery':{},'mask_preview':True}}}
             elif event.get('type')=='operation':event={**event,'busy':False}
+        if event.get('type')=='preview.progress':
+            self.preview_pending_feedback()
+        elif event.get('type')=='mask.preview' and not event.get('active'):
+            self.preview_pending_feedback()
+        self._send_menu_event(event)
+
+    def preview_pending_feedback(self):
+        """A separate click-through indicator, never a reopened menu or PS query."""
+        with self.window_lock:
+            preview=getattr(self,'mask_preview',None)
+            active=bool(preview and not preview.closed and preview.phase in ('commit','cancel')
+                        and not self.visible and self.settings['enabled']
+                        and self.target and getattr(self,'preview_hint_anchor',None))
+            value={'type':'preview.pending','active':active}
+            if active:
+                progress=preview.progress(read=False)
+                if progress:
+                    value.update({key:progress[key] for key in ('stage','phase','operation','done','total','frame')})
+                    value.update(epoch=preview.epoch,owner=self.target,anchor=self.preview_hint_anchor)
+                else:
+                    active=False;value['active']=False
+            now=time.monotonic()
+            if value==self.preview_hint_value and (not active or now-self.preview_hint_at<.5):return
+            self.preview_hint_value=dict(value);self.preview_hint_at=now
+            self.preview_hint_serial+=1;value['serial']=self.preview_hint_serial
+        self._send_menu_event(value)
+
+    def _send_menu_event(self, event):
         with self.menu_lock:
             if self.process and self.process.poll() is None:
                 try:
@@ -569,6 +600,10 @@ class Desktop:
         if self.gui.GetForegroundWindow() != foreground or not self._is_photoshop(hwnd):
             raise RuntimeError("Photoshop 焦点已改变，已取消唤出")
         self.visible = True
+        self.preview_hint_anchor=[round(bounds[0]+(max(bounds[2]*.5,min(650*scale,bounds[2]-270*scale))
+            if panel.get('kind')=='layers' and bounds[2]>700*scale else bounds[2]*.5)),
+            round(bounds[1]+bounds[3]*.5)]
+        self.preview_pending_feedback()
         self.restore_pending = False
         context_ready = time.perf_counter()
         logging.info('Menu panel context: %s', panel)
@@ -785,6 +820,7 @@ class Desktop:
                 self.gui.SetForegroundWindow(self.target)
             except Exception:
                 logging.info('Photoshop focus restore refused: before=%s target=%s', foreground, self.target)
+        self.preview_pending_feedback()
         logging.info('Menu hidden: restore=%s before=%s after=%s', restore, foreground, self.gui.GetForegroundWindow())
         return {"message": "操作菜单已收起"}
 

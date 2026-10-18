@@ -162,6 +162,8 @@ async def run_preview(app, preview, target):
                         or not await asyncio.to_thread(app.desktop._scope)):
                     preview.cancel()
                 await asyncio.to_thread(preview.publish)
+                feedback=getattr(app.desktop,'preview_pending_feedback',None)
+                if feedback:feedback()
                 try:
                     progress=await asyncio.to_thread(preview.progress)
                     if progress:progress['epoch']=app.desktop.menu_epoch

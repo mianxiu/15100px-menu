@@ -109,6 +109,67 @@ class MaskPreviewTests(unittest.TestCase):
 
 
 
+class PreviewPendingFeedbackTests(unittest.TestCase):
+    def desktop(self):
+        from backend.desktop import Desktop
+        from unittest.mock import Mock
+        desktop=Desktop('http://localhost',lambda _:None)
+        desktop.target=41;desktop.preview_hint_anchor=[500,300]
+        desktop.mask_preview=MaskPreview(7,paint());desktop._send_menu_event=Mock()
+        return desktop
+
+    def test_hidden_commit_or_cancel_shows_without_reading_files_or_changing_transaction(self):
+        for commit in (True,False):
+            desktop=self.desktop();preview=desktop.mask_preview
+            if commit:preview.update(paint(25,40),commit=True)
+            else:preview.cancel()
+            desktop.visible=True;desktop.preview_pending_feedback()
+            desktop._send_menu_event.assert_not_called()
+            desktop.visible=False
+            before=(preview.phase,preview.seq,preview.paint)
+            with patch.object(Path,'read_text',side_effect=AssertionError('Feedback must not read PS/files')):
+                desktop.preview_pending_feedback()
+            value=desktop._send_menu_event.call_args.args[0]
+            self.assertTrue(value['active']);self.assertEqual(value['owner'],41)
+            self.assertEqual(value['phase'],'commit' if commit else 'cancel')
+            self.assertEqual(value['epoch'],7);self.assertEqual(value['anchor'],[500,300])
+            self.assertEqual((preview.phase,preview.seq,preview.paint),before)
+
+    def test_renewal_is_bounded_and_reopen_terminal_or_disable_hides(self):
+        for stop in ('reopen','terminal','disable'):
+            desktop=self.desktop();desktop.mask_preview.cancel()
+            with patch('backend.desktop.time.monotonic',return_value=10):
+                desktop.preview_pending_feedback();desktop.preview_pending_feedback()
+                self.assertEqual(desktop._send_menu_event.call_count,1)
+            with patch('backend.desktop.time.monotonic',return_value=10.6):desktop.preview_pending_feedback()
+            self.assertEqual(desktop._send_menu_event.call_count,2)
+            if stop=='reopen':desktop.visible=True
+            elif stop=='terminal':desktop.mask_preview.close()
+            else:desktop.settings={**desktop.settings,'enabled':False}
+            desktop.preview_pending_feedback()
+            events=[call.args[0] for call in desktop._send_menu_event.call_args_list]
+            self.assertEqual([v['active'] for v in events],[True,True,False])
+            self.assertEqual([v['serial'] for v in events],[1,2,3])
+
+    def test_no_preview_and_editable_preview_do_not_create_hidden_busy_feedback(self):
+        desktop=self.desktop();desktop.preview_pending_feedback()
+        desktop.mask_preview=None;desktop.preview_pending_feedback()
+        desktop._send_menu_event.assert_not_called()
+
+    def test_closed_progress_race_and_new_menu_epoch_preserve_original_identity(self):
+        desktop=self.desktop();desktop.mask_preview.cancel();desktop.menu_epoch=20
+        desktop.preview_pending_feedback();self.assertEqual(desktop._send_menu_event.call_args.args[0]['epoch'],7)
+        with patch.object(desktop.mask_preview,'progress',return_value=None):desktop.preview_pending_feedback()
+        self.assertFalse(desktop._send_menu_event.call_args.args[0]['active'])
+
+    def test_old_progress_event_cannot_replace_current_preview_phase_or_counts(self):
+        desktop=self.desktop();desktop.menu_epoch=20;desktop.mask_preview.cancel()
+        desktop.mask_preview.progress_value={'stage':'restore-verify','done':2,'total':8,'frame':3,'serial':5}
+        desktop.event({'type':'preview.progress','epoch':6,'phase':'commit','stage':'write','done':7,'total':8,'frame':1})
+        value=desktop._send_menu_event.call_args_list[0].args[0]
+        self.assertEqual((value['epoch'],value['phase'],value['stage'],value['done']),(7,'cancel','restore-verify',2))
+
+
 class PreviewDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def exercise(self,reopen):
         focus=threading.Event();entered=threading.Event();calls=[];events=[]
