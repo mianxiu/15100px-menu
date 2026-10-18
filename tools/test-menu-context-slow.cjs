@@ -14,6 +14,7 @@ async function host(){
    selectionContext:context,selectionContextFresh:async checkpoint=>{if(control.readBlock)await new Promise(r=>{releaseRead=r;});if(checkpoint)await checkpoint();return context();},selectionMatches:()=>!control.changed,interfacePreferences:async()=>({}),
    observeShape:async(context,force,catalog,checkpoint)=>{control.shapes++;if(control.block)await new Promise(r=>{release=r;});if(checkpoint)await checkpoint();control.afterShape=(control.afterShape||0)+1;if(control.shapeFail)throw Error('color unavailable');
      return {available:true,revision:'s:1'};}};
+ labels.captureSelection=labels.capture;
  const sandbox={console:{log(){}},module:{exports:{}},Date:class extends Date{static now(){return control.now;}},setInterval(fn,ms){if(ms===16)poll=fn;},require(name){
    if(name==='./labels.js')return (ps,session)=>{control.session=session;return labels;};if(name==='./probe-config.js')return 'token';
    if(name==='photoshop')return {app:{documents:[]},action:{addNotificationListener(){}}};

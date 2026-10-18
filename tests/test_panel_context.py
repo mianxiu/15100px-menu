@@ -31,7 +31,63 @@ class PanelContextTests(unittest.TestCase):
             if visible:
                 desktop.panel_context.snapshot.assert_not_called()
             else:
-                desktop.panel_context.snapshot.assert_called_once_with(10)
+                self.assertEqual(desktop.panel_context.snapshot.call_args.args,(10,))
+                self.assertTrue(desktop.panel_context.snapshot.call_args.kwargs['accept']())
+
+    def test_slow_background_read_cannot_block_fresh_open_or_overwrite_it(self):
+        import threading
+        detector=PanelContext(Mock())
+        entered,release,done=threading.Event(),threading.Event(),threading.Event()
+        def read(root,clicked,previous):
+            if threading.current_thread().name=='slow-context':
+                entered.set();release.wait(2)
+                return ({'kind':'layers'},clicked,1)
+            return ({'kind':'text','input_focused':True},clicked,2)
+        detector._read_snapshot=read
+        slow=threading.Thread(target=detector.snapshot,args=(10,),name='slow-context')
+        slow.start();self.assertTrue(entered.wait(1))
+        fast=threading.Thread(target=lambda:(detector.snapshot(10),done.set()))
+        fast.start()
+        try:self.assertTrue(done.wait(.5),'Fresh open must not wait for background native reads')
+        finally:release.set();slow.join(2);fast.join(2)
+        self.assertEqual(detector.current['kind'],'text')
+        self.assertTrue(detector.current['input_focused'])
+
+    def test_background_publish_is_discarded_when_menu_has_become_visible(self):
+        detector=PanelContext(Mock());original=dict(detector.current)
+        detector._read_snapshot=lambda *args:({'kind':'layers'},None,2)
+        self.assertEqual(detector.snapshot(10,accept=lambda:False)['kind'],'layers')
+        self.assertEqual(detector.current,original)
+
+    def test_monitor_native_panel_read_runs_outside_menu_window_lock(self):
+        from backend.desktop import Desktop
+        from types import SimpleNamespace
+        import threading
+        desktop=Desktop('http://localhost',lambda action:None)
+        desktop.window_lock=threading.Lock();desktop.target=10
+        desktop.stop=Mock(wait=Mock(side_effect=[False,True]));desktop._scope=Mock(return_value=True)
+        desktop._is_photoshop=Mock(return_value=True);desktop._native_config=Mock()
+        desktop.gui=SimpleNamespace(GetForegroundWindow=lambda:10)
+        desktop.panel_context=Mock()
+        def read(*args,**kwargs):
+            acquired=desktop.window_lock.acquire(blocking=False)
+            self.assertTrue(acquired,'Panel enumeration must not own the menu transition lock')
+            if acquired:desktop.window_lock.release()
+        desktop.panel_context.snapshot.side_effect=read
+        desktop._monitor();desktop.panel_context.snapshot.assert_called_once()
+
+    def test_monitor_publishes_fresh_input_state_on_the_same_pass(self):
+        from backend.desktop import Desktop
+        from types import SimpleNamespace
+        desktop=Desktop('http://localhost',lambda action:None)
+        desktop.target=10;desktop.stop=Mock(wait=Mock(side_effect=[False,True]))
+        desktop._scope=Mock(return_value=True);desktop._is_photoshop=Mock(return_value=True)
+        desktop.gui=SimpleNamespace(GetForegroundWindow=lambda:10)
+        desktop.panel_context=Mock();desktop.panel_context.current={'kind':'generic'}
+        states=[];desktop._native_config=lambda:states.append(desktop.panel_context.current['kind'])
+        def read(*args,**kwargs):desktop.panel_context.current={'kind':'text','input_focused':True}
+        desktop.panel_context.snapshot.side_effect=read
+        desktop._monitor();self.assertEqual(states[-1],'text')
 
     def test_panel_signatures_and_unknown_palette(self):
         self.assertEqual(classify_chain([('PSViewC',''),('OWL.WelcomeScreenView','')]), 'home')

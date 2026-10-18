@@ -119,6 +119,75 @@ class ApiTests(AsyncHTTPTestCase):
         self.assertEqual(self._app.plugins.status()['active']['version'],'1.0.0')
         self.assertEqual(self.fetch('/api/plugins/export').code,200)
 
+    def operation_desktop(self):
+        from types import SimpleNamespace
+        self._app.desktop=SimpleNamespace(require_action_focus=lambda:None,event=lambda event:None,hide=lambda:None)
+
+    async def operation_socket(self):
+        ws=await websocket_connect(HTTPRequest(self.get_url('/websocket').replace('http:','ws:'),headers={'Origin':self.get_url('/').rstrip('/')}))
+        await ws.read_message()
+        return ws
+
+    async def response_for(self,ws,ident):
+        while True:
+            value=json.loads(await asyncio.wait_for(ws.read_message(),1))
+            if value.get('id')==ident:return value
+
+    @gen_test
+    async def test_same_socket_busy_repeat_is_rejected_before_first_finishes_and_reads_stay_responsive(self):
+        self.operation_desktop();entered=asyncio.Event();release=asyncio.Event();calls=[]
+        async def execute(name,**kwargs):
+            calls.append(name);entered.set();await release.wait();return {'message':'done'}
+        self._app.bridge.execute=execute;ws=await self.operation_socket()
+        try:
+            await ws.write_message(json.dumps({'id':'first','action':'action.execute','args':{'name':'select'}}))
+            await asyncio.wait_for(entered.wait(),1)
+            await ws.write_message(json.dumps({'id':'repeat','action':'action.execute','args':{'name':'select'}}))
+            await ws.write_message(json.dumps({'id':'read','action':'commands.list'}))
+            replies={}
+            while len(replies)<2:
+                value=json.loads(await asyncio.wait_for(ws.read_message(),1))
+                if value.get('id') in ('repeat','read'):replies[value['id']]=value
+            self.assertFalse(replies['repeat']['ok']);self.assertIn('未接受',replies['repeat']['error'])
+            self.assertTrue(replies['read']['ok']);self.assertEqual(calls,['select'])
+            release.set();self.assertTrue((await self.response_for(ws,'first'))['ok'])
+            self.assertEqual(calls,['select'])
+        finally:release.set();ws.close()
+
+    @gen_test
+    async def test_operation_is_reserved_before_slow_focus_validation(self):
+        self.operation_desktop();entered=threading.Event();release=threading.Event();calls=[]
+        def focus():calls.append('focus');entered.set();release.wait(2)
+        self._app.desktop.require_action_focus=focus
+        async def execute(name,**kwargs):calls.append('execute');return {'message':'done'}
+        self._app.bridge.execute=execute;ws=await self.operation_socket()
+        try:
+            await ws.write_message(json.dumps({'id':'first','action':'action.execute','args':{'name':'select'}}))
+            self.assertTrue(await asyncio.to_thread(entered.wait,1))
+            self.assertTrue(self._app.operation_lock.locked())
+            await ws.write_message(json.dumps({'id':'repeat','action':'action.execute','args':{'name':'select'}}))
+            self.assertFalse((await self.response_for(ws,'repeat'))['ok']);self.assertEqual(calls,['focus'])
+            release.set();self.assertTrue((await self.response_for(ws,'first'))['ok'])
+            self.assertEqual(calls,['focus','execute'])
+        finally:release.set();ws.close()
+
+    @gen_test
+    async def test_socket_disconnect_does_not_cancel_an_accepted_operation(self):
+        self.operation_desktop();entered=asyncio.Event();release=asyncio.Event();finished=asyncio.Event()
+        async def execute(name,**kwargs):
+            entered.set();await release.wait();finished.set();return {'message':'durable outcome'}
+        self._app.bridge.execute=execute;ws=await self.operation_socket()
+        try:
+            await ws.write_message(json.dumps({'id':'first','action':'action.execute','args':{'name':'select'}}))
+            await asyncio.wait_for(entered.wait(),1);ws.close();await asyncio.sleep(.01)
+            self.assertTrue(self._app.operation_lock.locked());release.set()
+            await asyncio.wait_for(finished.wait(),1)
+            for _ in range(30):
+                if not self._app.operation_lock.locked():break
+                await asyncio.sleep(.01)
+            self.assertFalse(self._app.operation_lock.locked())
+        finally:release.set();ws.close()
+
     @gen_test
     async def test_websocket_failure_does_not_break_next_request(self):
         url = self.get_url('/websocket').replace('http:', 'ws:')

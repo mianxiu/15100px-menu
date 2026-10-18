@@ -59,6 +59,8 @@ class PanelContext:
     def __init__(self, gui):
         self.gui = gui
         self.lock = threading.Lock()
+        self.read_serial = 0
+        self.click_revision = 0
         self.clicked = None
         self.previous_focus = None
         self.current = self.result('generic', 'fallback')
@@ -71,6 +73,7 @@ class PanelContext:
         # A click is the active editor in Photoshop even when OWL keeps the
         # keyboard focus on its document view. Never use mouse hover as focus.
         with self.lock:
+            self.click_revision += 1
             self.clicked = (hwnd, workspace_root(self.gui, root) or root)
             self.previous_focus = None
 
@@ -152,25 +155,38 @@ class PanelContext:
             if previous:
                 user.SetThreadDpiAwarenessContext(previous)
 
-    def snapshot(self, root):
-        """Resolve on a worker, preserving panel context while popup has focus."""
-        with self.lock:
-            try:
-                return self._snapshot_locked(root)
-            except Exception:
-                # PS may destroy/recreate controls during a workspace change.
-                logging.debug('Panel context unavailable', exc_info=True)
-                self.current = self.result('generic', 'fallback')
-                return dict(self.current)
+    def snapshot(self, root, accept=None):
+        """Fresh native reads never hold the state lock or serialize opening.
 
-    def _snapshot_locked(self, root):
+        A newer reader/click fences late background publication. The caller
+        still receives its own fresh read; no old cached eligibility is used.
+        """
+        for attempt in range(2):
+            with self.lock:
+                self.read_serial += 1
+                serial,revision=self.read_serial,self.click_revision
+                clicked,previous=self.clicked,self.previous_focus
+            try:
+                value,clicked,focus=self._read_snapshot(root,clicked,previous)
+            except Exception:
+                logging.debug('Panel context unavailable', exc_info=True)
+                value,clicked,focus=self.result('generic','fallback'),clicked,previous
+            with self.lock:
+                if revision!=self.click_revision:continue
+                if serial==self.read_serial and (accept is None or accept()):
+                    self.current=value
+                    self.clicked,self.previous_focus=clicked,focus
+                return dict(value)
+        # Repeated click changes cannot safely identify the editor. Fail
+        # closed for this invocation; the next fresh snapshot can recover.
+        return {**self.result('generic','changed'),'input_focused':True}
+
+    def _read_snapshot(self, root, clicked, previous_focus):
         root = workspace_root(self.gui, root) or root
-        clicked = self.clicked
         focus = self.focus_window(root)
         focused = self.describe(focus, root)
-        if self.previous_focus is not None and focus != self.previous_focus and focused != 'generic':
-            self.clicked = clicked = None
-        self.previous_focus = focus
+        if previous_focus is not None and focus != previous_focus and focused != 'generic':
+            clicked = None
         kind, source, hwnd = focused, 'keyboard-focus', focus
         if clicked and clicked[1] == root and self.gui.IsWindow(clicked[0]):
             clicked_kind = self.describe(clicked[0], root)
@@ -187,6 +203,6 @@ class PanelContext:
             kind, source = 'home', 'visible-home'
         if kind == 'generic':
             source = 'fallback'
-        self.current = self.result(kind, source, hwnd or 0)
-        self.current['input_focused'] = focused == 'text'
-        return dict(self.current)
+        value = self.result(kind, source, hwnd or 0)
+        value['input_focused'] = focused == 'text'
+        return value,clicked,focus

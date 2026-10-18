@@ -1,6 +1,6 @@
 // Experimental executor: only fixed-target labels, no arbitrary scripts.
 module.exports = function createLabels(ps, session, options={}) {
-  const caps=createCapsActions(ps,session,capture,selectionContext,creationTree);
+  const caps=createCapsActions(ps,session,capture,selectionContext,capsTree,captureSelection);
   const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
   const shapePaint=createShapePaint(ps,session,capture,selectionContext,options.legacyPreview===true);
   const quickCommands=['layer.new','layer.solid','layer.group','adjustment.curves',
@@ -40,7 +40,19 @@ module.exports = function createLabels(ps, session, options={}) {
       if(section==='layerSectionStart')stack.push(row.layerID);
     }
     if(stack.length||!order.length)throw Error('Unbalanced native tree');
-    return {order,groups};
+    return {order,groups,rows:records.filter(row=>row.layerSection._value!=='layerSectionEnd')};
+  }
+  async function capsTree(doc) {
+    const tree=await creationTree(doc);
+    // Full fresh tree supplies lookup indices only. The feedback reader still
+    // verifies each hint against a fresh DOM collection and exact layer ID.
+    const positions=new Map();
+    for(const row of tree.rows) {
+      const parent=row.parentLayerID>0?row.parentLayerID:null;
+      const index=positions.get(parent)||0;positions.set(parent,index+1);
+      rememberPosition(doc.id+':'+(parent===null?'root':parent)+':'+row.layerID,index);
+    }
+    return tree;
   }
   function rememberPosition(key,index) {
     positionHints.delete(key);positionHints.set(key,index);
@@ -283,6 +295,22 @@ module.exports = function createLabels(ps, session, options={}) {
     if (ps.app.activeDocument.id !== doc.id || !ids.length || !ids.includes(active.layerID))
       throw Error('Target changed or no selected layers');
     return {session, document_id:doc.id, active_layer_id:active.layerID, layer_ids:ids};
+  }
+  async function captureSelection() {
+    if(!ps.app.documents.length)throw Error('No document');
+    const doc=ps.app.activeDocument;
+    if(doc.activeLayers.length<8)return capture();
+    try {
+      const [chosen,active]=await ps.action.batchPlay([
+        {_obj:'get',_target:[{_ref:'property',_property:'targetLayersIDs'},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}},
+        {_obj:'get',_target:[{_ref:'property',_property:'layerID'},{_ref:'layer',_enum:'ordinal',_value:'targetEnum'}],_options:{dialogOptions:'dontDisplay'}}
+      ],{});
+      const refs=chosen?.targetLayersIDs;
+      if(!Array.isArray(refs) || !refs.length || refs.some(v=>v?._ref!=='layer' || !Number.isInteger(v._id) || v._id<=0))throw Error('Native selection unavailable');
+      const ids=refs.map(v=>v._id).sort((a,b)=>a-b);
+      if(new Set(ids).size!==ids.length || ids.length!==doc.activeLayers.length || !ids.includes(active?.layerID) || ps.app.activeDocument.id!==doc.id)throw Error('Native selection identity invalid');
+      return {session,document_id:doc.id,active_layer_id:active.layerID,layer_ids:ids};
+    } catch(_) {return capture();} // Read-only compatibility fallback, never a write retry.
   }
   function selectionMatches(value) {
     if(!value || value.session!==session || !Array.isArray(value.layer_ids) || !ps.app.documents.length)return false;
@@ -577,7 +605,7 @@ module.exports = function createLabels(ps, session, options={}) {
     } catch(_) {}
     return {...interfaceState};
   }
-  return {capture,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:shapePaint.observe,
+  return {capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:shapePaint.observe,
     prepareLegacyShape:shapePaint.prepareLegacy,finishLegacyShape:shapePaint.finishLegacy};
 };
 
@@ -998,7 +1026,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
 }
 
 // Fixed reference-Caps actions. No menu letters, synthetic keys or IME changes.
-function createCapsActions(ps,session,capture,selectionContext,readNativeTree) {
+function createCapsActions(ps,session,capture,selectionContext,readNativeTree,captureSelection) {
   const commands=['selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle','convertSmartObject'];
   async function convert(request) {
     return ps.core.executeAsModal(async context=>{
@@ -1036,10 +1064,54 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree) {
       }
     },{commandName:'Menu convert smart object',timeOut:0});
   }
+  async function select(request) {
+    const timings={},started=Date.now();
+    return ps.core.executeAsModal(async context=>{
+      timings.modal_wait_ms=Date.now()-started;
+      const check=()=>{if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');};
+      check();let at=Date.now();
+      const actual=await captureSelection(),expected=request.target;
+      if(actual.document_id!==expected.document_id || actual.active_layer_id!==expected.active_layer_id || actual.layer_ids.join(',')!==expected.layer_ids?.join(','))throw Error('Caps target changed');
+      timings.target_ms=Date.now()-at;
+      const doc=ps.app.activeDocument;
+      function walk(layers){return Array.from(layers).flatMap(l=>[l,...(l.kind===ps.constants.LayerKind.GROUP?walk(l.layers):[])]);}
+      async function order(){
+        if(doc.layers.length>=8)try{return (await readNativeTree(doc)).order;}catch(_){}
+        return walk(doc.layers).map(l=>l.id);
+      }
+      at=Date.now();const before=await order(),members=new Set(before);
+      if(!actual.layer_ids.length || !actual.layer_ids.includes(actual.active_layer_id) || actual.layer_ids.some(id=>!members.has(id)))throw Error('Caps target missing');
+      timings.before_tree_ms=Date.now()-at;check();
+      const command=request.command,extend=command.startsWith('extend');
+      const step={_obj:'select',_target:[{_ref:'layer',_enum:'ordinal',_value:command.endsWith('Above')?'forwardEnum':'backwardEnum'}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}};
+      if(extend)step.selectionModifier={_enum:'selectionModifierType',_value:'addToSelection'};
+      const descriptors=[];
+      if(!extend && actual.layer_ids.length>1)descriptors.push({_obj:'select',_target:[{_ref:'layer',_id:actual.active_layer_id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}});
+      descriptors.push(step);at=Date.now();
+      const results=await ps.action.batchPlay(descriptors,{});
+      const rejected=results.find(v=>v._obj==='error');
+      if(rejected) {
+        if(rejected.result===-128)return {verified:true,cancelled:true,count:0,command,selection_context:selectionContext(),selection_timings_ms:timings};
+        throw Error(rejected.message||'Photoshop rejected selection');
+      }
+      timings.select_ms=Date.now()-at;at=Date.now();
+      const after=await captureSelection(),now=await order();
+      if(after.document_id!==actual.document_id || now.length!==before.length || now.some(id=>!members.has(id)))throw Error('Caps document/layer identity changed');
+      if(extend?actual.layer_ids.some(id=>!after.layer_ids.includes(id)):after.layer_ids.length!==1)throw Error('Layer selection readback mismatch');
+      if(now.join(',')!==before.join(','))throw Error('Caps layer order changed');
+      timings.after_tree_ms=Date.now()-at;at=Date.now();
+      const feedback=selectionContext();
+      // No deferred old snapshot: complete only with current capabilities.
+      if(feedback.document_id!==after.document_id || feedback.layer_ids.join(',')!==after.layer_ids.join(','))throw Error('Caps feedback identity changed');
+      timings.feedback_ms=Date.now()-at;
+      return {verified:true,count:actual.layer_ids.length,command,selection_context:feedback,selection_timings_ms:timings};
+    },{commandName:'Menu '+request.command,timeOut:0});
+  }
   async function execute(request) {
     const command=request.command,expected=request.target;
     if(!commands.includes(command) || expected?.session!==session)throw Error('Unsupported Caps command/session');
     if(command==='convertSmartObject')return convert(request);
+    if(['selectAbove','selectBelow','extendAbove','extendBelow'].includes(command))return select(request);
     return ps.core.executeAsModal(async context=>{
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
       const actual=await capture();

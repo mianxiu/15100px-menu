@@ -51,7 +51,9 @@ def inventory():
 
 
 def select(state):
-    codex = [w for w in state['windows'] if w['role'] == 'codex']
+    # Native notification/toast windows share the Codex process; only the
+    # returned Chromium main window identifies the intended secondary monitor.
+    codex = [w for w in state['windows'] if w['role'] == 'codex' and w.get('cls') == 'Chrome_WidgetWin_1']
     ps = [w for w in state['windows'] if w['role'] == 'photoshop' and w['cls'] == 'Photoshop']
     if len(codex) != 1 or len(ps) != 1:
         raise RuntimeError('Expected exactly one visible Codex window and Photoshop main window')

@@ -208,7 +208,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.39', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.40', session, transport: 'plugin-data-files',
         layer_observation:observation,
         ...await labels.interfacePreferences(),
         photoshop_version: optional(() => uxp.host.version),
@@ -276,13 +276,13 @@ async function probe(reason) {
       // and making the caller wait forever for an outcome. Existing accepted
       // records above, other sessions and malformed packets are never changed.
       seen.add(request.id);
-      const rejected={schema:1,session,id:request.id,probe_version:'0.3.39',operation:request.operation,
+      const rejected={schema:1,session,id:request.id,probe_version:'0.3.40',operation:request.operation,
         phase:'failed',error:'请求在执行前已过期；未修改 Photoshop',not_executed:true,result_unknown:false,completed_at_ms:Date.now()};
       pendingResponse=rejected;await finishResponse(folder,rejected);
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.39', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.40', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -322,7 +322,7 @@ async function probe(reason) {
             !['selectAbove','selectBelow','extendAbove','extendBelow','copyStyle','pasteStyle'].includes(request.command))throw Error('Invalid direct Caps binding');
         // Keep both fresh captures: bind here, then the existing executor
         // checks the exact target again inside its modal before any write.
-        const captured=await labels.capture();
+        const captured=await (['selectAbove','selectBelow','extendAbove','extendBelow'].includes(request.command)?labels.captureSelection():labels.capture());
         response.captured_target=captured;
         await record(folder,'result-'+request.id+'.json',{...response,phase:'accepted'});
         request={...request,target:captured};

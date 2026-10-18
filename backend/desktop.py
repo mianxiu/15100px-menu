@@ -450,12 +450,13 @@ class Desktop:
         next_icon_refresh = 0
         while not self.stop.wait(.1):
             try:
+                panel_target=None
                 with self.window_lock:
                     scoped = self._scope()
                     if scoped:
                         self._refresh_document_name()
                     if not self.visible and self.panel_context and self._is_photoshop(self.gui.GetForegroundWindow()):
-                        self.panel_context.snapshot(self.target)
+                        panel_target=self.target
                     if self.hwnd and not self.gui.IsWindow(self.hwnd):
                         self.hwnd, self.visible = None, False
                     if self.hwnd and time.monotonic() >= next_icon_refresh:
@@ -465,6 +466,12 @@ class Desktop:
                         logging.info('Menu auto-hide: scoped=%s foreground=%s target=%s target_valid=%s',
                                      scoped, self.gui.GetForegroundWindow(), self.target, self._is_photoshop(self.target))
                         self.hide(restore=False)
+                    self._native_config()
+                if panel_target is not None:
+                    self.panel_context.snapshot(panel_target,accept=lambda:
+                        not self.visible and self.target==panel_target)
+                    # Publish fresh input protection on this pass, rather
+                    # than waiting an additional monitor interval.
                     self._native_config()
             except Exception:
                 logging.exception("Window monitor failed")

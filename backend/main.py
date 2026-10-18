@@ -93,10 +93,27 @@ class WSHandler(websocket.WebSocketHandler):
         if self.request.host.split(":", 1)[0] not in ("127.0.0.1", "localhost"):
             self.close(1008, "Local connections only")
             return
+        self._requests=set()
         self.application.clients.add(self)
         self.write_message({"type": "connected", "actions": ACTIONS})
 
-    async def on_message(self, message):
+    def on_message(self, message):
+        # Returning a pending coroutine makes Tornado serialize this socket's
+        # messages. That would queue clicks behind a long PS transaction and
+        # prevent even hide/status requests from reaching their own guards.
+        if len(self._requests)>=64:
+            self.close(1013,'Too many concurrent requests')
+            return
+        task=asyncio.create_task(self._dispatch_message(message))
+        self._requests.add(task)
+        task.add_done_callback(self._request_finished)
+
+    def _request_finished(self, task):
+        self._requests.discard(task)
+        if not task.cancelled() and task.exception():
+            logging.error('WebSocket response delivery failed',exc_info=task.exception())
+
+    async def _dispatch_message(self, message):
         request_id = None
         try:
             data = json.loads(message)
@@ -494,13 +511,17 @@ class Application(web.Application):
             logging.info("Script action requested: %s", name)
             if not self.desktop:
                 raise RuntimeError("无桌面模式不提供图层操作")
-            await asyncio.to_thread(self.desktop.require_action_focus)
-            if name in ('moveToTop','moveToBottom','moveUp','moveDown'):
-                await asyncio.to_thread(self.desktop.require_move_context,name)
             if self.operation_lock.locked() or self.bridge.busy:
                 raise RuntimeError("操作进行中，请等待完成后重新选择；本次操作未接受")
             try:
                 async with self.operation_lock:
+                    # Reserve before any awaited focus/target work. A repeat
+                    # arriving during that work is rejected, never postponed.
+                    if not self.bridge.busy:
+                        await self.broadcast({"type":"operation","busy":True,"action":name})
+                    await asyncio.to_thread(self.desktop.require_action_focus)
+                    if name in ('moveToTop','moveToBottom','moveUp','moveDown'):
+                        await asyncio.to_thread(self.desktop.require_move_context,name)
                     async with self.panel_lock:
                         if 'menu_epoch' in args and args['menu_epoch'] != self.desktop.menu_epoch:
                             return {"message":"已忽略旧菜单操作"}
@@ -509,10 +530,6 @@ class Application(web.Application):
                         if isinstance(self.bridge,UxpBridge) and 'menu_epoch' in args and snapshot and (len(snapshot.get('layer_ids',[]))==1 or name=='shape.paint' and snapshot.get('shape_editor',{}).get('mask_batch') is True):
                             frozen_target={key:snapshot.get(key) for key in ('session','document_id','layer_ids')}
                             frozen_target['active_layer_id']=(snapshot.get('shape_editor',{}).get('active_layer_id') if name=='shape.paint' and snapshot.get('shape_editor',{}).get('mask_batch') else snapshot['layer_ids'][0])
-                    # Target reads can also wait for Photoshop; show busy
-                    # feedback before entering COM, not just before writing.
-                    if not self.bridge.busy:
-                        await self.broadcast({"type": "operation", "busy": True, "action": name})
                     async def before_dispatch(target):
                         async with self.panel_lock:
                             if name in ('moveToTop','moveToBottom','moveUp','moveDown'):
