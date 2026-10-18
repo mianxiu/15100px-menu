@@ -3,7 +3,7 @@
 - [x] 187取消误报修复：恢复历史后恢复本次原选层，保留写前与写后校验；生产函数复现及双核／正常配置故意错开历史选层的取消实测通过。静止圆点不重复发预览，闲置不写PS。原186未知收据、待核对文件及完整历史未改；备份1.psd后按两次明确授权结束本项目后台组件并切换隔离187，PS与UXP未重启。一次前台变化安全暂停未计通过，其临时文档在已确认取消后清理。证据.runtime/unknown186-readonly/read-only-comparison.json、recovery187/preserved186-journals.json、approval.json及live-matrix.json。
 
 - [x] 187所有配色点进入色环、主色放大：移除配色模式栏和底部色块，九点同显、主色尺寸两倍，独立拾取／拖动联动，重合避让及真实锚点引线，拾取保留偏移；闲置缓存与原单事务预览保持。436回归、40前端、双核原生完整矩阵、四主题32份导出和四轮PS24.0.1事务（低CPU确认／取消、正常确认／取消）通过，核对恢复、一次撤销与资源还原。构建及实际187／UXP42入口和原生组件匹配，PS未重启，原稿／配置／历史未知记录保留；首次测试声明编译错误留档修复，未计通过。实体键鼠／画布及其他办公硬件待验收。证据.runtime/recovery187/runtime.json、live-matrix.json、tests187.log、native187-low.log、ui187-verified.json。
-- [ ] 187公开交付：待源码／标签、Wiki、匿名下载和API403备用更新核验；通过后仅保留187 Release，186附件与Git标签／历史保留。
+- [x] 187公开交付：源码／标签及Wiki六页已推送，安装包／SHA／清单匿名下载与冻结更新器API403备用通道真实下载核验通过。仅保留187 Release；186全部附件本地备份、Git标签／源码历史保留。实际187／UXP42，dist仅保留当前发行物；实体键鼠／画布与其他硬件范围仍按上项待验收。证据.runtime/recovery187/runtime.json、release-0.4.187-public-verification.json、manifest187-verification.json、fallback187-live.json、wiki187-public.json、release187-cleanup.json。
 
 
 
