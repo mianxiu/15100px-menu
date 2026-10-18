@@ -288,7 +288,9 @@ static unsigned renderedFrames=0;
 static std::wstring preview;
 static std::string previewKind="menu";
 static int previewRecentHover=-1;
-static int previewQuickHover=-1,previewActionHover=-1,previewCapsHover=-1;
+static int previewQuickHover=-1,previewActionHover=-1,previewCapsHover=-1,previewShapeHover=-1;
+static bool previewOwningEditor=false;
+static float previewShapeHeight=0;
 static bool previewLifecycle=false;
 static bool previewLive=false;
 static bool previewShape=false;
@@ -1071,11 +1073,15 @@ static ImVec4 actionTipBounds(int action) {
     const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
     if(action>=200 && action<234){
         const RECT group=tipGroupRect(action),anchor=shapeTipRows[action-200];
+        const auto heading=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,panelTitle());
+        const RECT centre={LONG(pieCenter.x-std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y-40*scale),
+                           LONG(pieCenter.x+std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y+19*scale)};
         const float x=std::clamp((anchor.left+anchor.right-width)*.5f,pos.x+8*scale,std::max(pos.x+8*scale,pos.x+size.x-width-8*scale));
         const ImVec4 above={x,group.top-gap-height,x+width,group.top-gap};
         auto valid=[&](ImVec4 tip){
             if(tip.x<pos.x+8*scale || tip.y<pos.y+8*scale || tip.z>pos.x+size.x-8*scale || tip.w>pos.y+size.y-8*scale)return false;
             if(tipOverlaps(tip,shapeEditor.bounds,2*scale) || tipOverlaps(tip,shapeEditor.maskBounds,2*scale))return false;
+            if(tipOverlaps(tip,centre,2*scale))return false;
             for(const auto& row:holdRows)if(tipOverlaps(tip,row,2*scale))return false;
             for(const auto& row:quickRows)if(tipOverlaps(tip,row,2*scale))return false;
             for(const auto& row:capsRows)if(tipOverlaps(tip,row,2*scale))return false;
@@ -1086,7 +1092,24 @@ static ImVec4 actionTipBounds(int action) {
         const float left=group.left-gap-width;
         const float y=std::clamp(float(anchor.top),pos.y+8*scale,std::max(pos.y+8*scale,pos.y+size.y-height-8*scale));
         for(const auto& candidate:std::array<ImVec4,3>{{{left,y,left+width,y+height},{group.right+gap,y,group.right+gap+width,y+height},{x,group.bottom+gap,x+width,group.bottom+gap+height}}})if(valid(candidate))return candidate;
-        return {};
+        // A tall panel can touch the viewport edge. Search free side corridors
+        // instead of silently suppressing the tip when all four anchors fail.
+        std::vector<float> rows={float(group.top),float(anchor.top),pos.y+8*scale,pos.y+size.y-height-8*scale};
+        auto obstacle=[&](RECT r){if(r.right>r.left && r.bottom>r.top){rows.push_back(r.top-gap-height);rows.push_back(r.bottom+gap);}};
+        obstacle(centre);obstacle(shapeEditor.bounds);obstacle(shapeEditor.maskBounds);
+        obstacle({LONG(footerBounds.x),LONG(footerBounds.y),LONG(footerBounds.z),LONG(footerBounds.w)});
+        for(const auto& r:holdRows)obstacle(r);
+        for(const auto& r:quickRows)obstacle(r);
+        for(const auto& r:capsRows)obstacle(r);
+        ImVec4 best{};float score=FLT_MAX;
+        for(float px:{float(group.right)+gap,left,pos.x+8*scale,pos.x+size.x-width-8*scale})for(float py:rows){
+            const ImVec4 candidate={roundf(px),roundf(py),roundf(px+width),roundf(py+height)};
+            if(!valid(candidate))continue;
+            const float dx=(candidate.x+candidate.z-anchor.left-anchor.right)*.5f,dy=(candidate.y+candidate.w-anchor.top-anchor.bottom)*.5f;
+            const float distance=dx*dx+dy*dy;
+            if(distance<score){score=distance;best=candidate;}
+        }
+        return best;
     }
     RECT anchor=action>=40?capsRows[action-40]:action>=32?quickRows[action-32]:action>=12?recentRows[action-12]:action>=4?labelRows[action-4]:holdRows[action];
     RECT group=anchor;
@@ -1463,7 +1486,8 @@ static void drawPie() {
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
     drawFooter(messages,pieCenter.y+(capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
     const int tipAction=shapeEditor.ready() && shapeTipCandidate>=200?shapeTipCandidate:actionTipText(selected)?selected:-1;
-    const bool showTip=!pieAnimating && !holdFinished && canExecute();
+    const bool ownEditorTip=tipAction>=200 && tipAction<234 && shapeEditor.ready();
+    const bool showTip=!pieAnimating && !holdFinished && !inputFocused && !ImGui::IsAnyItemActive() && (ownEditorTip || canExecute());
     const int displayed=!preview.empty()?(showTip?tipAction:-1):hoverTip.update(tipAction,tipFamily(tipAction),GetTickCount64(),tipGapAt(hoverTip.shown,cursor),showTip);
     if(displayed>=0)drawActionTip(displayed);else tipVisual.reset();
 }
@@ -1718,6 +1742,9 @@ int main() {
         else if (i+1<argc && arg==L"--preview-caps-hover") previewCapsHover=std::stoi(argv[++i]);
         else if (i+1<argc && arg==L"--preview-quick-hover") previewQuickHover=std::stoi(argv[++i]);
         else if (i+1<argc && arg==L"--preview-progress") previewProgressStage=std::filesystem::path(argv[++i]).u8string();
+        else if (i+1<argc && arg==L"--preview-shape-hover") previewShapeHover=std::stoi(argv[++i]);
+        else if (arg==L"--preview-owning-editor") previewOwningEditor=true;
+        else if (i+1<argc && arg==L"--preview-shape-height") previewShapeHeight=std::clamp(std::stof(argv[++i]),440.f,620.f);
         else if (i+1<argc && arg==L"--preview-shape") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
             shapeEditor.prepare(data);previewShape=true;previewKind="hold";
@@ -1973,7 +2000,7 @@ int main() {
     if (!selfTest) {ShowWindow(window,preview.empty()?SW_SHOWNORMAL:SW_SHOWNOACTIVATE);UpdateWindow(window);}
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
-            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?menuShapeWindowHeight:440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);
             if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
             if(!previewProgressStage.empty())accept({{"type","preview.progress"},{"epoch",menuEpoch},{"phase","preview"},{"stage",previewProgressStage},{"done",12},{"total",previewProgressStage=="redraw"?0:32},{"frame",2}});
@@ -2055,6 +2082,12 @@ int main() {
                     io.AddMousePosEvent((r.left+r.right)*.5f,(r.top+r.bottom)*.5f);
                     io.AddMouseButtonEvent(ImGuiMouseButton_Left,frames==22);
                 }
+            }
+            if(!preview.empty() && previewShapeHover>=0 && previewShapeHover<34 && frames>=2){
+                const auto r=shapeTipRows[previewShapeHover];
+                const ImVec2 point=previewShapeHover>=25?perceptualPicker.points[previewShapeHover-25]:ImVec2{(r.left+r.right)*.5f,(r.top+r.bottom)*.5f};
+                io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(point.x,point.y);io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);
+                if(previewOwningEditor)maskPreviewStarted=true;
             }
             ImGui::NewFrame();drawMenu();ImGui::Render();
             ++renderedFrames;
@@ -2619,6 +2652,34 @@ int main() {
                     if(perceptualPicker.active!=i || perceptualPicker.base!=base || testedActions.size()!=shapeCount)
                         throw std::runtime_error("Wheel point pickup changed the base or dispatched a second task");
                 }
+                // A hovered, still-editable color control must retain its
+                // read-only tip after the first write starts the shared preview.
+                hoverTip.reset();const auto roleHover=perceptualPicker.points[3];
+                io.AddMousePosEvent(roleHover.x,roleHover.y);numberFrame(ImGuiKey_None,false);
+                hoverTip.pendingSince=GetTickCount64()-200;numberFrame(ImGuiKey_None,false);
+                if(!maskPreviewStarted || canExecute() || !shapeEditor.ready() || hoverTip.shown!=228 || !tipVisual.ready)
+                    throw std::runtime_error("Owning live preview recognized hover but suppressed its visible tooltip");
+                const auto tipTestTheme=uiTheme,tipTestFont=uiFontSize;auto* tipTestDefault=io.FontDefault;
+                for(const char* themeName:{"light","light-gray","dark-gray","dark"})for(const char* fontName:{"small","large"})for(float panelHeight:{500.f,620.f}){
+                    uiTheme=themeName;theme();uiFontSize=fontName;io.FontDefault=menuFonts[fontIndex()];
+                    SetWindowPos(window,nullptr,0,0,int(920*scale),int(panelHeight*scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+                    ImGui_ImplWin32_NewFrame();numberFrame(ImGuiKey_None,false);
+                    for(int i=0;i<perceptual::wheelCount;++i){
+                        const auto p=perceptualPicker.points[i];hoverTip.reset();io.AddMousePosEvent(p.x,p.y);numberFrame(ImGuiKey_None,false);
+                        hoverTip.pendingSince=GetTickCount64()-200;numberFrame(ImGuiKey_None,false);
+                        if(hoverTip.shown!=225+i || !tipVisual.ready || tipVisual.bounds.z<=tipVisual.bounds.x ||
+                           tipOverlaps(tipVisual.bounds,shapeEditor.bounds) || tipOverlaps(tipVisual.bounds,shapeEditor.maskBounds))
+                            throw std::runtime_error("Live preview tooltip clipped or missing in theme/font/height matrix: "+std::to_string(i)+" "+themeName+" "+fontName+" "+std::to_string(panelHeight));
+                        if(canExecute() || capsEnabled(0) || holdActionAt({LONG((tipVisual.bounds.x+tipVisual.bounds.z)*.5f),LONG((tipVisual.bounds.y+tipVisual.bounds.w)*.5f)})!=-1)
+                            throw std::runtime_error("Tooltip display changed input or operation permissions");
+                    }
+                }
+                uiTheme=tipTestTheme;theme();uiFontSize=tipTestFont;io.FontDefault=tipTestDefault;
+                SetWindowPos(window,nullptr,0,0,int(920*scale),int(menuShapeWindowHeight*scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+                ImGui_ImplWin32_NewFrame();numberFrame(ImGuiKey_None,false);
+                inputFocused=true;numberFrame(ImGuiKey_None,false);
+                if(tipVisual.ready || hoverTip.shown!=-1)throw std::runtime_error("Input protection retained a visible editing tooltip");
+                inputFocused=false;numberFrame(ImGuiKey_None,false);
                 const auto wheelDraft=shapeEditor.draft;const auto dot=perceptualPicker.points[3];
                 io.AddMousePosEvent(dot.x,dot.y);numberFrame(ImGuiKey_None,false);io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
                 const auto wb=perceptualPicker.wheelBounds;const float cx=(wb.left+wb.right)*.5f,cy=(wb.top+wb.bottom)*.5f;
@@ -2884,7 +2945,14 @@ int main() {
                 inputFocused=false;capsReady=false;
                 std::cout<<"Dear ImGui self-test passed: original radial/focus/input/cancel matrix; shape local draft, types, single release, stale cursor, pinned commit; production SHOWWINDOW content and 100 hidden frames\n";break;
             }
-            if (!preview.empty() && frames==20) {screenshot(preview);if (!previewLive) break;}
+            if (!preview.empty() && frames==20) {
+                screenshot(preview);
+                if(previewShapeHover>=0){auto report=std::filesystem::path(preview);report+=L".tooltip.json";
+                    std::ofstream(report)<<Json{{"candidate",shapeTipCandidate},{"visible",tipVisual.ready},{"text",tipVisual.text},
+                        {"bounds",{tipVisual.bounds.x,tipVisual.bounds.y,tipVisual.bounds.z,tipVisual.bounds.w}},
+                        {"preview_running",maskPreviewStarted},{"other_actions_enabled",canExecute()}}.dump();}
+                if (!previewLive) break;
+            }
             if (SUCCEEDED(swapChain->Present(1,0))) renderedHit=holdFinished?-1:pendingHit;
             finishPlatformFrame();
         }
