@@ -127,7 +127,6 @@ class PhotoshopLauncher:
         self.timeout = timeout
         self.task = None
         self.state = {'phase':'idle', 'message':'尚未请求启动 Photoshop'}
-        self.preferences = self.root/'preferences.json'
         self.last = self.root/'latest.json'
         if self.last.exists():
             self.state = json.loads(self.last.read_text('utf-8'))
@@ -137,20 +136,10 @@ class PhotoshopLauncher:
     @property
     def active(self): return self.state['phase'] in ('starting', 'waiting-uxp', 'unknown')
 
-    @property
-    def auto_start(self):
-        if not self.preferences.exists(): return True
-        return json.loads(self.preferences.read_text('utf-8')).get('auto_start') is True
-
     def snapshot(self):
-        value = {**self.state, 'active':self.active, 'auto_start':self.auto_start}
+        value = {**self.state, 'active':self.active}
         if self.active: value['elapsed_seconds'] = round((time.time()*1000-value['started_at_ms'])/1000, 1)
         return value
-
-    def set_auto_start(self, enabled):
-        if type(enabled) is not bool: raise ValueError('自动启动设置必须为布尔值')
-        atomic_json(self.preferences, {'auto_start':enabled})
-        return {'message':'后台自动启动 Photoshop 已开启' if enabled else '后台自动启动 Photoshop 已关闭'}
 
     def update(self, **values):
         self.state.update(values); atomic_json(self.last, self.state)

@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-v0.4.202：修复色相／邻近色提示跳位和空白误报色相。详情见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。
+v0.4.203：打开后台或安装／更新插件后不再自动启动Photoshop，保留手动启动按钮。详情见[Wiki安装说明](https://github.com/mianxiu/15100px-menu/wiki/Installation)。
 
 v0.4.201：展开／收起统一悬停原按钮，说明文字保留，外框恢复实线。用法与验证范围见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。
 

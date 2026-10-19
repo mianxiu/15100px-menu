@@ -304,14 +304,6 @@ class Application(web.Application):
             return heartbeat.get('phase')=='ready' and int(heartbeat['session'].split('-')[0])>=started_at_ms
         except (OSError,ValueError,RuntimeError,KeyError):return False
 
-    async def auto_start_photoshop(self):
-        uxp=await asyncio.to_thread(self.uxp.status)
-        if self.photoshop_launcher.auto_start and uxp['installed'] and uxp['enabled'] and not uxp['error']:
-            try:return await self.dispatch('photoshop.start',{})
-            except Exception as error:
-                logging.warning('Automatic Photoshop start skipped: %s',error)
-                return {'message':'插件已安装；自动启动未接受：'+str(error)}
-
     async def dispatch(self, action, args):
         if getattr(self,'closing',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
             raise RuntimeError('服务正在退出，本次操作未接受')
@@ -389,10 +381,6 @@ class Application(web.Application):
             async with self.operation_lock:
                 uxp=await asyncio.to_thread(self.uxp.status)
                 return await self.photoshop_launcher.start(uxp['installed'] and uxp['enabled'] and not uxp['error'])
-        if action=='photoshop.autostart':
-            result=self.photoshop_launcher.set_auto_start(args.get('enabled'))
-            await self.broadcast({'type':'status','data':await self.dispatch('status',{})})
-            return result
         if action=='uxp.status':return await asyncio.to_thread(self.uxp.status)
         if action in ('uxp.install','uxp.enable','uxp.disable','uxp.uninstall','uxp.rollback','uxp.apply-language','uxp.repair-registration'):
             if self.photoshop_launcher.active or self.operation_lock.locked() or self.bridge.busy or getattr(self.bridge,'_queue',[]):
@@ -404,9 +392,6 @@ class Application(web.Application):
                 elif action=='uxp.repair-registration':result=await asyncio.to_thread(self.uxp.repair_registration)
                 else:result=await asyncio.to_thread(getattr(self.uxp,action.split('.')[1]))
             if action in ('uxp.rollback','uxp.uninstall'):self.uxp_auto.set_enabled(False)
-            if action=='uxp.install':
-                startup=await self.auto_start_photoshop()
-                if startup:result['message']+='；'+startup['message']
             await self.broadcast({'type':'status','data':await self.dispatch('status',{})})
             return result
         if action == "status":
@@ -721,8 +706,6 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         status_task = asyncio.create_task(poll_status())
         app.application_updates.schedule=asyncio.create_task(app.application_updates.periodic())
         await app.photoshop_launcher.resume()
-        if not headless and not no_desktop and not app.photoshop_launcher.active:
-            await app.auto_start_photoshop()
         print(f"Photoshop Menu：http://127.0.0.1:{port}", flush=True)
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda *_: loop.call_soon_threadsafe(app.stop_event.set))

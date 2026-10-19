@@ -136,8 +136,7 @@ function App() {
   function UxpFollow(){return <><label class="option-row"><input type="checkbox" checked={state().uxp_auto_update?.enabled ?? true} disabled={disabled()} onChange={e=>perform('uxp.auto',{enabled:e.target.checked})}/><span>{t("已安装UXP自动跟随内置版本更新")}</span></label><p role="status">{t(state().uxp_auto_update?.message || '等待检查内置 UXP')}</p><p class="caption">{t("保存并关闭PS后自动安装较新内置版，不自动关闭PS。禁用、卸载、回退和未知结果保护优先。")}</p></>;}
   function PhotoshopStartup(){return <>
     <p>{t(state().photoshop_start?.message) || t("等待启动状态")}<Show when={state().photoshop_start?.active}> · {state().photoshop_start?.elapsed_seconds || 0} {t("秒")}</Show></p>
-    <label class="option-row"><input type="checkbox" checked={state().photoshop_start?.auto_start ?? true} disabled={disabled()} onChange={e=>perform('photoshop.autostart',{enabled:e.target.checked})}/><span>{t("启动后台及安装／更新插件后自动启动 Photoshop")}</span></label>
-    <p>{t("关闭 PS 后不会反复重开。")}</p>
+    <p>{t("打开后台或安装／更新插件后，请手动启动 Photoshop。")}</p>
   </>;}
   const managedBusy=()=>disabled() || state().photoshop.busy || state().photoshop_start?.active;
   function Overview(){return <div class="panel-scroll overview-grid">
@@ -149,7 +148,7 @@ function App() {
     <Show when={!state().photoshop.status_fresh}><p class="error">{t("状态等待更新 · 显示缓存")}</p></Show>
     <div class="buttons"><Show when={!state().photoshop.connected || state().photoshop_start?.active}><button class="primary" disabled={managedBusy()} onClick={()=>perform('photoshop.start')}>{state().photoshop_start?.active?t("正在启动…"):t("启动 Photoshop")}</button></Show><button disabled={disabled()} onClick={()=>perform('status',{refresh:true})}>{t("刷新连接状态")}</button><button onClick={()=>choose('settings')}>{t("菜单设置")}</button><button onClick={()=>choose('plugins')}>{t("插件管理")}</button></div>
     </section>
-    <VersionHealthPanel/><DiagnosticPanel/><section class="compact-section"><details><summary>{t("启动选项")}</summary><PhotoshopStartup/></details></section>
+    <VersionHealthPanel/><DiagnosticPanel/><section class="compact-section"><details><summary>{t("启动状态")}</summary><PhotoshopStartup/></details></section>
     <section class="compact-section"><details><summary>{t("连接详情")}</summary><dl class="info-list"><div><dt>{t("当前面板：")}</dt><dd>{t(state().menu?.panel_context?.label) || t("通用操作")}</dd></div><div><dt>{t("上次读取：")}</dt><dd>{state().photoshop.status_updated_at ? new Date(state().photoshop.status_updated_at).toLocaleTimeString(state().language || 'zh-CN') : '—'}</dd></div><div><dt>{t("当前运行版本")}</dt><dd>v{state().version || '—'}</dd></div><div><dt>{t("程序：")}</dt><dd>{state().service?.executable || t("此服务未提供程序路径")}</dd></div></dl><p>{t(state().desktop)}</p><Show when={state().tray_error}><p class="error">{t("托盘：")}{state().tray_error}</p></Show><button class="danger" disabled={managedBusy()} onClick={()=>perform('service.quit')}>{t("退出后台服务")}</button></details></section>
   </div>;}
   function UxpInstalled(){return <div class="panel-scroll"><section>

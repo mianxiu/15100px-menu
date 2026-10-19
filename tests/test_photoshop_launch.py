@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from backend.photoshop_launch import PhotoshopLauncher, execute_worker, worker_command, registered_executable
-from backend.main import Application
+from backend.main import Application, run
 from backend.settings import atomic_json
 from backend.version import APP_VERSION
 
@@ -66,11 +66,29 @@ class LaunchTests(unittest.IsolatedAsyncioTestCase):
         await resumed.resume(); await resumed.task
         self.assertEqual(self.launch.call_count,1)
         await resumed.close()
-    async def test_auto_setting_is_persistent_and_strict(self):
-        self.assertTrue(self.manager.auto_start)
-        self.manager.set_auto_start(False)
-        self.assertFalse(PhotoshopLauncher(self.root,self.ready).auto_start)
-        with self.assertRaises(ValueError):self.manager.set_auto_start('true')
+    async def test_open_backend_with_installed_plugin_ignores_legacy_auto_start(self):
+        preferences=self.root/'photoshop-start/preferences.json'
+        atomic_json(preferences,{'auto_start':True})
+        saved=preferences.read_bytes()
+        bridge=Mock();bridge.busy=False;bridge._queue=[];bridge.tasks=None;bridge.close=AsyncMock()
+        app=Application(0,bridge=bridge,runtime=self.root)
+        app.photoshop_launcher=self.manager
+        app.uxp=Mock();app.uxp.status.return_value={'installed':True,'enabled':True,'error':None}
+        app.preferences.data['open_control_on_start']=False
+        app.sync_uxp_auto=AsyncMock()
+        app.application_updates=Mock(periodic=AsyncMock(),close=AsyncMock())
+        app.control=Mock();app.listen=Mock();app.stop_event.set()
+        with patch('backend.main.Application',return_value=app), \
+             patch('backend.main.Desktop'),patch('backend.main.Tray') as tray, \
+             patch('backend.main.signal.signal'):
+            tray.return_value.error=None
+            await run(port=0,runtime=self.root)
+        self.launch.assert_not_called();self.registered.assert_not_called()
+        self.assertEqual(self.manager.snapshot()['phase'],'idle')
+        self.assertEqual(preferences.read_bytes(),saved)
+        with self.assertRaisesRegex(ValueError,'未知动作'):
+            app.closing=False
+            await app.dispatch('photoshop.autostart',{'enabled':True})
     async def test_busy_backend_rejects_start_and_management_during_start(self):
         bridge=Mock();bridge.busy=True;bridge._queue=[];bridge.tasks=None
         app=Application(15158,bridge=bridge,runtime=self.root)
@@ -80,6 +98,17 @@ class LaunchTests(unittest.IsolatedAsyncioTestCase):
         bridge.busy=False
         self.manager.state={'phase':'starting','started_at_ms':0}
         with self.assertRaises(RuntimeError):await app.dispatch('uxp.uninstall',{})
+
+    async def test_explicit_start_action_still_launches_once(self):
+        bridge=Mock();bridge.busy=False;bridge._queue=[];bridge.tasks=None
+        app=Application(0,bridge=bridge,runtime=self.root)
+        app.photoshop_launcher=self.manager
+        app.sync_uxp_auto=AsyncMock()
+        app.uxp=Mock();app.uxp.status.return_value={'installed':True,'enabled':True,'error':None}
+        reply=await app.dispatch('photoshop.start',{})
+        self.assertEqual(reply['photoshop_start']['phase'],'starting')
+        await self.manager.task
+        self.launch.assert_called_once()
 
 
 class WorkerTests(unittest.TestCase):

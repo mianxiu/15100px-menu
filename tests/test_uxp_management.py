@@ -146,7 +146,12 @@ class UxpManagementApiTests(AsyncHTTPTestCase):
         self.bridge.status=AsyncMock(return_value={'connected':False,'execution_backend':'uxp-local-files'})
         app=Application(self.get_http_port(),bridge=self.bridge,runtime=base/'data')
         app.uxp=UxpManager(base/'data',ROOT/'uxp/offline-probe',base/'roaming',running=lambda:False,hosts=lambda p:[])
-        app.photoshop_launcher.set_auto_start(False)
+        # Old enabled preferences must not start PS after install/update either.
+        preferences=base/'data/photoshop-start/preferences.json'
+        preferences.parent.mkdir(parents=True)
+        preferences.write_text('{"auto_start":true}',encoding='utf-8')
+        self.start_photoshop=AsyncMock()
+        app.photoshop_launcher.start=self.start_photoshop
         return app
     def tearDown(self):
         self.io_loop.run_sync(self.bridge.close)
@@ -181,6 +186,7 @@ class UxpManagementApiTests(AsyncHTTPTestCase):
                 if result.get('id')==action:return result
         try:
             self.assertTrue((await request('uxp.install'))['ok'])
+            self.start_photoshop.assert_not_awaited()
             self.assertTrue((await request('uxp.disable'))['ok'])
             blocked=await request('action.execute',{'name':'label.red'})
             self.assertFalse(blocked['ok']);self.assertIn('禁用',blocked['error'])
@@ -189,9 +195,11 @@ class UxpManagementApiTests(AsyncHTTPTestCase):
             self.assertTrue((await request('uxp.repair-registration'))['ok'])
             preview=self._app.uxp.prepare(self._app.uxp.export())
             self.assertTrue((await request('uxp.install',{'token':preview['token']}))['ok'])
+            self.start_photoshop.assert_not_awaited()
             self.assertTrue((await request('uxp.rollback'))['ok'])
             self.assertTrue((await request('uxp.uninstall'))['ok'])
             self.assertFalse((await request('uxp.enable'))['ok'])
+            self.start_photoshop.assert_not_awaited()
         finally:ws.close()
 
 
