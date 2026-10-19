@@ -71,7 +71,8 @@ async function main(){
  h=await host();h.control.kind='pixel';h.control.readBlock=true;
  h.request('a'.repeat(32));h.poll();await settle();
  h.request('b'.repeat(32));h.releaseRead();await settle();
- assert.equal(h.files.has('menu-context-result.json'),false,'Superseded read must not publish stale capabilities');
+ assert.equal(h.result().menu_phase,'reading','Superseded read must not publish stale capabilities');
+ assert.equal(h.result().mask,undefined);assert.equal(h.result().document_id,undefined);
  h.control.readBlock=false;await h.poll();await settle();
  assert.equal(h.result().menu_request_id,'b'.repeat(32),'A newer menu gets its own fresh read, never the previous result');
  // A queued command waits for the current host call, but skips remaining optional work.

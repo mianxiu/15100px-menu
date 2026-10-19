@@ -94,7 +94,15 @@ async function refreshMenuContext(folder,now) {
       menuRefreshId=request.id;observation.menu={...observation.menu,interrupted:reason,elapsed_ms:Date.now()-started,completed_at_ms:Date.now()};throw error;}
   }
   let context;
-  try {await checkpoint();context=await labels.selectionContextFresh(checkpoint);await checkpoint();}
+  try {
+    await checkpoint();
+    // Acknowledges only this read, never layer eligibility or a mutation.
+    // The menu can keep its bounded completion window when the FIRST DOM
+    // snapshot itself takes longer than the request acceptance window.
+    await record(folder,'menu-context-result.json',{schema:1,session,
+      menu_request_id:request.id,menu_phase:'reading',started_at_ms:started});
+    context=await labels.selectionContextFresh(checkpoint);await checkpoint();
+  }
   catch(error) {
     if(error.menuReadInterrupted)return true;
     menuRefreshId=request.id;
@@ -139,10 +147,12 @@ async function finishResponse(folder,response) {
   await record(folder,'probe-response.json',response);
   pendingResponse=null;
   if(activeExecution?.id===response.id)activeExecution=null;
-  completedReceipts.push('result-'+response.id+'.json');
+  if(!response.result_unknown)completedReceipts.push('result-'+response.id+'.json');
   if(completedReceipts.length>64) {
     const name=completedReceipts.shift();
-    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-'),name.replace('result-','execution-'),name.replace('result-','legacy-prepared-'),name.replace('result-','legacy-result-')])
+    // Only IDs whose terminal result was persisted by this session enter this
+    // list. Never sweep an old directory or delete an unknown request's proof.
+    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-'),name.replace('result-','preview-progress-'),name.replace('result-','execution-'),name.replace('result-','legacy-prepared-'),name.replace('result-','legacy-result-'),name.replace('result-','legacy-exited-')])
       try {await (await folder.getEntry(file)).delete();}catch(_){}
   }
 }
@@ -209,7 +219,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.44', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.45', session, transport: 'plugin-data-files',
         layer_observation:observation,
         shape_clipboard_available:labels.paintClipboardAvailable?.()===true,
         ...await labels.interfacePreferences(),
@@ -284,7 +294,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.44', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.45', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

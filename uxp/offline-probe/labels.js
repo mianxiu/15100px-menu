@@ -71,7 +71,8 @@ module.exports = function createLabels(ps, session, options={}) {
   // retain all original checks, including the final fresh selection identity.
   function* readSelectionContext(quickOnly=false,onPositionMiss=null) {
     if (!ps.app.documents.length) return {session,document_id:null,layer_ids:[],kind:'none',mask:0};
-    const doc=ps.app.activeDocument,selected=Array.from(doc.activeLayers),k=ps.constants.LayerKind;
+    const doc=ps.app.activeDocument,sourceSelection=doc.activeLayers,selected=[],k=ps.constants.LayerKind;
+    for(let i=0;i<sourceSelection.length;i++){selected.push(sourceSelection[i]);if(i%4===3)yield;}
     // Host-backed DOM getters are costly. Reuse reads only within this one
     // snapshot, never across requests or the final selection identity check.
     // Cross-read position hints are separately revalidated against fresh IDs.
@@ -82,7 +83,7 @@ module.exports = function createLabels(ps, session, options={}) {
       if(!Object.prototype.hasOwnProperty.call(values,key))values[key]=layer[key];
       return values[key];
     }
-    function siblings(parent) {
+    function* siblings(parent) {
       if(!siblingLists.has(parent)) {
         const source=parent?read(parent,'layers'):doc.layers;
         // This fresh Photoshop Layers collection captures the ordered sibling
@@ -93,7 +94,8 @@ module.exports = function createLabels(ps, session, options={}) {
         const count=source.length,objects=new Map();
         // Tiny lists and large selections keep the original host-read path:
         // materialization has little avoidable cost in those cases.
-        const eager=count<=8 || selected.length>count/2?Array.from(source):null;
+        const eager=count<=8 || selected.length>count/2?[]:null;
+        if(eager)for(let i=0;i<count;i++){eager.push(source[i]);if(i%4===3)yield;}
         const at=index=>{
           if(eager)return eager[index];
           if(!objects.has(index))objects.set(index,source[index]);
@@ -113,8 +115,10 @@ module.exports = function createLabels(ps, session, options={}) {
       }
       return siblingLists.get(parent);
     }
-    function singlePosition(order,id) {
-      if(order.original)return order.findIndex(layer=>read(layer,'id')===id);
+    function* singlePosition(order,id) {
+      if(order.original){for(let i=0;i<order.length;i++){
+        if(read(order.at(i),'id')===id)return i;if(i%4===3)yield;
+      }return -1;}
       if(!order.length)return -1;
       const hinted=order.hintedIndex(id);if(hinted>=0)return hinted;
       if(order.idAt(0)===id)return 0;
@@ -122,7 +126,9 @@ module.exports = function createLabels(ps, session, options={}) {
       if(order.idAt(last)===id)return last;
       if(last>0 && read(edge,'isBackgroundLayer') && order.idAt(last-1)===id)return last-1;
       positionMiss(order);
-      for(let i=0;i<order.length;i++)if(order.idAt(i)===id)return i;
+      for(let i=0;i<order.length;i++){
+        if(order.idAt(i)===id)return i;if(i%4===3)yield;
+      }
       return -1;
     }
     function positionMiss(order) {
@@ -143,7 +149,8 @@ module.exports = function createLabels(ps, session, options={}) {
     }
     const kinds=[];
     for(let i=0;i<selected.length;i++) {kinds.push(layerKind(selected[i]));if(i%4===3)yield;}
-    const ids=selected.map(l=>read(l,'id')).sort((a,b)=>a-b),background=kinds.includes('background');
+    const ids=[];for(let i=0;i<selected.length;i++){ids.push(read(selected[i],'id'));if(i%4===3)yield;}
+    ids.sort((a,b)=>a-b);const background=kinds.includes('background');
     const parents=[];
     for(let i=0;i<selected.length;i++) {parents.push(read(selected[i],'parent'));if(i%4===3)yield;}
     const parentIds=parents.map(parent=>parent?read(parent,'id'):null);
@@ -162,33 +169,38 @@ module.exports = function createLabels(ps, session, options={}) {
     if(!quickOnly && selected.length && !kinds.includes('unknown')) {
       if(!background)mask|=2;
       if(selected.length===1) {
-        const active=selected[0],order=siblings(parents[0]);
+        const active=selected[0],order=yield* siblings(parents[0]);
         if(read(active,'kind')===k.GROUP) {if(read(active,'layers').length)mask|=1;}
         else {
-          const index=singlePosition(order,ids[0]);
+          const index=yield* singlePosition(order,ids[0]);
           singleIndex=index;
           if(index>=0 && ((index>0 && read(order.at(index-1),'kind')!==k.GROUP) ||
               (index+1<order.length && read(order.at(index+1),'kind')!==k.GROUP)))mask|=1;
         }
       }
       if(!background && !locked && sameParent) {
-        const order=siblings(parents[0]),selectedIds=new Set(ids);
+        const order=yield* siblings(parents[0]),selectedIds=new Set(ids);
         // Photoshop sibling IDs are unique. A single ordinary layer was
         // already located for adjacency above; do not read every remaining
         // sibling ID again just to establish membership. Groups/multi-select
         // still establish membership, stopping once every selected ID is found.
-        if(!order.original && singleIndex===undefined && ids.length===1)singleIndex=singlePosition(order,ids[0]);
+        if(!order.original && singleIndex===undefined && ids.length===1)singleIndex=yield* singlePosition(order,ids[0]);
         let chosenCount=singleIndex===undefined?0:(singleIndex<0?0:1);
-        if(order.original)chosenCount=order.raw.filter(layer=>ids.includes(read(layer,'id'))).length;
+        if(order.original){chosenCount=0;for(let i=0;i<order.length;i++){
+          if(selectedIds.has(read(order.at(i),'id')))chosenCount++;if(i%4===3)yield;
+        }}
         else if(singleIndex===undefined && order.length) {
           const found=new Set(),first=order.idAt(0),last=order.idAt(order.length-1);
           if(selectedIds.has(first))found.add(first);
           if(selectedIds.has(last))found.add(last);
-          for(const id of ids)if(!found.has(id) && order.hintedIndex(id)>=0)found.add(id);
+          for(let i=0;i<ids.length;i++){
+            const id=ids[i];if(!found.has(id) && order.hintedIndex(id)>=0)found.add(id);if(i%4===3)yield;
+          }
           if(found.size<ids.length)positionMiss(order);
           const reverse=selectedIds.has(last) && !selectedIds.has(first);
           for(let i=reverse?order.length-1:0;found.size<ids.length && i>=0 && i<order.length;i+=reverse?-1:1) {
             const id=order.idAt(i);if(selectedIds.has(id))found.add(id);
+            if(i%4===3)yield;
           }
           chosenCount=found.size;
         }
@@ -196,17 +208,18 @@ module.exports = function createLabels(ps, session, options={}) {
           // To establish an edge, stop at the first unselected non-background
           // layer. There is no need to query every sibling's expensive
           // isBackgroundLayer getter; unusual background positions still work.
-          function atEdge(bottom) {
+          function* atEdge(bottom) {
             let count=0;
             for(let i=bottom?order.length-1:0;i>=0 && i<order.length;i+=bottom?-1:1) {
               const layer=order.at(i);
               if(selectedIds.has(read(layer,'id'))) {if(++count===ids.length)return true;}
               else if(!read(layer,'isBackgroundLayer'))return false;
+              if(i%4===3)yield;
             }
             return false;
           }
-          if(!atEdge(false))mask|=4;
-          if(!atEdge(true))mask|=8;
+          if(!(yield* atEdge(false)))mask|=4;
+          if(!(yield* atEdge(true)))mask|=8;
         }
       }
     }

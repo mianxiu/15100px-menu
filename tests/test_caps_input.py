@@ -133,6 +133,25 @@ class CapsInputTests(unittest.TestCase):
    self.result(folder,menu_phase='completed',layer_ids=[4]);d._finish_menu_context()
    self.assertEqual(d.menu_layer_context['layer_ids'],[3]);self.assertIsNone(d.menu_context_pending)
    self.assertEqual(d.gui.SendMessage.call_count,1)
+ def test_accepted_read_waits_for_first_snapshot_without_enabling_or_renewing(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.menu_context_pending.update(deadline=110,completion_deadline=130)
+   for changes in ({'session':'old'},{'menu_request_id':'old'},{'schema':2}):
+    with patch('backend.desktop.time.monotonic',return_value=105):
+     self.result(folder,menu_phase='reading',**changes);d._finish_menu_context()
+    self.assertEqual(d.menu_context_pending['deadline'],110)
+   for now in (105,115,129):
+    with patch('backend.desktop.time.monotonic',return_value=now):
+     self.result(folder,menu_phase='reading');d._finish_menu_context()
+    self.assertEqual(d.menu_context_pending['deadline'],130)
+    d.gui.SendMessage.assert_not_called();self.assertFalse(d.menu_layer_context)
+   with patch('backend.desktop.time.monotonic',return_value=129):
+    self.result(folder,menu_phase='completed');d._finish_menu_context()
+   self.assertEqual(d.menu_layer_context['layer_ids'],[3]);self.assertIsNone(d.menu_context_pending)
+   d=self.ready(folder);d.menu_context_pending.update(deadline=130,completion_deadline=130)
+   with patch('backend.desktop.time.monotonic',return_value=131):
+    self.result(folder,menu_phase='reading');d._finish_menu_context()
+   self.assertIsNone(d.menu_context_pending);d.gui.SendMessage.assert_not_called()
  def test_slow_current_request_finishes_after_the_old_three_second_limit(self):
   with tempfile.TemporaryDirectory() as folder:
    d=self.ready(folder);d.menu_context_pending['deadline']=time.monotonic()+6

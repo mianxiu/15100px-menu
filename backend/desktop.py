@@ -775,6 +775,14 @@ class Desktop:
             snapshot=json.loads((pending['folder']/'menu-context-result.json').read_text('utf-8-sig'))
             if snapshot.get('menu_request_id')!=pending['id']:return
             phase=snapshot.get('menu_phase','completed')
+            if phase=='reading':
+                if snapshot.get('schema')==1 and snapshot.get('session')==pending['session'] and not pending.get('applied_phase'):
+                    # This is read acceptance, NOT a usable layer snapshot.
+                    # A fixed deadline from publication cannot be renewed by
+                    # repeated markers, heartbeats or an unfinished mutation.
+                    pending['deadline']=max(pending['deadline'],pending.get('completion_deadline',pending['deadline']))
+                    self.menu_context_delivery={'phase':'reading','epoch':pending['epoch']}
+                return
             if phase not in ('basic','completed') or pending.get('applied_phase')==phase:return
             from .layer_context import validate,flags
             value=validate(snapshot,pending['session'])
