@@ -384,9 +384,17 @@ static void drawShapeEditor() {
     const float maskHeight=shapeEditor.hasMask()?2*menuControlPadding*scale+2*row+(shapeEditor.batchMask?iconRow:0):0;
     const float separation=shapeEditor.hasMask() && !shapeEditor.batchMask?gap:0;
     const float height=shapeEditor.batchMask?0:std::min(content,windowSize.y-24*scale-maskHeight-separation);
-    const float totalHeight=height+separation+maskHeight;
+    // Reserve vertical placement for every editable channel/type. Switching
+    // stroke to fill or gradient to solid must not move the header down and
+    // turn a stationary click into a hover exit/implicit confirmation.
+    const bool layoutWrapActions=shapeEditor.vector && width-2*menuControlPadding*scale<6*cell+3*gap;
+    const float largestContent=!shapeEditor.batchMask?
+        2*menuControlPadding*scale+iconRow*(wrapTools?2:1)+(shapeEditor.vector?row:0)+colorSquare+(wrapValues?2:1)*row+
+        menuGradientEditorHeight*scale+gap+iconRow*(layoutWrapActions?2:1):content;
+    const float placementHeight=shapeEditor.batchMask?maskHeight:
+        std::min(largestContent,windowSize.y-24*scale-maskHeight-separation)+separation+maskHeight;
     ImVec2 at={std::max(windowPos.x+16*scale,shapeModeBounds.left-menuPanelGap*scale-width),std::max(windowPos.y+12*scale,float(shapeModeBounds.top))};
-    at.y=std::max(windowPos.y+12*scale,std::min(at.y,windowPos.y+windowSize.y-totalHeight-12*scale));
+    at.y=std::max(windowPos.y+12*scale,std::min(at.y,windowPos.y+windowSize.y-placementHeight-12*scale));
 
     at.x=std::round(at.x);at.y=std::round(at.y);
     if(!shapeEditor.batchMask)shapeEditor.bounds={LONG(at.x),LONG(at.y),LONG(at.x+width),LONG(at.y+height)};

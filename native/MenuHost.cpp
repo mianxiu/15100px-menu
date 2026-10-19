@@ -2630,6 +2630,29 @@ int main() {
                 accept({{"type","preview.menu.confirmed"},{"epoch",menuEpoch}});if(shapeEditor.available || !taskBusy)throw std::runtime_error("Fresh selection protection bypassed");
                 taskBusy=busyFeedback=false;allowed=capable=true;shapeEditor.prepare(shapeFixture);setHoldMode(true);io.AddMousePosEvent(-1000,-1000);numberFrame(ImGuiKey_None,false);
                 if(shapePanelOpen)throw std::runtime_error("New session inherited expanded editor");
+                // Keep real hover dismissal enabled: switching back to a shorter
+                // fill panel must not move its header out from under the pointer.
+                pointer((shapeModeBounds.left+shapeModeBounds.right)*.5f,(shapeModeBounds.top+shapeModeBounds.bottom)*.5f);
+                const auto channelEvents=testedMaskEvents.size();
+                auto hoverClick=[&](int tip){const auto rect=shapeTipRows[tip];
+                    pointer((rect.left+rect.right)*.5f,(rect.top+rect.bottom)*.5f);
+                    io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
+                    io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
+                    for(int n=0;n<5;++n)numberFrame(ImGuiKey_None,false);
+                    if(!shapePanelOpen || shapeReturning)throw std::runtime_error("Fill/stroke switch collapsed hover editor: "+std::to_string(tip));};
+                const auto stableTop=shapeEditor.bounds.top;
+                for(int i=0;i<6;++i){hoverClick(1);hoverClick(0);}
+                if(testedMaskEvents.size()!=channelEvents)throw std::runtime_error("Channel selection wrote or confirmed preview");
+                for(int tip:{3,2,4,2,1,3,2,4,2,0}){
+                    hoverClick(tip);
+                    if(shapeEditor.bounds.top!=stableTop)throw std::runtime_error("Paint type moved editor header");
+                    for(size_t n=channelEvents;n<testedMaskEvents.size();++n)
+                        if(testedMaskEvents[n].value("action",std::string())!="mask.preview.update")throw std::runtime_error("Paint type switch implicitly confirmed preview");
+                }
+                pointer(pieCenter.x,pieCenter.y);
+                if(!shapeReturning || !testedMaskEvents.back().value("return_to_menu",false))throw std::runtime_error("Actual exit after paint switch did not confirm once");
+                taskBusy=busyFeedback=false;allowed=capable=true;shapeEditor.prepare(shapeFixture);setHoldMode(true);io.AddMousePosEvent(-1000,-1000);numberFrame(ImGuiKey_None,false);
+                std::cout<<"Fill/stroke/type hover switching passed: 22 clicks, stable header, no implicit commit, actual exit confirms once\n";
                 testEditorKeepOpen=true;shapePanelOpen=true;numberFrame(ImGuiKey_None,false);
                 testedMaskEvents.resize(switchEvents);testedActions.resize(switchActions);
                 std::cout<<"Hover editor path passed: anchored single expander, continuous travel, panel/mask dwell, exit restores ordinary, one dirty confirmation, stale terminal rejection\n";
