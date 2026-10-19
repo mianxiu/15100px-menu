@@ -113,18 +113,26 @@ static bool drawPerceptualPicker(Json& rgb,float width) {
     const ImVec2 lane={barHi.x+gap+menuHarmonyLaneWidth*scale*.5f,at.y+side*.5f};
     const auto identity=std::to_string(menuEpoch)+":"+std::to_string(shapeEditor.channel)+":"+std::to_string(shapeEditor.stop);
     state.reset(rgb,identity);state.layout(lane,side*.5f,scale);bool changed=false;
-    ImGui::InvisibleButton("##perceptual-hue-sv",{width,side});shapeItemTip(23);
+    ImGui::InvisibleButton("##perceptual-hue-sv",{width,side});
     state.wheelBounds={LONG(at.x),LONG(at.y),LONG(at.x+width),LONG(at.y+side)};
     state.squareBounds={LONG(lo.x),LONG(lo.y),LONG(hi.x),LONG(hi.y)};
     state.hueBounds={LONG(barLo.x),LONG(barLo.y),LONG(barHi.x),LONG(barHi.y)};state.lightnessBounds={};
     const auto mouse=ImGui::GetIO().MousePos;
     const int hovered=ImGui::IsItemHovered()?state.hit(mouse,scale):-1;
-    if(hovered>=0 && !ImGui::IsItemActive()){
-        const auto p=state.points[hovered];const float hit=(State::markerExtent(hovered)+2.5f)*scale;
-        shapeTipRows[25+hovered]={LONG(p.x-hit),LONG(p.y-hit),LONG(p.x+hit),LONG(p.y+hit)};shapeTipCandidate=225+hovered;
+    // All anchors remain available while the visual waits 60ms to change text.
+    // Neutral space between the hue strip and markers has no tooltip target.
+    shapeTipRows[23]=state.hueBounds;shapeTipRows[24]=state.squareBounds;
+    for(int i=0;i<perceptual::wheelCount;++i){
+        const auto p=state.points[i];const float hit=(State::markerExtent(i)+2.5f)*scale;
+        shapeTipRows[25+i]={LONG(p.x-hit),LONG(p.y-hit),LONG(p.x+hit),LONG(p.y+hit)};
     }
-    auto inSquare=[&](ImVec2 p){return p.x>=lo.x && p.y>=lo.y && p.x<=hi.x && p.y<=hi.y;};
+    auto inSquare=[&](ImVec2 p){return p.x>=lo.x && p.x<=hi.x && p.y>=lo.y && p.y<=hi.y;};
     auto inHue=[&](ImVec2 p){return p.x>=barLo.x && p.x<=barHi.x && p.y>=barLo.y && p.y<=barHi.y;};
+    if(ImGui::IsItemHovered() && !ImGui::IsItemActive()){
+        if(hovered>=0)shapeTipCandidate=225+hovered;
+        else if(inSquare(mouse))shapeTipCandidate=224;
+        else if(inHue(mouse))shapeTipCandidate=223;
+    }
     if(ImGui::IsItemHovered() && ImGui::IsMouseClicked(0)){
         state.dragHandle=hovered>=0;
         state.drag=hovered>=0?hovered:inSquare(mouse)?-2:inHue(mouse)?0:-1;

@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+v0.4.202：修复色相／邻近色提示跳位和空白误报色相。详情见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。
+
 v0.4.201：展开／收起统一悬停原按钮，说明文字保留，外框恢复实线。用法与验证范围见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。
 
 v0.4.200：展开／收起按钮增加状态说明文字及圆角虚线描边，沿用点击收起与屏幕取色保护。用法和验证范围见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。

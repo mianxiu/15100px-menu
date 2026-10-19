@@ -1015,9 +1015,6 @@ static ImVec4 footerBounds{};
 static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidgetHeight-quickGroupGap;}
 static const char* actionTipText(int action) {
     if(action==200+shapeModeTipBase)return shapePanelOpen?(shapeEditor.batchMask?"羽化／密度":"颜色／羽化"):shapeEditor.batchMask?"展开羽化／密度":"展开颜色／羽化";
-    if(action==223 && POINT{LONG(ImGui::GetIO().MousePos.x),LONG(ImGui::GetIO().MousePos.y)}.x>=perceptualPicker.squareBounds.left &&
-       ImGui::GetIO().MousePos.x<=perceptualPicker.squareBounds.right && ImGui::GetIO().MousePos.y>=perceptualPicker.squareBounds.top &&
-       ImGui::GetIO().MousePos.y<=perceptualPicker.squareBounds.bottom)return "饱和度／明度";
     if(action==205)return shapeEditor.channel?"无描边":"无填充";
     if(action==222){const auto method=shapeEditor.current().value("method",std::string("classic"));return method=="perceptual"?"感知渐变；点击切换线性":method=="linear"?"线性渐变；点击切换经典":"经典渐变；点击切换感知";}
     if(action>=200 && action<200+shapeTipCount)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
@@ -1093,7 +1090,8 @@ static ImVec4 actionTipBounds(int action) {
             if(tipOverlaps(tip,{LONG(footerBounds.x),LONG(footerBounds.y),LONG(footerBounds.z),LONG(footerBounds.w)},2*scale))return false;
             return true;
         };
-        if(action>=225 && action<200+shapeModeTipBase){
+        const bool pickerSideTip=action==223 || action>=225 && action<200+shapeModeTipBase;
+        if(pickerSideTip){
             const float nearX=group.right+gap;
             const float nearY=std::clamp((anchor.top+anchor.bottom-height)*.5f,pos.y+8*scale,std::max(pos.y+8*scale,pos.y+size.y-height-8*scale));
             const ImVec4 nearby={nearX,nearY,nearX+width,nearY+height};
@@ -1101,7 +1099,7 @@ static ImVec4 actionTipBounds(int action) {
         }
         const float left=group.left-gap-width;
         const float y=std::clamp(float(anchor.top),pos.y+8*scale,std::max(pos.y+8*scale,pos.y+size.y-height-8*scale));
-        if(action<225 || action>=200+shapeModeTipBase){
+        if(!pickerSideTip){
             if(valid(above))return above;
             for(const auto& candidate:std::array<ImVec4,3>{{{left,y,left+width,y+height},{group.right+gap,y,group.right+gap+width,y+height},{x,group.bottom+gap,x+width,group.bottom+gap+height}}})if(valid(candidate))return candidate;
         }
@@ -2814,6 +2812,29 @@ int main() {
                 for(int frame=0;frame<120;++frame)numberFrame(ImGuiKey_None,false);
                 if(shapeEditor.draft!=idleDraft || testedMaskEvents.size()!=idleEvents)
                     throw std::runtime_error("Idle perceptual picker issued a preview without input");
+                // Reproduce the live 60ms handoff, not only a final static tip.
+                const auto tipDraft=shapeEditor.draft;const auto tipEvents=testedMaskEvents.size();
+                hoverTip.reset();auto firstTipPoint=perceptualPicker.points[1];
+                io.AddMousePosEvent(firstTipPoint.x,firstTipPoint.y);numberFrame(ImGuiKey_None,false);
+                hoverTip.pendingSince=GetTickCount64()-200;numberFrame(ImGuiKey_None,false);
+                if(hoverTip.shown!=226 || !tipVisual.ready)throw std::runtime_error("First adjacent tooltip missing");
+                const auto heldTipTarget=tipVisual.to;auto nextTipPoint=perceptualPicker.points[2];
+                io.AddMousePosEvent(nextTipPoint.x,nextTipPoint.y);numberFrame(ImGuiKey_None,false);
+                if(shapeTipCandidate!=227 || hoverTip.shown!=226 || tipVisual.to.x!=heldTipTarget.x || tipVisual.to.y!=heldTipTarget.y ||
+                   tipVisual.to.z!=heldTipTarget.z || tipVisual.to.w!=heldTipTarget.w)
+                    throw std::runtime_error("Retained adjacent tooltip lost its anchor during the 60ms handoff");
+                hoverTip.pendingSince=GetTickCount64()-80;numberFrame(ImGuiKey_None,false);
+                if(hoverTip.shown!=227)throw std::runtime_error("Adjacent tooltip did not switch after stable hover");
+                const auto hueTipRect=perceptualPicker.hueBounds,svTipRect=perceptualPicker.squareBounds;
+                io.AddMousePosEvent((hueTipRect.left+hueTipRect.right)*.5f,(hueTipRect.top+hueTipRect.bottom)*.5f);numberFrame(ImGuiKey_None,false);
+                if(shapeTipCandidate!=223 || shapeTipRows[23].left!=hueTipRect.left || shapeTipRows[23].right!=hueTipRect.right)
+                    throw std::runtime_error("Hue tooltip uses the whole picker instead of its strip");
+                io.AddMousePosEvent(hueTipRect.right+2*scale,nextTipPoint.y);numberFrame(ImGuiKey_None,false);
+                if(shapeTipCandidate>=0 || hoverTip.shown!=-1 || tipVisual.ready)throw std::runtime_error("Neutral picker gap advertised a hue tooltip");
+                io.AddMousePosEvent((svTipRect.left+svTipRect.right)*.5f,(svTipRect.top+svTipRect.bottom)*.5f);numberFrame(ImGuiKey_None,false);
+                if(shapeTipCandidate!=224 || shapeTipRows[24].left!=svTipRect.left)throw std::runtime_error("SV tooltip shares the hue target");
+                if(shapeEditor.draft!=tipDraft || testedMaskEvents.size()!=tipEvents)throw std::runtime_error("Tooltip handoff wrote the preview");
+                std::cout<<"Picker tooltip handoff passed: retained adjacent anchor during delay, stable text change, independent hue/SV, neutral gap without false hue, no preview writes\n";
                 for(int i=0;i<perceptual::wheelCount;++i){
                     const auto point=perceptualPicker.points[i];const auto base=perceptualPicker.base;
                     io.AddMousePosEvent(point.x,point.y);numberFrame(ImGuiKey_None,false);
