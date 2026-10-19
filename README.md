@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-v0.4.203：打开后台或安装／更新插件后不再自动启动Photoshop，保留手动启动按钮。详情见[Wiki安装说明](https://github.com/mianxiu/15100px-menu/wiki/Installation)。
+v0.4.204／UXP44：补上PS24.0.0颜色／羽化实时预览路径，需要更新内置插件并手动重启PS。该机实测待复核；操作与限制见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Legacy-preview)。
 
 v0.4.201：展开／收起统一悬停原按钮，说明文字保留，外框恢复实线。用法与验证范围见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。
 

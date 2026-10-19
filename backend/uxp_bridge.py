@@ -17,6 +17,20 @@ def compatible(value):
     try:return version(value)[:2]==(0,3)
     except ValueError:return False
 
+def legacy_preview_available(heartbeat):
+    """Select the standalone engine only from this host's explicit capability.
+
+    UXP44 first advertises support for 24.0.0. An older executor must keep
+    its existing draft behavior rather than borrowing another host's support.
+    """
+    host=version_tuple(heartbeat.get('photoshop_version'))
+    try:executor=version(heartbeat.get('probe_version'))
+    except (ValueError,TypeError):return False
+    minimum=(0,3,44) if host<(24,0,1) else (0,3,32)
+    return ((24,0,0)<=host<(24,1,0) and executor>=minimum and
+            heartbeat.get('legacy_preview_available') is True and
+            heartbeat.get('document_redraw_available') is False)
+
 def read_heartbeat(folder):
     """Read current metadata through UXP's brief in-place overwrite window.
 
@@ -114,9 +128,7 @@ class UxpTransport:
                 if payload.get('command')=='shape.preview' and (version_tuple(heartbeat.get('photoshop_version'))<(24,1,0) or heartbeat.get('document_redraw_available') is not True):
                     raise RuntimeError('当前PS使用本地草稿，实时预览需要PS24.1及官方重绘API；未提交修改')
                 legacy=payload.get('command')=='shape.legacy.preview'
-                if legacy and (preview is None or native_preview is None or version(heartbeat.get('probe_version'))<(0,3,32) or
-                        heartbeat.get('legacy_preview_available') is not True or heartbeat.get('document_redraw_available') is not False or
-                        not (24,0,1)<=version_tuple(heartbeat.get('photoshop_version'))<(24,1,0)):
+                if legacy and (preview is None or native_preview is None or not legacy_preview_available(heartbeat)):
                     raise RuntimeError('旧版独立预览能力未就绪；未提交修改')
                 # A solid preview may switch to gradient within this transaction.
                 # Reject old executors before binding or publishing any request.
@@ -457,7 +469,7 @@ class UxpBridge(PhotoshopBridge):
                 native=None;command='shape.preview' if preview else 'shape.paint'
                 if preview:
                     heartbeat=read_heartbeat(self.transport.folder)
-                    if heartbeat.get('legacy_preview_available') is True and heartbeat.get('document_redraw_available') is False and (24,0,1)<=version_tuple(heartbeat.get('photoshop_version'))<(24,1,0):
+                    if legacy_preview_available(heartbeat):
                         # Bind the COM instance before the UXP preparation. A host
                         # restart can only invalidate this proxy, never attach a
                         # later process that might reuse document/layer IDs.

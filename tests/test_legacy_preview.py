@@ -31,6 +31,25 @@ class LegacyTransportTests(unittest.TestCase):
   with patch('backend.uxp_bridge.publish_request',side_effect=self.publish) as publish,patch('backend.uxp_management.photoshop_running',return_value=True):result=self.call(native)
   self.assertEqual(native.call_count,1);self.assertEqual(publish.call_count,1);self.assertTrue(result['result']['verified'])
   self.assertEqual(self.transport.pending.value['id'],result['id']);self.preview.bind.assert_called_once()
+ def test_2400_executor44_prepares_once_then_runs_bound_native(self):
+  self.heartbeat.update(photoshop_version='24.0.0',probe_version='0.3.44');self.save_heartbeat()
+  native=Mock(side_effect=lambda folder,request,ready:self.finish(request))
+  with patch('backend.uxp_bridge.publish_request',side_effect=self.publish) as publish:
+   result=self.call(native)
+  self.assertTrue(result['result']['verified']);publish.assert_called_once();native.assert_called_once()
+  self.assertEqual(self.request['command'],'shape.legacy.preview')
+  self.assertEqual(self.request['target'],{'session':'session'})
+  self.assertEqual(self.transport.pending.value['id'],result['id'])
+ def test_2400_missing_capabilities_never_publishes_or_invokes_native(self):
+  self.heartbeat.update(photoshop_version='24.0.0',probe_version='0.3.44')
+  for changes in ({'legacy_preview_available':False},{'legacy_preview_available':None},
+                  {'document_redraw_available':True},{'document_redraw_available':None},
+                  {'probe_version':'0.3.43'}):
+   before=dict(self.heartbeat);self.heartbeat.update(changes);self.save_heartbeat();native=Mock()
+   with patch('backend.uxp_bridge.publish_request') as publish:
+    with self.assertRaisesRegex(RuntimeError,'未就绪'):self.call(native)
+   publish.assert_not_called();native.assert_not_called()
+   self.assertIsNone(self.transport.pending.value);self.heartbeat=before
  def test_final_receipt_precedes_native_invocation_and_host_check(self):
   def publish(source,dest):self.publish(source,dest);self.finish(self.request)
   native=Mock()

@@ -3,8 +3,9 @@ const {app} = require('photoshop');
 const uxp = require('uxp');
 const token = require('./probe-config.js');
 const session = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
-const hostVersion=String(uxp.host?.version || '').split('.').map(Number);
-const legacyPreview=hostVersion[0]===24 && hostVersion[1]===0 && hostVersion[2]>=1;
+// PS24.0.0 shares the standalone app.refresh channel with 24.0.1.
+// A 24.1+ host still needs its actual official redraw API; no nested JSX.
+const legacyPreview=/^24\.0(?:\.\d+)*$/.test(String(uxp.host?.version || ''));
 const labels = require('./labels.js')(require('photoshop'), session, {legacyPreview});
 const seen = new Set();
 let sequence = 0;
@@ -208,7 +209,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.43', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.44', session, transport: 'plugin-data-files',
         layer_observation:observation,
         shape_clipboard_available:labels.paintClipboardAvailable?.()===true,
         ...await labels.interfacePreferences(),
@@ -277,13 +278,13 @@ async function probe(reason) {
       // and making the caller wait forever for an outcome. Existing accepted
       // records above, other sessions and malformed packets are never changed.
       seen.add(request.id);
-      const rejected={schema:1,session,id:request.id,probe_version:'0.3.43',operation:request.operation,
+      const rejected={schema:1,session,id:request.id,probe_version:'0.3.44',operation:request.operation,
         phase:'failed',error:'请求在执行前已过期；未修改 Photoshop',not_executed:true,result_unknown:false,completed_at_ms:Date.now()};
       pendingResponse=rejected;await finishResponse(folder,rejected);
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.43', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.44', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

@@ -74,4 +74,28 @@ async function main() {
   assert.equal(await failing(),null);
   console.log('PASS: network-free startup, optional metadata, token, expiry, operation, duplicate fencing');
 }
-main().catch(error => {console.error(error); process.exitCode = 1;});
+async function capabilityMatrix() {
+  const manifest=JSON.parse(fs.readFileSync('uxp/offline-probe/manifest.json','utf8'));
+  for(const [host,expected] of [['24.0',true],['24.0.0',true],['24.0.1',true],['24.0.1.112',true],
+    ['23.3.0',false],['23.5.0',false],['24.1.0',false],['24.2.0',false],['25.0.0',false],['24.0.bad',false],['',false]]) {
+    for(const official of [false,true]) {
+      const files=new Map();let options;
+      const folder={createFile:async name=>({write:async text=>files.set(name,text)})};
+      const app={documents:[],activeDocument:null};
+      const ps={app,core:official?{redrawDocument:()=>{throw Error('startup must not redraw');}}:{},action:{addNotificationListener(){}}};
+      vm.runInNewContext(source,{module:{exports:{}},console,Date,setTimeout,clearTimeout,setInterval(){},
+        require:name=>name==='photoshop'?ps:name==='uxp'?{host:{version:host},versions:{uxp:'6.3'},storage:{localFileSystem:{
+          getDataFolder:async()=>folder,getPluginFolder:async()=>({getEntry:async()=>({read:async()=>JSON.stringify(manifest)})})
+        }}}:name==='./labels.js'?((ps,session,settings)=>{options=settings;return {interfacePreferences:async()=>({}),selectionContext:()=>({}),selectionContextFresh:async()=>({})};}):'test-token'});
+      await new Promise(resolve=>setImmediate(resolve));
+      const heartbeat=JSON.parse(files.get('probe-last.json'));
+      assert.equal(options.legacyPreview,expected,host);
+      assert.equal(heartbeat.legacy_preview_available,expected,host);
+      assert.equal(heartbeat.document_redraw_available,official,host);
+      assert.equal(heartbeat.probe_version,manifest.version);
+      assert.equal(files.has('probe-request.json'),false);
+    }
+  }
+  console.log('PASS: 24.0.0 standalone capability / 23.x excluded / actual official API / no startup writes');
+}
+main().then(capabilityMatrix).catch(error => {console.error(error); process.exitCode = 1;});

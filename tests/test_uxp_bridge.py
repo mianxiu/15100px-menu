@@ -354,6 +354,26 @@ class UxpBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bridge.transport.call.call_count,1)
         self.assertEqual(self.bridge.transport.call.call_args.args,('set_label',))
         self.assertEqual(self.bridge.transport.call.call_args.kwargs['target'],self.target)
+    async def test_preview_2400_routes_by_loaded_executor_and_explicit_capability(self):
+        folder=Path(self.temp.name);self.bridge.transport.folder=folder
+        params={'revision':'r','fill':{'kind':'solid','enabled':True,'rgb':[12,34,56]},
+                'stroke':{'kind':'solid','enabled':False,'rgb':[0,0,0],'width':1},
+                'mask':{'feather':4.5,'density':77}}
+        self.bridge._application=Mock(return_value=object())
+        for host,plugin,capability,official,legacy in (
+            ('24.0.0','0.3.44',True,False,True),('24.0.1','0.3.43',True,False,True),
+            ('24.0.0','0.3.43',True,False,False),('24.0.0','0.3.44',False,False,False),
+            ('23.5.0','0.3.44',True,False,False),('24.2.0','0.3.44',True,True,False)):
+            (folder/'probe-last.json').write_text(json.dumps({'photoshop_version':host,'probe_version':plugin,
+                'legacy_preview_available':capability,'document_redraw_available':official}),'utf-8')
+            self.bridge._application.reset_mock();self.bridge.transport.call.reset_mock()
+            await self.bridge.execute_shape(params,frozen_target=self.target,preview=object())
+            self.bridge.transport.call.assert_called_once()
+            call=self.bridge.transport.call.call_args.kwargs
+            self.assertEqual(call['command'],'shape.legacy.preview' if legacy else 'shape.preview')
+            self.assertEqual(call['target'],self.target)
+            self.assertEqual(callable(call['native_preview']),legacy)
+            self.assertEqual(self.bridge._application.call_count,int(legacy))
     async def test_frozen_target_invalid_or_busy_never_publishes(self):
         with self.assertRaises(ValueError):await self.bridge.execute('layer.new',frozen_target={**self.target,'layer_ids':[2,3]})
         self.bridge.busy=True
