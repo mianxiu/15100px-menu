@@ -379,14 +379,38 @@ static bool shapeEyedropMessage(UINT msg,WPARAM wp,LPARAM lp) {
     // Mouse motion still updates ImGui so returning to the panel is immediate.
     return msg==WM_LBUTTONDBLCLK || msg==WM_MOUSEWHEEL || msg==WM_MOUSEHWHEEL;
 }
+static const char* shapeModeLabel(bool expanded) {
+    if(shapeEditor.batchMask)return expanded?"收起羽化／密度":"展开羽化／密度";
+    return expanded?"收起颜色／羽化":"展开颜色／羽化";
+}
+static void drawShapeModeFrame(ImDrawList* draw,ImVec2 a,ImVec2 b,ImU32 ink,float rounding) {
+    // Keep the shared rounded contour; distribute short dashes along its path.
+    const float stroke=scale,dash=menuDashedFrameDash*scale,gap=menuDashedFrameGap*scale;
+    a.x+=stroke*.5f;a.y+=stroke*.5f;b.x-=stroke*.5f;b.y-=stroke*.5f;
+    draw->PathRect(a,b,rounding);
+    std::array<ImVec2,128> points{};const int count=std::min(int(points.size()),draw->_Path.Size);
+    std::copy_n(draw->_Path.Data,count,points.data());draw->PathClear();
+    float phase=0;
+    for(int i=0;i<count;++i){
+        const auto from=points[i],to=points[(i+1)%count];const float dx=to.x-from.x,dy=to.y-from.y,length=std::sqrt(dx*dx+dy*dy);
+        for(float at=0;at<length;){
+            const bool visible=phase<dash;const float step=std::min(length-at,(visible?dash:dash+gap)-phase);
+            if(visible && step>0)draw->AddLine({from.x+dx*at/length,from.y+dy*at/length},
+                {from.x+dx*(at+step)/length,from.y+dy*(at+step)/length},ink,stroke);
+            at+=step;phase+=step;if(phase>=dash+gap-.001f)phase=0;
+        }
+    }
+}
 static void drawShapeModeSwitch() {
     shapeModeBounds={};shapeModeRows={};
     if(!shapeEditor.ready())return;
-    const auto row=holdRows[0];const float width=figmaDisplayIconWidth*scale,height=figmaDisplayWidgetHeight*scale;
+    auto* font=menuFonts[fontIndex()]?menuFonts[fontIndex()]:ImGui::GetFont();const float textSize=font->FontSize*figmaBasicTextScale;
+    const float labelWidth=std::max(font->CalcTextSizeA(textSize,FLT_MAX,0,shapeModeLabel(false)).x,font->CalcTextSizeA(textSize,FLT_MAX,0,shapeModeLabel(true)).x);
+    const auto row=holdRows[0];const float width=std::ceil(labelWidth+basicTextOffset()+figmaBasicRightPadding*scale),height=menuControlHeight*scale;
     const float x=std::round((row.left+row.right-width)*.5f),y=row.top-menuPanelGap*scale-height;
     shapeModeBounds={LONG(x),LONG(y),LONG(x+width),LONG(y+height)};shapeModeRows[0]=shapeModeBounds;
     const auto saved=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos({x,y});
-    ImGui::PushFont(menuFonts[0]?menuFonts[0]:ImGui::GetFont());
+    ImGui::PushFont(font);
     ImGui::BeginChild("editor-mode",{width,height},ImGuiChildFlags_None,
         ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
     auto* draw=ImGui::GetWindowDrawList();const float rounding=ImGui::GetStyle().FrameRounding;
@@ -412,8 +436,10 @@ static void drawShapeModeSwitch() {
     }
     const ImVec2 a={x,y},b={x+width,y+height};
     const auto surface=tint(shapePanelOpen?ImGuiCol_ButtonActive:hovered?ImGuiCol_ButtonHovered:ImGuiCol_Button);
-    draw->AddRectFilled(a,b,surface,rounding);draw->AddRect(a,b,tint(ImGuiCol_Border),rounding,0,scale);
-    drawStyledMenuIcon(draw,shapePanelOpen?33:32,{x+(width-figmaDisplayIconSize*scale)*.5f,y+(height-figmaDisplayIconSize*scale)*.5f},figmaDisplayIconSize*scale,tint(ImGuiCol_Text),surface);
+    draw->AddRectFilled(a,b,surface,rounding);drawShapeModeFrame(draw,a,b,tint(ImGuiCol_Border),rounding);
+    const float iconSize=figmaBasicIconSize*scale;
+    drawStyledMenuIcon(draw,shapePanelOpen?33:32,{x+figmaBasicLeftPadding*scale,y+(height-iconSize)*.5f},iconSize,tint(ImGuiCol_Text),surface);
+    draw->AddText(font,textSize,{x+basicTextOffset(),std::round(y+(height-textSize)*.5f)},tint(ImGuiCol_Text),shapeModeLabel(shapePanelOpen));
     shapeTipRows[shapeModeTipBase]=shapeModeBounds;
     if(hovered && canSwitch)shapeTipCandidate=200+shapeModeTipBase;
     ImGui::EndChild();ImGui::PopFont();ImGui::SetCursorScreenPos(saved);
