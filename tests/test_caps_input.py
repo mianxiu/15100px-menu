@@ -103,31 +103,34 @@ class CapsInputTests(unittest.TestCase):
   context={'session':'s','document_id':2,'layer_ids':[3],'kind':'shape-fill','shape_editor':{'available':True},'plugin_time_ms':(time.time()-120)*1000}
   require_menu_target(context,'shape.paint',dict(context))
   with self.assertRaisesRegex(RuntimeError,'已改变'):require_menu_target(context,'shape.paint',{**context,'layer_ids':[4]})
- def test_completion_resume_waits_for_scope_input_and_native_success(self):
+ def test_all_completed_scopes_close_without_selection_reads(self):
   with tempfile.TemporaryDirectory() as folder:
-   d=self.ready(folder);d.menu_context_requester=Mock();d.menu_context_pending=None
-   d.visible=False;d._resume_completed_menu();self.assertIsNone(d.menu_context_pending)
-   d.visible=True;d._scope.return_value=False;d._resume_completed_menu();self.assertIsNone(d.menu_context_pending)
-   d._scope.return_value=True;d.panel_context.current['input_focused']=True;d._resume_completed_menu();self.assertIsNone(d.menu_context_pending)
-   d.panel_context.current['input_focused']=False;d.gui.SendMessage.return_value=0;d._resume_completed_menu();self.assertIsNone(d.menu_context_pending)
-   d.gui.SendMessage.return_value=1;d._resume_completed_menu();pending=d.menu_context_pending
-   self.assertTrue(pending['resume']);self.assertTrue(pending['unpublished'])
-   d._resume_completed_menu();self.assertIs(d.menu_context_pending,pending)
-   d.menu_context_requester.assert_not_called()
- def test_completion_snapshot_rotates_epoch_and_then_enriches_same_selection(self):
+   for scope in ('layers','canvas','generic','home','text'):
+    d=self.ready(folder);d.panel_context.current['kind']=scope;d.menu_context_pending=None
+    d.hide=Mock();d.menu_context_requester=Mock();d.gui.SendMessage.return_value=1
+    d._close_completed_menu();d.hide.assert_called_once_with(restore=True)
+    d.menu_context_requester.assert_not_called();self.assertIsNone(d.menu_context_pending)
+ def test_completion_close_waits_for_native_result_and_preview_guard(self):
   with tempfile.TemporaryDirectory() as folder:
-   d=self.ready(folder);d.menu_context_pending['resume']=True;d.hold_active=True
-   self.result(folder,menu_request_id='old');d._finish_menu_context();d.gui.SendMessage.assert_not_called()
-   self.result(folder,menu_phase='basic');d._finish_menu_context()
-   self.assertEqual(d.menu_epoch,8);self.assertFalse(d.hold_active)
-   self.assertEqual(d.menu_layer_context['layer_ids'],[3]);self.assertEqual(d.menu_context_pending['epoch'],8)
-   self.result(folder,menu_phase='completed');d._finish_menu_context()
-   self.assertIsNone(d.menu_context_pending);self.assertEqual(d.gui.SendMessage.call_count,2)
- def test_completion_rejected_by_native_does_not_advance_backend_epoch(self):
+   d=self.ready(folder);d.hide=Mock();d.gui.SendMessage.return_value=0
+   d._close_completed_menu();d.hide.assert_not_called()
+   d.gui.SendMessage.return_value=1;d.preview_input_guard={'release':True}
+   d._close_completed_menu();d.hide.assert_not_called()
+   d.preview_input_guard=None;d.mask_preview=SimpleNamespace(closed=False)
+   d._close_completed_menu();d.hide.assert_not_called()
+   d.mask_preview.closed=True;d._close_completed_menu();d.hide.assert_called_once_with(restore=True)
+ def test_hidden_or_foreign_feedback_never_reopens_or_activates(self):
   with tempfile.TemporaryDirectory() as folder:
-   d=self.ready(folder);d.menu_context_pending['resume']=True;d.gui.SendMessage.return_value=0
-   self.result(folder);d._finish_menu_context()
-   self.assertEqual(d.menu_epoch,7);self.assertTrue(d.menu_context_pending['resume'])
+   d=self.ready(folder);d.hide=Mock();d.visible=False
+   d._close_completed_menu();d.hide.assert_not_called();d.gui.SendMessage.assert_not_called()
+   d.visible=True;d._scope.return_value=False;d._close_completed_menu();d.hide.assert_called_once_with(restore=False)
+ def test_retired_resume_snapshot_is_dropped_without_epoch_or_host_read(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.menu_context_pending['resume']=True;self.result(folder)
+   d._finish_menu_context();self.assertIsNone(d.menu_context_pending);self.assertEqual(d.menu_epoch,7)
+   d.gui.SendMessage.assert_not_called()
+   d.menu_context_pending={'epoch':7,'unpublished':True,'resume':True};d.menu_context_requester=Mock()
+   d._publish_menu_context();d.menu_context_requester.assert_not_called();self.assertIsNone(d.menu_context_pending)
 
 class NativeDialogWaitTests(unittest.IsolatedAsyncioTestCase):
  async def test_style_wait_has_no_generic_write_timeout_and_never_replays(self):

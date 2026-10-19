@@ -1,4 +1,4 @@
-"""Hover return confirms one preview; withdrawn followups never execute."""
+"""Hover exit confirms once; the real Desktop filter must deliver its terminal event."""
 import asyncio,json,unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -91,3 +91,11 @@ class PreviewReturnWireTests(unittest.TestCase):
         original={'type':'status','data':{'photoshop':{'busy':False}}};d.event(original)
         self.assertTrue(d._send_menu_event.call_args.args[0]['data']['photoshop']['busy']);self.assertFalse(original['data']['photoshop']['busy'])
         p.close();d.event({'type':'operation','busy':False});self.assertFalse(d._send_menu_event.call_args.args[0]['busy'])
+
+    def test_real_desktop_filter_forwards_verified_completion_event(self):
+        from backend.desktop import Desktop
+        d=Desktop('http://localhost',lambda _:None);d.menu_epoch=7;d._send_menu_event=Mock()
+        d.mask_preview=MaskPreview(7,paint());d.mask_preview.update(paint(9),commit=True,return_to_menu=True)
+        event={'type':'preview.menu.confirmed','epoch':7}
+        d.event(event)
+        d._send_menu_event.assert_called_once_with(event)

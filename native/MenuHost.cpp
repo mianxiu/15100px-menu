@@ -108,6 +108,7 @@ static std::string taskStatus() {
 static void updateBusy(bool busy,bool queueReady=false,int queueCount=0) {
     if (busy && !taskBusy) taskStarted=GetTickCount64();
     if (busy && window && IsWindowVisible(window)) busyFeedback=true;
+    if(!busy && taskBusy && taskHasResult && !taskFailed)completionStarted=GetTickCount64();
     taskBusy=busy;taskQueueCount=0;allowed=capable&&!busy;
 }
 static std::array<std::string,4> shortcuts={"CapsLock + A","CapsLock + C","CapsLock + W","CapsLock + S"};
@@ -117,16 +118,16 @@ static const char* keywords[]={"select group layers","orange color tag","move to
 static char search[256]{};
 static int selection=0;
 static bool holdMode=false;
+static bool holdFinished=false;
 static bool completionReady() {
     return busyFeedback && !taskBusy && taskHasResult && !taskFailed && taskRecovery.empty() &&
-        completionStarted && GetTickCount64()-completionStarted>=450 && holdMode;
+        completionStarted && GetTickCount64()-completionStarted>=450;
 }
 static std::array<RECT,4> holdRows{};
 static POINT holdOrigin{};
 static bool holdMoved=false;
 static ImVec2 pieCenter{};
 static bool pieReady=false;
-static bool holdFinished=false;
 static bool pinned=false;
 static LPARAM menuEpoch=0;
 static ULONGLONG pieStarted=0;
@@ -632,17 +633,8 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
             if(data->dwData==0x4d435458){
                 const bool resume=value.value("resume",false);
                 if(!IsWindowVisible(hwnd) || value.value("epoch",0)!=menuEpoch || shapeEditor.dirty || taskBusy)return FALSE;
-                if(resume) {
-                    if(!completionReady() || value.value("next_epoch",0)!=menuEpoch+1 || inputFocused || panelKind!=2)return FALSE;
-                    // No old hover or held input can become a new action. Keep
-                    // the original anchor; the restored menu is click-pinned.
-                    for(int key:{VK_CAPITAL,VK_LBUTTON,VK_RBUTTON,VK_SHIFT,VK_CONTROL,VK_MENU})
-                        if(GetAsyncKeyState(key)&0x8000)return FALSE;
-                    const auto origin=holdOrigin;
-                    setHoldMode(true);holdOrigin=origin;pinned=true;
-                    menuEpoch=value.at("next_epoch");
-                    completionStarted=0;
-                } else if(holdFinished || busyFeedback)return FALSE;
+                // Success feedback now closes; old restore packets cannot reopen it.
+                if(resume || holdFinished || busyFeedback)return FALSE;
                 const auto flags=value.value("flags",uint64_t(0));
                 layerAware=true;layerMask=(flags>>8)&15;layerKind=(flags>>12)&15;
                 layerBackground=(flags&(1u<<16))!=0;layerCount=(flags>>17)&255;
@@ -665,8 +657,8 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     // Read-only diagnostic used by the real SetWindowPos lifecycle regression.
     if (msg==WM_APP+18) return static_cast<LRESULT>(std::lround(compositionOpacity*1000));
     if (msg==WM_APP+19) return (busyFeedback?1:0)|(taskBusy?2:0);
-    // Read-only readiness query. The backend still validates scope and obtains
-    // a new request-bound selection before the atomic COPYDATA transition.
+    // Read-only success feedback expiry. The backend waits for preview/guard
+    // release, then hides this window without querying Photoshop or replaying actions.
     if (msg==WM_APP+24) return IsWindowVisible(hwnd) && completionReady();
     if (msg==WM_APP+25) {
         // The foreground menu process can hand activation back to its owner;
@@ -2537,15 +2529,28 @@ int main() {
                 taskRecovery.clear();inputFocused=true;
                 if(applyResume(resume))throw std::runtime_error("Input protection allowed completion resume");
                 inputFocused=false;
-                if(!applyResume(resume))throw std::runtime_error("Fresh completion snapshot was not applied");
+                if(applyResume(resume))throw std::runtime_error("Retired completion restore packet accepted");
+                // All compact successes qualify, irrespective of layer/canvas/home scope or hold mode.
+                for(int scope:{0,1,2,3,4})for(bool held:{false,true}){
+                    panelKind=scope;setHoldMode(held);holdFinished=false;
+                    accept({{"type","operation"},{"busy",true},{"action","color"}});
+                    accept({{"type","notice"},{"scope","operation"},{"ok",true},{"message","Completed"}});
+                    accept({{"type","operation"},{"busy",false}});
+                    if(SendMessageW(window,WM_APP+24,0,0))throw std::runtime_error("Success closed before feedback interval");
+                    completionStarted=GetTickCount64()-500;
+                    if(SendMessageW(window,WM_APP+24,0,0)!=1)throw std::runtime_error("Completed scope never became close-ready");
+                    taskBusy=true;if(completionReady())throw std::runtime_error("Running operation became close-ready");taskBusy=false;
+                    taskFailed=true;if(completionReady())throw std::runtime_error("Failure became close-ready");taskFailed=false;
+                    taskRecovery="unknown";if(completionReady())throw std::runtime_error("Unknown became close-ready");taskRecovery.clear();
+                }
+                ShowWindow(window,SW_HIDE);
+                if(SendMessageW(window,WM_APP+24,0,0))throw std::runtime_error("Hidden feedback became close-ready");
+                panelKind=2;setHoldMode(true);
+                SetWindowPos(window,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
                 numberFrame(ImGuiKey_None,false);
-                if(busyFeedback || !canExecute() || !pieReady || !pinned || menuEpoch!=oldEpoch+1 ||
-                    testedActions.size()!=before || ImGui::GetDrawData()->TotalVtxCount<=0)
-                    throw std::runtime_error("Completion resume lacked visible actions or replayed a command");
-                if(applyResume(resume))throw std::runtime_error("Completion snapshot replayed");
-                setHoldMode(true);numberFrame(ImGuiKey_None,false);
-                if (busyFeedback || !canExecute() || !pieReady)
-                    throw std::runtime_error("Explicit reopen did not restore idle menu");
+                if (busyFeedback || !canExecute() || !pieReady || SendMessageW(window,WM_APP+24,0,0))
+                    throw std::runtime_error("Explicit reopen inherited completed feedback");
+                std::cout<<"Completion close readiness passed: all five scopes, held/pinned, 450ms delay, busy/failure/unknown/hidden guards, no restore packet, fresh reopen\n";
                 const auto shapeCount=testedActions.size();
                 for(int r=0;r<=255;r+=51)for(int g=0;g<=255;g+=51)for(int b=0;b<=255;b+=51){
                     perceptual::Color source={double(r),double(g),double(b)},back=perceptual::fromLab(perceptual::lab(source));

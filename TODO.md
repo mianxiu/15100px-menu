@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] v0.4.197代码／构建／实际入口：所有成功反馈约450ms后自动收起整个菜单，旧自动恢复停用，调色终态转发过滤已修复且原条件失败复现留证。461后端回归、双核原生矩阵、9类真实Desktop→原生窗口显示／隐藏串测、当前浅灰8渲染及三轮PS24.0.1接口事务通过；一次撤销／取消恢复、原稿／配置／历史未知与CPU资源保持，未重启PS／UXP43。实际入口、Windows版本及组件匹配。Wiki六页已推送并匿名核验，未新增Release。证据.runtime/recovery197/runtime.json、live-matrix.json、completion197-final/verified.json、completion197-reproduced.log。
+- [ ] v0.4.197实体键鼠／画布目视、其他PS与真实办公低配待验；不以接口或原生自动测试代替。
+
 - [x] v0.4.196代码／构建／实际入口：完整高度中性连接通道、颜色拖动结束保持和屏幕吸管已安装，Windows文件版本、dist与实际EXE、菜单及热键组件匹配。459回归、双核原生完整矩阵及新增取色／取消／过期／输入／捕获保护，当前浅灰8类渲染、PS24.0.1三轮接口事务（低CPU2、正常1）通过；原稿、设置、历史未知和资源保持，未重启PS／UXP43。证据.runtime/recovery196/runtime.json、live-matrix.json和native196-low.log。Wiki三页已推送并匿名核验，本轮未新增Release。
 - [ ] v0.4.196实体验收：鼠标／Caps／Esc到画布目视、其他PS与真实办公低配硬件；Computer Use启动器0x80070020阻塞，原生消息模拟／PS接口测试不能代替实体。
 

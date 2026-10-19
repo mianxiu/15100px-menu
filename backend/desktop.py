@@ -400,7 +400,7 @@ class Desktop:
                 self.menu_ready.clear()
 
     def event(self, event):
-        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress','mask.preview','preview.progress'):
+        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress','mask.preview','preview.progress','preview.menu.confirmed'):
             return
         preview=getattr(self,'mask_preview',None)
         if preview and event.get('type')=='preview.progress' and event.get('epoch')==preview.epoch:
@@ -552,7 +552,6 @@ class Desktop:
             try:
                 self.layer_context=self.layer_context_provider()
                 self._cancel_closed_menu_context()
-                self._resume_completed_menu()
                 self._publish_menu_context()
                 self._finish_menu_context()
             except Exception:
@@ -588,6 +587,7 @@ class Desktop:
                     # than waiting an additional monitor interval.
                     self._native_config()
                 self.maintain_preview_input_guard()
+                self._close_completed_menu()
             except Exception:
                 logging.exception("Window monitor failed")
 
@@ -720,19 +720,14 @@ class Desktop:
         return {"message": "操作菜单已打开", "panel_context": panel,'layer_context':self.menu_layer_context}
 
     @window_transition
-    def _resume_completed_menu(self):
-        # Only an already-visible success feedback may recover. Never show or
-        # activate a window, bypass focus/input guards, or submit a PS mutation.
-        if not self.visible or not self.hwnd or not self.menu_context_requester:return
-        panel=self.panel_context.current if self.panel_context else {}
-        if panel.get('kind')!='layers' or panel.get('input_focused') or not self._scope():return
+    def _close_completed_menu(self):
+        # Only native success + idle + the 450ms feedback interval qualify.
+        # No Photoshop reads or window activation are needed to retire feedback.
+        if not self.visible or not self.hwnd or getattr(self,'preview_input_guard',None):return
+        preview=getattr(self,'mask_preview',None)
+        if preview and not preview.closed:return
         if self.gui.SendMessage(self.hwnd,0x8018,0,0)!=1:return
-        pending=self.menu_context_pending
-        if pending and pending.get('resume') and time.monotonic()<=pending['deadline']:return
-        if time.monotonic()<getattr(self,'completion_retry_at',0):return
-        self.completion_retry_at=time.monotonic()+2
-        self.menu_context_pending={'epoch':self.menu_epoch,'unpublished':True,
-                                   'deadline':time.monotonic()+10,'resume':True}
+        self.hide(restore=self._scope())
 
     def _cancel_closed_menu_context(self):
         with self.window_lock:
@@ -747,6 +742,7 @@ class Desktop:
         with self.window_lock:
             pending=self.menu_context_pending
             if not pending or not pending.get('unpublished'):return
+            if pending.get('resume'):self.menu_context_pending=None;return
             if not self.visible or self.menu_epoch!=pending['epoch'] or self.stop.is_set() or time.monotonic()>pending['deadline']:
                 self.menu_context_pending=None;return
             pending['unpublished']=False  # Exactly one publication per menu.
@@ -760,7 +756,6 @@ class Desktop:
             if self.menu_context_pending is not pending:return
             if request and self.visible and self.menu_epoch==pending['epoch'] and not self.stop.is_set():
                 request['deadline']=min(request['deadline'],pending['deadline'])
-                if pending.get('resume'):request['resume']=True
                 self.menu_context_pending=request
             else:self.menu_context_pending=None
 
@@ -768,6 +763,7 @@ class Desktop:
     def _finish_menu_context(self):
         pending=self.menu_context_pending
         if not pending:return
+        if pending.get('resume'):self.menu_context_pending=None;return
         if not self.visible or self.menu_epoch!=pending['epoch'] or time.monotonic()>pending['deadline']:
             self.menu_context_pending=None;return
         if 'id' not in pending:return
@@ -787,17 +783,12 @@ class Desktop:
             from .shape_paint import metadata
             shape=metadata(value.get('shape_editor'))
             active=shape_editor_allowed(panel,shape,True,value)
-            resume=pending.get('resume',False)
             payload=json.dumps({'epoch':pending['epoch'],'flags':flags(value),
-                                **({'resume':True,'next_epoch':pending['epoch']+1} if resume else {}),
                                 'shape':shape if active else {'available':False}}).encode('utf-8')
             class CopyData(ctypes.Structure):
                 _fields_=[('tag',ctypes.c_size_t),('size',W.DWORD),('data',ctypes.c_void_p)]
             buffer=ctypes.create_string_buffer(payload);packet=CopyData(0x4d435458,len(payload)+1,ctypes.cast(buffer,ctypes.c_void_p))
             if self.gui.SendMessage(self.hwnd,0x4a,0,ctypes.addressof(packet)):
-                if resume:
-                    self.menu_epoch+=1;pending['epoch']=self.menu_epoch
-                    pending.pop('resume',None);self.hold_active=False
                 self.menu_layer_context=dict(value);self.color_editor_active=active
                 if phase=='completed':self.menu_context_pending=None
                 else:
