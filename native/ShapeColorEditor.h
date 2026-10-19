@@ -1,4 +1,5 @@
 #include "PerceptualColor.h"
+#include "ScreenSample.h"
 // Frame-coalesced paint and mask updates share one rollbackable transaction.
 struct ShapeColorEditor {
     bool available=false,dirty=false,vector=true,livePreview=false,batchMask=false;
@@ -79,9 +80,8 @@ struct ShapeColorEditor {
 static ShapeColorEditor shapeEditor;
 // Presentation only: a hidden panel retains its request, draft and rollback.
 // A new menu session always starts with the ordinary operations visible.
-static bool shapePanelOpen=false,shapeReturning=false,shapeHoverReady=false;
+static bool shapePanelOpen=false,shapeReturning=false,shapeHoverReady=false,shapeModePressed=false;
 static RECT shapeModeBounds{},shapeHoverBounds{};
-static bool testEditorKeepOpen=false; // Isolated control fixtures; the hover matrix runs without this override.
 static std::array<RECT,1> shapeModeRows{};
 static bool shapePanelVisible(){return shapePanelOpen && shapeEditor.ready();}
 static bool shapeClipboardReady=false,shapeClipboardAvailable=false;
@@ -319,13 +319,14 @@ static void drawGradientBar(float width) {
     ImGui::SetCursorScreenPos({at.x,at.y+menuGradientEditorHeight*scale+menuPanelGap*scale});
 }
 // Screen sampling consumes its own click; it never forwards a click to PS.
-static bool shapeEyedropActive=false,shapeEyedropDown=false,shapeReturnHold=false,shapeWasEditing=false;
+static bool shapeEyedropActive=false,shapeEyedropDown=false;
 static LPARAM shapeEyedropEpoch=0;
 static std::string shapeEyedropRevision;
 static int shapeEyedropChannel=0,shapeEyedropStop=0;
 static void stopShapeEyedrop() {
     const bool owned=shapeEyedropActive;
     shapeEyedropActive=shapeEyedropDown=false;
+    RemovePropW(window,screenSampleProperty);
     if(owned && GetCapture()==window)ReleaseCapture();
 }
 static bool shapeEyedropAllowed() {
@@ -337,10 +338,13 @@ static bool beginShapeEyedrop() {
     if(!shapeEyedropAllowed() || shapeEditor.batchMask || shapeEditor.current().value("kind","")=="pattern")return false;
     if(!selfTest && GetForegroundWindow()!=window){SetForegroundWindow(window);if(GetForegroundWindow()!=window)return false;}
     shapeEyedropEpoch=menuEpoch;shapeEyedropRevision=shapeEditor.draft.value("revision",std::string());shapeEyedropChannel=shapeEditor.channel;shapeEyedropStop=shapeEditor.stop;
-    shapeEyedropActive=true;shapeEyedropDown=false;shapeReturnHold=true;
+    shapeEyedropActive=true;shapeEyedropDown=false;shapeModePressed=false;
     hoverTip.reset();tipVisual.reset();renderedHit=pendingHit=-1;
     SetCursor(LoadCursorW(nullptr,IDC_CROSS));
-    if(!selfTest){SetCapture(window);if(GetCapture()!=window){stopShapeEyedrop();return false;}}
+    if(!selfTest){
+        SetCapture(window);
+        if(GetCapture()!=window || !SetPropW(window,screenSampleProperty,window)){stopShapeEyedrop();return false;}
+    }
     return true;
 }
 static bool applyShapeSample(COLORREF pixel) {
@@ -352,7 +356,7 @@ static bool applyShapeSample(COLORREF pixel) {
     if(kind!="solid" && kind!="gradient")return false;
     auto& rgb=kind=="solid"?p["rgb"]:p["stops"][shapeEditor.stop]["rgb"];
     rgb=Json::array({GetRValue(pixel),GetGValue(pixel),GetBValue(pixel)});p["enabled"]=true;shapeEditor.changed();
-    shapeReturnHold=true;return true;
+    return true;
 }
 static bool shapeEyedropMessage(UINT msg,WPARAM wp,LPARAM lp) {
     if(!shapeEyedropActive)return false;
@@ -361,7 +365,7 @@ static bool shapeEyedropMessage(UINT msg,WPARAM wp,LPARAM lp) {
     if(msg==WM_CAPTURECHANGED || msg==WM_CANCELMODE){stopShapeEyedrop();return false;}
     // Esc must continue to the existing menu cancellation/rollback path.
     if(msg==WM_KEYDOWN && wp==VK_ESCAPE){stopShapeEyedrop();return false;}
-    if(msg==WM_RBUTTONDOWN || msg==WM_RBUTTONUP){stopShapeEyedrop();shapeReturnHold=true;return true;}
+    if(msg==WM_RBUTTONDOWN || msg==WM_RBUTTONUP){stopShapeEyedrop();return true;}
     if(msg==WM_LBUTTONDOWN){shapeEyedropDown=true;return true;}
     if(msg==WM_LBUTTONUP){
         if(shapeEyedropDown){
@@ -391,22 +395,20 @@ static void drawShapeModeSwitch() {
     const bool editing=ImGui::IsAnyItemActive() || ImGui::GetIO().WantTextInput || ImGui::IsMouseDown(0) || ImGui::IsMouseDown(1);
     const bool canSwitch=!pieAnimating && !holdFinished && !editing && !shapeEyedropActive;
     if(!hovered)shapeHoverReady=true;
-    const bool withinPanel=shapeHoverBounds.right>shapeHoverBounds.left && mouse.x>=shapeHoverBounds.left && mouse.x<shapeHoverBounds.right && mouse.y>=shapeHoverBounds.top && mouse.y<shapeHoverBounds.bottom;
-    const bool bridge=shapeHoverBounds.right>shapeHoverBounds.left && mouse.x>=shapeHoverBounds.right && mouse.x<x+width && mouse.y>=std::min(LONG(y),shapeHoverBounds.top) && mouse.y<std::max(LONG(y+height),shapeHoverBounds.bottom);
-    const bool keep=hovered || withinPanel || bridge;
-    if(keep && !shapeEyedropActive)shapeReturnHold=false;
-    if(shapeWasEditing && !editing && !keep)shapeReturnHold=true;
-    shapeWasEditing=editing;
+    // Hover opens as before; only an owned click on this same icon collapses.
+    // Leaving the panel (including screen sampling) never confirms a preview.
+    if(ImGui::IsMouseClicked(0))shapeModePressed=hovered && shapePanelOpen && !pieAnimating && !holdFinished &&
+        !shapeEyedropActive && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput;
+    const bool close=shapeModePressed && hovered && ImGui::IsMouseReleased(0);
+    if(ImGui::IsMouseReleased(0) || !shapePanelOpen || shapeEyedropActive)shapeModePressed=false;
     const bool open=hovered && shapeHoverReady;
-    const bool close=shapePanelOpen && !shapeReturnHold && shapeHoverBounds.right>shapeHoverBounds.left && !keep && !(selfTest && testEditorKeepOpen);
     if(canSwitch && (open && !shapePanelOpen || close)){
-        if(!(close && shapeEditor.dirty && !shapeEditor.livePreview)){
-            if(close && maskPreviewStarted){emitMaskPreview(true,true);shapeReturning=true;updateBusy(true);pinned=true;}
-            shapePanelOpen=!close;shapeEditor.gradientDragging=false;
-            if(close)shapeHoverBounds={};
-            shapeEditor.copyBounds=shapeEditor.gradientBounds=shapeEditor.featherBounds=shapeEditor.densityBounds=shapeEditor.hexBounds={};
-            shapeEditor.rgbBounds={};shapeTipCandidate=-1;hoverTip.reset();tipVisual.reset();renderedHit=pendingHit=-1;
-        }
+        if(close && shapeEditor.dirty && !shapeEditor.livePreview){commitShapeDraft();shapeReturning=true;updateBusy(true);pinned=true;}
+        if(close && maskPreviewStarted){emitMaskPreview(true,true);shapeReturning=true;updateBusy(true);pinned=true;}
+        shapePanelOpen=!close;shapeEditor.gradientDragging=false;
+        if(close){shapeHoverBounds={};shapeHoverReady=false;}
+        shapeEditor.copyBounds=shapeEditor.gradientBounds=shapeEditor.featherBounds=shapeEditor.densityBounds=shapeEditor.hexBounds={};
+        shapeEditor.rgbBounds={};shapeTipCandidate=-1;hoverTip.reset();tipVisual.reset();renderedHit=pendingHit=-1;
     }
     const ImVec2 a={x,y},b={x+width,y+height};
     const auto surface=tint(shapePanelOpen?ImGuiCol_ButtonActive:hovered?ImGuiCol_ButtonHovered:ImGuiCol_Button);

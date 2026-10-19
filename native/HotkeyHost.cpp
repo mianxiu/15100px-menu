@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#include "ScreenSample.h"
 
 enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal };
 static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal"};
@@ -142,6 +143,7 @@ static KeyMachine keys;
 static HWND target=nullptr;
 static bool dismissPending=false;
 static std::array<bool,3> mouseConsumed{};
+static ScreenSampleClicks sampleClicks;
 static bool previewPointer(int index,bool up,bool hit) {
     if(index<0 || index>=3)return false;
     if(up){bool owned=mouseConsumed[index];mouseConsumed[index]=false;return owned;}
@@ -483,6 +485,13 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
                   message==WM_MBUTTONUP || message==WM_MBUTTONDOWN?2:-1;
         bool up=message==WM_LBUTTONUP || message==WM_RBUTTONUP || message==WM_MBUTTONUP;
         const auto& mouse=*reinterpret_cast<const MSLLHOOKSTRUCT*>(data);
+        const bool captured=config.enabled && !config.textInput && config.colorEditor &&
+            index>=0 && index<2 && screenSampleCaptured(config.overlay,foreground);
+        const int sampleRoute=sampleClicks.route(index,up,captured);
+        if(sampleRoute==2)return 1;
+        // Leave sampling to the menu's real capture. It is neither an outside
+        // dismiss, a taskbar activation nor a right-click menu cancellation.
+        if(sampleRoute==1)return CallNextHookEx(nullptr,code,message,data);
         if(message==WM_MOUSEMOVE && keys.pending!=-1 && !keys.used && !intentRevealed && !(mouse.flags&LLMHF_INJECTED)) {
             const long long dx=mouse.pt.x-intentOrigin.x,dy=mouse.pt.y-intentOrigin.y;
             if(dx*dx+dy*dy>=144){intentRevealed=true;emit(HoldReveal);}
@@ -726,6 +735,18 @@ static void sampleCapsState(bool force=false) {
     } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
 }
 static int selfTest() {
+    ScreenSampleClicks samples;
+    for(int n=0;n<1000;++n){
+        check(samples.route(0,false,false)==0); // Ordinary outside click still dismisses.
+        check(samples.route(0,false,true)==1 && samples.route(0,true,true)==1);
+        check(samples.route(0,true,true)==0); // No orphan release ownership.
+        check(samples.route(0,false,true)==1 && samples.route(0,true,false)==2);
+        check(samples.route(1,false,true)==1 && samples.route(1,true,false)==2);
+        check(samples.route(1,false,true)==1 && samples.route(1,true,true)==2);
+        check(samples.route(2,false,true)==0 && samples.route(-1,false,true)==0);
+    }
+    check(!screenSampleCaptured(nullptr,GetForegroundWindow()));
+    std::cout<<"Screen sample hook routing passed: captured clicks bypass outside/right dismiss, lost capture and right-cancel releases consumed, ordinary outside unchanged\n";
     for(int button=0;button<3;++button){
         check(!previewPointer(button,true,false));
         check(!previewPointer(button,false,false));
@@ -1182,7 +1203,7 @@ int main(int argc,char** argv) {
             }
         } else if (message.message==WM_TIMER && message.wParam==renewal) {
             auto now=GetTickCount64(),started=microseconds();
-            bool mouseHeld=false;for (bool held:mouseConsumed) mouseHeld=mouseHeld || held;
+            bool mouseHeld=sampleClicks.held[0] || sampleClicks.held[1];for (bool held:mouseConsumed) mouseHeld=mouseHeld || held;
             bool attempted=renewalAllowed(now,lastInputTick,keys.physical[VK_CAPITAL],winRight.physical,mouseHeld);
             // Unhooking while Windows has pending hook calls can lose an
             // event. Keep the same hook throughout holds and rapid input.

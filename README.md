@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+v0.4.199：颜色／羽化面板仅点击原图标收起，屏幕取色后往返保持展开。用法与验证限制见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。
+
 本机v0.4.197将所有成功反馈统一为勾号短暂停留后自动收起菜单，使用说明见[Wiki菜单指南](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide)。
 
 本机v0.4.196已增加屏幕吸管、完整面板连接通道及拖动后保持展开；操作与验证范围见[Wiki取色说明](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。
