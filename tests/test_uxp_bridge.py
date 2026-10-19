@@ -287,9 +287,15 @@ class UxpDiscoveryTests(unittest.TestCase):
         self.heartbeat(24,-60000)
         with self.assertRaises(RuntimeError):_ = self.transport.folder
 
+    def test_manifest_floor_hosts_are_discovered_without_extending_legacy_preview(self):
+        folder=self.heartbeat(23)
+        for host in ('23.3.0','23.5.0','24.0.0'):
+            p=folder/'probe-last.json';v=json.loads(p.read_text('utf-8'));v['photoshop_version']=host;p.write_text(json.dumps(v),'utf-8')
+            self.assertEqual(self.transport.folder,folder)
+
     def test_older_running_host_is_rejected(self):
         self.heartbeat(23)
-        with self.assertRaisesRegex(RuntimeError,'24.0.1'):_ = self.transport.folder
+        with self.assertRaisesRegex(RuntimeError,'23.3.0'):_ = self.transport.folder
 
 class UxpBridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_direct_caps_one_request_preserves_actual_bound_target_in_history(self):

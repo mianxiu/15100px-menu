@@ -21,13 +21,14 @@ OWNED = (*FILES, 'probe-config.js')
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
-def validate(folder):
+def validate(folder, *, allow_previous_floor=False):
     folder = Path(folder)
     data = json.loads((folder/'manifest.json').read_text('utf-8-sig'))
     if data.get('id') != PLUGIN_ID or version(data.get('version'))[:2] != (0, 3):
         raise ValueError('不是兼容的 Photoshop Menu UXP 插件（需要 0.3.x）')
     host = data.get('host', {})
-    if host.get('app') != 'PS' or host.get('minVersion') != MIN_PHOTOSHOP_TEXT:
+    floors={MIN_PHOTOSHOP_TEXT,'24.0.1'} if allow_previous_floor else {MIN_PHOTOSHOP_TEXT}
+    if host.get('app') != 'PS' or host.get('minVersion') not in floors:
         raise ValueError('UXP 插件最低 Photoshop 版本必须为 '+MIN_PHOTOSHOP_TEXT)
     if data.get('main')!='main.js' or data.get('manifestVersion')!=5 or host.get('data')!={'apiVersion':2,'loadEvent':'startup'}:
         raise ValueError('UXP 插件启动方式或 API 不兼容')
@@ -85,12 +86,14 @@ class UxpManager:
         result={'enabled':self.enabled,'installed':False,'version':None,'bundled_version':validate(self.builtin)['version'],
                 'minimum_photoshop':MIN_PHOTOSHOP_TEXT,'can_rollback':bool(self.state()['history']),
                 'plugin_dir':str(self.plugin),'matches_builtin':False,'error':'',
+                'minimum_declaration_pending':False,
                 'installation':'missing','name':None,'desired_name':plugin_name(language,validate(self.builtin)['version']),
                 'language':language,'language_pending':False}
         try:
             if self.plugin.exists():
                 result['installation']='invalid'
-                data=validate(self.plugin)
+                data=validate(self.plugin,allow_previous_floor=True)
+                result['minimum_declaration_pending']=data['host']['minVersion']!=MIN_PHOTOSHOP_TEXT
                 result.update(installed=True,version=data['version'],name=data.get('name'))
                 result['desired_name']=plugin_name(language,data['version'])
                 result['language_pending']=data!=localized_manifest(data,language)
@@ -108,6 +111,36 @@ class UxpManager:
         except (OSError,ValueError,KeyError) as error:result['error']=str(error)
         result['registration']=self.registration.status(data if result['installed'] else None)
         return result
+
+    def sync_minimum_declaration(self):
+        """Update only a known owned floor; loaded JS and credentials stay intact."""
+        current=self.status()
+        if not current['installed'] or current['error']:raise RuntimeError('无法确认原插件所有权，未修改最低版本')
+        if not current['minimum_declaration_pending']:return current
+        self.assert_owned()
+        data=validate(self.plugin,allow_previous_floor=True)
+        wanted=validate(self.builtin)
+        data['host']['minVersion']=MIN_PHOTOSHOP_TEXT
+        language=read_language(self.runtime)
+        if (localized_manifest(data,language)!=localized_manifest(wanted,language) or
+                any(digest(self.plugin/n)!=digest(self.builtin/n) for n in ('main.js','labels.js'))):
+            raise RuntimeError('运行脚本或清单有其他变化，请正常关闭PS后安装')
+        backup=self.snapshot()
+        try:
+            atomic_json(self.plugin/'manifest.json',data)
+            state=self.state();state.update(history=state['history']+[backup],owned={n:digest(self.plugin/n) for n in OWNED})
+            atomic_json(self.state_path,state);self.sync_receipt()
+            if (self.runtime/'offline-install.json').exists():
+                receipt=json.loads((self.runtime/'offline-install.json').read_text('utf-8'))
+                receipt['minimum_photoshop']=MIN_PHOTOSHOP_TEXT
+                atomic_json(self.runtime/'offline-install.json',receipt)
+        except Exception:
+            saved=self.root/'backups'/backup
+            shutil.copy2(saved/'manifest.json',self.plugin/'manifest.json')
+            atomic_json(self.state_path,json.loads((saved/'snapshot.json').read_text('utf-8'))['state'])
+            if (saved/'offline-install.json').exists():shutil.copy2(saved/'offline-install.json',self.runtime/'offline-install.json')
+            raise
+        return self.status()
 
     def set_enabled(self, enabled):
         if type(enabled) is not bool:raise ValueError('启用状态必须为布尔值')
@@ -280,7 +313,7 @@ class UxpManager:
         safety=self.snapshot()
         saved=json.loads((self.root/'backups'/history[-1]/'snapshot.json').read_text('utf-8'))
         old_folder=self.root/'backups'/history[-1]
-        plan=self.registration.prepare(restore=saved['registration']) if 'registration' in saved else self.registration.prepare(validate(old_folder) if 'manifest.json' in saved['present'] else None)
+        plan=self.registration.prepare(restore=saved['registration']) if 'registration' in saved else self.registration.prepare(validate(old_folder,allow_previous_floor=True) if 'manifest.json' in saved['present'] else None)
         receipt=self.runtime/'offline-install.json'
         current_receipt=json.loads(receipt.read_text('utf-8')) if receipt.exists() else None
         try:

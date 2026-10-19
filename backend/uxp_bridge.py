@@ -6,7 +6,7 @@ from pathlib import Path
 import secrets
 import time
 from .photoshop_bridge import PhotoshopBridge
-from .photoshop_version import require_version, version_tuple
+from .photoshop_version import MIN_PHOTOSHOP_TEXT, require_version, version_tuple
 from .plugins import version
 from .layer_context import unavailable,validate,fresh
 from .uxp_recovery import PendingUxp,captured_target
@@ -72,7 +72,7 @@ class UxpTransport:
         if len(candidates)>1:
             raise RuntimeError('检测到多个 Photoshop UXP 实例，请仅保留一个实例运行')
         if not candidates:
-            raise RuntimeError('UXP 未就绪，请启动 Photoshop 24.0.1 或更新版本')
+            raise RuntimeError('UXP 未就绪，请启动 Photoshop '+MIN_PHOTOSHOP_TEXT+' 或更新版本')
         return candidates[0]
 
     def call(self, operation, preview=None, native_preview=None, **payload):

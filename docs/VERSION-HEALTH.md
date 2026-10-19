@@ -1,5 +1,23 @@
 # 版本变化自动自检
 
+198／UXP43：依据Adobe官方文档，将插件声明、安装／启动检查、运行心跳校验和版本自检的最低Photoshop版本统一为 **23.3.0（Photoshop 2022，UXP 6.0）**。这是文档与代码审计确定的安装／运行准入门槛，不代表23.3已通过本项目实机验收；当前真实宿主验收仍为PS24.0.1。
+
+| 项目实际依赖 | Adobe最低版本与项目处理 |
+| --- | --- |
+| Manifest v5与插件文件权限 | [PS23.3.0／UXP6.0](https://developer.adobe.com/photoshop/uxp/2022/guides/uxp-guide/uxp-misc/manifest-v5/)，决定本次总体声明下限。 |
+| 启动时驻留 `loadEvent: startup` | [PS23.1+](https://developer.adobe.com/photoshop/uxp/2022/guides/uxp-guide/uxp-misc/manifest-v4/photoshop-manifest/)，继续保留apiVersion 2。 |
+| 模态交互与一次撤销 | [交互模式PS23.3](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/media/executeasmodal/)；[历史暂停／恢复PS23.0](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/objects/options/executioncontext/)。不削减回滚、输入、忙碌拒绝和未知不重发保护。 |
+| PS面板字体偏好 | [DOM读取PS24.0+](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/classes/preferences/preferencesinterface/)；已有异常保护保留，23.x缺少此DOM时沿用小字号，主题仍走原只读get，不新增PS查询。 |
+| 官方实时重绘 | [core.redrawDocument从PS24.1起](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/media/photoshopcore/)，仍同时检查API存在，不随安装门槛降低。 |
+
+PS23.3～24.0.0可通过新声明的准入检查，尚未实机验收；当前不会因此开放独立旧版实时预览，颜色编辑在缺少预览能力时保留既有本地草稿／确认提交路径。24.0.1≤PS<24.1的独立预览仍需明确能力标志，24.1+走官方API检查；文档门槛、安装成功、基础心跳和完整功能验收分别记录。
+
+已有UXP43如果只有最低版本声明不同、脚本与凭据和自有文件核验一致，可备份后仅迁移manifest及所有权收据；不改main.js／labels.js／凭据，不重启PS。自动跟随在忙碌或原结果待核对时等待，外部改动或其他清单差异拒绝热迁移；真正的脚本更新仍要求正常关闭PS。主程序版本为198，插件执行代码版本继续为43。
+
+198本机交付：468项Python回归（含23.3边界、旧清单迁移、阻塞／外部改动拒绝和失败恢复）、只读字体缺失模拟及冻结EXE启动／重启通过。已切换实际198；EXE／Windows文件版本／嵌入资源及菜单、热键匹配。已安装清单和收据均为23.3.0；main.js、labels.js及凭据字节／时间戳、共享加载索引、PS会话、用户1.psd及历史未知记录保持。通过198门槛完成一次本机PS24.0.1真实只读UXP检查，无文档修改或新待核对任务。原生与前端未改，沿用197验证，未重复四主题。23.3～24.0.0、UXP6.0和其他实机仍未验，不将文档或模拟边界等同兼容通过；本轮未新增Release。首次EXE替换遇Windows锁，核对旧进程全部退出和旧文件完整后，从替换处完成更新，未重发退出或宿主请求。
+
+以下为历史版本与验收记录，原24.0.1声明下限已由198调整。
+
 164新增，现已随v0.4.165／UXP0.3.32发布；文档操作与屏幕效果的验证限制见本页末尾。该功能已接入真实后台，不依赖Codex、联网查询或额外Adobe工具。
 
 ## 使用方式

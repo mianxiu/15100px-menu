@@ -55,7 +55,7 @@ class LegacyTransportTests(unittest.TestCase):
    with self.assertRaises(UxpResultUnknown):self.call(callback)
   self.assertEqual(callback.call_count,1);self.assertIsNotNone(self.transport.pending.value)
  def test_old_plugin_modern_host_and_missing_capability_reject_before_publication(self):
-  for changes in ({'probe_version':'0.3.31'},{'probe_version':'0.3.42'},{'photoshop_version':'24.2.0'},{'document_redraw_available':True},{'legacy_preview_available':False}):
+  for changes in ({'probe_version':'0.3.31'},{'probe_version':'0.3.42'},{'photoshop_version':'24.2.0'},{'photoshop_version':'23.3.0'},{'photoshop_version':'24.0.0'},{'document_redraw_available':True},{'legacy_preview_available':False}):
    before=dict(self.heartbeat);self.heartbeat.update(changes);self.save_heartbeat()
    with self.assertRaisesRegex(RuntimeError,'未就绪|0.3.43'):self.call(Mock())
    self.assertIsNone(self.transport.pending.value);self.assertFalse((self.folder/'probe-request.json').exists());self.heartbeat=before

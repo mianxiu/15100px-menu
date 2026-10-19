@@ -3,8 +3,8 @@ import os
 from pathlib import Path
 import re
 
-MIN_PHOTOSHOP = (24,0,1)
-MIN_PHOTOSHOP_TEXT = '24.0.1'
+MIN_PHOTOSHOP = (23,3,0)
+MIN_PHOTOSHOP_TEXT = '.'.join(map(str,MIN_PHOTOSHOP))
 
 def version_tuple(value):
     if not isinstance(value,str) or not re.fullmatch(r'\d+(?:\.\d+){1,3}',value):
@@ -14,7 +14,7 @@ def version_tuple(value):
 
 def require_version(value):
     if version_tuple(value)<MIN_PHOTOSHOP:
-        raise RuntimeError('需要 Photoshop 24.0.1 或更新版本，检测到 '+value)
+        raise RuntimeError('需要 Photoshop '+MIN_PHOTOSHOP_TEXT+' 或更新版本，检测到 '+value)
     return value
 
 def exe_version(path):
@@ -48,5 +48,5 @@ def check_install_hosts(paths):
     supported=[item for item in found if version_tuple(item['version'])>=MIN_PHOTOSHOP]
     if not supported:
         versions=', '.join(item['version'] for item in found) or '未检测到安装'
-        raise RuntimeError('安装要求 Photoshop 24.0.1 或更新版本（'+versions+'）；自定义目录可用 --photoshop-exe 指定 Photoshop.exe')
+        raise RuntimeError('安装要求 Photoshop '+MIN_PHOTOSHOP_TEXT+' 或更新版本（'+versions+'）；自定义目录可用 --photoshop-exe 指定 Photoshop.exe')
     return supported

@@ -193,3 +193,67 @@ class UxpManagementApiTests(AsyncHTTPTestCase):
             self.assertTrue((await request('uxp.uninstall'))['ok'])
             self.assertFalse((await request('uxp.enable'))['ok'])
         finally:ws.close()
+
+
+class MinimumDeclarationMigrationTests(unittest.TestCase):
+    setUp=UxpManagementTests.setUp
+    tearDown=UxpManagementTests.tearDown
+
+    def previous_install(self):
+        from backend.uxp_management import digest
+        from backend.settings import atomic_json
+        self.manager.install()
+        path=self.manager.plugin/'manifest.json';v=json.loads(path.read_text('utf-8'))
+        v['host']['minVersion']='24.0.1';atomic_json(path,v)
+        state=self.manager.state();state['owned']['manifest.json']=digest(path);atomic_json(self.manager.state_path,state)
+        self.manager.running.return_value=True
+        return path
+
+    def test_only_owned_floor_hot_migrates_and_preserves_runtime_code(self):
+        from backend.uxp_auto_update import UxpAutoUpdate
+        path=self.previous_install();names=('main.js','labels.js','probe-config.js')
+        before={n:((self.manager.plugin/n).read_bytes(),(self.manager.plugin/n).stat().st_mtime_ns) for n in names}
+        token=self.manager.config.read_bytes()
+        auto=UxpAutoUpdate(self.manager.runtime)
+        self.assertTrue(self.manager.status()['minimum_declaration_pending'])
+        auto.step(self.manager,blocked=True);self.assertEqual(json.loads(path.read_text('utf-8'))['host']['minVersion'],'24.0.1')
+        result=auto.step(self.manager);self.assertEqual(result['phase'],'current')
+        self.assertEqual(json.loads(path.read_text('utf-8'))['host']['minVersion'],'23.3.0')
+        self.assertTrue(self.manager.status()['matches_builtin']);self.assertFalse(self.manager.status()['error'])
+        for n,(content,mtime) in before.items():
+            self.assertEqual((self.manager.plugin/n).read_bytes(),content);self.assertEqual((self.manager.plugin/n).stat().st_mtime_ns,mtime)
+        self.assertEqual(self.manager.config.read_bytes(),token)
+
+    def test_foreign_script_is_not_overwritten_or_adopted(self):
+        path=self.previous_install();code=self.manager.plugin/'main.js';code.write_bytes(b'foreign code')
+        with self.assertRaises(RuntimeError):self.manager.sync_minimum_declaration()
+        self.assertEqual(code.read_bytes(),b'foreign code');self.assertEqual(json.loads(path.read_text('utf-8'))['host']['minVersion'],'24.0.1')
+
+    def test_package_validation_stays_strict_and_migration_does_not_enable_disabled_plugin(self):
+        from backend.uxp_management import validate
+        from backend.settings import atomic_json
+        path=self.previous_install()
+        with self.assertRaises(ValueError):validate(self.manager.plugin)
+        self.assertEqual(validate(self.manager.plugin,allow_previous_floor=True)['host']['minVersion'],'24.0.1')
+        state=self.manager.state();state['enabled']=False;atomic_json(self.manager.state_path,state)
+        self.manager.sync_minimum_declaration();self.assertFalse(self.manager.enabled)
+
+    def test_metadata_failure_restores_floor_and_keeps_js_and_credentials_untouched(self):
+        path=self.previous_install();code=self.manager.plugin/'main.js';mtime=code.stat().st_mtime_ns
+        token=self.manager.config.read_bytes();before=self.manager.state()
+        with patch.object(self.manager,'sync_receipt',side_effect=OSError('receipt write failed')):
+            with self.assertRaises(OSError):self.manager.sync_minimum_declaration()
+        self.assertEqual(json.loads(path.read_text('utf-8'))['host']['minVersion'],'24.0.1')
+        self.assertEqual(code.stat().st_mtime_ns,mtime);self.assertEqual(self.manager.config.read_bytes(),token);self.assertEqual(self.manager.state(),before)
+
+    def test_older_plugin_keeps_normal_closed_ps_upgrade_path(self):
+        from backend.uxp_auto_update import UxpAutoUpdate
+        from backend.uxp_management import digest
+        from backend.settings import atomic_json
+        path=self.previous_install();v=json.loads(path.read_text('utf-8'));v['version']='0.3.42';atomic_json(path,v)
+        state=self.manager.state();state['owned']['manifest.json']=digest(path);atomic_json(self.manager.state_path,state)
+        auto=UxpAutoUpdate(self.manager.runtime)
+        with patch.object(self.manager,'sync_minimum_declaration') as hot,patch.object(self.manager,'install') as install:
+            self.assertEqual(auto.step(self.manager)['phase'],'waiting');hot.assert_not_called();install.assert_not_called()
+            self.manager.running.return_value=False
+            self.assertEqual(auto.step(self.manager)['phase'],'updated');install.assert_called_once();hot.assert_not_called()

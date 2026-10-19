@@ -34,7 +34,7 @@
 
 ## 开始使用
 
-需要 **Windows 10／11 x64、Photoshop 24.0.1 或更新版本**；版本兼容与已知限制见 [Wiki](https://github.com/mianxiu/15100px-menu/wiki/Installation)。
+需要 **Windows 10／11 x64**；v0.4.198起声明最低 **Photoshop 23.3.0／UXP6.0**（23.x实机待验，当前已验PS24.0.1）。版本兼容与已知限制见 [Wiki](https://github.com/mianxiu/15100px-menu/wiki/Installation)。
 
 1. 从 [Release](https://github.com/mianxiu/15100px-menu/releases/latest) 下载 `PhotoshopMenu-Backend-<版本>.zip`，解压并运行 `PhotoshopMenu.exe`，无需安装 Python 或 Node.js。
 2. 双击托盘图标打开后台，在「插件管理」按提示安装内置 UXP 插件，重新打开 PS，确认已连接。

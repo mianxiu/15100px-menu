@@ -56,6 +56,11 @@ class VersionHealthTests(unittest.IsolatedAsyncioTestCase):
   result=await self.check(s);codes=[f['code'] for f in result['findings']]
   self.assertTrue(result['attention']);self.assertIn('redraw_api_missing',codes);self.assertIn('redraw_capability_lost',codes)
   self.assertEqual(result['last_success']['versions']['photoshop'],'25.5.0')
+ async def test_documented_floor_is_eligible_but_does_not_claim_preview_support(self):
+  s=state();s['photoshop'].update(photoshop_version='23.3.0',document_redraw_available=False,legacy_preview_available=False)
+  result=await self.check(s);codes=[f['code'] for f in result['findings']]
+  self.assertNotIn('host_version_unsupported',codes);self.assertIn('legacy_preview_pending',codes)
+
  async def test_old_version_is_explicit_compatibility_draft_not_full_preview_acceptance(self):
   s=state();s['photoshop'].update(photoshop_version='24.0.1',document_redraw_available=False)
   result=await self.check(s);self.assertFalse(result['attention'])

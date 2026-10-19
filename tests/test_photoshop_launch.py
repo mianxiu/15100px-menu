@@ -94,8 +94,8 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(registered_executable(),path.resolve())
             with patch('winreg.QueryValue',return_value='{test}'),patch('winreg.OpenKey',return_value=key), \
                  patch('winreg.QueryValueEx',return_value=(str(path),1)), \
-                 patch('backend.photoshop_launch.exe_version',return_value='24.0.0'):
-                with self.assertRaisesRegex(RuntimeError,'24.0.1'):registered_executable()
+                 patch('backend.photoshop_launch.exe_version',return_value='23.2.9'):
+                with self.assertRaisesRegex(RuntimeError,'23.3.0'):registered_executable()
     def test_frozen_worker_uses_the_same_exe_without_service_args(self):
         with patch.object(sys,'frozen',True,create=True),patch.object(sys,'executable','C:/app/PhotoshopMenu.exe'):
             command=worker_command(Path('C:/data/request.json'))

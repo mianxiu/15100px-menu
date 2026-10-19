@@ -71,13 +71,13 @@ class OfflineInstallTests(unittest.TestCase):
     def test_minimum_declaration_update_preserves_running_code_and_credentials(self):
         self.installer.install(self.payload,self.setup)
         path=self.installer.plugin/'manifest.json'
-        manifest=json.loads(path.read_text('utf-8'));manifest['host']['minVersion']='23.5.0'
+        manifest=json.loads(path.read_text('utf-8'));manifest['host']['minVersion']='24.0.1'
         path.write_text(json.dumps(manifest),'utf-8')
         code=self.installer.plugin/'main.js';mtime=code.stat().st_mtime_ns
         credential=(self.installer.root/'uxp-config.json').read_bytes()
         self.assertFalse(self.installer.plugin_is_current(self.payload))
         self.assertTrue(self.installer.plugin_is_current(self.payload,True))
         self.installer.install(self.payload,self.setup,preserve_plugin=True)
-        self.assertEqual(json.loads(path.read_text('utf-8'))['host']['minVersion'],'24.0.1')
+        self.assertEqual(json.loads(path.read_text('utf-8'))['host']['minVersion'],'23.3.0')
         self.assertEqual(code.stat().st_mtime_ns,mtime)
         self.assertEqual((self.installer.root/'uxp-config.json').read_bytes(),credential)

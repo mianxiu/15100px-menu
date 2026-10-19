@@ -16,5 +16,7 @@ const labels=require('../uxp/offline-probe/labels.js');
  name='unknown';font=99;assert.deepEqual(await read(),{ui_theme:'dark',ui_font_size:'large'});
  name='throw';assert.deepEqual(await read(),{ui_theme:'dark',ui_font_size:'large'});
  assert.ok(calls.every(ds=>ds.length===1 && ds[0]._obj==='get' && ds[0]._target[0]._property==='interfacePrefs'));
+ const legacy=labels({...ps,app:{}},'legacy').interfacePreferences;name='kPanelBrightnessLightGray';
+ assert.deepEqual(await legacy(),{ui_theme:'light-gray',ui_font_size:'small'});
  console.log('UXP interface preferences: four themes, three sizes, unavailable retention, read-only get passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

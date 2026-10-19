@@ -11,7 +11,7 @@ import tempfile
 import shutil
 if not getattr(sys,'frozen',False):sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from offline_install import OfflineInstall
-from backend.photoshop_version import installed_paths,check_install_hosts,exe_version,require_version
+from backend.photoshop_version import MIN_PHOTOSHOP_TEXT,installed_paths,check_install_hosts,exe_version,require_version
 
 running_host_paths=[]
 
@@ -115,7 +115,7 @@ def main():
             if running and not installer.plugin_is_current(source/'payload',True):
                 raise RuntimeError('请先保存并正常关闭 Photoshop，再重新运行安装包。插件版本或凭据有变化，需要下次启动重新加载。')
             result=installer.install(source/'payload',Path(sys.executable) if getattr(sys,'frozen',False) else Path(__file__),links,preserve_plugin=running)
-            result['minimum_photoshop']='24.0.1';result['photoshop_installations']=hosts
+            result['minimum_photoshop']=MIN_PHOTOSHOP_TEXT;result['photoshop_installations']=hosts
             message='离线安装完成。请正常打开 Photoshop，再通过开始菜单运行 Photoshop Menu。插件会随 PS 自动加载。'
             if not args.no_launch:
                 concrete=(installer.root/'uxp-config.json').resolve().parent

@@ -1,5 +1,23 @@
 # 统一后台与 UXP 离线管理
 
+198／UXP43：依据Adobe官方文档，将插件声明、安装／启动检查、运行心跳校验和版本自检的最低Photoshop版本统一为 **23.3.0（Photoshop 2022，UXP 6.0）**。这是文档与代码审计确定的安装／运行准入门槛，不代表23.3已通过本项目实机验收；当前真实宿主验收仍为PS24.0.1。
+
+| 项目实际依赖 | Adobe最低版本与项目处理 |
+| --- | --- |
+| Manifest v5与插件文件权限 | [PS23.3.0／UXP6.0](https://developer.adobe.com/photoshop/uxp/2022/guides/uxp-guide/uxp-misc/manifest-v5/)，决定本次总体声明下限。 |
+| 启动时驻留 `loadEvent: startup` | [PS23.1+](https://developer.adobe.com/photoshop/uxp/2022/guides/uxp-guide/uxp-misc/manifest-v4/photoshop-manifest/)，继续保留apiVersion 2。 |
+| 模态交互与一次撤销 | [交互模式PS23.3](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/media/executeasmodal/)；[历史暂停／恢复PS23.0](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/objects/options/executioncontext/)。不削减回滚、输入、忙碌拒绝和未知不重发保护。 |
+| PS面板字体偏好 | [DOM读取PS24.0+](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/classes/preferences/preferencesinterface/)；已有异常保护保留，23.x缺少此DOM时沿用小字号，主题仍走原只读get，不新增PS查询。 |
+| 官方实时重绘 | [core.redrawDocument从PS24.1起](https://developer.adobe.com/photoshop/uxp/2022/ps-reference/media/photoshopcore/)，仍同时检查API存在，不随安装门槛降低。 |
+
+PS23.3～24.0.0可通过新声明的准入检查，尚未实机验收；当前不会因此开放独立旧版实时预览，颜色编辑在缺少预览能力时保留既有本地草稿／确认提交路径。24.0.1≤PS<24.1的独立预览仍需明确能力标志，24.1+走官方API检查；文档门槛、安装成功、基础心跳和完整功能验收分别记录。
+
+已有UXP43如果只有最低版本声明不同、脚本与凭据和自有文件核验一致，可备份后仅迁移manifest及所有权收据；不改main.js／labels.js／凭据，不重启PS。自动跟随在忙碌或原结果待核对时等待，外部改动或其他清单差异拒绝热迁移；真正的脚本更新仍要求正常关闭PS。主程序版本为198，插件执行代码版本继续为43。
+
+198本机交付：468项Python回归（含23.3边界、旧清单迁移、阻塞／外部改动拒绝和失败恢复）、只读字体缺失模拟及冻结EXE启动／重启通过。已切换实际198；EXE／Windows文件版本／嵌入资源及菜单、热键匹配。已安装清单和收据均为23.3.0；main.js、labels.js及凭据字节／时间戳、共享加载索引、PS会话、用户1.psd及历史未知记录保持。通过198门槛完成一次本机PS24.0.1真实只读UXP检查，无文档修改或新待核对任务。原生与前端未改，沿用197验证，未重复四主题。23.3～24.0.0、UXP6.0和其他实机仍未验，不将文档或模拟边界等同兼容通过；本轮未新增Release。首次EXE替换遇Windows锁，核对旧进程全部退出和旧文件完整后，从替换处完成更新，未重发退出或宿主请求。
+
+以下为历史版本与验收记录，原24.0.1声明下限已由198调整。
+
 193／UXP43：实时改色后可直接点四个图层移动按钮，先确认颜色再移动，各自撤销；运行提示统一为同节奏转圈和真实阶段／计数。重复、异常及未知结果保护保持，无需重启已有PS／UXP43。
 
 192／UXP43：色相条与饱和度／明度方块分开，四枚配色标记移到色条外，去掉星形强调色，tip靠近标记且只说明配色含义。沿用实时预览、Esc恢复、一次撤销与UXP43，无需重启已有PS。
@@ -41,7 +59,7 @@ v0.4.120起支持应用更新；当前从主导航“应用更新”进入：Git
 
 ## Photoshop 启动助手
 
-主 EXE 自带 COM 启动助手，由当前正常桌面 Explorer 启动。后台服务不会直接调用 COM 冷启动，不依赖额外 Python、AHK、旧 openFile 工具或 Adobe 安装工具；不修改 Adobe 配置、授权、DCOM 权限或网络屏蔽规则。最低版本仍为 24.0.1，启动采用本机 Photoshop.Application COM 注册指向的 Photoshop.exe。自定义插件安装路径不会改写 COM 注册；多版本同时安装时应核对注册目标。
+主 EXE 自带 COM 启动助手，由当前正常桌面 Explorer 启动。后台服务不会直接调用 COM 冷启动，不依赖额外 Python、AHK、旧 openFile 工具或 Adobe 安装工具；不修改 Adobe 配置、授权、DCOM 权限或网络屏蔽规则。最低声明为 23.3.0，启动采用本机 Photoshop.Application COM 注册指向的 Photoshop.exe。自定义插件安装路径不会改写 COM 注册；多版本同时安装时应核对注册目标。
 
 “运行状态”／“插件管理”的“启动 Photoshop”标签提供启动按钮和阶段反馈。默认启用“启动后台及安装／更新插件后自动启动 Photoshop”，设置保存在用户数据目录 photoshop-start/preferences.json；只在插件已安装、启用且凭据有效时自动启动。PS 已运行则跳过；关闭 PS 后不会循环重开。启动请求立即返回，后台保持响应；等待 COM 与新 UXP 会话最多约90秒。显示的是阶段／用时，没有虚构百分比。
 

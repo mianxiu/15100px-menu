@@ -32,6 +32,14 @@ class UxpAutoUpdate:
             self.phase='inactive';self.message='未安装或已禁用；保留当前选择';return self.snapshot()
         if s['error']:
             self.phase='blocked';self.message='安装异常，请在插件管理中检查';return self.snapshot()
+        if s.get('minimum_declaration_pending') and version(s['version'])==version(s['bundled_version']):
+            if blocked:
+                self.phase='waiting';self.message='操作或结果待核对，稍后同步最低版本声明';return self.snapshot()
+            key=('minimum',s['version'],s['bundled_version'])
+            if self.failed_key==key:return self.snapshot()
+            try:s=manager.sync_minimum_declaration()
+            except Exception:
+                self.failed_key=key;self.phase='error';self.message='最低版本声明未同步，请在插件管理中检查';return self.snapshot()
         registration=s.get('registration',{})
         if registration.get('state') in ('invalid','disabled'):
             self.phase='blocked';self.message='加载登记需要检查，请在插件管理中修复';return self.snapshot()
