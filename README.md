@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-v0.4.205／UXP44本机版：修复大图案目录造成的菜单更新包拒收及卡灰路径，i5／UHD730原故障仍待实机复测。操作与限制见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
+v0.4.205／UXP44已发布：修复大图案目录造成的菜单更新包拒收及卡灰路径，i5／UHD730原故障仍待实机复测。操作与限制见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
 v0.4.201：展开／收起统一悬停原按钮，说明文字保留，外框恢复实线。用法与验证范围见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。
 
