@@ -554,7 +554,7 @@ static bool quickDividerAt(int i,POINT point) {
         (i!=2 && i!=6 && point.x>=quickRows[i].right-scale);
 }
 static int holdActionAt(POINT point) {
-    if (!holdMode || !pieReady || holdFinished || pieAnimating || (!canExecute() && !shapeEditor.ready())) return -1;
+    if (shapeEyedropActive || !holdMode || !pieReady || holdFinished || pieAnimating || (!canExecute() && !shapeEditor.ready())) return -1;
     float dx=point.x-pieCenter.x,dy=point.y-pieCenter.y;
     float ox=static_cast<float>(point.x-holdOrigin.x),oy=static_cast<float>(point.y-holdOrigin.y);
     // Edge clamping may put the invocation point on top of a swatch. Protect
@@ -585,6 +585,7 @@ static int holdActionAt(POINT point) {
 static void setHoldMode(bool enabled) {
     holdMode=enabled;holdFinished=false;pinned=false;holdMoved=false;resetMenu();focusSearch=false;
     pieStarted=0;pieAnimating=enabled;
+    stopShapeEyedrop();shapeReturnHold=shapeWasEditing=false;
     ringAngleReady=false;shapeReturning=false;shapeHoverReady=false;shapeHoverBounds={};shapePanelOpen=false;shapeModeBounds={};shapeModeRows={};
     shownPresets=recentPresets;
     // The compositor retains the last presented surface while hidden. Never
@@ -610,6 +611,7 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     if (requireHighlight && !selfTest) std::cout<<Json({{"type","selection"},{"session",menuEpoch},
         {"cursor",{point.x,point.y}},{"frozen_hit",frozenHit},{"current_cursor",{current.x,current.y}},
         {"current_hit",currentHit},{"highlight",renderedHit},{"chosen",chosen}}).dump()<<std::endl;
+    if(shapeEyedropActive){stopShapeEyedrop();chosen=-1;}
     if(chosen==100){commitShapeDraft();holdFinished=true;pieReady=false;setOpacity(0.f);return;}
     holdFinished=true;pieReady=false;
     setOpacity(0.f);
@@ -620,6 +622,8 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     else send(chosen<0?"hide":rowAction(chosen));
 }
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    if(ImGui::GetCurrentContext() && shapeEyedropMessage(msg,wp,lp))return 0;
+    if(msg==WM_WINDOWPOSCHANGED && (reinterpret_cast<WINDOWPOS*>(lp)->flags&SWP_HIDEWINDOW))stopShapeEyedrop();
     if(msg==WM_APP+23){holdOrigin={static_cast<LONG>(wp),static_cast<LONG>(lp)};holdMoved=false;return 0;}
     if(msg==WM_COPYDATA){
         auto* data=reinterpret_cast<COPYDATASTRUCT*>(lp);
@@ -700,6 +704,7 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     if (msg==WM_APP+10) { contextMode=wp!=0;resetMenu();return 0; }
     if (msg==WM_SHOWWINDOW) {
         opened=wp!=0;
+        if(!opened)stopShapeEyedrop();
         if (opened) {
             resetMenu();pieStarted=0;setOpacity(holdMode?0.f:1.f);
         } else {
@@ -1314,7 +1319,7 @@ static void drawCapsBar() {
 static void shapeEditorKeys() {
     // The hook leaves letters with the editor so focused RGB/Hex fields keep
     // normal typing. Only an unfocused editor frame handles these shortcuts.
-    if(shapeEditor.ready() && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput && !holdFinished && !pieAnimating){
+    if(shapeEditor.ready() && !shapeEyedropActive && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput && !holdFinished && !pieAnimating){
         const ImGuiKey keys[]={ImGuiKey_C,ImGuiKey_V,ImGuiKey_F,ImGuiKey_W,ImGuiKey_S};
         if(!ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeySuper)
             for(int i=0;i<5;++i)if(ImGui::IsKeyPressed(keys[i],false)){
@@ -1490,6 +1495,7 @@ static void drawPie() {
     }
     if(hint)messages.push_back(hint);
     if(shapeEditor.ready() && shapeEditor.dirty && !previewProgress.active && !maskPreviewStarted)messages.push_back("调整待应用");
+    if(shapeEyedropActive)messages.push_back("屏幕取色：点击颜色；右键取消取色");
     if(shapeEditor.ready() && shapeEditor.copyFailed)messages.push_back("剪贴板暂时不可用，未复制颜色");
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
     drawFooter(messages,pieCenter.y+(!editing && capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
@@ -2615,6 +2621,12 @@ int main() {
                 if(std::abs(arrow.left-panel.right-menuPanelGap*scale)>1)throw std::runtime_error("Editor not anchored next to expander");
                 const float cy=(arrow.top+arrow.bottom)*.5f;
                 for(float x=(arrow.left+arrow.right)*.5f;x>panel.right-10*scale;x-=scale){pointer(x,cy);if(!shapePanelOpen)throw std::runtime_error("Moving from expander to panel collapsed editor");}
+                // The entire red corridor keeps the editor open, but never confirms.
+                for(float y=std::min(float(arrow.top),float(panel.top))+scale;y<float(mask.bottom)-scale;y+=3*scale){
+                    pointer((panel.right+arrow.right)*.5f,y);
+                    POINT p{LONG((panel.right+arrow.right)*.5f),LONG(y)};
+                    if(!shapePanelOpen || holdActionAt(p)!=-1 || shapeEditor.hit(p))throw std::runtime_error("Full-height editor corridor collapsed or gained commit hit");
+                }
                 pointer((panel.left+panel.right)*.5f,(panel.top+panel.bottom)*.5f);
                 for(int n=0;n<20;++n)numberFrame(ImGuiKey_None,false);
                 if(!shapePanelOpen || shapeEditor.draft!=switchDraft || testedMaskEvents.size()!=switchEvents)throw std::runtime_error("Panel dwell altered state");
@@ -2653,7 +2665,47 @@ int main() {
                 if(!shapeReturning || !testedMaskEvents.back().value("return_to_menu",false))throw std::runtime_error("Actual exit after paint switch did not confirm once");
                 taskBusy=busyFeedback=false;allowed=capable=true;shapeEditor.prepare(shapeFixture);setHoldMode(true);io.AddMousePosEvent(-1000,-1000);numberFrame(ImGuiKey_None,false);
                 std::cout<<"Fill/stroke/type hover switching passed: 22 clicks, stable header, no implicit commit, actual exit confirms once\n";
+                // Releasing a color drag outside must not implicitly commit.
+                pointer((shapeModeBounds.left+shapeModeBounds.right)*.5f,(shapeModeBounds.top+shapeModeBounds.bottom)*.5f);
+                auto dragSquare=perceptualPicker.squareBounds;pointer((dragSquare.left+dragSquare.right)*.5f,(dragSquare.top+dragSquare.bottom)*.5f);
+                io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
+                pointer(pieCenter.x,pieCenter.y);io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
+                for(int n=0;n<6;++n)numberFrame(ImGuiKey_None,false);
+                if(!shapePanelOpen || shapeReturning)throw std::runtime_error("Released color drag implicitly closed picker");
+                pointer(shapeEditor.bounds.left+10*scale,shapeEditor.bounds.top+10*scale);
+                // Sample through the production native message path. No OS input is injected.
+                const auto beforeSample=testedMaskEvents.size();const auto sampleOriginal=shapeEditor.original;
+                if(!beginShapeEyedrop())throw std::runtime_error("Eyedropper did not arm");
+                pointer(pieCenter.x,pieCenter.y);if(!shapePanelOpen)throw std::runtime_error("Sampling collapsed editor");
+                // A memory DC is not used: read an actual visible pixel, then compare the consumed click.
+                POINT pixelPoint{10,10};ClientToScreen(window,&pixelPoint);
+                HDC sampleDC=GetDC(nullptr);const auto pixel=GetPixel(sampleDC,pixelPoint.x,pixelPoint.y);ReleaseDC(nullptr,sampleDC);
+                if(pixel==CLR_INVALID)throw std::runtime_error("Desktop pixel not readable");
+                if(!shapeEyedropMessage(WM_LBUTTONDOWN,0,MAKELPARAM(10,10)) || !shapeEyedropMessage(WM_LBUTTONUP,0,MAKELPARAM(10,10)))throw std::runtime_error("Sample click was not consumed");
+                numberFrame(ImGuiKey_None,false);
+                if(shapeEyedropActive || !shapePanelOpen || shapeReturning || shapeEditor.current()["rgb"]!=Json::array({GetRValue(pixel),GetGValue(pixel),GetBValue(pixel)}) || shapeEditor.original!=sampleOriginal)
+                    throw std::runtime_error("Screen sample lost color, original, or expanded panel");
+                for(size_t n=beforeSample;n<testedMaskEvents.size();++n)if(testedMaskEvents[n]["action"]!="mask.preview.update")throw std::runtime_error("Sample implicitly committed");
+                const auto sampledDraft=shapeEditor.draft;beginShapeEyedrop();shapeEyedropMessage(WM_RBUTTONDOWN,0,0);
+                if(shapeEyedropActive || shapeEditor.draft!=sampledDraft)throw std::runtime_error("Eyedrop cancellation changed paint");
+                beginShapeEyedrop();if(shapeEyedropMessage(WM_KEYDOWN,VK_ESCAPE,0) || shapeEyedropActive || shapeEditor.draft!=sampledDraft)throw std::runtime_error("Eyedropper swallowed menu Esc rollback");
+                beginShapeEyedrop();++menuEpoch;if(applyShapeSample(RGB(1,2,3)) || shapeEditor.draft!=sampledDraft)throw std::runtime_error("Stale sample session accepted");--menuEpoch;
+                beginShapeEyedrop();shapeEditor.draft["revision"]="changed";if(applyShapeSample(RGB(1,2,3)))throw std::runtime_error("Stale sample revision accepted");shapeEditor.draft=sampledDraft;
+                beginShapeEyedrop();if(applyShapeSample(CLR_INVALID) || shapeEditor.draft!=sampledDraft)throw std::runtime_error("Failed pixel read changed paint");
+                beginShapeEyedrop();inputFocused=true;if(applyShapeSample(RGB(1,2,3)))throw std::runtime_error("Input protection accepted screen sample");inputFocused=false;
+                beginShapeEyedrop();panelKind=0;if(applyShapeSample(RGB(1,2,3)))throw std::runtime_error("Canvas accepted shape screen sample");panelKind=2;
+                beginShapeEyedrop();shapeEyedropMessage(WM_CAPTURECHANGED,0,0);if(shapeEyedropActive)throw std::runtime_error("Lost capture retained sampling");
+                // Gradient sampling changes only the selected stop, preserving order and source rollback.
+                shapeEditor.mode(1);shapeEditor.stop=1;const auto gradientBefore=shapeEditor.current();
+                beginShapeEyedrop();if(!applyShapeSample(RGB(63,127,191)))throw std::runtime_error("Gradient sample rejected");
+                if(shapeEditor.current()["stops"][0]!=gradientBefore["stops"][0] || shapeEditor.current()["stops"][1]["location"]!=gradientBefore["stops"][1]["location"] || shapeEditor.current()["stops"][1]["rgb"]!=Json({63,127,191}) || shapeEditor.original!=sampleOriginal)
+                    throw std::runtime_error("Sampling changed gradient neighbours, order or rollback");
+                shapeEditor.mode(0);numberFrame(ImGuiKey_None,false);
+                pointer(shapeEditor.bounds.left+10*scale,shapeEditor.bounds.top+10*scale);pointer(pieCenter.x,pieCenter.y);
+                if(!shapeReturning)throw std::runtime_error("Real hover exit after sample did not confirm");
+                taskBusy=busyFeedback=false;allowed=capable=true;shapeEditor.prepare(shapeFixture);setHoldMode(true);
                 testEditorKeepOpen=true;shapePanelOpen=true;numberFrame(ImGuiKey_None,false);
+                std::cout<<"Screen eyedropper and hover regression passed: full-height neutral corridor, drag release hold, actual desktop pixel, consumed click, retained picker, cancel/stale/failed read rejection\n";
                 testedMaskEvents.resize(switchEvents);testedActions.resize(switchActions);
                 std::cout<<"Hover editor path passed: anchored single expander, continuous travel, panel/mask dwell, exit restores ordinary, one dirty confirmation, stale terminal rejection\n";
                 if(!shapeEditor.ready() || shapeEditor.bounds.right<=shapeEditor.bounds.left || ImGui::GetDrawData()->TotalVtxCount<=0)

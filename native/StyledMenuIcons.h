@@ -173,6 +173,28 @@ static constexpr FigmaPathCommand styledPath33_0[] = {
     {'L', 5.50000000f, 4.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
     {'L', 2.50000000f, 7.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
 };
+static constexpr FigmaPathCommand styledPath34_0[] = {
+    {'M', 1.00000000f, 6.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 5.50000000f, 1.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 7.50000000f, 3.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 3.00000000f, 8.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 1.00000000f, 8.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'Z', 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath34_1[] = {
+    {'M', 1.00000000f, 6.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 5.50000000f, 1.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 7.50000000f, 3.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 3.00000000f, 8.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 1.00000000f, 8.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 1.00000000f, 6.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
+static constexpr FigmaPathCommand styledPath34_2[] = {
+    {'M', 4.50000000f, 1.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 8.00000000f, 4.00000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'M', 6.00000000f, 2.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+    {'L', 8.00000000f, 0.50000000f, 0.00000000f, 0.00000000f, 0.00000000f, 0.00000000f},
+};
 
 static void styledPath(ImDrawList* draw,const FigmaPathCommand* path,int count,ImVec2 at,float unit,ImU32 ink,float stroke) {
     auto point=[&](float x,float y){return ImVec2{at.x+x*unit,at.y+y*unit};};
@@ -376,6 +398,11 @@ static void drawStyledMenuIcon(ImDrawList* draw,int icon,ImVec2 at,float size,Im
         break;
     case 33:
         styledPath(draw,styledPath33_0,sizeof(styledPath33_0)/sizeof(*styledPath33_0),at,unit,color(0.00000000f),1.00000000f);
+        break;
+    case 34:
+        styledPath(draw,styledPath34_0,sizeof(styledPath34_0)/sizeof(*styledPath34_0),at,unit,color(0.67431195f),0.00000000f);
+        styledPath(draw,styledPath34_1,sizeof(styledPath34_1)/sizeof(*styledPath34_1),at,unit,color(0.00000000f),1.00000000f);
+        styledPath(draw,styledPath34_2,sizeof(styledPath34_2)/sizeof(*styledPath34_2),at,unit,color(0.00000000f),1.00000000f);
         break;
     }
 }

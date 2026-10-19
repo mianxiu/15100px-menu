@@ -1104,6 +1104,31 @@
           "stroke": 1
         }
       ]
+    },
+    {
+      "index": 34,
+      "operation": "shape.screenEyedropper",
+      "name": "屏幕取色",
+      "adaptation": "Project-authored eyedropper; nine-unit grid and one-unit strokes. Samples displayed RGB, not document color-managed source values.",
+      "shapes": [
+        {
+          "kind": "path",
+          "data": "M 1 6 L 5.5 1.5 L 7.5 3.5 L 3 8 L 1 8 Z",
+          "tone": 0.67431195
+        },
+        {
+          "kind": "path",
+          "data": "M 1 6 L 5.5 1.5 L 7.5 3.5 L 3 8 L 1 8 L 1 6",
+          "tone": 0,
+          "stroke": 1
+        },
+        {
+          "kind": "path",
+          "data": "M 4.5 1 L 8 4 M 6 2.5 L 8 0.5",
+          "tone": 0,
+          "stroke": 1
+        }
+      ]
     }
   ],
   "harmony_markers": {

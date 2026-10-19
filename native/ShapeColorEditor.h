@@ -87,11 +87,12 @@ static bool shapePanelVisible(){return shapePanelOpen && shapeEditor.ready();}
 static bool shapeClipboardReady=false,shapeClipboardAvailable=false;
 static int shapeTipCandidate=-1;
 static constexpr int shapeModeTipBase=25+perceptual::wheelCount;
-static constexpr int shapeTipCount=shapeModeTipBase+1;
+static constexpr int shapeEyedropTip=shapeModeTipBase+1;
+static constexpr int shapeTipCount=shapeEyedropTip+1;
 static std::array<RECT,shapeTipCount> shapeTipRows{};
 static const char* shapeTipNames[shapeTipCount]={"填充","描边","纯色","渐变","图案","无填充／无描边","描边宽度：双击输入","复制当前Hex颜色","黑色","白色","交换填充与描边","复制形状填充与描边","粘贴到当前选中的形状图层","羽化：双击数值输入","密度：双击数值输入",
     "","","","","","","","切换渐变插值：感知／线性／经典","色相","",
-    "主色","邻近色 −30°","邻近色 +30°","互补色","展开／收起"};
+    "主色","邻近色 −30°","邻近色 +30°","互补色","展开／收起","屏幕取色"};
 static void shapeItemTip(int index,bool allowHover=true) {
     const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();shapeTipRows[index]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
     if(allowHover && ImGui::IsItemHovered() && !ImGui::IsItemActive())shapeTipCandidate=200+index;
@@ -317,6 +318,63 @@ static void drawGradientBar(float width) {
     for(int i=0;i<int(stops.size());++i)if(i!=shapeEditor.stop)handle(i);handle(shapeEditor.stop);
     ImGui::SetCursorScreenPos({at.x,at.y+menuGradientEditorHeight*scale+menuPanelGap*scale});
 }
+// Screen sampling consumes its own click; it never forwards a click to PS.
+static bool shapeEyedropActive=false,shapeEyedropDown=false,shapeReturnHold=false,shapeWasEditing=false;
+static LPARAM shapeEyedropEpoch=0;
+static std::string shapeEyedropRevision;
+static int shapeEyedropChannel=0,shapeEyedropStop=0;
+static void stopShapeEyedrop() {
+    const bool owned=shapeEyedropActive;
+    shapeEyedropActive=shapeEyedropDown=false;
+    if(owned && GetCapture()==window)ReleaseCapture();
+}
+static bool shapeEyedropAllowed() {
+    if(!shapeEditor.ready() || !shapePanelOpen || holdFinished || !IsWindowVisible(window))return false;
+    const HWND foreground=GetForegroundWindow(),owner=GetWindow(window,GW_OWNER);
+    return selfTest || foreground==window || (!shapeEyedropActive && owner && foreground==owner);
+}
+static bool beginShapeEyedrop() {
+    if(!shapeEyedropAllowed() || shapeEditor.batchMask || shapeEditor.current().value("kind","")=="pattern")return false;
+    if(!selfTest && GetForegroundWindow()!=window){SetForegroundWindow(window);if(GetForegroundWindow()!=window)return false;}
+    shapeEyedropEpoch=menuEpoch;shapeEyedropRevision=shapeEditor.draft.value("revision",std::string());shapeEyedropChannel=shapeEditor.channel;shapeEyedropStop=shapeEditor.stop;
+    shapeEyedropActive=true;shapeEyedropDown=false;shapeReturnHold=true;
+    hoverTip.reset();tipVisual.reset();renderedHit=pendingHit=-1;
+    SetCursor(LoadCursorW(nullptr,IDC_CROSS));
+    if(!selfTest){SetCapture(window);if(GetCapture()!=window){stopShapeEyedrop();return false;}}
+    return true;
+}
+static bool applyShapeSample(COLORREF pixel) {
+    const bool valid=shapeEyedropActive && pixel!=CLR_INVALID && shapeEyedropAllowed() && menuEpoch==shapeEyedropEpoch &&
+        shapeEditor.channel==shapeEyedropChannel && shapeEditor.stop==shapeEyedropStop && shapeEditor.draft.value("revision",std::string())==shapeEyedropRevision;
+    stopShapeEyedrop();
+    if(!valid)return false;
+    auto& p=shapeEditor.current();const auto kind=p.value("kind","");
+    if(kind!="solid" && kind!="gradient")return false;
+    auto& rgb=kind=="solid"?p["rgb"]:p["stops"][shapeEditor.stop]["rgb"];
+    rgb=Json::array({GetRValue(pixel),GetGValue(pixel),GetBValue(pixel)});p["enabled"]=true;shapeEditor.changed();
+    shapeReturnHold=true;return true;
+}
+static bool shapeEyedropMessage(UINT msg,WPARAM wp,LPARAM lp) {
+    if(!shapeEyedropActive)return false;
+    if(!shapeEyedropAllowed()){stopShapeEyedrop();return false;}
+    if(msg==WM_SETCURSOR){SetCursor(LoadCursorW(nullptr,IDC_CROSS));return true;}
+    if(msg==WM_CAPTURECHANGED || msg==WM_CANCELMODE){stopShapeEyedrop();return false;}
+    // Esc must continue to the existing menu cancellation/rollback path.
+    if(msg==WM_KEYDOWN && wp==VK_ESCAPE){stopShapeEyedrop();return false;}
+    if(msg==WM_RBUTTONDOWN || msg==WM_RBUTTONUP){stopShapeEyedrop();shapeReturnHold=true;return true;}
+    if(msg==WM_LBUTTONDOWN){shapeEyedropDown=true;return true;}
+    if(msg==WM_LBUTTONUP){
+        if(shapeEyedropDown){
+            POINT at{LONG(short(LOWORD(lp))),LONG(short(HIWORD(lp)))};ClientToScreen(window,&at);
+            HDC screen=GetDC(nullptr);COLORREF pixel=screen?GetPixel(screen,at.x,at.y):CLR_INVALID;
+            if(screen)ReleaseDC(nullptr,screen);
+            if(!applyShapeSample(pixel))notice="屏幕取色失败，请重试";
+        }
+        return true;
+    }
+    // Mouse motion still updates ImGui so returning to the panel is immediate.
+    return msg==WM_LBUTTONDBLCLK || msg==WM_MOUSEWHEEL || msg==WM_MOUSEHWHEEL;
+}
 static void drawShapeModeSwitch() {
     shapeModeBounds={};shapeModeRows={};
     if(!shapeEditor.ready())return;
@@ -331,13 +389,16 @@ static void drawShapeModeSwitch() {
     const auto mouse=ImGui::GetIO().MousePos;
     const bool hovered=mouse.x>=x && mouse.x<x+width && mouse.y>=y && mouse.y<y+height;
     const bool editing=ImGui::IsAnyItemActive() || ImGui::GetIO().WantTextInput || ImGui::IsMouseDown(0) || ImGui::IsMouseDown(1);
-    const bool canSwitch=!pieAnimating && !holdFinished && !editing;
+    const bool canSwitch=!pieAnimating && !holdFinished && !editing && !shapeEyedropActive;
     if(!hovered)shapeHoverReady=true;
     const bool withinPanel=shapeHoverBounds.right>shapeHoverBounds.left && mouse.x>=shapeHoverBounds.left && mouse.x<shapeHoverBounds.right && mouse.y>=shapeHoverBounds.top && mouse.y<shapeHoverBounds.bottom;
-    const bool bridge=shapeHoverBounds.right>shapeHoverBounds.left && mouse.x>=shapeHoverBounds.right && mouse.x<x+width && mouse.y>=y && mouse.y<y+height;
+    const bool bridge=shapeHoverBounds.right>shapeHoverBounds.left && mouse.x>=shapeHoverBounds.right && mouse.x<x+width && mouse.y>=std::min(LONG(y),shapeHoverBounds.top) && mouse.y<std::max(LONG(y+height),shapeHoverBounds.bottom);
     const bool keep=hovered || withinPanel || bridge;
+    if(keep && !shapeEyedropActive)shapeReturnHold=false;
+    if(shapeWasEditing && !editing && !keep)shapeReturnHold=true;
+    shapeWasEditing=editing;
     const bool open=hovered && shapeHoverReady;
-    const bool close=shapePanelOpen && shapeHoverBounds.right>shapeHoverBounds.left && !keep && !(selfTest && testEditorKeepOpen);
+    const bool close=shapePanelOpen && !shapeReturnHold && shapeHoverBounds.right>shapeHoverBounds.left && !keep && !(selfTest && testEditorKeepOpen);
     if(canSwitch && (open && !shapePanelOpen || close)){
         if(!(close && shapeEditor.dirty && !shapeEditor.livePreview)){
             if(close && maskPreviewStarted){emitMaskPreview(true,true);shapeReturning=true;updateBusy(true);pinned=true;}
@@ -359,6 +420,8 @@ static void drawShapeEditor() {
     shapeTipCandidate=-1;shapeTipRows={};
     shapeEditor.bounds=shapeEditor.maskBounds=shapeEditor.copyBounds=shapeEditor.gradientBounds=shapeEditor.featherBounds=shapeEditor.densityBounds=shapeEditor.hexBounds={};shapeEditor.rgbBounds={};
     drawShapeModeSwitch();
+    if(shapeEyedropActive && !shapeEyedropAllowed())stopShapeEyedrop();
+    if(shapeEyedropActive)SetCursor(LoadCursorW(nullptr,IDC_CROSS));
     if(!shapePanelVisible())return;
     const auto windowPos=ImGui::GetWindowPos(),windowSize=ImGui::GetWindowSize();
     const float available=shapeModeBounds.left-windowPos.x-(menuPanelGap+16)*scale;
@@ -377,7 +440,7 @@ static void drawShapeEditor() {
     const float colorSquare=perceptualSquareSide(width-2*menuControlPadding*scale);
     const float cell=figmaDisplayIconWidth*scale;
     const bool wrapTools=width-2*menuControlPadding*scale<(shapeEditor.vector?6:4)*cell+gap;
-    const bool wrapActions=shapeEditor.vector && kind!="pattern" && width-2*menuControlPadding*scale<5*cell+2*gap;
+    const bool wrapActions=shapeEditor.vector && kind!="pattern" && width-2*menuControlPadding*scale<6*cell+3*gap;
     const bool wrapValues=width-2*menuControlPadding*scale<valuesWidth;
     const float content=2*menuControlPadding*scale+iconRow*(wrapTools?2:1)+(shapeEditor.vector && shapeEditor.channel?row:0)+
         (kind=="pattern"?row:colorSquare+(wrapValues?2:1)*row+(kind=="gradient"?menuGradientEditorHeight*scale+gap:0))+iconRow*(wrapActions?2:1);
@@ -414,7 +477,7 @@ static void drawShapeEditor() {
     ImGui::SetWindowFontScale(1.f);
     if(selfTest && std::abs(ImGui::GetFontSize()-controlTextSize)>.01f)
         throw std::runtime_error("Shape controls must share the menu panel body font");
-    ImGui::BeginDisabled(pieAnimating);
+    ImGui::BeginDisabled(pieAnimating || shapeEyedropActive);
     inner=ImGui::GetContentRegionAvail().x;
     if(!shapeEditor.vector)shapeEditor.channel=0;
     const auto toolsAt=ImGui::GetCursorScreenPos();const float channelWidth=(shapeEditor.vector?2:1)*figmaDisplayIconWidth*scale;
@@ -477,7 +540,11 @@ static void drawShapeEditor() {
             auto& c=paintKind=="solid"?p["rgb"]:p["stops"][shapeEditor.stop]["rgb"];
             c=quickColor?Json::array({255,255,255}):Json::array({0,0,0});p["enabled"]=true;shapeEditor.changed();}
     }
-    if(shapeEditor.vector)ImGui::SetCursorScreenPos({actionsAt.x+(paintKind=="pattern"?0:wrapActions?inner-cell:(inner-cell)*.5f),actionsAt.y});
+    if(paintKind!="pattern"){
+        ImGui::SetCursorScreenPos({actionsAt.x+2*cell+gap,actionsAt.y});
+        if(shapeIconButton("##screen-eyedrop",34,shapeEyedropTip,cell,true,false,figmaDisplayWidgetHeight) && !beginShapeEyedrop())notice="无法开始屏幕取色，请保持菜单在前台";
+    }
+    if(shapeEditor.vector)ImGui::SetCursorScreenPos({actionsAt.x+(paintKind=="pattern"?0:wrapActions?inner-cell:3*cell+2*gap),actionsAt.y});
     if(shapeEditor.vector && shapeIconButton("##swap-paint",18,10,cell,true,false,figmaDisplayWidgetHeight)){
         const double widthValue=shapeEditor.draft["stroke"].value("width",1.);
         Json fill=shapeEditor.draft["fill"],stroke=shapeEditor.draft["stroke"];stroke.erase("width");
@@ -494,7 +561,7 @@ static void drawShapeEditor() {
         shapeEditor.maskBounds={LONG(maskAt.x),LONG(maskAt.y),LONG(maskAt.x+width),LONG(maskAt.y+maskHeight)};
         ImGui::SetCursorScreenPos(maskAt);
         ImGui::BeginChild("shape-mask",{width,maskHeight},ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
-        ImGui::BeginDisabled(pieAnimating);
+        ImGui::BeginDisabled(pieAnimating || shapeEyedropActive);
         if(shapeEditor.batchMask)shapePaintToolbar(inner);
         inner=ImGui::GetContentRegionAvail().x;
         auto slider=[&](const char* label,const char* id,const char* key,float maximum,const char* format,ImGuiSliderFlags flags,RECT& bounds){
