@@ -67,6 +67,45 @@ class CapsInputTests(unittest.TestCase):
    d=self.ready(folder);d.menu_layer_context={'layer_ids':[99],'kind':'pixel'}
    shape={'available':True,'vector':True,'revision':'s:1','fill':{'kind':'solid','enabled':True,'rgb':[1,2,3]},'stroke':{'kind':'solid','enabled':False,'rgb':[0,0,0],'width':1},'patterns':[]}
    self.result(folder,kind='shape-fill',shape_editor=shape);d._finish_menu_context();self.assertTrue(d.color_editor_active);self.assertEqual(d.menu_layer_context['layer_ids'],[3])
+ def large_shape(self):
+  return {'available':True,'vector':True,'revision':'s:1','fill':{'kind':'solid','enabled':True,'rgb':[1,2,3]},
+   'stroke':{'kind':'solid','enabled':False,'rgb':[0,0,0],'width':1},'patterns':['图案'*64]*128}
+ def packet(self,d):
+  import ctypes
+  class CopyData(ctypes.Structure):
+   _fields_=[('tag',ctypes.c_size_t),('size',ctypes.c_ulong),('data',ctypes.c_void_p)]
+  packet=ctypes.cast(d.gui.SendMessage.call_args.args[3],ctypes.POINTER(CopyData)).contents
+  return packet.size,json.loads(ctypes.string_at(packet.data,packet.size-1))
+ def test_maximum_catalog_remains_complete_inside_native_packet_budget(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);received=[]
+   def receive(*args):
+    received.append(self.packet(d));return 1
+   d.gui.SendMessage.side_effect=receive
+   self.result(folder,kind='shape-fill',shape_editor=self.large_shape());d._finish_menu_context()
+   size,value=received[0]
+   self.assertGreater(size,65536);self.assertLessEqual(size,256*1024)
+   self.assertEqual(value['shape']['patterns'],self.large_shape()['patterns'])
+   self.assertTrue(d.menu_context_delivery['accepted']);self.assertFalse(d.menu_context_delivery['editor_omitted'])
+   self.assertIsNone(d.menu_context_pending);self.assertTrue(d.color_editor_active)
+ def test_optional_editor_over_budget_keeps_fresh_basic_actions_usable(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);received=[]
+   def receive(*args):received.append(self.packet(d));return 1
+   d.gui.SendMessage.side_effect=receive
+   self.result(folder,kind='shape-fill',shape_editor=self.large_shape())
+   with patch('backend.desktop.MAX_CONTEXT_PACKET_BYTES',65536):d._finish_menu_context()
+   size,value=received[0]
+   self.assertLess(size,65536);self.assertEqual(value['shape'],{'available':False})
+   self.assertEqual((value['flags']>>8)&15,15);self.assertEqual((value['flags']>>32)&127,127)
+   self.assertFalse(d.color_editor_active);self.assertEqual(d.menu_layer_context['layer_ids'],[3])
+   self.assertTrue(d.menu_context_delivery['editor_omitted']);self.assertIsNone(d.menu_context_pending)
+ def test_native_rejection_does_not_mark_context_applied_or_replace_target(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.menu_layer_context={'layer_ids':[99]};d.gui.SendMessage.return_value=0
+   self.result(folder);d._finish_menu_context()
+   self.assertEqual(d.menu_layer_context,{'layer_ids':[99]});self.assertIsNotNone(d.menu_context_pending)
+   self.assertEqual(d.menu_context_delivery['phase'],'native-rejected');self.assertFalse(d.menu_context_delivery['accepted'])
  def test_basic_capabilities_apply_once_then_matching_paint_can_finish(self):
   with tempfile.TemporaryDirectory() as folder:
    d=self.ready(folder);d.menu_context_pending['deadline']=time.monotonic()+10

@@ -628,7 +628,9 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     if(msg==WM_APP+23){holdOrigin={static_cast<LONG>(wp),static_cast<LONG>(lp)};holdMoved=false;return 0;}
     if(msg==WM_COPYDATA){
         auto* data=reinterpret_cast<COPYDATASTRUCT*>(lp);
-        if(!data || (data->dwData!=0x53485045 && data->dwData!=0x4d435458) || !data->lpData || data->cbData<2 || data->cbData>65536)return FALSE;
+        // 128 pattern names of 128 characters may exceed 64KiB after JSON
+        // escaping. Keep a bound that covers the validated editor schema.
+        if(!data || (data->dwData!=0x53485045 && data->dwData!=0x4d435458) || !data->lpData || data->cbData<2 || data->cbData>256*1024)return FALSE;
         try {auto* text=static_cast<const char*>(data->lpData);const auto value=Json::parse(text,text+data->cbData-1);
             if(data->dwData==0x4d435458){
                 const bool resume=value.value("resume",false);
@@ -3031,6 +3033,38 @@ int main() {
                 if(testedActions.back()!="hide")throw std::runtime_error("Unchanged paint submitted");
                 auto resetShape=[&]{shapeEditor.prepare(shapeFixture);setHoldMode(true);shapePanelOpen=true;numberFrame(ImGuiKey_None,false);holdMoved=true;};
                 resetShape();
+                // The documented 128 patterns x 128 characters is valid
+                // editor data. Python's ASCII JSON encoding can exceed 64KiB;
+                // its completed snapshot may replace the brief basic result.
+                {
+                    Json largeShape=shapeFixture;largeShape["patterns"]=Json::array();
+                    std::string longName;for(int n=0;n<64;++n)longName+=u8"图案";
+                    for(int n=0;n<128;++n)largeShape["patterns"].push_back(longName);
+                    Json update={{"epoch",menuEpoch},{"flags",uint64_t(64)|(uint64_t(15)<<8)|
+                        (uint64_t(6)<<12)|(uint64_t(1)<<17)|(uint64_t(127)<<32)},{"shape",largeShape}};
+                    const auto payload=update.dump(-1,' ',true);
+                    if(payload.size()<=65536)throw std::runtime_error("Large layer-context fixture too small");
+                    layerAware=true;layerMask=0;layerKind=0;quickMask=0;
+                    COPYDATASTRUCT packet{0x4d435458,DWORD(payload.size()+1),const_cast<char*>(payload.c_str())};
+                    if(!SendMessageW(window,WM_COPYDATA,0,reinterpret_cast<LPARAM>(&packet)) ||
+                       layerMask!=15 || layerKind!=6 || quickMask!=127 || !shapeEditor.available)
+                        throw std::runtime_error("Valid completed layer snapshot rejected; all layer actions remain disabled: bytes="+std::to_string(payload.size()+1));
+                    const auto eventCount=testedActions.size(),previewCount=testedMaskEvents.size();
+                    numberFrame(ImGuiKey_None,false);
+                    if(ImGui::GetDrawData()->TotalVtxCount<=0 || !rowEnabled(0) ||
+                       testedActions.size()!=eventCount || testedMaskEvents.size()!=previewCount)
+                        throw std::runtime_error("Large snapshot did not enable visible controls without executing an action");
+                    auto stale=update;stale["epoch"]=menuEpoch-1;const auto stalePayload=stale.dump(-1,' ',true);
+                    COPYDATASTRUCT stalePacket{0x4d435458,DWORD(stalePayload.size()+1),const_cast<char*>(stalePayload.c_str())};
+                    if(SendMessageW(window,WM_COPYDATA,0,reinterpret_cast<LPARAM>(&stalePacket)))
+                        throw std::runtime_error("Large snapshot bypassed the current-menu epoch guard");
+                    auto oversized=update;oversized["padding"]=std::string(256*1024,'x');const auto oversizedPayload=oversized.dump();
+                    COPYDATASTRUCT oversizedPacket{0x4d435458,DWORD(oversizedPayload.size()+1),const_cast<char*>(oversizedPayload.c_str())};
+                    if(SendMessageW(window,WM_COPYDATA,0,reinterpret_cast<LPARAM>(&oversizedPacket)))
+                        throw std::runtime_error("Oversized snapshot bypassed the packet bound");
+                    std::cout<<"Large completed layer snapshot passed: bytes="<<payload.size()+1<<", full pattern catalog, visible actions, zero execution\n";
+                    resetShape();
+                }
                 // Old/missing host capability keeps the entire editor local.
                 for(const bool missing:{false,true}) {
                     auto local=shapeFixture;

@@ -16,6 +16,7 @@ from .paths import ROOT, runtime_dir, overlay_command
 from .panel_context import PanelContext, panel_flags
 
 TITLE = "Photoshop Menu - Actions"
+MAX_CONTEXT_PACKET_BYTES = 256 * 1024
 
 
 def window_transition(method):
@@ -151,6 +152,7 @@ class Desktop:
         self.menu_context_requester=None
         self.menu_context_pending=None
         self.menu_context_active=None
+        self.menu_context_delivery={'phase':'idle'}
         self.menu_context_canceller=None
         self.document_caption = None
         self.caption_window = 0
@@ -669,6 +671,7 @@ class Desktop:
             # before showing. Windows read-sharing retries run on the existing
             # layer monitor, outside the window/input lock.
             self.menu_context_pending={'epoch':self.menu_epoch+1,'unpublished':True,'deadline':time.monotonic()+10}
+            self.menu_context_delivery={'phase':'queued','epoch':self.menu_epoch+1}
             from .layer_context import unavailable
             self.menu_layer_context=unavailable()
         from .shape_paint import metadata
@@ -765,6 +768,7 @@ class Desktop:
         if not pending:return
         if pending.get('resume'):self.menu_context_pending=None;return
         if not self.visible or self.menu_epoch!=pending['epoch'] or time.monotonic()>pending['deadline']:
+            self.menu_context_delivery={'phase':'expired' if self.visible and self.menu_epoch==pending['epoch'] else 'closed','epoch':pending['epoch']}
             self.menu_context_pending=None;return
         if 'id' not in pending:return
         try:
@@ -785,10 +789,22 @@ class Desktop:
             active=shape_editor_allowed(panel,shape,True,value)
             payload=json.dumps({'epoch':pending['epoch'],'flags':flags(value),
                                 'shape':shape if active else {'available':False}}).encode('utf-8')
+            editor_omitted=len(payload)+1>MAX_CONTEXT_PACKET_BYTES
+            if editor_omitted:
+                # Optional editor data must not strand fresh basic layer
+                # actions. No PS request is retried or snapshot age extended.
+                active=False
+                payload=json.dumps({'epoch':pending['epoch'],'flags':flags(value),
+                                    'shape':{'available':False}}).encode('utf-8')
             class CopyData(ctypes.Structure):
                 _fields_=[('tag',ctypes.c_size_t),('size',W.DWORD),('data',ctypes.c_void_p)]
             buffer=ctypes.create_string_buffer(payload);packet=CopyData(0x4d435458,len(payload)+1,ctypes.cast(buffer,ctypes.c_void_p))
-            if self.gui.SendMessage(self.hwnd,0x4a,0,ctypes.addressof(packet)):
+            accepted=bool(self.gui.SendMessage(self.hwnd,0x4a,0,ctypes.addressof(packet)))
+            self.menu_context_delivery={'phase':'applied' if accepted else 'native-rejected','epoch':pending['epoch'],
+                'menu_phase':phase,'kind':value['kind'],'selection_count':len(value['layer_ids']),
+                'packet_bytes':len(payload)+1,'selection_age_ms':max(0,round(time.time()*1000-value['plugin_time_ms'])),
+                'accepted':accepted,'editor_omitted':editor_omitted}
+            if accepted:
                 self.menu_layer_context=dict(value);self.color_editor_active=active
                 if phase=='completed':self.menu_context_pending=None
                 else:

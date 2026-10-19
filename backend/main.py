@@ -319,7 +319,8 @@ class Application(web.Application):
             self.diagnostics.runtime_provider=lambda:{'application':service_identity(),
                 'photoshop':self.bridge._status_snapshot(),'tasks':self.tasks.snapshot(),
                 'application_update':self.application_updates.snapshot(),
-                'graphics':getattr(self.desktop,'graphics',{}) if self.desktop else {}}
+                'graphics':getattr(self.desktop,'graphics',{}) if self.desktop else {},
+                'menu_context_delivery':getattr(self.desktop,'menu_context_delivery',{}) if self.desktop else {}}
             result=self.diagnostics.start(scope)
             if desktop and scope in ('all','menu'):
                 from collections import deque

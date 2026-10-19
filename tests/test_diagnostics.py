@@ -11,13 +11,15 @@ class DiagnosticTests(unittest.IsolatedAsyncioTestCase):
                 'layer_observation':{'background':{'selection_ms':900,'error':'SECRET_ERROR'}}},
             'tasks':{'items':[{'id':'a','state':'failed','target':{'name':'SECRET_DOCUMENT'},'error':'SECRET_ERROR','timeline':[{'state':'running','duration_ms':40,'token':'SECRET_TOKEN'}]}]},
             'application_update':{'phase':'error','error':'SECRET_PROXY','release':{'body':'SECRET_BODY'}},
-            'graphics':{'requested':'auto','active':'gpu','adapter':'test adapter','private':'SECRET_GPU'},'token':'SECRET_TOKEN'})
+            'graphics':{'requested':'auto','active':'gpu','adapter':'test adapter','private':'SECRET_GPU'},'token':'SECRET_TOKEN',
+            'menu_context_delivery':{'phase':'native-rejected','packet_bytes':98958,'accepted':False,'token':'SECRET_TOKEN','document_name':'SECRET_DOCUMENT'}})
         import json
         self.assertNotIn('SECRET',json.dumps(report))
         self.assertEqual(report['layer_context']['selection_count'],2)
         self.assertEqual(report['layer_observation']['background']['selection_ms'],900)
         self.assertTrue(report['tasks'][0]['error_present'])
         self.assertEqual(report['graphics'],{'requested':'auto','active':'gpu','adapter':'test adapter'})
+        self.assertEqual(report['menu_context_delivery'],{'phase':'native-rejected','packet_bytes':98958,'accepted':False})
         self.assertEqual(runtime_report({'photoshop':{'layer_observation':None,'layer_context':None}})['layer_context']['selection_count'],0)
 
     def test_loader_findings_ignore_old_host_and_pre_start_logs(self):

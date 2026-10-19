@@ -28,7 +28,8 @@ def runtime_report(value):
         'photoshop':pick(ps,('connected','busy','uxp_ready','uxp_version','photoshop_version','status_fresh','status_age_ms','status_wait_reason')),
         'layer_context':context,'layer_observation':observed,'tasks':tasks,
         'application_update':{**pick(updates,('phase','current','available','last_checked','last_attempt')),'error_present':bool(updates.get('error'))},
-        'graphics':pick(value.get('graphics',{}),('requested','active','actual','adapter','requested_mode','actual_mode','adapter_name','backend','software'))}
+        'graphics':pick(value.get('graphics',{}),('requested','active','actual','adapter','requested_mode','actual_mode','adapter_name','backend','software')),
+        'menu_context_delivery':pick(value.get('menu_context_delivery',{}),('phase','epoch','menu_phase','kind','selection_count','packet_bytes','selection_age_ms','accepted','editor_omitted'))}
 
 def uxp_findings(report):
     backend=report.get('backend',{})

@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-v0.4.204／UXP44：补上PS24.0.0颜色／羽化实时预览路径，需要更新内置插件并手动重启PS。该机实测待复核；操作与限制见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Legacy-preview)。
+v0.4.205／UXP44本机版：修复大图案目录造成的菜单更新包拒收及卡灰路径，i5／UHD730原故障仍待实机复测。操作与限制见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
 v0.4.201：展开／收起统一悬停原按钮，说明文字保留，外框恢复实线。用法与验证范围见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Perceptual-color)。
 
