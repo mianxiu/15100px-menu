@@ -4,6 +4,7 @@ module.exports = function createLabels(ps, session, options={}) {
   const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
   const shapePaint=createShapePaint(ps,session,capture,selectionContext,options.legacyPreview===true);
   const paintClipboard=createPaintClipboard(ps,session,captureSelection,selectionContext,creationTree);
+  const stability=createStabilityFixture(ps,session,capture,documentTarget);
   const quickCommands=['layer.new','layer.solid','layer.group','adjustment.curves',
     'adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite'];
   // Scalar lookup hints only, bounded for long sessions. A hint never supplies
@@ -333,6 +334,7 @@ module.exports = function createLabels(ps, session, options={}) {
     return ps.app.activeDocument.id===doc.id && doc.id===value.document_id && ids.join(',')===value.layer_ids.join(',');
   }
   async function setLabel(request,previewIO=null) {
+    if(request.command==='stability.internal')return stability.execute(request,setLabel);
     if(['shape.copyPaint','shape.pastePaint'].includes(request.command))return paintClipboard.execute(request);
     if(caps.commands.includes(request.command))return caps.execute(request);
     if(request.command==='shape.paint' || request.command==='shape.preview')return shapePaint.apply(request,previewIO);
@@ -620,10 +622,102 @@ module.exports = function createLabels(ps, session, options={}) {
     } catch(_) {}
     return {...interfaceState};
   }
-  return {capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:shapePaint.observe,
+  return {stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:shapePaint.observe,
     paintClipboardAvailable:paintClipboard.available,
     prepareLegacyShape:shapePaint.prepareLegacy,finishLegacyShape:shapePaint.finishLegacy};
 };
+
+// A test owns one document in this plugin session. No name-based recovery,
+// arbitrary scripts, original-document edits, or automatic cleanup after failure.
+function createStabilityFixture(ps,session,capture,documentTarget) {
+  let owner=null;
+  const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  function stamp(doc){return {id:doc.id,history:doc.activeHistoryState.id,
+    selected:Array.from(doc.activeLayers,x=>x.id).sort((a,b)=>a-b)};}
+  function originals(){return Array.from(ps.app.documents).filter(d=>!owner || d.id!==owner.document_id).map(stamp).sort((a,b)=>a.id-b.id);}
+  function guard(run) {
+    if(!owner || owner.run!==run || owner.session!==session)throw Error('Test ownership unavailable; no cleanup or replay');
+    if(!ps.app.documents.length || ps.app.activeDocument.id!==owner.document_id)throw Error('Test document changed; stopped');
+    if(!equal(originals(),owner.originals))throw Error('Original documents changed; stopped');
+    if(!equal(stamp(ps.app.activeDocument),owner.expected))throw Error('Test selection/history changed; stopped');
+    return ps.app.activeDocument;
+  }
+  async function read(run) {
+    const doc=guard(run),target=await capture();guard(run);
+    return {target,history_id:doc.activeHistoryState.id,layer_count:doc.layers.length,shape_id:owner.shape_id};
+  }
+  function accept(run) {
+    if(!owner || owner.run!==run || !ps.app.documents.length || ps.app.activeDocument.id!==owner.document_id || !equal(originals(),owner.originals))
+      throw Error('Test target changed after operation');
+    owner.expected=stamp(ps.app.activeDocument);
+  }
+  async function batch(commands) {
+    const result=await ps.action.batchPlay(commands,{});
+    if(result.length!==commands.length || result.some(x=>!x || x._obj==='error'))throw Error('Test fixture operation rejected');
+    return result;
+  }
+  async function execute(request,perform) {
+    const run=request.stability_run,step=request.test_step;
+    if(typeof run!=='string' || !/^[a-f0-9]{32}$/.test(run))throw Error('Invalid test identity');
+    if(step==='fixture')return ps.core.executeAsModal(async context=>{
+      if(owner && !Array.from(ps.app.documents).some(d=>d.id===owner.document_id) && equal(originals(),owner.originals))owner=null;
+      if(owner)throw Error('An owned test document is still retained');
+      if(context.isCancelled || Date.now()>request.expires_at_ms || !equal(documentTarget(),request.target))throw Error('Test document set changed');
+      const saved=originals(),active=request.target.active_document_id;
+      let doc;
+      try {doc=await ps.app.createDocument({name:'Photoshop Menu Test '+run.slice(0,8),width:128,height:128,resolution:72,mode:'RGBColorMode',fill:'transparent'});}
+      catch(error){if(!equal(documentTarget(),request.target))error.resultUnknown=true;throw error;}
+      if(!doc || !Number.isInteger(doc.id) || request.target.document_ids.includes(doc.id)){
+        const error=Error('Test creation outcome unknown');error.resultUnknown=true;throw error;
+      }
+      owner={run,session,document_id:doc.id,originals:saved,original_active:active,expected:stamp(doc)};
+      await batch([{_obj:'make',_target:[{_ref:'contentLayer'}],using:{_obj:'contentLayer',
+        type:{_obj:'solidColorLayer',color:{_obj:'RGBColor',red:40,grain:90,blue:150}},
+        shape:{_obj:'rectangle',top:{_unit:'pixelsUnit',_value:8},left:{_unit:'pixelsUnit',_value:8},
+          bottom:{_unit:'pixelsUnit',_value:80},right:{_unit:'pixelsUnit',_value:80}}},_options:{dialogOptions:'dontDisplay'}}]);
+      owner.shape_id=doc.activeLayers[0].id;
+      for(let i=0;i<3;i++)await batch([{_obj:'make',_target:[{_ref:'layer'}],_options:{dialogOptions:'dontDisplay'}}]);
+      await batch([{_obj:'select',_target:[{_ref:'layer',_id:owner.shape_id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}}]);
+      accept(run);return {verified:true,...await read(run)};
+    },{commandName:'Menu isolated test fixture',timeOut:0});
+    guard(run);
+    if(['label','layer.new'].includes(step)) {
+      const target=(await read(run)).target;
+      const result=await perform({...request,command:step,target,...(step==='label'?{color:request.test_color}: {})});
+      accept(run);return {...result,...await read(run)};
+    }
+    if(!['select-shape','select-many','undo','finish'].includes(step))throw Error('Unknown test step');
+    return ps.core.executeAsModal(async context=>{
+      const doc=guard(run);
+      if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Test cancelled or expired');
+      if(step==='finish') {
+        const original=owner.original_active;
+        await doc.closeWithoutSaving();
+        owner=null;
+        if(original!==null) {
+          const target=Array.from(ps.app.documents).find(d=>d.id===original);
+          if(!target)throw Error('Original document no longer available');
+          ps.app.activeDocument=target;
+        }
+        return {verified:true,closed_owned_document:true,original_active_restored:true};
+      }
+      if(step==='select-shape')await batch([{_obj:'select',_target:[{_ref:'layer',_id:owner.shape_id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}}]);
+      if(step==='select-many') {
+        const ids=Array.from(doc.layers).slice(0,32).map(l=>l.id);
+        for(let i=0;i<ids.length;i++)await batch([{_obj:'select',_target:[{_ref:'layer',_id:ids[i]}],makeVisible:false,
+          ...(i?{selectionModifier:{_enum:'selectionModifierType',_value:'addToSelection'}}:{}),_options:{dialogOptions:'dontDisplay'}}]);
+      }
+      if(step==='undo') {
+        const states=Array.from(doc.historyStates),index=states.findIndex(s=>s.id===doc.activeHistoryState.id);
+        if(index<1 || states[index-1].id!==request.restore_history)throw Error('Single undo checkpoint mismatch');
+        doc.activeHistoryState=states[index-1];
+        if(doc.activeHistoryState.id!==request.restore_history)throw Error('Single undo readback mismatch');
+      }
+      accept(run);return {verified:true,...await read(run)};
+    },{commandName:'Menu isolated test '+step,timeOut:0});
+  }
+  return {read,guard,accept,execute};
+}
 
 
 // Session-local native paint clipboard. No pixels, geometry, effects or mask

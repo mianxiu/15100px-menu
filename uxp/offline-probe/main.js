@@ -219,7 +219,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.45', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.46', session, transport: 'plugin-data-files',
         layer_observation:observation,
         shape_clipboard_available:labels.paintClipboardAvailable?.()===true,
         ...await labels.interfacePreferences(),
@@ -294,7 +294,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.45', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.46', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -329,6 +329,7 @@ async function probe(reason) {
         serial:++progressSerial,stage,done,total,frame:progressFrame});}catch(_){}
     }
     try {
+      if(request.stability_run && request.command!=='stability.internal')labels.stability.guard(request.stability_run);
       if(request.capture_current!==undefined) {
         if(request.capture_current!==true || request.capture_session!==session || request.operation!=='set_label' || request.target!==undefined ||
             !['selectAbove','selectBelow','extendAbove','extendBelow','copyStyle','pasteStyle'].includes(request.command))throw Error('Invalid direct Caps binding');
@@ -341,6 +342,7 @@ async function probe(reason) {
       }
       if (request.operation === 'inspect') {
         response.target = labels.documentTarget();
+        if(request.stability_run)response.stability=await labels.stability.read(request.stability_run);
         if(request.shape_inspect)response.shape_editor=await labels.observeShape(await labels.selectionContextFresh(),true);
       }
       if (request.operation === 'capture') response.target = await labels.capture();
@@ -388,6 +390,7 @@ async function probe(reason) {
             id:request.id,session,phase:'preview',...value,plugin_time_ms:Date.now()})
         }:null);
       if (request.operation === 'new_document') response.result = await labels.createDocument(request);
+      if(request.stability_run && request.command!=='stability.internal' && request.operation==='set_label')labels.stability.accept(request.stability_run);
     } catch (error) { response.phase = 'failed'; response.error = String(error); response.result_unknown=!!error.resultUnknown; }
     // This executes after the awaited modal function (including its finally)
     // returned or rejected. Content rollback can still be unknown independently.

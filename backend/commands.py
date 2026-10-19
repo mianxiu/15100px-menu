@@ -47,6 +47,9 @@ class Command:
     parameters: tuple = ()
 
 
+INTERNAL_COMMANDS = MappingProxyType({
+    'stability.internal': Command('stability.internal','隔离稳定性测试','owned-document-only; verified-readback',channel='uxp-local-files'),
+})
 REGISTRY = MappingProxyType({
     **{
     name: Command(name, info["label"],
@@ -66,14 +69,14 @@ REGISTRY = MappingProxyType({
 
 
 def validate_command(name, params=None):
-    if not isinstance(name, str) or name not in REGISTRY:
+    if not isinstance(name, str) or name not in REGISTRY and name not in INTERNAL_COMMANDS:
         raise ValueError("未知的图层操作")
     if name=='shape.paint' and params is not None:
         from .shape_paint import parameters
         parameters(params)
     elif params is not None and (not isinstance(params, dict) or params):
         raise ValueError("此命令不接受参数")
-    return REGISTRY[name]
+    return REGISTRY.get(name) or INTERNAL_COMMANDS[name]
 
 
 def command_contracts():

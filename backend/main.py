@@ -31,6 +31,7 @@ from .application_updates import ApplicationUpdates
 from .uxp_auto_update import UxpAutoUpdate
 from .diagnostics import Diagnostics
 from .version_health import VersionHealth
+from .stability import StabilityTest
 
 APP_ID = "photoshop-menu"
 from .version import APP_VERSION
@@ -205,6 +206,7 @@ class Application(web.Application):
         self.application_updates = ApplicationUpdates(self.runtime)
         self.uxp_auto=UxpAutoUpdate(self.runtime)
         self.diagnostics=Diagnostics(self.runtime,ROOT/"tools/inspect-panels.ps1",port)
+        self.stability=StabilityTest(self)
         self.version_health=VersionHealth(self.runtime)
         self.updating = False
         self.closing = False
@@ -219,6 +221,9 @@ class Application(web.Application):
         ], websocket_max_message_size=65536, websocket_ping_interval=20, websocket_ping_timeout=20)
 
     async def broadcast(self, event):
+        if getattr(getattr(self,'stability',None),'active',False):
+            if event.get('type')=='operation':event={**event,'busy':True}
+            if event.get('type')=='status':event={**event,'data':{**event['data'],'photoshop':{**event['data']['photoshop'],'busy':True}}}
         if self.desktop:
             self.desktop.event(event)
         if not hasattr(self,'status_delivery'):self.status_delivery=StatusDelivery(self.clients)
@@ -309,6 +314,12 @@ class Application(web.Application):
             raise RuntimeError('服务正在退出，本次操作未接受')
         if getattr(self,'updating',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
             raise RuntimeError('应用正在更新，本次操作未接受')
+        if action=='stability.start':return await self.stability.start(args.get('profile','standard'))
+        if action=='stability.stop':return self.stability.stop()
+        if action=='stability.status':return self.stability.snapshot()
+        if action=='stability.export':return self.stability.export()
+        if getattr(getattr(self,'stability',None),'active',False) and action in ('diagnostics.start','panel.inspect','panel.calibrate','settings.save'):
+            raise RuntimeError('稳定性测试进行中，请先停止后续测试')
         if action=='diagnostics.start':
             desktop=self.desktop
             scope=args.get('scope','all')
@@ -424,6 +435,8 @@ class Application(web.Application):
                     "tray_error": self.tray.error if self.tray else ""}
             self.version_health.observe(value)
             value['version_health']=self.version_health.snapshot()
+            value['stability']=self.stability.snapshot() if hasattr(self,'stability') else {}
+            if getattr(getattr(self,'stability',None),'active',False):value['photoshop']={**value['photoshop'],'busy':True}
             return value
         if action == 'document.new':
             if args.get('params') not in (None, {}):raise ValueError('新建窗口入口不接受文档参数')
@@ -470,6 +483,7 @@ class Application(web.Application):
             return await dispatch_preview(self,action,args)
         if action == "action.execute":
             name = args.get("name")
+            if name=='stability.internal':raise ValueError('测试命令仅能通过隔离测试入口执行')
             if name=='document.recent':raise ValueError('请从首页最近预设列表选择尺寸')
             validate_command(name, args.get("params"))
             from .commands import CAPS_ACTIONS
@@ -714,6 +728,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
     finally:
         app.closing=True
         await app.diagnostics.close()
+        await app.stability.close()
         await app.version_health.close()
         await app.application_updates.close()
         if status_task:

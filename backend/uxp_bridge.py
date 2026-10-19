@@ -104,6 +104,8 @@ class UxpTransport:
                     raise RuntimeError('UXP 未就绪，请正常启动 Photoshop 并加载 0.3.x 插件')
                 identity=secrets.token_hex(16)
                 modifying=operation in ('set_label','new_document')
+                if payload.get('stability_run') and version(heartbeat.get('probe_version'))<(0,3,46):
+                    raise RuntimeError('自动稳定性测试需要实际加载 UXP 0.3.46')
                 if modifying and version(heartbeat.get('probe_version'))<(0,3,8):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.8，以支持结果核对；未提交修改')
                 if 'capture_current' in payload:
@@ -459,7 +461,7 @@ class UxpBridge(PhotoshopBridge):
         self._captured_app=target['session'];self._captured_target={**bound,'session':target['session']}
         return {**self._captured_target,'instance_binding':self._captured_app}
 
-    async def execute_shape(self, params, before_dispatch=None, frozen_target=None, preview=None):
+    async def execute_shape(self, params, before_dispatch=None, frozen_target=None, preview=None, _stability_run=None):
         from .shape_paint import parameters
         params=parameters(params)
         if self.execution_guard:self.execution_guard()
@@ -482,13 +484,40 @@ class UxpBridge(PhotoshopBridge):
                 # baseline check before history or writes. Old plugins ignore
                 # this field and retain their complete preparation.
                 native_contract={'native_batch_validation':2} if native and params.get('mask_batch') else {}
-                response=self.transport.call('set_label',preview=preview,native_preview=native,command=command,target=self._captured_target,paint=params,**native_contract)
+                response=self.transport.call('set_label',preview=preview,native_preview=native,command=command,target=self._captured_target,paint=params,**native_contract,**({'stability_run':_stability_run} if _stability_run else {}))
                 value=validate(response.get('layer_context'),self._captured_app)
                 self.layer_context=value if fresh(value) else unavailable()
                 return json.dumps(response['result'])
             finally:self._uxp_worker_active=False
         capture=(lambda:(self._bind_batch_mask_target if params.get('mask_batch') else self._bind_menu_target)(frozen_target)) if frozen_target is not None else self._capture_target
+        if _stability_run:capture=lambda:self._capture_stability(_stability_run)
         return await self._execute_task('shape.paint',before_dispatch,capture=capture,execute=write,interactive=preview is not None)
+
+    def _capture_stability(self, run):
+        target=self.transport.call('inspect',stability_run=run)['stability']['target']
+        from .operation_target import validate_target
+        validate_target(target)
+        self._captured_app=target['session'];self._captured_target=dict(target)
+        return dict(target)
+
+    async def execute_stability(self, run, step, before_dispatch=None, **values):
+        """Internal owned-fixture operations; never exposed as arbitrary actions."""
+        if self.execution_guard:self.execution_guard()
+        def capture():
+            if step=='fixture':
+                self._captured_target=self.transport.call('inspect')['target']
+                return dict(self._captured_target)
+            return self._capture_stability(run)
+        def execute(_):
+            self.transport.task_id=self._active_task_id;self._uxp_worker_active=True
+            try:
+                response=self.transport.call('set_label',command='stability.internal',stability_run=run,
+                    test_step=step,target=self._captured_target,**values)
+                value=validate(response.get('layer_context'),response.get('session'))
+                self.layer_context=value if fresh(value) else unavailable()
+                return json.dumps({'result':response['result'],'timings_ms':response.get('timings_ms',{})})
+            finally:self._uxp_worker_active=False
+        return await self._execute_task('stability.internal',before_dispatch,capture=capture,execute=execute)
 
     def _capture_new_target(self):
         if self.document_guard:self.document_guard()

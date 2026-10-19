@@ -15,6 +15,7 @@
 | `legacy/` | 早期独立实验，不属于当前运行入口 |
 | `dist/` | 当前v0.4.165 EXE、后端ZIP、UXP ZIP、更新清单及两份SHA256，共6项；仅保留最新Release；旧159正式包及160 ZIP已归档 |
 | 应用数据目录 `version-health/` | 自动版本自检摘要及最多20份脱敏报告，不随发行包提交 |
+| 应用数据目录 `stability-reports/` | 207新增一键稳定性测试的逐次JSON及最新部分报告；只保存在本机，不随发行包提交 |
 | `.runtime/` | 当前构建／测试证据及仍在使用的本地数据，忽略提交 |
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |

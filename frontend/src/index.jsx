@@ -48,6 +48,7 @@ function App() {
     if(event.type==='notice') setNotice(event);
     if(event.type==='diagnostics')setState(previous=>({...previous,diagnostics:receivedDiagnostic(event.data)}));
     if(event.type==='version-health')setState(previous=>({...previous,version_health:event.data}));
+    if(event.type==='stability')setState(previous=>({...previous,stability:event.data}));
     if(event.type==='tasks') setState(previous=>({...previous,tasks:event.data}));
   });
   async function call(action,args={}) {
@@ -118,12 +119,30 @@ function App() {
     createEffect(()=>{if(state().diagnostics?.phase!=='collecting')return;
       const timer=setInterval(()=>setNow(performance.now()),200);onCleanup(()=>clearInterval(timer));});
     const clock=()=>diagnosticClock(state().diagnostics,now());
-    return <section><h2>{t("统一诊断")}</h2><label class="option-row"><span>{t("检测范围")}</span><select aria-label={t("检测范围")} value={scope()} disabled={disabled() || state().diagnostics?.phase==='collecting'} onChange={e=>setScope(e.target.value)}><For each={diagnosticScopes}>{([id,label])=><option value={id}>{t(label)}</option>}</For></select></label><Show when={scope()==='all' || scope()==='menu'}><p>{t("点击开始后有5秒准备时间。请切回PS、点击图层列表，再按下面的菜单快捷键；PS前方的小提示会显示采集倒计时。")}</p><p><kbd>{state().settings.shortcuts?.toggle}</kbd></p></Show>
+    return <section><h2>{t("统一诊断")}</h2><label class="option-row"><span>{t("检测范围")}</span><select aria-label={t("检测范围")} value={scope()} disabled={disabled() || state().stability?.active || state().diagnostics?.phase==='collecting'} onChange={e=>setScope(e.target.value)}><For each={diagnosticScopes}>{([id,label])=><option value={id}>{t(label)}</option>}</For></select></label><Show when={scope()==='all' || scope()==='menu'}><p>{t("点击开始后有5秒准备时间。请切回PS、点击图层列表，再按下面的菜单快捷键；PS前方的小提示会显示采集倒计时。")}</p><p><kbd>{state().settings.shortcuts?.toggle}</kbd></p></Show>
       <div class="diagnostic-progress"><span role="status">{t(clock().label)}</span><Show when={clock().showSeconds}><strong aria-live="off">{clock().seconds} {t("秒")}</strong></Show></div>
       <Show when={state().diagnostics?.phase==='collecting' && state().diagnostics?.stage==='sampling'}><p class="caption">{state().diagnostics.samples_done || 0} / {state().diagnostics.samples_total || 10} {t("个采样")}</p></Show>
       <For each={Object.entries(state().diagnostics?.components || {})}>{([id,phase])=><p class="caption">{t(diagnosticComponents[id])} · {t(({collecting:'检测中',completed:'已完成',failed:'未完成'})[phase] || '等待检测')}</p>}</For>
       <For each={state().diagnostics?.findings || []}>{code=><p role="status">{t(diagnosticFinding(code))}</p>}</For>
-      <div class="buttons"><button disabled={disabled() || state().diagnostics?.phase==='collecting'} onClick={()=>perform('diagnostics.start',{scope:scope()})}>{t("开始只读诊断")}</button><button disabled={disabled() || !state().diagnostics?.ready} onClick={exportDiagnostics}>{t("导出统一报告")}</button></div><p class="caption">{t("综合检测合并菜单／热键、UXP安装加载、图层读取耗时、任务与更新状态，生成一份JSON；单项失败仍可导出其余结果。")}</p><p class="caption">{t("仅读取窗口结构、插件加载日志和已有状态，不读取输入文字、文档内容或凭据，不向PS提交操作。")}</p></section>;
+      <div class="buttons"><button disabled={disabled() || state().stability?.active || state().diagnostics?.phase==='collecting'} onClick={()=>perform('diagnostics.start',{scope:scope()})}>{t("开始只读诊断")}</button><button disabled={disabled() || !state().diagnostics?.ready} onClick={exportDiagnostics}>{t("导出统一报告")}</button></div><p class="caption">{t("综合检测合并菜单／热键、UXP安装加载、图层读取耗时、任务与更新状态，生成一份JSON；单项失败仍可导出其余结果。")}</p><p class="caption">{t("仅读取窗口结构、插件加载日志和已有状态，不读取输入文字、文档内容或凭据，不向PS提交操作。")}</p></section>;
+  }
+  function StabilityPanel(){
+    const [profile,setProfile]=createSignal('standard');
+    const test=()=>state().stability || {};
+    async function start(){try{const result=await call('stability.start',{profile:profile()});setState(previous=>({...previous,stability:result}));}catch{}}
+    async function stop(){try{const result=await call('stability.stop');setState(previous=>({...previous,stability:result}));}catch{}}
+    async function download(){try{const report=await call('stability.export');const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='ps-menu-stability-'+report.run_id+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{}}
+    return <section id="stability-test"><h2>{t('自动稳定性测试')}</h2>
+      <p>{t('在隔离临时文档中反复识别图层、修改标签、增加图层、调整颜色／羽化并核验撤销。测试期间请勿操作PS；可停留在后台管理窗口。')}</p>
+      <label class="advanced-field"><span>{t('测试强度')}</span><select aria-label={t('测试强度')} disabled={disabled() || test().active} value={profile()} onChange={e=>setProfile(e.target.value)}><option value="standard">{t('标准：3轮，24次新增图层')}</option><option value="extended">{t('持续：10轮，80次新增图层')}</option></select></label>
+      <p role="status">{t(test().message || '尚未开始测试')}</p>
+      <Show when={test().active || test().ready}><p class="caption">{test().round || 0} / {test().rounds || 0} {t('轮')} · {test().completed_steps || 0} {t('个步骤')} · {test().samples || 0} {t('个系统采样')}</p></Show>
+      <Show when={test().error}><p class="error">{test().error}</p></Show>
+      <Show when={!test().active && test().cleanup?.includes('retained')}><p>{t('临时文档已保留供检查，未自动关闭或重发操作。')}</p></Show>
+      <div class="buttons"><button class="primary" disabled={disabled() || test().active || state().photoshop.busy || !state().photoshop.uxp_ready || state().menu?.visible} onClick={start}>{t('一键开始测试')}</button><button disabled={disabled() || !test().active || test().stop_requested} onClick={stop}>{t('停止后续测试')}</button><button disabled={disabled() || !test().ready} onClick={download}>{t('导出测试报告')}</button></div>
+      <p class="caption">{t('自动保存本地报告，记录每步耗时、逐核CPU、频率、内存及磁盘等待；不改变电源计划，不上传。停止会等待当前请求结束，未知结果保留保护。')}</p>
+      <p class="caption">{t('未支持的实时预览单独标记；实体Caps、UU远程、鼠标手感及画布目视不计为自动通过。')}</p>
+    </section>;
   }
   async function exportDiagnostics(){try{const report=await call('diagnostics.export');const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='ps-menu-diagnostic-'+Date.now()+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{}}
   const health=()=>healthView(state().version_health);
@@ -148,7 +167,7 @@ function App() {
     <Show when={!state().photoshop.status_fresh}><p class="error">{t("状态等待更新 · 显示缓存")}</p></Show>
     <div class="buttons"><Show when={!state().photoshop.connected || state().photoshop_start?.active}><button class="primary" disabled={managedBusy()} onClick={()=>perform('photoshop.start')}>{state().photoshop_start?.active?t("正在启动…"):t("启动 Photoshop")}</button></Show><button disabled={disabled()} onClick={()=>perform('status',{refresh:true})}>{t("刷新连接状态")}</button><button onClick={()=>choose('settings')}>{t("菜单设置")}</button><button onClick={()=>choose('plugins')}>{t("插件管理")}</button></div>
     </section>
-    <VersionHealthPanel/><DiagnosticPanel/><section class="compact-section"><details><summary>{t("启动状态")}</summary><PhotoshopStartup/></details></section>
+    <VersionHealthPanel/><StabilityPanel/><DiagnosticPanel/><section class="compact-section"><details><summary>{t("启动状态")}</summary><PhotoshopStartup/></details></section>
     <section class="compact-section"><details><summary>{t("连接详情")}</summary><dl class="info-list"><div><dt>{t("当前面板：")}</dt><dd>{t(state().menu?.panel_context?.label) || t("通用操作")}</dd></div><div><dt>{t("上次读取：")}</dt><dd>{state().photoshop.status_updated_at ? new Date(state().photoshop.status_updated_at).toLocaleTimeString(state().language || 'zh-CN') : '—'}</dd></div><div><dt>{t("当前运行版本")}</dt><dd>v{state().version || '—'}</dd></div><div><dt>{t("程序：")}</dt><dd>{state().service?.executable || t("此服务未提供程序路径")}</dd></div></dl><p>{t(state().desktop)}</p><Show when={state().tray_error}><p class="error">{t("托盘：")}{state().tray_error}</p></Show><button class="danger" disabled={managedBusy()} onClick={()=>perform('service.quit')}>{t("退出后台服务")}</button></details></section>
   </div>;}
   function UxpInstalled(){return <div class="panel-scroll"><section>
