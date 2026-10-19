@@ -586,7 +586,7 @@ static int holdActionAt(POINT point) {
 static void setHoldMode(bool enabled) {
     holdMode=enabled;holdFinished=false;pinned=false;holdMoved=false;resetMenu();focusSearch=false;
     pieStarted=0;pieAnimating=enabled;
-    stopShapeEyedrop();shapeModePressed=false;
+    stopShapeEyedrop();
     ringAngleReady=false;shapeReturning=false;shapeHoverReady=false;shapeHoverBounds={};shapePanelOpen=false;shapeModeBounds={};shapeModeRows={};
     shownPresets=recentPresets;
     // The compositor retains the last presented surface while hidden. Never
@@ -2619,9 +2619,8 @@ int main() {
                 const auto switchEvents=testedMaskEvents.size(),switchActions=testedActions.size();const auto switchDraft=shapeEditor.draft;
                 auto pointer=[&](float x,float y){io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(x,y);numberFrame(ImGuiKey_None,false);};
                 auto toggleEditor=[&]{const auto icon=shapeModeBounds;
-                    pointer((icon.left+icon.right)*.5f,(icon.top+icon.bottom)*.5f);
-                    io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
-                    io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);};
+                    pointer(pieCenter.x,pieCenter.y);
+                    pointer((icon.left+icon.right)*.5f,(icon.top+icon.bottom)*.5f);};
                 if(shapeEditor.bounds.right || !shapeModeBounds.right)throw std::runtime_error("New menu did not start ordinary");
                 const auto arrow=shapeModeBounds;pointer((arrow.left+arrow.right)*.5f,(arrow.top+arrow.bottom)*.5f);
                 const auto panel=shapeEditor.bounds;const auto mask=shapeEditor.maskBounds;
@@ -2632,8 +2631,8 @@ int main() {
                 for(float x=(arrow.left+arrow.right)*.5f;x>panel.right-10*scale;x-=scale){pointer(x,cy);if(!shapePanelOpen)throw std::runtime_error("Moving from expander to panel collapsed editor");}
                 // The entire red corridor keeps the editor open, but never confirms.
                 for(float y=std::min(float(arrow.top),float(panel.top))+scale;y<float(mask.bottom)-scale;y+=3*scale){
-                    pointer((panel.right+arrow.right)*.5f,y);
-                    POINT p{LONG((panel.right+arrow.right)*.5f),LONG(y)};
+                    pointer((panel.right+arrow.left)*.5f,y);
+                    POINT p{LONG((panel.right+arrow.left)*.5f),LONG(y)};
                     if(!shapePanelOpen || holdActionAt(p)!=-1 || shapeEditor.hit(p))throw std::runtime_error("Full-height editor corridor collapsed or gained commit hit");
                 }
                 pointer((panel.left+panel.right)*.5f,(panel.top+panel.bottom)*.5f);
@@ -2643,11 +2642,10 @@ int main() {
                 pointer(pieCenter.x,pieCenter.y);
                 if(!shapePanelOpen || !shapeEditor.bounds.right || testedMaskEvents.size()!=switchEvents || testedActions.size()!=switchActions)
                     throw std::runtime_error("Leaving editor implicitly collapsed or wrote preview");
-                // The icon owns both ends of the collapse click. Hover and a
-                // press that is released elsewhere cannot collapse the panel.
-                pointer((arrow.left+arrow.right)*.5f,cy);io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
-                pointer(pieCenter.x,pieCenter.y);io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
-                if(!shapePanelOpen)throw std::runtime_error("Cancelled icon click collapsed editor");
+                // A drag across the icon cannot defer a collapse until release.
+                io.AddMouseButtonEvent(0,true);numberFrame(ImGuiKey_None,false);
+                pointer((arrow.left+arrow.right)*.5f,cy);io.AddMouseButtonEvent(0,false);numberFrame(ImGuiKey_None,false);
+                if(!shapePanelOpen)throw std::runtime_error("Drag release over icon collapsed editor");
                 toggleEditor();
                 if(shapePanelOpen || shapeEditor.bounds.right || testedMaskEvents.size()!=switchEvents || testedActions.size()!=switchActions)
                     throw std::runtime_error("Clean icon collapse did not restore ordinary menu without writes");
@@ -2688,7 +2686,7 @@ int main() {
                 toggleEditor();
                 if(!shapeReturning || !testedMaskEvents.back().value("return_to_menu",false))throw std::runtime_error("Icon after paint switch did not confirm once");
                 taskBusy=busyFeedback=false;allowed=capable=true;shapeEditor.prepare(shapeFixture);setHoldMode(true);io.AddMousePosEvent(-1000,-1000);numberFrame(ImGuiKey_None,false);
-                std::cout<<"Fill/stroke/type hover switching passed: 22 clicks, stable header, no implicit commit, icon click confirms once\n";
+                std::cout<<"Fill/stroke/type hover switching passed: 22 clicks, stable header, no implicit commit, icon hover confirms once\n";
                 // Releasing a color drag outside must not implicitly commit.
                 pointer((shapeModeBounds.left+shapeModeBounds.right)*.5f,(shapeModeBounds.top+shapeModeBounds.bottom)*.5f);
                 auto dragSquare=perceptualPicker.squareBounds;pointer((dragSquare.left+dragSquare.right)*.5f,(dragSquare.top+dragSquare.bottom)*.5f);
@@ -2738,6 +2736,7 @@ int main() {
                 // Sample exactly over the collapse icon via the real WndProc:
                 // this click must be consumed, never becoming an icon click.
                 beginShapeEyedrop();const auto sampleIcon=shapeModeBounds;
+                pointer((sampleIcon.left+sampleIcon.right)*.5f,(sampleIcon.top+sampleIcon.bottom)*.5f);
                 const auto samplePoint=MAKELPARAM((sampleIcon.left+sampleIcon.right)/2,(sampleIcon.top+sampleIcon.bottom)/2);
                 procedure(window,WM_LBUTTONDOWN,MK_LBUTTON,samplePoint);procedure(window,WM_LBUTTONUP,0,samplePoint);numberFrame(ImGuiKey_None,false);
                 if(!shapePanelOpen || shapeReturning || shapeEyedropActive)throw std::runtime_error("Screen sample leaked to collapse icon");
@@ -2758,7 +2757,7 @@ int main() {
                 shapePanelOpen=true;numberFrame(ImGuiKey_None,false);
                 std::cout<<"Screen eyedropper and hover regression passed: full-height neutral corridor, drag release hold, actual desktop pixel, WndProc consumed icon click, repeated outside/return retains picker, cancel/stale/failed read rejection\n";
                 testedMaskEvents.resize(switchEvents);testedActions.resize(switchActions);
-                std::cout<<"Hover editor path passed: anchored single expander, continuous travel, panel/mask dwell, click-only collapse, cancelled click and immediate reopen rejected, one dirty confirmation, stale terminal rejection\n";
+                std::cout<<"Hover editor path passed: anchored single expander, continuous travel, panel/mask dwell, hover-entry collapse without clicks, drag release and immediate reopen rejected, one dirty confirmation, stale terminal rejection\n";
                 if(!shapeEditor.ready() || shapeEditor.bounds.right<=shapeEditor.bounds.left || ImGui::GetDrawData()->TotalVtxCount<=0)
                     throw std::runtime_error("Shape editor did not render through production window path");
                 if(shapeTipRows[8].top!=shapeTipRows[10].top || shapeTipRows[10].top!=shapeTipRows[11].top ||

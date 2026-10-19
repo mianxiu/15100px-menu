@@ -80,7 +80,7 @@ struct ShapeColorEditor {
 static ShapeColorEditor shapeEditor;
 // Presentation only: a hidden panel retains its request, draft and rollback.
 // A new menu session always starts with the ordinary operations visible.
-static bool shapePanelOpen=false,shapeReturning=false,shapeHoverReady=false,shapeModePressed=false;
+static bool shapePanelOpen=false,shapeReturning=false,shapeHoverReady=false;
 static RECT shapeModeBounds{},shapeHoverBounds{};
 static std::array<RECT,1> shapeModeRows{};
 static bool shapePanelVisible(){return shapePanelOpen && shapeEditor.ready();}
@@ -326,6 +326,7 @@ static int shapeEyedropChannel=0,shapeEyedropStop=0;
 static void stopShapeEyedrop() {
     const bool owned=shapeEyedropActive;
     shapeEyedropActive=shapeEyedropDown=false;
+    if(owned)shapeHoverReady=false;
     RemovePropW(window,screenSampleProperty);
     if(owned && GetCapture()==window)ReleaseCapture();
 }
@@ -338,7 +339,7 @@ static bool beginShapeEyedrop() {
     if(!shapeEyedropAllowed() || shapeEditor.batchMask || shapeEditor.current().value("kind","")=="pattern")return false;
     if(!selfTest && GetForegroundWindow()!=window){SetForegroundWindow(window);if(GetForegroundWindow()!=window)return false;}
     shapeEyedropEpoch=menuEpoch;shapeEyedropRevision=shapeEditor.draft.value("revision",std::string());shapeEyedropChannel=shapeEditor.channel;shapeEyedropStop=shapeEditor.stop;
-    shapeEyedropActive=true;shapeEyedropDown=false;shapeModePressed=false;
+    shapeEyedropActive=true;shapeEyedropDown=false;shapeHoverReady=false;
     hoverTip.reset();tipVisual.reset();renderedHit=pendingHit=-1;
     SetCursor(LoadCursorW(nullptr,IDC_CROSS));
     if(!selfTest){
@@ -383,24 +384,6 @@ static const char* shapeModeLabel(bool expanded) {
     if(shapeEditor.batchMask)return expanded?"收起羽化／密度":"展开羽化／密度";
     return expanded?"收起颜色／羽化":"展开颜色／羽化";
 }
-static void drawShapeModeFrame(ImDrawList* draw,ImVec2 a,ImVec2 b,ImU32 ink,float rounding) {
-    // Keep the shared rounded contour; distribute short dashes along its path.
-    const float stroke=scale,dash=menuDashedFrameDash*scale,gap=menuDashedFrameGap*scale;
-    a.x+=stroke*.5f;a.y+=stroke*.5f;b.x-=stroke*.5f;b.y-=stroke*.5f;
-    draw->PathRect(a,b,rounding);
-    std::array<ImVec2,128> points{};const int count=std::min(int(points.size()),draw->_Path.Size);
-    std::copy_n(draw->_Path.Data,count,points.data());draw->PathClear();
-    float phase=0;
-    for(int i=0;i<count;++i){
-        const auto from=points[i],to=points[(i+1)%count];const float dx=to.x-from.x,dy=to.y-from.y,length=std::sqrt(dx*dx+dy*dy);
-        for(float at=0;at<length;){
-            const bool visible=phase<dash;const float step=std::min(length-at,(visible?dash:dash+gap)-phase);
-            if(visible && step>0)draw->AddLine({from.x+dx*at/length,from.y+dy*at/length},
-                {from.x+dx*(at+step)/length,from.y+dy*(at+step)/length},ink,stroke);
-            at+=step;phase+=step;if(phase>=dash+gap-.001f)phase=0;
-        }
-    }
-}
 static void drawShapeModeSwitch() {
     shapeModeBounds={};shapeModeRows={};
     if(!shapeEditor.ready())return;
@@ -418,15 +401,13 @@ static void drawShapeModeSwitch() {
     const bool hovered=mouse.x>=x && mouse.x<x+width && mouse.y>=y && mouse.y<y+height;
     const bool editing=ImGui::IsAnyItemActive() || ImGui::GetIO().WantTextInput || ImGui::IsMouseDown(0) || ImGui::IsMouseDown(1);
     const bool canSwitch=!pieAnimating && !holdFinished && !editing && !shapeEyedropActive;
+    const bool entered=hovered && shapeHoverReady;
     if(!hovered)shapeHoverReady=true;
-    // Hover opens as before; only an owned click on this same icon collapses.
-    // Leaving the panel (including screen sampling) never confirms a preview.
-    if(ImGui::IsMouseClicked(0))shapeModePressed=hovered && shapePanelOpen && !pieAnimating && !holdFinished &&
-        !shapeEyedropActive && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput;
-    const bool close=shapeModePressed && hovered && ImGui::IsMouseReleased(0);
-    if(ImGui::IsMouseReleased(0) || !shapePanelOpen || shapeEyedropActive)shapeModePressed=false;
-    const bool open=hovered && shapeHoverReady;
-    if(canSwitch && (open && !shapePanelOpen || close)){
+    else if(editing || shapeEyedropActive)shapeHoverReady=false;
+    // One transition per entry. Holding over the icon cannot oscillate, and
+    // an entry during dragging/input/sampling is consumed rather than deferred.
+    if(canSwitch && entered){
+        const bool close=shapePanelOpen;shapeHoverReady=false;
         if(close && shapeEditor.dirty && !shapeEditor.livePreview){commitShapeDraft();shapeReturning=true;updateBusy(true);pinned=true;}
         if(close && maskPreviewStarted){emitMaskPreview(true,true);shapeReturning=true;updateBusy(true);pinned=true;}
         shapePanelOpen=!close;shapeEditor.gradientDragging=false;
@@ -436,7 +417,7 @@ static void drawShapeModeSwitch() {
     }
     const ImVec2 a={x,y},b={x+width,y+height};
     const auto surface=tint(shapePanelOpen?ImGuiCol_ButtonActive:hovered?ImGuiCol_ButtonHovered:ImGuiCol_Button);
-    draw->AddRectFilled(a,b,surface,rounding);drawShapeModeFrame(draw,a,b,tint(ImGuiCol_Border),rounding);
+    draw->AddRectFilled(a,b,surface,rounding);draw->AddRect(a,b,tint(ImGuiCol_Border),rounding,0,scale);
     const float iconSize=figmaBasicIconSize*scale;
     drawStyledMenuIcon(draw,shapePanelOpen?33:32,{x+figmaBasicLeftPadding*scale,y+(height-iconSize)*.5f},iconSize,tint(ImGuiCol_Text),surface);
     draw->AddText(font,textSize,{x+basicTextOffset(),std::round(y+(height-textSize)*.5f)},tint(ImGuiCol_Text),shapeModeLabel(shapePanelOpen));
