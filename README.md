@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-v0.4.207／UXP0.3.46新增后台一键自动稳定性测试，自动生成图层读取、持续操作及系统负载报告。[使用方法与验证限制](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)；故障机持续卡顿和UU远程Caps双按仍待定位。
+[v0.4.207已发布](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.207)／UXP0.3.46新增后台一键自动稳定性测试，自动生成图层读取、持续操作及系统负载报告。[使用方法与验证限制](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)；故障机持续卡顿和UU远程Caps双按仍待定位。
 
 以下为历史版本变更。
 
