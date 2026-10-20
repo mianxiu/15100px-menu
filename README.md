@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+216／UXP0.3.51已完成代码、构建及本机运行切换：24.2.x常见根级单选按需读取邻层，组／多选保留有界全树。正在完成发布前核验；[读取策略和验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
+
 [0.4.215已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.215)：主题和字号每次PS启动只读取一次成功值，运行期间不轮询；实际需要UXP0.3.50。[操作与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
 [0.4.214已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.214)：UXP0.3.49将后台主题／文档元数据读取放到菜单和命令之后，存活心跳保留独立元数据时间。实际48需正常关闭PS后更新内置49再手动启动；[性能与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。

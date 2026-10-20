@@ -1,6 +1,9 @@
 // Experimental executor: only fixed-target labels, no arbitrary scripts.
 module.exports = function createLabels(ps, session, options={}) {
   const nativeSelection=options.nativeSelection===true;
+  // A bounded work-planning hint only. Every result still reads and validates
+  // current identity/count/locks; this never supplies target capabilities.
+  const nativePlan={total:null,single:true};
   const caps=createCapsActions(ps,session,capture,selectionContext,capsTree,captureSelection);
   const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
   const shapePaint=createShapePaint(ps,session,capture,selectionContext,options.legacyPreview===true);
@@ -138,16 +141,8 @@ module.exports = function createLabels(ps, session, options={}) {
         layer_ids:ids,parent_id:order.parentId,sibling_count:order.length});
     }
     function layerKind(layer) {
-      if(read(layer,'isBackgroundLayer'))return 'background';
-      const kind=read(layer,'kind');
-      for(const [key,name] of [['NORMAL','pixel'],['GROUP','group'],['TEXT','text'],['SMARTOBJECT','smart'],
-          ['SOLIDFILL','shape-fill'],['GRADIENTFILL','shape-fill'],['PATTERNFILL','shape-fill']])
-        if(k[key]!==undefined && kind===k[key])return name;
-      const adjustment=['BLACKANDWHITE','BRIGHTNESSCONTRAST','CHANNELMIXER','COLORBALANCE','COLORLOOKUP',
-        'CURVES','EXPOSURE','GRADIENTMAP','HUESATURATION','INVERSION','LEVELS','PHOTOFILTER',
-        'POSTERIZE','SELECTIVECOLOR','THRESHOLD','VIBRANCE','GRAIN','CLARITY'];
-      if(adjustment.some(key=>k[key]!==undefined && kind===k[key]))return 'adjustment';
-      return Object.values(k).includes(kind)?'other':'unknown';
+      const background=read(layer,'isBackgroundLayer');
+      return selectionKind(k,background?undefined:read(layer,'kind'),background);
     }
     const kinds=[];
     for(let i=0;i<selected.length;i++) {kinds.push(layerKind(selected[i]));if(i%4===3)yield;}
@@ -227,22 +222,13 @@ module.exports = function createLabels(ps, session, options={}) {
     }
     if(host.app.activeDocument.id!==doc.id || Array.from(doc.activeLayers,l=>l.id).sort((a,b)=>a-b).join(',')!==ids.join(','))
       throw Error('Layer context changed during read');
-    const modes=host.constants.DocumentMode || {},depths=host.constants.BitsPerChannelType || {};
-    const mode=doc.mode,depth=doc.bitsPerChannel;
-    const layered=['RGB','CMYK','LAB','GRAYSCALE'].some(key=>modes[key]!==undefined && mode===modes[key]);
-    let quickMask=layered && ids.length && !parentLocked && !kinds.includes('unknown')?3:0;
-    if(quickMask && !background && !locked && sameParent)quickMask|=4;
-    const adjustmentDepth=[depths.EIGHT,depths.SIXTEEN].some(v=>v!==undefined && depth===v);
-    if(quickMask && adjustmentDepth) {
-      quickMask|=8;
-      if(mode===modes.RGB)quickMask|=112;
-    }
+    const quickMask=selectionQuickMask(host.constants,doc.mode,doc.bitsPerChannel,ids,kinds,background,locked,parentLocked,sameParent);
     return {session,document_id:doc.id,layer_ids:ids,selection_count:ids.length,
       kind:kinds.every(kind=>kind===kinds[0])?(kinds[0] || 'none'):'mixed',
       types:[...new Set(kinds)],background,locked,same_parent:sameParent,mask,quick_mask:quickMask};
   }
   async function selectionContextFresh(checkpoint=null) {
-    if(nativeSelection)return nativeSelectionContext(ps,session,readSelectionContext,checkpoint);
+    if(nativeSelection)return nativeSelectionContext(ps,session,readSelectionContext,checkpoint,true,nativePlan);
     async function read(onMiss=null) {
       if(!checkpoint)return selectionContext(false,onMiss);
       await checkpoint();
@@ -635,7 +621,34 @@ module.exports = function createLabels(ps, session, options={}) {
       ui_preferences_complete:interfaceRead.font&&interfaceRead.theme,ui_preferences_time_ms:interfaceReadAt};
     return {...interfaceState};
   }
-  return {selectionContextNative:checkpoint=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
+  async function nativeReadComparison(run,order=0,checkpoint=null) {
+    if(![0,1,2].includes(order))throw Error('Invalid bounded native comparison order');
+    const samples={};
+    const strategies=['dom','full','targeted'];
+    for(const strategy of [...strategies.slice(order),...strategies.slice(0,order)]){
+      stability.guard(run);const stats={calls:0,descriptors:0,layer_records:0,response_bytes:0,checkpoints:0,checkpoint_ms:0};
+      const measured={constants:ps.constants,action:{async batchPlay(commands,options){
+        stats.calls++;stats.descriptors+=commands.length;
+        const result=await ps.action.batchPlay(commands,options);
+        for(const row of result)stats.layer_records+=Array.isArray(row?.list)?row.list.length:Number.isInteger(row?.layerID)?1:0;
+        stats.response_bytes+=JSON.stringify(result).length;return result;
+      }}};
+      const now=()=>typeof performance!=='undefined' && typeof performance.now==='function'?performance.now():Date.now();
+      const yieldRead=checkpoint?async()=>{const start=now();stats.checkpoints++;await checkpoint();stats.checkpoint_ms+=now()-start;}:null;
+      const started=now();
+      let value;
+      if(strategy==='dom'){
+        if(!yieldRead)value=selectionContext();
+        else{const iterator=readSelectionContext();let step;do{step=iterator.next();await yieldRead();}while(!step.done);value=step.value;}
+      }else value=await nativeSelectionContext(measured,session,readSelectionContext,yieldRead,strategy==='targeted',nativePlan);
+      samples[strategy]={value,ms:now()-started,...stats};stability.guard(run);
+    }
+    const keys=['session','document_id','layer_ids','selection_count','kind','types','background','locked','same_parent','mask','quick_mask'];
+    const signature=value=>JSON.stringify(keys.map(key=>value[key]));
+    return {samples,equivalent:Object.values(samples).every(sample=>signature(sample.value)===signature(samples.dom.value)),
+      constant_contract:{layer_kinds:Object.fromEntries(Object.entries(ps.constants.LayerKind))}};
+  }
+  return {nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
     if(!nativeSelection)return shapePaint.observe(...args);
     // Only explicit optional editor reads enter a short read-only modal scope.
     // Idle selection polling uses batchPlay and never occupies modal execution.
@@ -677,13 +690,16 @@ function createStabilityFixture(ps,session,capture,documentTarget) {
   async function execute(request,perform) {
     const run=request.stability_run,step=request.test_step;
     if(typeof run!=='string' || !/^[a-f0-9]{32}$/.test(run))throw Error('Invalid test identity');
+    const fixtureCount=request.test_layers===undefined?5:request.test_layers;
+    if(step==='fixture' && ![4,5,100,300].includes(fixtureCount))throw Error('Invalid bounded fixture size');
+    if(step==='fixture' && request.test_background!==undefined && typeof request.test_background!=='boolean')throw Error('Invalid fixture background');
     if(step==='fixture')return ps.core.executeAsModal(async context=>{
       if(owner && !Array.from(ps.app.documents).some(d=>d.id===owner.document_id) && equal(originals(),owner.originals))owner=null;
       if(owner)throw Error('An owned test document is still retained');
       if(context.isCancelled || Date.now()>request.expires_at_ms || !equal(documentTarget(),request.target))throw Error('Test document set changed');
       const saved=originals(),active=request.target.active_document_id;
       let doc;
-      try {doc=await ps.app.createDocument({name:'Photoshop Menu Test '+run.slice(0,8),width:128,height:128,resolution:72,mode:'RGBColorMode',fill:'transparent'});}
+      try {doc=await ps.app.createDocument({name:'Photoshop Menu Test '+run.slice(0,8),width:128,height:128,resolution:72,mode:'RGBColorMode',fill:request.test_background===true?'white':'transparent'});}
       catch(error){if(!equal(documentTarget(),request.target))error.resultUnknown=true;throw error;}
       if(!doc || !Number.isInteger(doc.id) || request.target.document_ids.includes(doc.id)){
         const error=Error('Test creation outcome unknown');error.resultUnknown=true;throw error;
@@ -694,17 +710,27 @@ function createStabilityFixture(ps,session,capture,documentTarget) {
         shape:{_obj:'rectangle',top:{_unit:'pixelsUnit',_value:8},left:{_unit:'pixelsUnit',_value:8},
           bottom:{_unit:'pixelsUnit',_value:80},right:{_unit:'pixelsUnit',_value:80}}},_options:{dialogOptions:'dontDisplay'}}]);
       owner.shape_id=doc.activeLayers[0].id;
-      for(let i=0;i<3;i++)await batch([{_obj:'make',_target:[{_ref:'layer'}],_options:{dialogOptions:'dontDisplay'}}]);
+      owner.expected=stamp(doc);
+      // A first content layer can replace the transparent starter layer.
+      // Keep the historical default's three makes; explicit scale fixtures
+      // instead fill to their requested REAL count on this host.
+      const extra=request.test_layers===undefined?3:fixtureCount-doc.layers.length;
+      if(extra<0 || extra>299)throw Error('Unexpected isolated fixture layer count');
+      for(let i=0;i<extra;i++){
+        if(context.isCancelled || ps.app.activeDocument.id!==owner.document_id)throw Error('Test creation cancelled or target changed');
+        await batch([{_obj:'make',_target:[{_ref:'layer'}],_options:{dialogOptions:'dontDisplay'}}]);
+        owner.expected=stamp(doc);
+      }
       await batch([{_obj:'select',_target:[{_ref:'layer',_id:owner.shape_id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}}]);
       accept(run);return {verified:true,...await read(run)};
     },{commandName:'Menu isolated test fixture',timeOut:0});
     guard(run);
-    if(['label','layer.new'].includes(step)) {
+    if(['label','layer.new','layer.group'].includes(step)) {
       const target=(await read(run)).target;
       const result=await perform({...request,command:step,target,...(step==='label'?{color:request.test_color}: {})});
       accept(run);return {...result,...await read(run)};
     }
-    if(!['select-shape','select-many','undo','finish'].includes(step))throw Error('Unknown test step');
+    if(!['select-shape','select-many','select-root','lock-target','undo','finish'].includes(step))throw Error('Unknown test step');
     return ps.core.executeAsModal(async context=>{
       const doc=guard(run);
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Test cancelled or expired');
@@ -720,6 +746,17 @@ function createStabilityFixture(ps,session,capture,documentTarget) {
         return {verified:true,closed_owned_document:true,original_active_restored:true};
       }
       if(step==='select-shape')await batch([{_obj:'select',_target:[{_ref:'layer',_id:owner.shape_id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}}]);
+      if(step==='select-root'){
+        const index=request.test_index,count=doc.layers.length;
+        if(count>300 || !Number.isInteger(index) || index<0 || index>=count)throw Error('Invalid bounded root selection');
+        await batch([{_obj:'select',_target:[{_ref:'layer',_id:doc.layers[index].id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}}]);
+      }
+      if(step==='lock-target'){
+        if(!['none','all','position'].includes(request.test_lock) || doc.activeLayers.length!==1)throw Error('Invalid test lock');
+        const layer=doc.activeLayers[0];layer.allLocked=false;layer.positionLocked=false;
+        if(request.test_lock==='all')layer.allLocked=true;
+        if(request.test_lock==='position')layer.positionLocked=true;
+      }
       if(step==='select-many') {
         const ids=Array.from(doc.layers).slice(0,32).map(l=>l.id);
         for(let i=0;i<ids.length;i++)await batch([{_obj:'select',_target:[{_ref:'layer',_id:ids[i]}],makeVisible:false,
@@ -1590,6 +1627,39 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
   return {observe,apply,prepare,prepareLegacy,finishLegacy};
 }
 
+function selectionKind(k,kind,background) {
+  if(background)return 'background';
+  for(const [key,name] of [['NORMAL','pixel'],['GROUP','group'],['TEXT','text'],['SMARTOBJECT','smart'],
+      ['SOLIDFILL','shape-fill'],['GRADIENTFILL','shape-fill'],['PATTERNFILL','shape-fill']])
+    if(k[key]!==undefined && kind===k[key])return name;
+  const adjustment=['BLACKANDWHITE','BRIGHTNESSCONTRAST','CHANNELMIXER','COLORBALANCE','COLORLOOKUP',
+    'CURVES','EXPOSURE','GRADIENTMAP','HUESATURATION','INVERSION','LEVELS','PHOTOFILTER',
+    'POSTERIZE','SELECTIVECOLOR','THRESHOLD','VIBRANCE','GRAIN','CLARITY'];
+  if(adjustment.some(key=>k[key]!==undefined && kind===k[key]))return 'adjustment';
+  return Object.values(k).includes(kind)?'other':'unknown';
+}
+function selectionQuickMask(constants,mode,depth,ids,kinds,background,locked,parentLocked,sameParent) {
+  const modes=constants.DocumentMode || {},depths=constants.BitsPerChannelType || {};
+  const layered=['RGB','CMYK','LAB','GRAYSCALE'].some(key=>modes[key]!==undefined && mode===modes[key]);
+  let mask=layered && ids.length && !parentLocked && !kinds.includes('unknown')?3:0;
+  if(mask && !background && !locked && sameParent)mask|=4;
+  if(mask && [depths.EIGHT,depths.SIXTEEN].some(v=>v!==undefined && depth===v)) {
+    mask|=8;if(mode===modes.RGB)mask|=112;
+  }
+  return mask;
+}
+function nativeKinds(constants) {
+  const k=constants.LayerKind;
+  return {1:k.NORMAL,2:k.CURVES,3:k.TEXT,4:k.SOLIDFILL,5:k.SMARTOBJECT,6:k.VIDEO,8:k.LAYER3D,9:k.GRADIENTFILL,10:k.PATTERNFILL,11:k.SOLIDFILL};
+}
+function nativeModeDepth(constants,before) {
+  const m=constants.DocumentMode,b=constants.BitsPerChannelType;
+  const modes={RGBColor:m.RGB,CMYKColor:m.CMYK,labColor:m.LAB,grayscale:m.GRAYSCALE,
+    bitmap:m.BITMAP,indexedColor:m.INDEXEDCOLOR,multichannel:m.MULTICHANNEL,duotone:m.DUOTONE};
+  const mode=modes[before[4].mode?._value],depth=({8:b.EIGHT,16:b.SIXTEEN,32:b.THIRTYTWO})[before[5].depth];
+  if(mode===undefined||depth===undefined)throw Error('Unsupported native document mode or depth');
+  return {mode,depth};
+}
 // Photoshop 24.2 Windows has severe per-getter DOM overhead outside modal work.
 // No host DOM objects or cross-request capability cache enter this read path.
 async function nativeDocumentCount(ps,checkpoint=null) {
@@ -1601,28 +1671,94 @@ async function nativeDocumentCount(ps,checkpoint=null) {
   if(!Number.isInteger(count)||count<0)throw Error('Native document state unavailable');
   return count;
 }
-async function nativeSelectionContext(ps,session,reader,checkpoint=null) {
+async function nativeSelectionContext(ps,session,reader,checkpoint=null,targeted=true,plan={total:null,single:true}) {
   if(await nativeDocumentCount(ps,checkpoint)===0)return {session,document_id:null,layer_ids:[],kind:'none',mask:0};
   const tick=async()=>{if(checkpoint)await checkpoint();};
   const ref=[{_ref:'document',_enum:'ordinal',_value:'targetEnum'}];
   const property=name=>({_obj:'get',_target:[{_ref:'property',_property:name},...ref],_options:{dialogOptions:'silent'}});
-  async function batch(commands){await tick();const result=await ps.action.batchPlay(commands,{});await tick();
-    if(!Array.isArray(result)||result.length!==commands.length||result.some(v=>!v||v._obj==='error'))throw Error('Native selection unavailable');return result;}
+  async function batch(commands,required=commands.length){await tick();const result=await ps.action.batchPlay(commands,{});await tick();
+    if(!Array.isArray(result)||result.length!==commands.length||result.slice(0,required).some(v=>!v||v._obj==='error'))throw Error('Native selection unavailable');return result;}
   function identity(rows){
     const id=rows[0].documentID,refs=rows[1].targetLayersIDs;
     if(!Number.isInteger(id)||id<=0||!Array.isArray(refs)||!refs.length||refs.some(x=>x?._ref!=='layer'||!Number.isInteger(x._id)||x._id<=0))throw Error('Invalid native selection identity');
     const ids=refs.map(x=>x._id).sort((a,b)=>a-b);if(new Set(ids).size!==ids.length)throw Error('Duplicate native selection');return {id,ids};
   }
-  const before=await batch(['documentID','targetLayersIDs','numberOfLayers','hasBackgroundLayer','mode','depth'].map(property));
+  const fields=['layerID','parentLayerID','itemIndex','layerSection','layerKind','background','layerLocking'];
+  const scalar=target=>({_obj:'multiGet',_target:{_ref:target},extendedReference:[fields],
+    options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}});
+  const headers=()=>['documentID','targetLayersIDs','numberOfLayers','hasBackgroundLayer','mode','depth'].map(property);
+  const prefetch=targeted && plan.single && (plan.total===null || plan.total>8);
+  const initial=await batch([...headers(),...(prefetch?[scalar([{_ref:'layer',_enum:'ordinal',_value:'targetEnum'},...ref])]:[])],6);
+  const before=initial.slice(0,6);
   const chosen=identity(before),count=before[2].numberOfLayers,bg=before[3].hasBackgroundLayer;
-  if(!Number.isInteger(count)||count<0||count>4096||typeof bg!=='boolean'||count+(bg?1:0)<1)throw Error('Native selection range unavailable');
+  if(!Number.isSafeInteger(count)||count<0||count>1000000||typeof bg!=='boolean'||count+(bg?1:0)<1)throw Error('Native selection range unavailable');
   const total=count+(bg?1:0),documentRef=[{_ref:'document',_id:chosen.id}];
+  const kindMap=nativeKinds(ps.constants),{mode,depth}=nativeModeDepth(ps.constants,before);
+  if(targeted){plan.total=total;plan.single=chosen.ids.length===1;}
+  let fallback='';
+  // Tiny trees already return fewer records with fewer descriptors. Preserve
+  // that bounded fast path rather than making small documents slower.
+  if(targeted && total>8 && chosen.ids.length===1){
+    const row=prefetch?initial[6]:(await batch([scalar([{_ref:'layer',_id:chosen.ids[0]},...documentRef])],0))[0],section=row?.layerSection?._value;
+    if(Number.isInteger(row?.layerID) && row.layerID>0 && row.layerID!==chosen.ids[0])throw Error('Layer context changed during native read');
+    const locks=row?.layerLocking,position=row?.itemIndex;
+    const root=row && row.layerID===chosen.ids[0] && section==='layerSectionContent' &&
+      Number.isInteger(row.parentLayerID) && row.parentLayerID<=0 && row.background===false &&
+      Number.isInteger(position) && position>=(bg?2:1) && position<=total &&
+      locks && typeof locks.protectAll==='boolean' && typeof locks.protectPosition==='boolean' && kindMap[row.layerKind]!==undefined;
+    if(root){
+      // Only immediate AM neighbours are needed for an ordinary root layer.
+      // A section end above denotes a group sibling; a section start below
+      // denotes a group sibling. No partial tree is presented as a full tree.
+      const indices=[position<total?position+1:null,position>1?position-1:null];
+      const commands=indices.filter(x=>x!==null).map(index=>scalar([{_ref:'layer',_index:index-(bg?1:0)},...documentRef]));
+      const neighbours=commands.length?await batch(commands,0):[];
+      let offset=0;const adjacent=indices.map(index=>index===null?null:neighbours[offset++]);
+      function relation(value,index,above){
+        if(index===null)return {nonGroup:false};
+        if(!value || value._obj==='error' || value.itemIndex!==index)return null;
+        const part=value.layerSection?._value;
+        if(above && part==='layerSectionEnd')return {nonGroup:false};
+        if(!Number.isInteger(value.layerID)||value.layerID<=0||value.layerID===row.layerID||
+           !Number.isInteger(value.parentLayerID)||value.parentLayerID>0)return null;
+        if(part==='layerSectionStart' && !above)return {nonGroup:false};
+        if(part!=='layerSectionContent' || typeof value.background!=='boolean' ||
+           value.background!==(bg && index===1))return null;
+        return {nonGroup:true};
+      }
+      const above=relation(adjacent[0],indices[0],true),below=relation(adjacent[1],indices[1],false);
+      if(above && below){
+        const selected=scalar([{_ref:'layer',_id:chosen.ids[0]},...documentRef]);
+        // Close the bracket with active document/selection identity last.
+        const verified=await batch([selected,...commands,...headers().slice(2),...headers().slice(0,2)]);
+        const tail=verified.slice(1+commands.length),after=[...tail.slice(4),...tail.slice(0,4)],last=identity(after);
+        const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+        if(last.id!==chosen.id || last.ids.join(',')!==chosen.ids.join(',') ||
+           !equal(after.slice(2,6),before.slice(2,6)) || !equal(verified[0],row) ||
+           !equal(verified.slice(1,1+commands.length),neighbours))throw Error('Layer context changed during native root read');
+        const kind=selectionKind(ps.constants.LayerKind,kindMap[row.layerKind],false),locked=locks.protectAll||locks.protectPosition;
+        if(kind==='unknown')throw Error('Unsupported native layer kind');
+        let mask=2;if(above.nonGroup||below.nonGroup)mask|=1;
+        if(!locked){if(position<total)mask|=4;if(position>(bg?2:1))mask|=8;}
+        return {session,document_id:chosen.id,layer_ids:chosen.ids,selection_count:1,kind,types:[kind],
+          background:false,locked,same_parent:true,mask,
+          quick_mask:selectionQuickMask(ps.constants,mode,depth,chosen.ids,[kind],false,locked,false,true),
+          read_path:'native-root-scalars',read_scope:'root-single'};
+      }
+      fallback='uncertain-adjacency';
+    }else fallback='structural-or-property';
+    // A read-only fallback is permitted only for the same current selection.
+    // Cancellation, a superseding menu and identity changes never downgrade.
+    const fence=identity(await batch(['documentID','targetLayersIDs'].map(property)));
+    if(fence.id!==chosen.id || fence.ids.join(',')!==chosen.ids.join(','))throw Error('Layer context changed before native fallback');
+  }
+  if(count>4096)throw Error('Native selection range unavailable');
   const [result]=await batch([{_obj:'multiGet',_target:{_ref:documentRef},extendedReference:[
     ['layerID','parentLayerID','itemIndex','layerSection','layerKind','background','layerLocking'],
     {_obj:'layer',index:bg?0:1,count:total}],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}]);
   if(!Array.isArray(result.list)||result.list.length!==total)throw Error('Incomplete native selection tree');
   const rows=result.list.slice().sort((a,b)=>b.itemIndex-a.itemIndex),layers=[],map=new Map(),stack=[];
-  const k=ps.constants.LayerKind,kindMap={1:k.NORMAL,2:k.CURVES,3:k.TEXT,4:k.SOLIDFILL,5:k.SMARTOBJECT,6:k.VIDEO,8:k.THREED,9:k.GRADIENTFILL,10:k.PATTERNFILL,11:k.SOLIDFILL};
+  const k=ps.constants.LayerKind;
   for(let i=0;i<rows.length;i++){
     if(i%16===0)await tick();const row=rows[i],section=row?.layerSection?._value;
     if(!row||row.itemIndex!==total-i)throw Error('Invalid native tree order');
@@ -1631,23 +1767,21 @@ async function nativeSelectionContext(ps,session,reader,checkpoint=null) {
     if(!['layerSectionContent','layerSectionStart'].includes(section)||!Number.isInteger(row.layerID)||row.layerID<=0||map.has(row.layerID)||
        !Number.isInteger(row.parentLayerID)||(row.parentLayerID>0?row.parentLayerID:null)!==(parent?.id??null)||
        !locks||typeof locks.protectAll!=='boolean'||typeof locks.protectPosition!=='boolean')throw Error('Invalid native layer membership or locks');
-    const kind=section==='layerSectionStart'?k.GROUP:kindMap[row.layerKind];
+    // Background is an explicit, validated role; never infer it from an
+    // otherwise unknown numeric kind (nor reject it for kind=12).
+    const kind=section==='layerSectionStart'?k.GROUP:row.background===true?k.NORMAL:kindMap[row.layerKind];
     if(kind===undefined)throw Error('Unsupported native layer kind');
     const layer={id:row.layerID,kind,parent,layers:[],isBackgroundLayer:row.background===true,allLocked:locks.protectAll,positionLocked:locks.protectPosition};
     if(layer.isBackgroundLayer && (!bg||parent||i!==rows.length-1))throw Error('Invalid native background');
     (parent?parent.layers:layers).push(layer);map.set(layer.id,layer);if(section==='layerSectionStart')stack.push(layer);
   }
   if(stack.length||!layers.length||(bg!==layers[layers.length-1].isBackgroundLayer)||chosen.ids.some(id=>!map.has(id)))throw Error('Incomplete native selection membership');
-  const modeMap={RGBColor:ps.constants.DocumentMode.RGB,CMYKColor:ps.constants.DocumentMode.CMYK,labColor:ps.constants.DocumentMode.LAB,grayscale:ps.constants.DocumentMode.GRAYSCALE,
-    bitmap:ps.constants.DocumentMode.BITMAP,indexedColor:ps.constants.DocumentMode.INDEXEDCOLOR,multichannel:ps.constants.DocumentMode.MULTICHANNEL,duotone:ps.constants.DocumentMode.DUOTONE};
-  const mode=modeMap[before[4].mode?._value],depth=({8:ps.constants.BitsPerChannelType.EIGHT,16:ps.constants.BitsPerChannelType.SIXTEEN,32:ps.constants.BitsPerChannelType.THIRTYTWO})[before[5].depth];
-  if(mode===undefined||depth===undefined)throw Error('Unsupported native document mode or depth');
   const doc={id:chosen.id,layers,activeLayers:chosen.ids.map(id=>map.get(id)),mode,bitsPerChannel:depth};
   const virtual={app:{documents:[doc],activeDocument:doc},constants:ps.constants};
   const iterator=reader(false,null,virtual);let step;do{step=iterator.next();await tick();}while(!step.done);
   const after=await batch(['documentID','targetLayersIDs','mode','depth'].map(property)),last=identity(after);
   if(last.id!==chosen.id||last.ids.join(',')!==chosen.ids.join(',')||JSON.stringify(after[2].mode)!==JSON.stringify(before[4].mode)||after[3].depth!==before[5].depth)throw Error('Layer context changed during native read');
-  return {...step.value,read_path:'native-24.2'};
+  return {...step.value,read_path:'native-24.2',...(targeted && total<=8?{read_scope:'bounded-tree'}:{}),...(fallback?{read_fallback:fallback}:{})};
 }
 
 async function nativeCapture(ps,session) {
