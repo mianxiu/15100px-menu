@@ -607,13 +607,15 @@ module.exports = function createLabels(ps, session, options={}) {
     },{commandName:'Menu recent document',timeOut:0});
   }
   let interfaceState={ui_theme:'dark',ui_font_size:'small'};
-  async function interfacePreferences() {
+  async function interfacePreferences(checkpoint) {
     // Only UXP DOM/get reads. Never execute JSX or enter a modal to observe UI.
+    if(checkpoint)await checkpoint();
     try {
       const value=ps.app.preferences.interface.textFontSize, sizes=ps.constants.FontSize || {};
       for(const key of ['SMALL','MEDIUM','LARGE'])if(sizes[key]!==undefined && value===sizes[key])
         interfaceState.ui_font_size=key.toLowerCase();
     } catch(_) {}
+    if(checkpoint)await checkpoint();
     try {
       const [value]=await ps.action.batchPlay([{_obj:'get',_target:[
         {_ref:'property',_property:'interfacePrefs'},{_ref:'application',_enum:'ordinal',_value:'targetEnum'}],
@@ -624,6 +626,7 @@ module.exports = function createLabels(ps, session, options={}) {
         kPanelBrightnessMediumGray:'dark-gray',kPanelBrightnessDarkGray:'dark'}[name];
       if(theme)interfaceState.ui_theme=theme;
     } catch(_) {}
+    if(checkpoint)await checkpoint();
     return {...interfaceState};
   }
   return {selectionContextNative:checkpoint=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{

@@ -22,6 +22,7 @@ let completedReceipts=[];
 let lastWorkAt=0;
 let menuRefreshId='';
 let heartbeatValue=null;
+let heartbeatFolder=null,heartbeatWriting=false,metadataReadAt=0;
 let activeExecution=null,executionPulseRunning=false;
 // This pulse performs only local file I/O. A pending Photoshop await must not
 // hide which original operation owns the host, or masquerade as fresh layer data.
@@ -201,48 +202,78 @@ async function record(folder, name, value) {
   await file.write(JSON.stringify(value));
 }
 async function readHeartbeat(folder) {
+  return publishHeartbeat(folder,'read-progress',5000,{read_only_work:true});
+}
+async function publishHeartbeat(folder,reason,interval=5000,extra={}) {
   const now=Date.now();
-  if(!heartbeatValue || now-lastHeartbeat<5000)return;
+  if(!heartbeatValue || heartbeatWriting || now-lastHeartbeat<interval)return;
   // Only a live JS checkpoint can renew transport liveness. No host getters,
   // and no retimestamping of layer snapshots or metadata: their original
-  // timestamps remain separate. A blocked host call cannot renew this lease.
-  await record(folder,'probe-last.json',{...heartbeatValue,reason:'read-progress',
-    sequence:++sequence,plugin_time_ms:now,metadata_time_ms:heartbeatValue.plugin_time_ms,
-    read_only_work:true,layer_observation:observation});
-  lastHeartbeat=now;
+  // timestamps remain separate. A synchronous host call blocking JS cannot
+  // renew this lease; an asynchronous wait says nothing about host completion.
+  heartbeatWriting=true;
+  try {
+    await record(folder,'probe-last.json',{...heartbeatValue,...extra,reason,
+      sequence:++sequence,plugin_time_ms:now,layer_observation:observation,
+      shape_clipboard_available:labels.paintClipboardAvailable?.()===true});
+    lastHeartbeat=now;
+  } finally {heartbeatWriting=false;}
+}
+async function refreshMetadata(folder,checkpoint) {
+  const started=Date.now();
+  if(metadataReadAt && started-metadataReadAt<5000)return;
+  // This work may await Photoshop, so only start it after interactive reads.
+  // Unfinished host calls remain awaited; checkpoints skip the remaining work.
+  metadataReadAt=started;
+  try {
+    await checkpoint();
+    const preferences=await labels.interfacePreferences(checkpoint);
+    await checkpoint();
+    const documents=app.documents;
+    await checkpoint();
+    const count=documents.length;
+    await checkpoint();
+    let name=null;
+    if(count){const document=app.activeDocument;await checkpoint();name=document.title;}
+    await checkpoint();
+    const done=Date.now();
+    heartbeatValue={...heartbeatValue,...preferences,document_count:count,document_name:name,
+      metadata_time_ms:done,metadata_started_at_ms:started,metadata_phase:'ready',metadata_error:''};
+    observation.metadata={elapsed_ms:done-started,completed_at_ms:done};
+    await publishHeartbeat(folder,'heartbeat',0);
+  } catch(error) {
+    observation.metadata={elapsed_ms:Date.now()-started,completed_at_ms:Date.now(),
+      ...(error.menuReadInterrupted?{interrupted:error.reason}:{error:String(error).slice(0,200)})};
+    if(error.menuReadInterrupted){metadataReadAt=0;return;}
+    heartbeatValue={...heartbeatValue,metadata_phase:'failed',metadata_error:String(error).slice(0,200)};
+  }
 }
 async function probe(reason) {
   if (running) return;
   running = true;
   try {
     const folder = await uxp.storage.localFileSystem.getDataFolder();
+    heartbeatFolder=folder;
     if(pendingResponse) {await finishResponse(folder,pendingResponse);return;}
     const now = Date.now();
-    if (reason !== 'poll' || now - (heartbeatValue?.plugin_time_ms || 0) >= 5000) {
+    if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.48', session, transport: 'plugin-data-files',
-        layer_observation:observation,
-        shape_clipboard_available:labels.paintClipboardAvailable?.()===true,
-        ...await labels.interfacePreferences(),
+        probe_version: '0.3.49', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
         legacy_preview_available:legacyPreview,
         plugin_id: 'com.15100px.menu.offline-probe',
-        document_count: app.documents.length, document_name: app.documents.length ? app.activeDocument.title : null, plugin_time_ms: now, phase: 'ready'
+        metadata_time_ms:0,metadata_phase:'pending',phase:'ready'
       };
-      await record(folder,'probe-last.json',heartbeatValue);
-      lastHeartbeat = now;
     }
+    // Transport publication performs local I/O only, never Photoshop getters.
+    await publishHeartbeat(folder,reason==='poll'?'heartbeat':reason);
     // A chord may follow Caps after its menu request was published. Service
     // the accepted command before optional menu/color reads; capture's short
     // quiet period also protects the following fixed-target write.
-    async function idleRead() {
-      if(now-lastWorkAt<80)return;
-      if(await refreshMenuContext(folder,now))return;
-      await updateLayerContext(folder,now,false,null,async()=>{
+    async function idleCheckpoint() {
         await readHeartbeat(folder);
         let command,menu;
         try {command=JSON.parse(await(await folder.getEntry('probe-request.json')).read());}catch(_){}
@@ -254,7 +285,12 @@ async function probe(reason) {
         const pendingMenu=menu?.token===token && menu.session===session && /^[0-9a-f]{32}$/.test(menu.id) &&
           menu.id!==menuRefreshId && Number.isFinite(menu.expires_at_ms) && menu.expires_at_ms>=Date.now() && menu.expires_at_ms<=Date.now()+10000;
         if(pendingCommand || pendingMenu){const error=Error('Background read yielded');error.menuReadInterrupted=true;error.reason=pendingCommand?'command':'menu';throw error;}
-      });
+    }
+    async function idleRead() {
+      if(now-lastWorkAt<80)return;
+      if(await refreshMenuContext(folder,now))return;
+      await updateLayerContext(folder,now,false,null,idleCheckpoint);
+      await refreshMetadata(folder,idleCheckpoint);
     }
     let request;
     try {
@@ -297,8 +333,8 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.48', operation: request.operation,
-      transport: 'plugin-data-files', document_count: app.documents.length,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.49', operation: request.operation,
+      transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
     if(modifying)await record(folder,'result-'+request.id+'.json',{...response,phase:'accepted'});
@@ -345,6 +381,7 @@ async function probe(reason) {
       }
       if (request.operation === 'inspect') {
         response.target = labels.documentTarget();
+        response.document_count = response.target.document_ids.length;
         if(request.stability_run)response.stability=await (/^24\.2(?:\.\d+)*$/.test(String(uxp.host?.version || ''))?require('photoshop').core.executeAsModal(()=>labels.stability.read(request.stability_run),{commandName:'Read isolated target',timeOut:0}):labels.stability.read(request.stability_run));
         if(request.stability_run && request.native_selection_test)response.native_selection=await labels.selectionContextNative();
         if(request.shape_inspect)response.shape_editor=await labels.observeShape(await labels.selectionContextFresh(),true);
@@ -367,7 +404,7 @@ async function probe(reason) {
               response.result=await labels.finishLegacyShape(request,prepared,native);break;
             }
           }
-          if(heartbeatValue && Date.now()-lastHeartbeat>=1000){lastHeartbeat=Date.now();await record(folder,'probe-last.json',{...heartbeatValue,phase:'preview',reason:'legacy-native',plugin_time_ms:lastHeartbeat});}
+          await publishHeartbeat(folder,'legacy-native',1000,{phase:'preview'});
           await new Promise(resolve=>setTimeout(resolve,40));
         }
       }
@@ -376,10 +413,7 @@ async function probe(reason) {
           stage:async(name,seq)=>{await executionStage(name,seq);const stage=progressStage(name);if(stage)await previewProgress(stage,0,0,seq);},
           progress:previewProgress,
           read:boundedPreviewRead(async()=>{
-            if(heartbeatValue && Date.now()-lastHeartbeat>=1000) {
-              lastHeartbeat=Date.now();
-              await record(folder,'probe-last.json',{...heartbeatValue,phase:'preview',reason:'mask-preview',plugin_time_ms:lastHeartbeat});
-            }
+            await publishHeartbeat(folder,'mask-preview',1000,{phase:'preview'});
             try {
               const raw=await (await folder.getEntry('mask-preview-'+request.id+'.json')).read();
               if(raw.length>4096)throw Error('Preview mailbox exceeds limit');
@@ -436,5 +470,9 @@ try {require('photoshop').action.addNotificationListener(
 catch(_) {}
 setInterval(() => probe('poll'), 16);
 setInterval(executionPulse,1000);
+// A pending asynchronous Photoshop call leaves JS responsive. Renew only the
+// transport lease; metadata, selection and original execution evidence keep
+// their own timestamps and ownership. No second host request is dispatched.
+setInterval(()=>{if(heartbeatFolder)publishHeartbeat(heartbeatFolder,'js-alive').catch(error=>console.log('Transport pulse unavailable',String(error)));},1500);
 
 
