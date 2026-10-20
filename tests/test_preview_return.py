@@ -99,3 +99,27 @@ class PreviewReturnWireTests(unittest.TestCase):
         event={'type':'preview.menu.confirmed','epoch':7}
         d.event(event)
         d._send_menu_event.assert_called_once_with(event)
+
+
+class DraftHoverReturnTests(unittest.IsolatedAsyncioTestCase):
+    async def test_local_draft_hover_preserves_menu_but_explicit_confirmation_hides(self):
+        import tempfile
+        from backend.main import Application
+        for returning in (True,False):
+            with tempfile.TemporaryDirectory() as folder:
+                b=object.__new__(UxpBridge);b.busy=False;b._queue=[];b.layer_context={}
+                app=Application(15190,bridge=b,runtime=folder);app.require_uxp_enabled=lambda:None
+                app.desktop=SimpleNamespace(menu_epoch=7,visible=True,require_action_focus=lambda:None,
+                    menu_layer_context={'session':'s','document_id':3,'layer_ids':[4]},
+                    require_menu_layer_target=Mock(),hide=Mock())
+                events=[]
+                async def broadcast(e):events.append(e)
+                async def execute(params,**kw):
+                    await kw['before_dispatch'](kw['frozen_target'])
+                    return {'message':'confirmed','result':json.dumps({'verified':True})}
+                app.broadcast=broadcast;b.execute_shape=execute
+                await app.dispatch('action.execute',{'name':'shape.paint','menu_epoch':7,'params':paint(),
+                    'return_to_menu':returning})
+                self.assertEqual(app.desktop.hide.call_count,0 if returning else 1)
+                self.assertTrue(any(e.get('type')=='notice' and e.get('ok') for e in events))
+                self.assertFalse(app.operation_lock.locked());app.control.close()

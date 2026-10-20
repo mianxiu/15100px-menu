@@ -134,7 +134,7 @@ static void copyShapeHex(const Json& rgb) {
     shapeEditor.copyFailed=false;
     shapeEditor.copiedAt=GetTickCount64();
 }
-static void commitShapeDraft() {
+static void commitShapeDraft(bool returnToMenu=false) {
     if(stabilityInspection)return;
     if(!shapeEditor.ready() || (!shapeEditor.dirty && !maskPreviewStarted) || !shapeEditor.valid()){send("hide");return;}
     // Both draft and preview confirmation return from the foreground menu to
@@ -147,7 +147,7 @@ static void commitShapeDraft() {
         return;
     }
     if(selfTest){testedActions.emplace_back("shape.paint");testedShapePaint=shapeEditor.draft;return;}
-    std::cout<<Json{{"type","action"},{"action","shape.paint"},{"session",menuEpoch},{"params",shapeEditor.draft}}.dump()<<std::endl;
+    std::cout<<Json{{"type","action"},{"action","shape.paint"},{"session",menuEpoch},{"params",shapeEditor.draft},{"return_to_menu",returnToMenu}}.dump()<<std::endl;
 }
 static bool shapeSegment(const char* id,const std::vector<std::string>& names,int& selected,float width,bool lockSelection=false,const std::vector<int>& icons={},int tipBase=-1,const std::vector<bool>& enabled={},const std::vector<int>& tips={}) {
     const ImVec2 start=ImGui::GetCursorScreenPos();const float height=(icons.empty()?menuControlHeight:figmaDisplayWidgetHeight)*scale,part=width/names.size();
@@ -410,7 +410,7 @@ static void drawShapeModeSwitch() {
     // an entry during dragging/input/sampling is consumed rather than deferred.
     if(canSwitch && entered){
         const bool close=shapePanelOpen;shapeHoverReady=false;
-        if(close && shapeEditor.dirty && !shapeEditor.livePreview){commitShapeDraft();shapeReturning=true;updateBusy(true);pinned=true;}
+        if(close && shapeEditor.dirty && !shapeEditor.livePreview){commitShapeDraft(true);shapeReturning=true;updateBusy(true);pinned=true;}
         if(close && maskPreviewStarted){emitMaskPreview(true,true);shapeReturning=true;updateBusy(true);pinned=true;}
         shapePanelOpen=!close;shapeEditor.gradientDragging=false;
         if(close){shapeHoverBounds={};shapeHoverReady=false;}

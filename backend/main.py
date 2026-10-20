@@ -509,6 +509,9 @@ class Application(web.Application):
             if self.photoshop_launcher.active:raise RuntimeError('Photoshop 正在启动或结果待确认，请等待就绪后重新选择')
             if isinstance(self.bridge,UxpBridge):self.require_uxp_enabled()
             logging.info("Script action requested: %s", name)
+            return_to_menu=args.get('return_to_menu',False)
+            if type(return_to_menu) is not bool or return_to_menu and (name!='shape.paint' or 'menu_epoch' not in args):
+                raise ValueError('无效的颜色返回菜单请求')
             if not self.desktop:
                 raise RuntimeError("无桌面模式不提供图层操作")
             if self.operation_lock.locked() or self.bridge.busy:
@@ -538,11 +541,15 @@ class Application(web.Application):
                                 raise TaskCancelled('菜单已重新打开，已取消旧操作')
                             if 'menu_epoch' in args and hasattr(self.desktop,'require_menu_layer_target'):
                                 await asyncio.to_thread(self.desktop.require_menu_layer_target,name,target)
-                            await asyncio.to_thread(self.desktop.hide)
+                            if not return_to_menu:await asyncio.to_thread(self.desktop.hide)
                     # Frozen menu targets stay bound; direct UXP Caps actions capture
                     # in their single request and revalidate inside the write transaction.
                     if name=='shape.paint':
                         result=await self.bridge.execute_shape(args.get('params'),before_dispatch=before_dispatch,frozen_target=frozen_target)
+                        if return_to_menu:
+                            terminal=json.loads(result.get('result','{}'))
+                            if terminal.get('verified') is not True or terminal.get('cancelled'):
+                                raise RuntimeError('颜色结果未确认，未恢复普通菜单')
                     elif frozen_target is not None:
                         result=await self.bridge.execute(name,before_dispatch=before_dispatch,frozen_target=frozen_target)
                     elif isinstance(self.bridge,UxpBridge) and 'menu_epoch' not in args:

@@ -64,6 +64,7 @@ static int lastVisibleVertices=0;
 static bool taskBusy=false,taskFailed=false,taskHasResult=false;
 static bool maskPreviewStarted=false,shapeDraftOnly=false;
 static bool busyFeedback=false;
+static bool hoverReturnConfirmed=false;
 static ULONGLONG feedbackStarted=0;
 static ULONGLONG completionStarted=0;
 static ULONGLONG taskStarted=0;
@@ -485,7 +486,7 @@ static void accept(const Json& event) {
         return;
     }
     if(type=="preview.menu.confirmed") {
-        if(shapeReturning && event.value("epoch",LPARAM(-1))==menuEpoch){shapeEditor.prepare(Json{{"available",false}});shapeReturning=false;}
+        if(shapeReturning && event.value("epoch",LPARAM(-1))==menuEpoch){shapeEditor.prepare(Json{{"available",false}});shapeReturning=false;hoverReturnConfirmed=true;}
         return;
     }
     if(type=="mask.preview") {maskPreviewStarted=event.value("active",false);if(!maskPreviewStarted)previewProgress.clear();return;}
@@ -591,7 +592,7 @@ static void setHoldMode(bool enabled) {
     holdMode=enabled;holdFinished=false;pinned=false;holdMoved=false;resetMenu();focusSearch=false;
     pieStarted=0;pieAnimating=enabled;
     stopShapeEyedrop();
-    ringAngleReady=false;shapeReturning=false;shapeHoverReady=false;shapeHoverBounds={};shapePanelOpen=false;shapeModeBounds={};shapeModeRows={};
+    ringAngleReady=false;shapeReturning=false;hoverReturnConfirmed=false;shapeHoverReady=false;shapeHoverBounds={};shapePanelOpen=false;shapeModeBounds={};shapeModeRows={};
     shownPresets=recentPresets;
     // The compositor retains the last presented surface while hidden. Never
     // expose that old, fully expanded pie before the new zero-alpha frame.
@@ -645,14 +646,21 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         try {auto* text=static_cast<const char*>(data->lpData);const auto value=Json::parse(text,text+data->cbData-1);
             if(data->dwData==0x4d435458){
                 const bool resume=value.value("resume",false);
-                if(!IsWindowVisible(hwnd) || value.value("epoch",0)!=menuEpoch || shapeEditor.dirty || taskBusy)return FALSE;
+                const bool hoverReturn=value.value("hover_return",false);
+                if(!IsWindowVisible(hwnd) || value.value("epoch",0)!=menuEpoch || taskBusy)return FALSE;
+                if(hoverReturn && (!(shapeReturning || hoverReturnConfirmed) || !completionReady() || inputFocused || panelKind!=2 ||
+                    maskPreviewStarted || (GetAsyncKeyState(VK_CAPITAL)&0x8000) || (GetAsyncKeyState(VK_LBUTTON)&0x8000) ||
+                    (GetAsyncKeyState(VK_RBUTTON)&0x8000) || value.value("next_epoch",LPARAM(0))!=menuEpoch+1))return FALSE;
                 // Success feedback now closes; old restore packets cannot reopen it.
-                if(resume || holdFinished || busyFeedback)return FALSE;
+                if(resume || (!hoverReturn && (shapeEditor.dirty || holdFinished || busyFeedback)))return FALSE;
                 const auto flags=value.value("flags",uint64_t(0));
                 layerAware=true;layerMask=(flags>>8)&15;layerKind=(flags>>12)&15;
                 layerBackground=(flags&(1u<<16))!=0;layerCount=(flags>>17)&255;
                 layerLocked=(flags&(1u<<25))!=0;layerCrossParents=(flags&(1u<<26))!=0;quickMask=(flags>>32)&127;
                 shapeEditor.prepare(value.at("shape"));hoverTip.reset();tipVisual.reset();renderedHit=pendingHit=-1;pieReady=false;
+                if(hoverReturn){menuEpoch=value.at("next_epoch").get<LPARAM>();shapeReturning=hoverReturnConfirmed=false;
+                    busyFeedback=taskHasResult=taskFailed=false;completionStarted=0;notice.clear();taskError.clear();previewProgress.clear();
+                    shapePanelOpen=false;shapeHoverReady=false;holdFinished=false;pinned=true;allowed=capable&&!taskBusy;}
             }else shapeEditor.prepare(value);
         }
         catch(...) {shapeEditor.prepare(Json{{"available",false}});}
@@ -673,6 +681,7 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     // Read-only success feedback expiry. The backend waits for preview/guard
     // release, then hides this window without querying Photoshop or replaying actions.
     if (msg==WM_APP+24) return IsWindowVisible(hwnd) && completionReady();
+    if (msg==WM_APP+28) return (shapeReturning || hoverReturnConfirmed)?2:0;
     if (msg==WM_APP+25) {
         // The foreground menu process can hand activation back to its owner;
         // the backend process often cannot, especially after a native script.
@@ -2543,6 +2552,23 @@ int main() {
                 if(applyResume(resume))throw std::runtime_error("Input protection allowed completion resume");
                 inputFocused=false;
                 if(applyResume(resume))throw std::runtime_error("Retired completion restore packet accepted");
+                auto hoverReturn=resume;hoverReturn["resume"]=false;hoverReturn["hover_return"]=true;
+                if(applyResume(hoverReturn))throw std::runtime_error("Unrequested hover return accepted");
+                hoverReturnConfirmed=true;taskFailed=true;
+                if(applyResume(hoverReturn))throw std::runtime_error("Failed hover return accepted");
+                taskFailed=false;taskBusy=true;
+                if(applyResume(hoverReturn))throw std::runtime_error("Busy hover return accepted");
+                taskBusy=false;inputFocused=true;
+                if(applyResume(hoverReturn))throw std::runtime_error("Input hover return accepted");
+                inputFocused=false;panelKind=2;
+                if(!applyResume(hoverReturn) || menuEpoch!=oldEpoch+1 || busyFeedback || !pinned || shapePanelOpen || hoverReturnConfirmed)
+                    throw std::runtime_error("Verified hover confirmation failed: "+Json{{"epoch",menuEpoch},{"expected",oldEpoch+1},
+                        {"busy",taskBusy},{"feedback",busyFeedback},{"ready",completionReady()},{"preview",maskPreviewStarted},
+                        {"pinned",pinned},{"panel",shapePanelOpen},{"confirmed",hoverReturnConfirmed}}.dump());
+                numberFrame(ImGuiKey_None,false);
+                if(!canExecute() || ImGui::GetDrawData()->TotalVtxCount<=0 || applyResume(hoverReturn))
+                    throw std::runtime_error("Hover return lost content or accepted duplicate epoch");
+                std::cout<<"Hover return confirmed: fresh epoch and visible ordinary menu; unrequested/busy/failure/input/duplicate rejected\n";
                 // All compact successes qualify, irrespective of layer/canvas/home scope or hold mode.
                 for(int scope:{0,1,2,3,4})for(bool held:{false,true}){
                     panelKind=scope;setHoldMode(held);holdFinished=false;

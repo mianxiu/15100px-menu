@@ -783,6 +783,16 @@ class Desktop:
         preview=getattr(self,'mask_preview',None)
         if preview and not preview.closed:return
         if self.gui.SendMessage(self.hwnd,0x8018,0,0)!=1:return
+        if self.gui.SendMessage(self.hwnd,0x801c,0,0)==2:
+            if not self._scope():self.hide(restore=False);return
+            panel=self.panel_context.current if self.panel_context else {}
+            if panel.get('kind')!='layers' or panel.get('input_focused'):return
+            if getattr(self,'hover_return_attempt',None)==self.menu_epoch:return
+            if not self.menu_context_requester:return
+            self.hover_return_attempt=self.menu_epoch
+            self.menu_context_pending={'epoch':self.menu_epoch,'unpublished':True,'hover_return':True,'deadline':time.monotonic()+10}
+            self.menu_context_delivery={'phase':'return-reading','epoch':self.menu_epoch}
+            return
         self.hide(restore=self._scope())
 
     def _cancel_closed_menu_context(self):
@@ -812,6 +822,7 @@ class Desktop:
             if self.menu_context_pending is not pending:return
             if request and self.visible and self.menu_epoch==pending['epoch'] and not self.stop.is_set():
                 request['deadline']=min(request['deadline'],pending['deadline'])
+                if pending.get('hover_return'):request['hover_return']=True
                 self.menu_context_pending=request
             else:self.menu_context_pending=None
 
@@ -837,6 +848,8 @@ class Desktop:
                     self.menu_context_delivery={'phase':'reading','epoch':pending['epoch']}
                 return
             if phase not in ('basic','completed') or pending.get('applied_phase')==phase:return
+            if pending.get('hover_return') and (phase!='completed' or getattr(self,'preview_input_guard',None)
+                    or getattr(self,'mask_preview',None) and not self.mask_preview.closed):return
             from .layer_context import validate,flags
             value=validate(snapshot,pending['session'])
             if value.get('kind') in ('unknown','none'):return
@@ -848,15 +861,15 @@ class Desktop:
             from .shape_paint import metadata
             shape=metadata(value.get('shape_editor'))
             active=shape_editor_allowed(panel,shape,True,value)
-            payload=json.dumps({'epoch':pending['epoch'],'flags':flags(value),
-                                'shape':shape if active else {'available':False}}).encode('utf-8')
+            envelope={'epoch':pending['epoch'],'flags':flags(value),'shape':shape if active else {'available':False}}
+            if pending.get('hover_return'):envelope.update(hover_return=True,next_epoch=self.menu_epoch+1)
+            payload=json.dumps(envelope).encode('utf-8')
             editor_omitted=len(payload)+1>MAX_CONTEXT_PACKET_BYTES
             if editor_omitted:
                 # Optional editor data must not strand fresh basic layer
                 # actions. No PS request is retried or snapshot age extended.
                 active=False
-                payload=json.dumps({'epoch':pending['epoch'],'flags':flags(value),
-                                    'shape':{'available':False}}).encode('utf-8')
+                payload=json.dumps({**envelope,'shape':{'available':False}}).encode('utf-8')
             class CopyData(ctypes.Structure):
                 _fields_=[('tag',ctypes.c_size_t),('size',W.DWORD),('data',ctypes.c_void_p)]
             buffer=ctypes.create_string_buffer(payload);packet=CopyData(0x4d435458,len(payload)+1,ctypes.cast(buffer,ctypes.c_void_p))
@@ -866,6 +879,7 @@ class Desktop:
                 'packet_bytes':len(payload)+1,'selection_age_ms':max(0,round(time.time()*1000-value['plugin_time_ms'])),
                 'accepted':accepted,'editor_omitted':editor_omitted,'request_id':pending['id']}
             if accepted:
+                if pending.get('hover_return'):self.menu_epoch+=1
                 self.menu_layer_context=dict(value);self.color_editor_active=active
                 if phase=='completed':self.menu_context_pending=None
                 else:

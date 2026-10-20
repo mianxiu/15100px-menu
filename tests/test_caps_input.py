@@ -168,6 +168,27 @@ class CapsInputTests(unittest.TestCase):
     d.hide=Mock();d.menu_context_requester=Mock();d.gui.SendMessage.return_value=1
     d._close_completed_menu();d.hide.assert_called_once_with(restore=True)
     d.menu_context_requester.assert_not_called();self.assertIsNone(d.menu_context_pending)
+ def test_hover_return_queues_once_and_waits_for_completed_fresh_snapshot(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.hide=Mock();d.menu_context_requester=Mock();d.gui.SendMessage.side_effect=lambda hwnd,msg,*a:2 if msg==0x801c else 1
+   d._close_completed_menu();d._close_completed_menu()
+   self.assertTrue(d.menu_context_pending['hover_return']);d.hide.assert_not_called()
+   request={'id':'test','session':'s','folder':Path(folder),'epoch':7,'deadline':time.monotonic()+10}
+   d.menu_context_requester=Mock(return_value=request);d._publish_menu_context();d._publish_menu_context()
+   d.menu_context_requester.assert_called_once_with(7);self.assertTrue(d.menu_context_pending['hover_return'])
+   d.gui.SendMessage.reset_mock();self.result(folder,menu_phase='basic');d._finish_menu_context();d.gui.SendMessage.assert_not_called()
+   self.result(folder,menu_phase='completed');d._finish_menu_context()
+   self.assertEqual(d.menu_epoch,8);self.assertEqual(d.menu_layer_context['layer_ids'],[3]);self.assertIsNone(d.menu_context_pending)
+   d.hide.assert_not_called()
+ def test_hover_return_rejects_stale_result_closed_menu_and_input_guard(self):
+  with tempfile.TemporaryDirectory() as folder:
+   for condition in ('stale','closed','guard','input'):
+    d=self.ready(folder);d.menu_context_pending['hover_return']=True
+    self.result(folder,menu_phase='completed',plugin_time_ms=(time.time()-4)*1000 if condition=='stale' else time.time()*1000)
+    if condition=='closed':d.visible=False
+    if condition=='guard':d.preview_input_guard={'release':True}
+    if condition=='input':d.panel_context.current['input_focused']=True
+    d._finish_menu_context();d.gui.SendMessage.assert_not_called();self.assertEqual(d.menu_epoch,7)
  def test_completion_close_waits_for_native_result_and_preview_guard(self):
   with tempfile.TemporaryDirectory() as folder:
    d=self.ready(folder);d.hide=Mock();d.gui.SendMessage.return_value=0
