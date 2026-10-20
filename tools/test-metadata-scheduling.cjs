@@ -9,7 +9,7 @@ async function host(initialCommand=false){
     async createFile(name){return {write:async text=>files.set(name,text)};}};
   const snapshot=()=>({session:c.session,document_id:1,layer_ids:[2],kind:'pixel',mask:15,quick_mask:127});
   const labels={selectionContextFresh:async checkpoint=>{if(checkpoint)await checkpoint();c.selection++;return snapshot();},
-    interfacePreferences:async()=>{c.preferences++;if(c.block)await new Promise(resolve=>{release=resolve;});return {ui_theme:'light-gray',ui_font_size:'large'};},
+    interfacePreferences:async()=>{c.preferences++;if(c.block)await new Promise(resolve=>{release=resolve;});return {ui_theme:'light-gray',ui_font_size:'large',ui_preferences_complete:true,ui_preferences_time_ms:c.now};},
     capture:async()=>{c.captures++;return snapshot();},documentTarget:()=>({document_ids:[1]}),paintClipboardAvailable:()=>false};
   const app={get documents(){c.documents++;if(c.onDocuments)c.onDocuments();return [{title:'original'}];},activeDocument:{title:'original'}};
   function command(id){files.set('probe-request.json',JSON.stringify({token:'token',id,operation:'capture',expires_at_ms:c.now+9000}));}
@@ -33,6 +33,11 @@ async function host(initialCommand=false){
   assert.equal(h.heartbeat().metadata_time_ms,0);assert.equal(h.heartbeat().metadata_phase,'pending');
   h.c.now+=100;await h.poll();assert.equal(h.c.preferences,1);assert.equal(h.c.documents,1);
   assert.equal(h.heartbeat().metadata_time_ms,h.c.now);assert.equal(h.heartbeat().document_name,'original');
+  const preferencesAt=h.heartbeat().ui_preferences_time_ms;
+  for(let n=0;n<12;n++){h.c.now+=6000;await h.poll();}
+  assert.equal(h.c.preferences,1,'Successful startup preferences must not be polled');
+  assert.equal(h.heartbeat().ui_preferences_time_ms,preferencesAt);
+  assert.equal(h.c.documents,13,'Document metadata still changes independently');
   // A due metadata refresh must not precede either command or basic menu read.
   for(const kind of ['command','menu']){
     h=await host();h.c.now+=6000;const before={...h.c};
@@ -43,17 +48,17 @@ async function host(initialCommand=false){
   }
   // JS liveness during an awaited metadata getter never freshens selection,
   // metadata, or execution evidence; commands wait for that original call.
-  h=await host();const metadataAt=h.heartbeat().metadata_time_ms;
+  h=await host(true);const metadataAt=h.heartbeat().metadata_time_ms;
   h.c.now+=6000;h.c.block=true;const pending=h.poll();await settle();
   const oldLayer=h.layer(),documents=h.c.documents,preferences=h.c.preferences;
   h.command('after-wait');h.c.now+=6000;await h.pulse();await settle();
   assert.equal(h.heartbeat().plugin_time_ms,h.c.now);assert.equal(h.heartbeat().metadata_time_ms,metadataAt);
   assert.equal(h.heartbeat().reason,'js-alive');assert.equal(h.layer(),oldLayer);
   assert.equal([...h.files.keys()].some(name=>name.startsWith('execution-')),false);
-  await h.poll();assert.equal(h.c.captures,0);assert.equal(h.c.preferences,preferences);
+  await h.poll();assert.equal(h.c.captures,1);assert.equal(h.c.preferences,preferences);
   h.release();await pending;assert.equal(h.c.documents,documents,'Yield before the next document getter');
   assert.equal(h.heartbeat().metadata_time_ms,metadataAt,'Interrupted metadata must not publish');
-  h.c.block=false;await h.poll();assert.equal(h.c.captures,1);await h.poll();assert.equal(h.c.captures,1);
+  h.c.block=false;await h.poll();assert.equal(h.c.captures,2);await h.poll();assert.equal(h.c.captures,2);
   // Checkpoints after synchronous getters also skip remaining metadata work.
   h=await host();h.c.now+=6000;h.c.onDocuments=()=>h.command('during-document-get');
   const previous=h.heartbeat().metadata_time_ms;await h.poll();assert.equal(h.heartbeat().metadata_time_ms,previous);

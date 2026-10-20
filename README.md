@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+0.4.215本机已更新：主题和字号每次PS启动只读取一次成功值，运行期间不轮询；实际需要UXP0.3.50。[操作与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
+
 [0.4.214已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.214)：UXP0.3.49将后台主题／文档元数据读取放到菜单和命令之后，存活心跳保留独立元数据时间。实际48需正常关闭PS后更新内置49再手动启动；[性能与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
 [0.4.213已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.213)：菜单空白处右键关闭，屏幕取色时右键先取消取色。UXP仍0.3.48，不需重启PS；[操作与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。

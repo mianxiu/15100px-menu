@@ -607,16 +607,18 @@ module.exports = function createLabels(ps, session, options={}) {
     },{commandName:'Menu recent document',timeOut:0});
   }
   let interfaceState={ui_theme:'dark',ui_font_size:'small'};
-  async function interfacePreferences(checkpoint) {
+  const interfaceRead={font:false,theme:false};let interfaceReadAt=0;
+  async function interfacePreferences(checkpoint,once=false) {
     // Only UXP DOM/get reads. Never execute JSX or enter a modal to observe UI.
     if(checkpoint)await checkpoint();
-    try {
+    if(!once || !interfaceRead.font)try {
       const value=ps.app.preferences.interface.textFontSize, sizes=ps.constants.FontSize || {};
-      for(const key of ['SMALL','MEDIUM','LARGE'])if(sizes[key]!==undefined && value===sizes[key])
-        interfaceState.ui_font_size=key.toLowerCase();
+      for(const key of ['SMALL','MEDIUM','LARGE'])if(sizes[key]!==undefined && value===sizes[key]){
+        interfaceState.ui_font_size=key.toLowerCase();interfaceRead.font=true;interfaceReadAt=Date.now();
+      }
     } catch(_) {}
     if(checkpoint)await checkpoint();
-    try {
+    if(!once || !interfaceRead.theme)try {
       const [value]=await ps.action.batchPlay([{_obj:'get',_target:[
         {_ref:'property',_property:'interfacePrefs'},{_ref:'application',_enum:'ordinal',_value:'targetEnum'}],
         _options:{dialogOptions:'dontDisplay'}}],{});
@@ -624,9 +626,13 @@ module.exports = function createLabels(ps, session, options={}) {
       const name=typeof raw==='string'?raw:raw?._value;
       const theme={kPanelBrightnessOriginal:'light',kPanelBrightnessLightGray:'light-gray',
         kPanelBrightnessMediumGray:'dark-gray',kPanelBrightnessDarkGray:'dark'}[name];
-      if(theme)interfaceState.ui_theme=theme;
+      if(theme){interfaceState.ui_theme=theme;interfaceRead.theme=true;interfaceReadAt=Date.now();}
     } catch(_) {}
     if(checkpoint)await checkpoint();
+    if(once)return {
+      ...(interfaceRead.theme?{ui_theme:interfaceState.ui_theme}:{}),
+      ...(interfaceRead.font?{ui_font_size:interfaceState.ui_font_size}:{}),
+      ui_preferences_complete:interfaceRead.font&&interfaceRead.theme,ui_preferences_time_ms:interfaceReadAt};
     return {...interfaceState};
   }
   return {selectionContextNative:checkpoint=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{

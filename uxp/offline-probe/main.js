@@ -23,6 +23,7 @@ let lastWorkAt=0;
 let menuRefreshId='';
 let heartbeatValue=null;
 let heartbeatFolder=null,heartbeatWriting=false,metadataReadAt=0;
+let interfacePreferencesValue=null;
 let activeExecution=null,executionPulseRunning=false;
 // This pulse performs only local file I/O. A pending Photoshop await must not
 // hide which original operation owns the host, or masquerade as fresh layer data.
@@ -227,7 +228,10 @@ async function refreshMetadata(folder,checkpoint) {
   metadataReadAt=started;
   try {
     await checkpoint();
-    const preferences=await labels.interfacePreferences(checkpoint);
+    // Theme/font belong to this PS/UXP startup session. Document metadata may
+    // change independently; a successful preference read is never polled again.
+    if(!interfacePreferencesValue?.ui_preferences_complete)
+      interfacePreferencesValue=await labels.interfacePreferences(checkpoint,true);
     await checkpoint();
     const documents=app.documents;
     await checkpoint();
@@ -237,7 +241,7 @@ async function refreshMetadata(folder,checkpoint) {
     if(count){const document=app.activeDocument;await checkpoint();name=document.title;}
     await checkpoint();
     const done=Date.now();
-    heartbeatValue={...heartbeatValue,...preferences,document_count:count,document_name:name,
+    heartbeatValue={...heartbeatValue,...interfacePreferencesValue,document_count:count,document_name:name,
       metadata_time_ms:done,metadata_started_at_ms:started,metadata_phase:'ready',metadata_error:''};
     observation.metadata={elapsed_ms:done-started,completed_at_ms:done};
     await publishHeartbeat(folder,'heartbeat',0);
@@ -259,7 +263,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.49', session, transport: 'plugin-data-files',
+        probe_version: '0.3.50', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
@@ -333,7 +337,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.49', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.50', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

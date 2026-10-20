@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 215主题／字号启动会话缓存代码／构建／实际入口：各项成功后只读取一次，失败／中断仅重试缺项，文档元数据及prefs原时间独立。494回归、11组UXP模拟、冻结启动／重启、实际215／UXP50及PS24.0.1正常／低CPU各16秒生产文件观察通过，CPU资源恢复。原稿／配置／旧未知保持；实体交互及其他PS仍待验。证据.runtime/tests215.log、uxp215-regression.log、recovery215finalreload、runtime215-verified.json。
+
 - [x] 214公开交付：源码／标签、ZIP／SHA及Latest更新清单匿名下载核验通过，只保留214 Release，213标签／历史保持；Wiki三页已推送并公开核验。实际214／UXP49；低78步／36循环、正常58步／27循环均因前台变化安全停止，未记全轮／原24.2故障机通过。证据.runtime/recovery214、runtime214-verified.json、release-0.4.214-public-verification.json、manifest214-verification.json、wiki214-verification.json。
 
 - [x] 214代码／构建／实际入口：UXP49将后台元数据放到交互之后，独立纯I/O心跳与真实metadata_time_ms；494回归、11组UXP模拟及冻结启动／重启通过。低CPU78步／36循环因前台变化安全停止，原请求无未知且原所有者清理／资源／原文档恢复；65秒生产文件23次独立续期不刷新元数据。正常配置58步／27循环后同样前台变化安全停止，原请求无未知且原所有者清理／原文档恢复已核验；两配置均不记全轮通过，未记故障机／实体输入验收。

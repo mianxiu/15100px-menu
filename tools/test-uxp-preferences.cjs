@@ -1,8 +1,8 @@
 const assert=require('node:assert/strict');
 const labels=require('../uxp/offline-probe/labels.js');
 (async()=>{
- let name='kPanelBrightnessLightGray',font=3,calls=[];
- const ps={app:{preferences:{interface:{get textFontSize(){return font;}}}},
+ let name='kPanelBrightnessLightGray',font=3,calls=[],fontReads=0;
+ const ps={app:{preferences:{interface:{get textFontSize(){fontReads++;return font;}}}},
   constants:{FontSize:{SMALL:1,MEDIUM:2,LARGE:3}},
   action:{batchPlay:async descriptors=>{calls.push(descriptors);if(name==='throw')throw Error('modal');
    return [{interfacePrefs:{kuiBrightnessLevel:{_value:name}}}];}},
@@ -23,5 +23,27 @@ const labels=require('../uxp/offline-probe/labels.js');
   await assert.rejects(read(async()=>{if(++checkpoints===stop)throw interrupted;}),e=>e===interrupted);
   assert.equal(calls.length-before,stop===3?1:0,'A checkpoint must skip remaining host calls');
  }
+ // Startup caches each successfully read field. Failure/interruption must
+ // retry only the missing field, rather than freezing a default as success.
+ const startup=labels(ps,'startup').interfacePreferences;name='throw';font=3;
+ const fontsBefore=fontReads;
+ const partial=await startup(null,true);
+ assert.equal(partial.ui_preferences_complete,false);assert.equal(partial.ui_font_size,'large');
+ assert.equal('ui_theme' in partial,false);
+ name='kPanelBrightnessLightGray';const cached=await startup(null,true);
+ assert.equal(cached.ui_preferences_complete,true);assert.equal(fontReads-fontsBefore,1);
+ const callsBefore=calls.length;name='kPanelBrightnessOriginal';font=1;
+ for(let n=0;n<12;n++)assert.deepEqual(await startup(null,true),cached);
+ assert.equal(fontReads-fontsBefore,1);assert.equal(calls.length,callsBefore);
+ const restarted=await labels(ps,'restarted').interfacePreferences(null,true);
+ assert.equal(restarted.ui_theme,'light');assert.equal(restarted.ui_font_size,'small');
+ const interrupted=labels(ps,'interrupted').interfacePreferences,stop=Error('new menu');
+ let checkpoints=0;const fontAt=fontReads,themeAt=calls.length;
+ await assert.rejects(interrupted(async()=>{if(++checkpoints===2)throw stop;},true),e=>e===stop);
+ assert.equal(fontReads,fontAt+1);assert.equal(calls.length,themeAt);
+ assert.equal((await interrupted(null,true)).ui_preferences_complete,true);
+ assert.equal(fontReads,fontAt+1,'Retry must retain the successful font read');
+ assert.equal(calls.length,themeAt+1);
+ console.log('PASS startup preferences: once per field/session, partial failure retry, checkpoint retention, unchanged timestamp, new startup reread');
  console.log('UXP interface preferences: four themes, three sizes, unavailable retention, read-only get passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
