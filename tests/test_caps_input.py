@@ -165,7 +165,7 @@ class CapsInputTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as folder:
    for scope in ('layers','canvas','generic','home','text'):
     d=self.ready(folder);d.panel_context.current['kind']=scope;d.menu_context_pending=None
-    d.hide=Mock();d.menu_context_requester=Mock();d.gui.SendMessage.return_value=1
+    d.hide=Mock();d.menu_context_requester=Mock();d.gui.SendMessage.side_effect=lambda hwnd,msg,*a:0 if msg==0x801c else 1
     d._close_completed_menu();d.hide.assert_called_once_with(restore=True)
     d.menu_context_requester.assert_not_called();self.assertIsNone(d.menu_context_pending)
  def test_slow_result_file_never_holds_window_lock_or_overwrites_reopened_menu(self):
@@ -217,7 +217,7 @@ class CapsInputTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as folder:
    d=self.ready(folder);d.hide=Mock();d.gui.SendMessage.return_value=0
    d._close_completed_menu();d.hide.assert_not_called()
-   d.gui.SendMessage.return_value=1;d.preview_input_guard={'release':True}
+   d.gui.SendMessage.side_effect=lambda hwnd,msg,*a:0 if msg==0x801c else 1;d.preview_input_guard={'release':True}
    d._close_completed_menu();d.hide.assert_not_called()
    d.preview_input_guard=None;d.mask_preview=SimpleNamespace(closed=False)
    d._close_completed_menu();d.hide.assert_not_called()
@@ -234,6 +234,33 @@ class CapsInputTests(unittest.TestCase):
    d.gui.SendMessage.assert_not_called()
    d.menu_context_pending={'epoch':7,'unpublished':True,'resume':True};d.menu_context_requester=Mock()
    d._publish_menu_context();d.menu_context_requester.assert_not_called();self.assertIsNone(d.menu_context_pending)
+
+ def test_busy_caps_wake_uses_fresh_basic_and_keeps_optional_followup_in_new_epoch(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.hide=Mock();d.menu_context_requester=Mock();d.hold_active=True
+   d.gui.SendMessage.side_effect=lambda hwnd,msg,*a:1
+   d._close_completed_menu();d._close_completed_menu()
+   self.assertTrue(d.menu_context_pending['busy_wake']);d.hide.assert_not_called()
+   request={'id':'test','session':'s','folder':Path(folder),'epoch':7,'deadline':time.monotonic()+10}
+   d.menu_context_requester=Mock(return_value=request);d._publish_menu_context();d._publish_menu_context()
+   d.menu_context_requester.assert_called_once_with(7)
+   d.gui.SendMessage.reset_mock();self.result(folder,menu_phase='basic');d._finish_menu_context()
+   self.assertEqual(d.menu_epoch,8);self.assertFalse(d.hold_active)
+   self.assertIs(d.menu_context_pending,request);self.assertEqual(request['epoch'],8)
+   self.assertFalse(request.get('busy_wake'));self.assertEqual(request['applied_phase'],'basic')
+   d.gui.SendMessage.reset_mock();self.result(folder,menu_phase='completed');d._finish_menu_context()
+   self.assertEqual(d.menu_epoch,8);self.assertIsNone(d.menu_context_pending);d.hide.assert_not_called()
+
+ def test_busy_caps_wake_guard_closed_stale_or_new_epoch_never_applies(self):
+  with tempfile.TemporaryDirectory() as folder:
+   for condition in ('guard','closed','stale','epoch','input'):
+    d=self.ready(folder);d.menu_context_pending['busy_wake']=True
+    self.result(folder,menu_phase='basic',plugin_time_ms=(time.time()-4)*1000 if condition=='stale' else time.time()*1000)
+    if condition=='guard':d.preview_input_guard={'active':True}
+    if condition=='closed':d.visible=False
+    if condition=='epoch':d.menu_epoch=8
+    if condition=='input':d.panel_context.current['input_focused']=True
+    d._finish_menu_context();d.gui.SendMessage.assert_not_called()
 
 class NativeDialogWaitTests(unittest.IsolatedAsyncioTestCase):
  async def test_style_wait_has_no_generic_write_timeout_and_never_replays(self):

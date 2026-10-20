@@ -59,11 +59,14 @@ static bool running=true,opened=false,contextMode=false,focusSearch=false;
 static bool allowed=false,capable=false,rightHide=false;
 static std::string document="连接中…",notice;
 static int renderedHit=-1,pendingHit=-1;
-static bool stabilityInspection=false;
+static bool stabilityInspection=false,stabilityObserveBusy=false;
 static int lastVisibleVertices=0;
 static bool taskBusy=false,taskFailed=false,taskHasResult=false;
 static bool maskPreviewStarted=false,shapeDraftOnly=false;
 static bool busyFeedback=false;
+// Only a Caps menu explicitly opened while a task was running requests wakeup.
+// Ordinary submitted-action feedback keeps its existing close behavior.
+static bool busyMenuWake=false;
 static bool hoverReturnConfirmed=false;
 static ULONGLONG feedbackStarted=0;
 static ULONGLONG completionStarted=0;
@@ -109,7 +112,7 @@ static std::string taskStatus() {
     return "";
 }
 static void updateBusy(bool busy,bool queueReady=false,int queueCount=0) {
-    if(stabilityInspection)busy=false;
+    if(stabilityInspection && !stabilityObserveBusy)busy=false;
     if (busy && !taskBusy) taskStarted=GetTickCount64();
     if (busy && window && IsWindowVisible(window)) busyFeedback=true;
     if(!busy && taskBusy && taskHasResult && !taskFailed)completionStarted=GetTickCount64();
@@ -239,6 +242,11 @@ static const char* rowAction(int i) {return panelKind==4?"document.new":actions[
 static const char* rowLabel(int i) {return panelKind==4?"新建文档":i==2?"置顶":i==3?"置底":i==0 && layerAware && layerKind!=3?"选择相邻图层":labels[i];}
 static const char* rowShortcut(int i) {return panelKind==4?"Ctrl + N":shortcuts[i].c_str();}
 static bool inputFocused=false;
+static bool returnInputsIdle() {
+    return !inputFocused && panelKind==2 && !maskPreviewStarted &&
+        !(GetAsyncKeyState(VK_CAPITAL)&0x8000) && !(GetAsyncKeyState(VK_LBUTTON)&0x8000) &&
+        !(GetAsyncKeyState(VK_RBUTTON)&0x8000) && !(GetAsyncKeyState(VK_MBUTTON)&0x8000);
+}
 static bool canExecute() {return !maskPreviewStarted && (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
 static bool capsEnabled(int i) {
     if(i>=capsCount())return false;
@@ -589,6 +597,7 @@ static int holdActionAt(POINT point) {
     return -1;
 }
 static void setHoldMode(bool enabled) {
+    busyMenuWake=enabled && taskBusy && panelKind==2 && !inputFocused;
     holdMode=enabled;holdFinished=false;pinned=false;holdMoved=false;resetMenu();focusSearch=false;
     pieStarted=0;pieAnimating=enabled;
     stopShapeEyedrop();
@@ -650,7 +659,7 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     }
     if(msg==WM_WINDOWPOSCHANGED && (reinterpret_cast<WINDOWPOS*>(lp)->flags&SWP_HIDEWINDOW))stopShapeEyedrop();
     if(msg==WM_APP+23){holdOrigin={static_cast<LONG>(wp),static_cast<LONG>(lp)};holdMoved=false;return 0;}
-    if(msg==WM_APP+26){stabilityInspection=wp!=0;if(stabilityInspection){taskBusy=busyFeedback=taskHasResult=false;taskRecovery.clear();allowed=capable=true;}return 0;}
+    if(msg==WM_APP+26){stabilityInspection=wp!=0;stabilityObserveBusy=wp==2;if(stabilityInspection && !stabilityObserveBusy){taskBusy=busyFeedback=taskHasResult=false;taskRecovery.clear();allowed=capable=true;}return 0;}
     if(msg==WM_APP+27){
         if(!stabilityInspection || static_cast<LPARAM>(wp)!=menuEpoch)return 0;
         return (layerMask&15)|((quickMask&127)<<4)|(canExecute()?1<<11:0)|
@@ -665,18 +674,21 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
             if(data->dwData==0x4d435458){
                 const bool resume=value.value("resume",false);
                 const bool hoverReturn=value.value("hover_return",false);
+                const bool busyWake=value.value("busy_wake",false);
                 if(!IsWindowVisible(hwnd) || value.value("epoch",0)!=menuEpoch || taskBusy)return FALSE;
+                if(busyWake && (hoverReturn || !busyMenuWake || !completionReady() || !returnInputsIdle() ||
+                    value.value("next_epoch",LPARAM(0))!=menuEpoch+1))return FALSE;
                 if(hoverReturn && (!(shapeReturning || hoverReturnConfirmed) || !completionReady() || inputFocused || panelKind!=2 ||
                     maskPreviewStarted || (GetAsyncKeyState(VK_CAPITAL)&0x8000) || (GetAsyncKeyState(VK_LBUTTON)&0x8000) ||
                     (GetAsyncKeyState(VK_RBUTTON)&0x8000) || value.value("next_epoch",LPARAM(0))!=menuEpoch+1))return FALSE;
                 // Success feedback now closes; old restore packets cannot reopen it.
-                if(resume || (!hoverReturn && (shapeEditor.dirty || holdFinished || busyFeedback)))return FALSE;
+                if(resume || (!hoverReturn && !busyWake && (shapeEditor.dirty || holdFinished || busyFeedback)))return FALSE;
                 const auto flags=value.value("flags",uint64_t(0));
                 layerAware=true;layerMask=(flags>>8)&15;layerKind=(flags>>12)&15;
                 layerBackground=(flags&(1u<<16))!=0;layerCount=(flags>>17)&255;
                 layerLocked=(flags&(1u<<25))!=0;layerCrossParents=(flags&(1u<<26))!=0;quickMask=(flags>>32)&127;
                 shapeEditor.prepare(value.at("shape"));hoverTip.reset();tipVisual.reset();renderedHit=pendingHit=-1;pieReady=false;
-                if(hoverReturn){menuEpoch=value.at("next_epoch").get<LPARAM>();shapeReturning=hoverReturnConfirmed=false;
+                if(hoverReturn || busyWake){menuEpoch=value.at("next_epoch").get<LPARAM>();shapeReturning=hoverReturnConfirmed=busyMenuWake=false;
                     busyFeedback=taskHasResult=taskFailed=false;completionStarted=0;notice.clear();taskError.clear();previewProgress.clear();
                     shapePanelOpen=false;shapeHoverReady=false;holdFinished=false;pinned=true;allowed=capable&&!taskBusy;}
             }else shapeEditor.prepare(value);
@@ -698,8 +710,8 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     if (msg==WM_APP+19) return (busyFeedback?1:0)|(taskBusy?2:0);
     // Read-only success feedback expiry. The backend waits for preview/guard
     // release, then hides this window without querying Photoshop or replaying actions.
-    if (msg==WM_APP+24) return IsWindowVisible(hwnd) && completionReady();
-    if (msg==WM_APP+28) return (shapeReturning || hoverReturnConfirmed)?2:0;
+    if (msg==WM_APP+24) return IsWindowVisible(hwnd) && completionReady() && (!busyMenuWake || returnInputsIdle());
+    if (msg==WM_APP+28) return (shapeReturning || hoverReturnConfirmed)?2:busyMenuWake?1:0;
     if (msg==WM_APP+25) {
         // The foreground menu process can hand activation back to its owner;
         // the backend process often cannot, especially after a native script.
@@ -740,6 +752,7 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         if (opened) {
             resetMenu();pieStarted=0;setOpacity(holdMode?0.f:1.f);
         } else {
+            busyMenuWake=false;
             // Keep the composition surface attached while the HWND hides.
             // The next frame selects transparent pie or opaque regular mode.
             holdFinished=true;pieReady=false;holdRows={};labelRows={};quickRows={};closePopups();
@@ -2587,6 +2600,44 @@ int main() {
                 if(!canExecute() || ImGui::GetDrawData()->TotalVtxCount<=0 || applyResume(hoverReturn))
                     throw std::runtime_error("Hover return lost content or accepted duplicate epoch");
                 std::cout<<"Hover return confirmed: fresh epoch and visible ordinary menu; unrequested/busy/failure/input/duplicate rejected\n";
+                for(const char* host:{"23.3.0","24.0.1","24.2.0","25.5.1"}) {
+                    procedure(window,WM_APP+26,2,0);
+                    ShowWindow(window,SW_HIDE);panelKind=2;inputFocused=false;
+                    Json wakeSettings={{"enabled",true},{"shortcuts",Json::object()}};
+                    accept({{"type","status"},{"data",{{"photoshop",{{"connected",true},{"document","owned-test.psd"},
+                        {"photoshop_version",host},{"uxp_version","0.3.51"},{"uxp_ready",true},{"busy",true}}},{"settings",wakeSettings}}}});
+                    accept({{"type","operation"},{"busy",true},{"action","color"}});
+                    setHoldMode(true);
+                    SetWindowPos(window,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+                    numberFrame(ImGuiKey_None,false);
+                    if(!busyMenuWake || !busyFeedback || canExecute() || ImGui::GetDrawData()->TotalVtxCount<=0)
+                        throw std::runtime_error("Caps busy wake did not start with visible exclusive running content");
+                    accept({{"type","notice"},{"scope","operation"},{"ok",true},{"message","Completed"}});
+                    accept({{"type","operation"},{"busy",false}});completionStarted=GetTickCount64()-500;
+                    Json wake={{"epoch",menuEpoch},{"next_epoch",menuEpoch+1},{"busy_wake",true},
+                        {"flags",uint64_t(64)|(uint64_t(15)<<8)|(uint64_t(2)<<12)|(uint64_t(1)<<17)|(uint64_t(127)<<32)},
+                        {"shape",{{"available",false}}}};
+                    if(SendMessageW(window,WM_APP+28,0,0)!=1 || SendMessageW(window,WM_APP+24,0,0)!=1)
+                        throw std::runtime_error("Successful Caps busy menu never requested fresh wakeup");
+                    busyMenuWake=false;if(applyResume(wake))throw std::runtime_error("Unrequested busy wake accepted");busyMenuWake=true;
+                    taskBusy=true;if(applyResume(wake))throw std::runtime_error("Running busy wake accepted");taskBusy=false;
+                    taskFailed=true;if(applyResume(wake))throw std::runtime_error("Failed busy wake accepted");taskFailed=false;
+                    taskRecovery="unknown";if(applyResume(wake))throw std::runtime_error("Unknown busy wake accepted");taskRecovery.clear();
+                    inputFocused=true;if(applyResume(wake) || SendMessageW(window,WM_APP+24,0,0))throw std::runtime_error("Input busy wake accepted");inputFocused=false;
+                    maskPreviewStarted=true;if(applyResume(wake))throw std::runtime_error("Active preview busy wake accepted");maskPreviewStarted=false;
+                    auto stale=wake;stale["epoch"]=menuEpoch-1;if(applyResume(stale))throw std::runtime_error("Stale busy wake accepted");
+                    if(!applyResume(wake) || busyMenuWake || busyFeedback || !pinned || holdFinished)
+                        throw std::runtime_error("Verified busy wake failed");
+                    numberFrame(ImGuiKey_None,false);
+                    if(!IsWindowVisible(window) || !canExecute() || ImGui::GetDrawData()->TotalVtxCount<=0 || applyResume(wake) ||
+                        (SendMessageW(window,WM_APP+27,menuEpoch,0)&0xf800)!=0xf800)
+                        throw std::runtime_error("Busy wake lost visible content or accepted duplicate");
+                    ShowWindow(window,SW_HIDE);if(applyResume(wake))throw std::runtime_error("Hidden busy menu reopened");
+                    setHoldMode(true);if(busyMenuWake)throw std::runtime_error("Idle reopen inherited busy wake intent");
+                    SetWindowPos(window,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+                }
+                procedure(window,WM_APP+26,0,0);
+                std::cout<<"Caps busy wake: 23.3/24.0/24.2/25.5 status contracts, fresh epoch + visible fixed ordinary content; failure/unknown/input/preview/stale/duplicate/hidden rejected\n";
                 // All compact successes qualify, irrespective of layer/canvas/home scope or hold mode.
                 for(int scope:{0,1,2,3,4})for(bool held:{false,true}){
                     panelKind=scope;setHoldMode(held);holdFinished=false;

@@ -614,7 +614,7 @@ class Desktop:
             if previous:
                 u.SetThreadDpiAwarenessContext(previous)
 
-    def begin_stability_menu(self, pid, check):
+    def begin_stability_menu(self, pid, check, observe_busy=False):
         """Owned read-only inspection; production popup/context path, no input injection."""
         import win32process
         check()
@@ -637,7 +637,9 @@ class Desktop:
         with self.window_lock:
             inspection['frames_start']=self.gui.SendMessage(self.hwnd,0x800b,0,0)
             self._stability_inspection=inspection;panel.current=inspection['panel']
-            self.gui.SendMessage(self.hwnd,0x801a,1,0)
+            # The dedicated busy-wake lab observes real operation events. The
+            # normal stability runner keeps its existing read-only suppression.
+            self.gui.SendMessage(self.hwnd,0x801a,2 if observe_busy else 1,0)
             try:
                 self._open(hold=True,origin=cursor,_inspection=inspection)
                 self.gui.SendMessage(self.hwnd,0x8010,1,0)
@@ -783,14 +785,17 @@ class Desktop:
         preview=getattr(self,'mask_preview',None)
         if preview and not preview.closed:return
         if self.gui.SendMessage(self.hwnd,0x8018,0,0)!=1:return
-        if self.gui.SendMessage(self.hwnd,0x801c,0,0)==2:
+        return_mode=self.gui.SendMessage(self.hwnd,0x801c,0,0)
+        if return_mode in (1,2):
             if not self._scope():self.hide(restore=False);return
             panel=self.panel_context.current if self.panel_context else {}
             if panel.get('kind')!='layers' or panel.get('input_focused'):return
-            if getattr(self,'hover_return_attempt',None)==self.menu_epoch:return
+            attempt='busy_wake_attempt' if return_mode==1 else 'hover_return_attempt'
+            if getattr(self,attempt,None)==self.menu_epoch:return
             if not self.menu_context_requester:return
-            self.hover_return_attempt=self.menu_epoch
-            self.menu_context_pending={'epoch':self.menu_epoch,'unpublished':True,'hover_return':True,'deadline':time.monotonic()+10}
+            setattr(self,attempt,self.menu_epoch)
+            self.menu_context_pending={'epoch':self.menu_epoch,'unpublished':True,
+                'busy_wake':return_mode==1,'hover_return':return_mode==2,'deadline':time.monotonic()+10}
             self.menu_context_delivery={'phase':'return-reading','epoch':self.menu_epoch}
             return
         self.hide(restore=self._scope())
@@ -826,6 +831,7 @@ class Desktop:
             if request and self.visible and self.menu_epoch==pending['epoch'] and not self.stop.is_set():
                 request['deadline']=min(request['deadline'],pending['deadline'])
                 if pending.get('hover_return'):request['hover_return']=True
+                if pending.get('busy_wake'):request['busy_wake']=True
                 self.menu_context_pending=request
             else:self.menu_context_pending=None
 
@@ -870,6 +876,8 @@ class Desktop:
             if phase not in ('basic','completed') or pending.get('applied_phase')==phase:return
             if pending.get('hover_return') and (phase!='completed' or getattr(self,'preview_input_guard',None)
                     or getattr(self,'mask_preview',None) and not self.mask_preview.closed):return
+            if pending.get('busy_wake') and (getattr(self,'preview_input_guard',None)
+                    or getattr(self,'mask_preview',None) and not self.mask_preview.closed):return
             from .layer_context import fresh,flags
             if prepared is None:return
             value,shape=prepared
@@ -883,6 +891,7 @@ class Desktop:
             active=shape_editor_allowed(panel,shape,True,value)
             envelope={'epoch':pending['epoch'],'flags':flags(value),'shape':shape if active else {'available':False}}
             if pending.get('hover_return'):envelope.update(hover_return=True,next_epoch=self.menu_epoch+1)
+            if pending.get('busy_wake'):envelope.update(busy_wake=True,next_epoch=self.menu_epoch+1)
             payload=json.dumps(envelope).encode('utf-8')
             editor_omitted=len(payload)+1>MAX_CONTEXT_PACKET_BYTES
             if editor_omitted:
@@ -900,6 +909,10 @@ class Desktop:
                 'accepted':accepted,'editor_omitted':editor_omitted,'request_id':pending['id']}
             if accepted:
                 if pending.get('hover_return'):self.menu_epoch+=1
+                if pending.get('busy_wake'):
+                    self.menu_epoch+=1;self.hold_active=False
+                    pending['epoch']=self.menu_epoch;pending.pop('busy_wake',None)
+                    self.menu_context_delivery['epoch']=self.menu_epoch
                 self.menu_layer_context=dict(value);self.color_editor_active=active
                 if phase=='completed':self.menu_context_pending=None
                 else:
