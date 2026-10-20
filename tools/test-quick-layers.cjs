@@ -36,7 +36,10 @@ action:{batchPlay:async list=>list.map(d=>{
     if(nativeFault==='cancelled')modalContext.isCancelled=true;
     return {list:rows};
   }
-  if(d._obj==='get')return {layerID:doc.activeLayers[0].id};
+  if(d._obj==='get') {
+    const key=d._target[0]._property;
+    return {[key]:{numberOfDocuments:1,documentID:doc.id,targetLayersIDs:doc.activeLayers.map(l=>({_ref:'layer',_id:l.id})),layerID:doc.activeLayers[0].id}[key]};
+  }
   writes++;
   if(d._target[0]._ref==='layer') {
     assert.equal(d.using,undefined);assert.equal(d._options.dialogOptions,'dontDisplay');
@@ -162,6 +165,24 @@ async function main(){
   const metadataFailed=await run('layer.new');
   assert.equal(metadataFailed.verified,true);assert.equal(metadataFailed.selection_context,undefined);
   Object.defineProperty(doc,'mode',originalMode);
+  // Native strategy feedback is freshly read after modal exit by main.js.
+  // It must not repeat the optional full DOM read inside each creation, nor
+  // remove eligibility, placement, membership, rollback or identity checks.
+  const nativeApi=create(ps,'s',{nativeSelection:true});
+  let discardedReads=0;
+  for(const command of ['layer.new','layer.solid','layer.group','adjustment.curves','adjustment.hueSaturation','adjustment.colorBalance','adjustment.blackWhite']) {
+    fixture('root-middle');const beforeWrites=writes;
+    Object.defineProperty(doc,'mode',{configurable:true,get(){if(writes>beforeWrites)discardedReads++;return 'RGB';}});
+    const result=await nativeApi.setLabel({command,target:await nativeApi.capture(),expires_at_ms:Date.now()+5000});
+    assert.equal(result.verified,true);assert.equal(result.selection_context,undefined);
+    assert.equal(result.selection_feedback,'fresh-native-after-modal');
+    Object.defineProperty(doc,'mode',originalMode);
+  }
+  assert.equal(discardedReads,0,'Native creation must not build discarded DOM feedback');
+  fixture('root-middle');const nativeTarget=await nativeApi.capture(),nativeWrites=writes;
+  doc.activeLayers=[doc.layers[0]];
+  await assert.rejects(nativeApi.setLabel({command:'layer.new',target:nativeTarget,expires_at_ms:Date.now()+5000}),/target changed/);
+  assert.equal(writes,nativeWrites,'Deferred feedback must never defer write authorization');
   function largeFixture(count,nested=false,background=false) {
     const layers=Array.from({length:count},(_,i)=>attach({id:10000+i,kind:'pixel',boundsNoEffects:{left:0,top:0,right:3,bottom:3}}));
     if(background)layers.at(-1).isBackgroundLayer=true;

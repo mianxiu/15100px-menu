@@ -37,7 +37,7 @@ function host(files,control) {
     if(name==='./probe-config.js')return 'secret';
     if(name==='./labels.js')return ()=>labels;
     if(name==='photoshop')return {app:{documents:[]},action:{addNotificationListener(){}}};
-    if(name==='uxp')return {storage:{localFileSystem:{getDataFolder:async()=>folder,getPluginFolder:async()=>{throw Error('not needed');}}},host:{version:'24.0.1'},versions:{uxp:'6.3.3'}};
+    if(name==='uxp')return {storage:{localFileSystem:{getDataFolder:async()=>folder,getPluginFolder:async()=>{throw Error('not needed');}}},host:{version:control.host||'24.0.1'},versions:{uxp:'6.3.3'}};
     throw Error(name);
   }};
   if(control.now!==undefined)context.Date=class extends Date {static now(){return control.now;}};
@@ -48,6 +48,18 @@ function request(files,id='a'.repeat(32),operation='set_label') {
   files.set('probe-request.json',JSON.stringify({id,token:'secret',operation,expires_at_ms:Date.now()+5000}));
 }
 async function main(){
+  // The native path must still publish current complete capabilities before
+  // its original final receipt, even if an old/prepared context was supplied.
+  for(const hostVersion of ['24.2.0','24.2.1']) {
+    const files=new Map(),control={executed:0,created:0,host:hostVersion,prepared:true};
+    const plugin=host(files,control);await settle();const before=control.contextReads;
+    request(files);await plugin.command();
+    const receipt=JSON.parse(files.get('result-'+ 'a'.repeat(32)+'.json'));
+    assert.equal(receipt.phase,'completed');assert.equal(control.contextReads,before+1);
+    assert.notEqual(receipt.layer_context.session,'prepared');
+    assert.deepEqual(receipt.layer_context.layer_ids,[99]);
+    assert.deepEqual(receipt.layer_context,JSON.parse(files.get('layer-context.json')));
+  }
   let files=new Map(),control={executed:0,created:0,failFinal:2};
   let plugin=host(files,control);await settle();request(files);
   const reads=control.contextReads;

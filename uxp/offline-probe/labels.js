@@ -484,7 +484,12 @@ module.exports = function createLabels(ps, session, options={}) {
           // Read the new state while the same PS modal still owns the target.
           // Metadata failure cannot undo a successfully verified creation:
           // the caller falls back to its normal full post-operation snapshot.
-          try {result.selection_context=selectionContext();}catch(_) {}
+          // The native strategy must read fresh capabilities after modal exit;
+          // it cannot reuse this prepared DOM context. Avoid building a full
+          // snapshot that main.js always discards. Keep the DOM strategy's
+          // existing prepared-context identity check and all write validation.
+          if(!nativeSelection)try {result.selection_context=selectionContext();}catch(_) {}
+          result.selection_feedback=nativeSelection?'fresh-native-after-modal':'prepared-dom';
           timings.selection_prepare_ms=Date.now()-stageStarted;stageStarted=Date.now();
           await context.hostControl.resumeHistory(history,true);
           timings.history_commit_ms=Date.now()-stageStarted;
@@ -621,6 +626,45 @@ module.exports = function createLabels(ps, session, options={}) {
       ui_preferences_complete:interfaceRead.font&&interfaceRead.theme,ui_preferences_time_ms:interfaceReadAt};
     return {...interfaceState};
   }
+  // Fixed read-only comparison on an owned fixture only. The before path is
+  // UXP51's discarded synchronous DOM preparation followed by its fresh native
+  // read; after omits only that preparation. Neither path publishes capabilities
+  // or mutates Photoshop. This measures feedback reads, not a whole operation.
+  async function feedbackReadComparison(run,order=0,checkpoint=null) {
+    if(![0,1].includes(order))throw Error('Invalid feedback comparison order');
+    const samples={},keys=['session','document_id','layer_ids','selection_count','kind','types','background','locked','same_parent','mask','quick_mask'];
+    const signature=value=>JSON.stringify(keys.map(key=>value[key]));
+    const now=()=>typeof performance!=='undefined' && typeof performance.now==='function'?performance.now():Date.now();
+    for(const strategy of order?['after','before']:['before','after']) {
+      stability.guard(run);
+      const stats={calls:0,descriptors:0,layer_records:0,response_bytes:0,checkpoints:0};
+      const measured={constants:ps.constants,action:{async batchPlay(commands,options){
+        stats.calls++;stats.descriptors+=commands.length;
+        const result=await ps.action.batchPlay(commands,options);
+        for(const row of result)stats.layer_records+=Array.isArray(row?.list)?row.list.length:Number.isInteger(row?.layerID)?1:0;
+        stats.response_bytes+=JSON.stringify(result).length;return result;
+      }}};
+      const yieldRead=checkpoint?async()=>{stats.checkpoints++;await checkpoint();}:null;
+      const started=now();let prepared,discarded=0;
+      // UXP51 prepared this DOM snapshot INSIDE its existing mutation modal.
+      // Out-of-modal getters can be much slower, so they are not a valid
+      // baseline. Acquire a read-only diagnostic scope, measure only its DOM
+      // work, and report acquisition/exit separately from comparable work.
+      if(strategy==='before')await ps.core.executeAsModal(context=>{
+        if(context.isCancelled)throw Error('Feedback comparison cancelled');
+        stability.guard(run);const at=now();prepared=selectionContext();discarded=now()-at;
+      },{commandName:'Read isolated feedback baseline',timeOut:0});
+      const freshStarted=now();
+      const value=await nativeSelectionContext(measured,session,readSelectionContext,yieldRead,true,nativePlan);
+      const completed=now();stability.guard(run);
+      if(prepared && signature(prepared)!==signature(value))throw Error('Feedback comparison capabilities changed');
+      samples[strategy]={value,ms:discarded+completed-freshStarted,wall_ms:completed-started,
+        diagnostic_modal_overhead_ms:strategy==='before'?Math.max(0,freshStarted-started-discarded):0,
+        discarded_dom_ms:discarded,fresh_native_ms:completed-freshStarted,
+        prepared_snapshots:strategy==='before'?1:0,...stats};
+    }
+    return {samples,equivalent:signature(samples.before.value)===signature(samples.after.value),scope:'native-feedback-reads-only'};
+  }
   async function nativeReadComparison(run,order=0,checkpoint=null) {
     if(![0,1,2].includes(order))throw Error('Invalid bounded native comparison order');
     const samples={};
@@ -648,7 +692,7 @@ module.exports = function createLabels(ps, session, options={}) {
     return {samples,equivalent:Object.values(samples).every(sample=>signature(sample.value)===signature(samples.dom.value)),
       constant_contract:{layer_kinds:Object.fromEntries(Object.entries(ps.constants.LayerKind))}};
   }
-  return {nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
+  return {feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
     if(!nativeSelection)return shapePaint.observe(...args);
     // Only explicit optional editor reads enter a short read-only modal scope.
     // Idle selection polling uses batchPlay and never occupies modal execution.

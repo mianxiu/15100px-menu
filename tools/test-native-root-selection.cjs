@@ -120,13 +120,31 @@ async function parity(m,targeted=true){const got=await m.api.selectionContextNat
   m=model(Array.from({length:32},()=>layer()));m.doc.activeLayers=[m.roots[15]];
   const commandsBefore=m.control.commands;
   await assert.rejects(m.api.nativeReadComparison('unowned'),/ownership/);
+  await assert.rejects(m.api.feedbackReadComparison('unowned'),/ownership/);
   assert.equal(m.control.commands,commandsBefore);
-  const benchmark=create({...m.ps,app:{documents:[m.doc],activeDocument:m.doc}},'s',{nativeSelection:true});
+  let comparisonModal=false,comparisonModals=0;
+  const benchmark=create({...m.ps,app:{documents:[m.doc],activeDocument:m.doc},core:{executeAsModal:async fn=>{
+    comparisonModals++;comparisonModal=true;try{return await fn({isCancelled:false});}finally{comparisonModal=false;}
+  }}},'s',{nativeSelection:true});
   benchmark.stability.guard=()=>{};let yields=0;
   const measurement=await benchmark.nativeReadComparison('owned',0,async()=>{yields++;});
   assert.equal(measurement.equivalent,true);assert.ok(yields>0);
   assert.equal(measurement.samples.targeted.checkpoints,8);
   assert.ok(measurement.samples.full.checkpoints>measurement.samples.targeted.checkpoints);
+  Object.defineProperty(m.doc,'mode',{get(){assert.equal(comparisonModal,true,'Baseline DOM preparation must retain its original modal context');return 'rgb';}});
+  for(const order of [0,1]) {
+    const feedback=await benchmark.feedbackReadComparison('owned',order,async()=>{yields++;});
+    assert.equal(feedback.equivalent,true);assert.equal(feedback.scope,'native-feedback-reads-only');
+    assert.equal(feedback.samples.before.prepared_snapshots,1);assert.equal(feedback.samples.after.prepared_snapshots,0);
+    assert.equal(feedback.samples.before.calls,feedback.samples.after.calls);
+    assert.equal(feedback.samples.before.response_bytes,feedback.samples.after.response_bytes);
+    assert.equal(feedback.samples.after.checkpoints,8);
+    assert.equal(feedback.samples.after.discarded_dom_ms,0);
+    assert.equal(feedback.samples.after.diagnostic_modal_overhead_ms,0);
+  }
+  assert.equal(comparisonModals,2);assert.equal(comparisonModal,false);
+  await assert.rejects(benchmark.feedbackReadComparison('owned',2),/Invalid/);
+  await assert.rejects(benchmark.feedbackReadComparison('owned',0,async()=>{throw stop;}),e=>e===stop);
   await assert.rejects(benchmark.nativeReadComparison('owned',2,async()=>{throw stop;}),e=>e===stop);
   console.log('PASS '+comparisons+' scalar/DOM capability comparisons, 1/4/100/300/5000 records, backgrounds/groups/modes/locks; bounded reads, one safe fallback, identity/cancel never downgrade');
 })().catch(error=>{console.error(error);process.exitCode=1;});
