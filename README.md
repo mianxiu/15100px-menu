@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-210本机修正24.2首页“当前文档不可用”弹窗；故障机需实际加载UXP0.3.48。[安装说明](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)。尚未新增Release。
+210本机修正24.2首页“当前文档不可用”弹窗；故障机需实际加载UXP0.3.48。[安装说明](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)。[210已发布](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.210)。
 
 本机209修正取色后重新hover收起：确认调整后返回普通菜单继续操作。UXP仍为0.3.47，未新增Release；实体鼠标和其他宿主待验。[说明](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 

@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 210公开交付：源码／标签、ZIP／SHA及Latest清单匿名下载通过，冻结更新器模拟API403后真实下载及校验通过。只保留210 Release，208标签与历史保留，无额外回退包。证据.runtime/release-0.4.210-public-verification.json、release210-cleanup.json、fallback210-live.json。
+- [x] 211性能第一批代码／构建／实际入口：后台端点与图层文件解析复用，保留逐次新鲜度和写前完整发现；492回归、冻结启动／重启及低CPU117步／54菜单循环通过。三轮本机文件读取中位2.52–3.14→0.56–0.61ms，不代表PS或实体延迟。正常全轮待完成，原机仍待验。证据.runtime/performance211、recovery211、runtime211-verified.json。
+
 - [ ] 当前执行顺序（2026-10-20用户更新）：先发布210，再连续落实性能路线；优先图层最小读取、交互调度、端点／文件冗余和窗口锁。UU远程Caps双按降为低优先级，不阻塞本轮交付。
 
 - [x] 210代码／构建：24.2原生读取先检查应用文档数量，空首页不查询当前文档；只读描述符silent且关闭竞态失败返回。489后端及20次空首页／关闭竞态／全silent契约回归通过，冻结EXE启动／重启通过。UXP48需重载；实际入口和本机恢复证据.runtime/recovery210finalreload，测试日志.runtime/tests210.log。

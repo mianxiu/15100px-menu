@@ -1,10 +1,12 @@
 """Production UXP execution using private local files; no COM write fallback."""
 import asyncio
+import copy
 import json
 import os
 from pathlib import Path
 import secrets
 import time
+import threading
 from .photoshop_bridge import PhotoshopBridge
 from .photoshop_version import MIN_PHOTOSHOP_TEXT, require_version, version_tuple
 from .plugins import version
@@ -71,9 +73,16 @@ class UxpTransport:
         self.pending=PendingUxp(self.config.parent/'uxp-pending.json',self.storage)
         self.task_id=None
         self.response_timeout=120
+        self._observation_lock=threading.Lock()
+        self._observation_binding=None
+        self._observation_until=0
 
     @property
     def folder(self):
+        # Every operation publication still performs authoritative discovery.
+        return self._discover()[0]
+
+    def _discover(self):
         candidates=[]
         for folder in self.storage.glob('*/External/com.15100px.menu.offline-probe/PluginData'):
             try:
@@ -81,13 +90,33 @@ class UxpTransport:
                 age=time.time()*1000-heartbeat.get('plugin_time_ms',0)
                 if compatible(heartbeat.get('probe_version')) and 0<=age<15000:
                     require_version(heartbeat.get('photoshop_version'))
-                    candidates.append(folder)
+                    candidates.append((folder,heartbeat))
             except (OSError,ValueError,TypeError):pass
         if len(candidates)>1:
             raise RuntimeError('检测到多个 Photoshop UXP 实例，请仅保留一个实例运行')
         if not candidates:
             raise RuntimeError('UXP 未就绪，请启动 Photoshop '+MIN_PHOTOSHOP_TEXT+' 或更新版本')
         return candidates[0]
+
+    def observe(self):
+        """Bound only background reads; never authorize an operation from cache."""
+        with self._observation_lock:
+            now=time.monotonic()
+            if self._observation_binding is not None and now<self._observation_until:
+                folder=self._observation_binding
+                try:
+                    heartbeat=read_heartbeat(folder)
+                    age=time.time()*1000-heartbeat.get('plugin_time_ms',0)
+                    if not compatible(heartbeat.get('probe_version')) or not 0<=age<15000:
+                        raise ValueError('Observation lease expired')
+                    require_version(heartbeat.get('photoshop_version'))
+                    return folder,heartbeat
+                except (OSError,ValueError,TypeError):
+                    self._observation_binding=None
+            folder,heartbeat=self._discover()
+            self._observation_binding=folder
+            self._observation_until=now+.5
+            return folder,heartbeat
 
     def call(self, operation, preview=None, native_preview=None, **payload):
         import msvcrt
@@ -207,6 +236,11 @@ class UxpTransport:
                 lease.seek(0);msvcrt.locking(lease.fileno(),msvcrt.LK_UNLCK,1)
 
 class UxpBridge(PhotoshopBridge):
+    def _observe_transport(self):
+        if isinstance(self.transport,UxpTransport):return self.transport.observe()
+        folder=self.transport.folder
+        return folder,read_heartbeat(folder)
+
     def _status(self):
         # Avoid status DoJavaScript calls that may reset Photoshop's tool cursor
         # even for a read-only script. Observe the UXP heartbeat instead.
@@ -214,7 +248,7 @@ class UxpBridge(PhotoshopBridge):
         # Process presence is enough to distinguish "start PS" from "wait for
         # UXP"; unknown document/selection data stays unavailable.
         try:
-            heartbeat=json.loads((self.transport.folder/'probe-last.json').read_text('utf-8-sig'))
+            _,heartbeat=self._observe_transport()
             theme=heartbeat.get('ui_theme');font=heartbeat.get('ui_font_size')
             if theme in ('light','light-gray','dark-gray','dark'):self.ui_theme=theme
             if font in ('small','medium','large'):self.ui_font_size=font
@@ -337,15 +371,25 @@ class UxpBridge(PhotoshopBridge):
     def read_layer_context(self):
         # Called by the desktop monitor, never by the low-level hook or open().
         try:
-            folder=self.transport.folder
-            heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8-sig'))
+            folder,heartbeat=self._observe_transport()
         except (OSError,ValueError,RuntimeError,KeyError,TypeError):
             self.layer_context=unavailable()
             return self.layer_context
         try:
             source=folder/'layer-context.json'
-            if source.stat().st_size>32768:raise ValueError('Layer metadata exceeds limit')
-            self.layer_context=validate(json.loads(source.read_text('utf-8-sig')),heartbeat['session'])
+            stat=source.stat()
+            if stat.st_size>32768:raise ValueError('Layer metadata exceeds limit')
+            key=(folder,heartbeat['session'],stat.st_mtime_ns,stat.st_size)
+            cached=getattr(self,'_layer_file_cache',None)
+            if cached and cached[0]==key:raw=cached[1]
+            else:
+                raw=json.loads(source.read_text('utf-8-sig'))
+                after=source.stat()
+                # Never cache an in-place rewrite as a stable file version.
+                if (after.st_mtime_ns,after.st_size)==(stat.st_mtime_ns,stat.st_size):
+                    self._layer_file_cache=(key,raw)
+            # Recheck real age on every use; cache hits never renew timestamps.
+            self.layer_context=validate(copy.deepcopy(raw),heartbeat['session'])
         except (OSError,ValueError,RuntimeError,KeyError,TypeError):
             # A reader may meet UXP's short overwrite window. Retain only a
             # recent snapshot from this exact plugin session, never an old host.
@@ -363,7 +407,7 @@ class UxpBridge(PhotoshopBridge):
         elif self._recovery_feedback:recovery['message']=self._recovery_feedback
         value['uxp_recovery']=recovery
         try:
-            heartbeat=json.loads((self.transport.folder/'probe-last.json').read_text('utf-8-sig'))
+            _,heartbeat=self._observe_transport()
             value['uxp_ready']=compatible(heartbeat.get('probe_version')) and time.time()*1000-heartbeat.get('plugin_time_ms',0)<15000
             value['uxp_version']=heartbeat.get('probe_version')
             value['photoshop_version']=heartbeat.get('photoshop_version')
