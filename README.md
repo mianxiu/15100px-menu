@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-217已完成构建并更新本机，UXP仍0.3.51：自动测试保留原报告，增加核验后的原测试文档收尾，中文显示失败阶段及原始错误详情；正在核验公开发布。[使用和验证范围](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)。
+[217已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.217)，UXP仍0.3.51：自动测试保留原报告，增加核验后的原测试文档收尾，中文显示失败阶段及原始错误详情；ZIP／SHA／Latest清单公开核验通过。[使用和验证范围](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)。
 
 [216／UXP0.3.51已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.216)：24.2.x常见根级单选按需读取邻层，组／多选保留有界全树；ZIP、SHA和更新清单公开下载通过。[读取策略和验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
