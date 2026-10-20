@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-218已构建并更新本机，UXP仍0.3.51：任务运行中按Caps打开的图层运行菜单，成功后经新鲜目标核验自动恢复固定普通菜单；正在发布。[操作与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide)。
+[218已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.218)，UXP仍0.3.51：任务运行中按Caps打开的图层运行菜单，成功后经新鲜目标核验自动恢复固定普通菜单；公开ZIP／SHA／Latest清单及Wiki已核验。[操作与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide)。
 
 [217已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.217)，UXP仍0.3.51：自动测试保留原报告，增加核验后的原测试文档收尾，中文显示失败阶段及原始错误详情；ZIP／SHA／Latest清单公开核验通过。[使用和验证范围](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)。
 
