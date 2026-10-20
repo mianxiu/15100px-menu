@@ -6,7 +6,8 @@ const session = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
 // PS24.0.0 shares the standalone app.refresh channel with 24.0.1.
 // A 24.1+ host still needs its actual official redraw API; no nested JSX.
 const legacyPreview=/^24\.0(?:\.\d+)*$/.test(String(uxp.host?.version || ''));
-const labels = require('./labels.js')(require('photoshop'), session, {legacyPreview});
+const nativeSelection=/^24\.2(?:\.\d+)*$/.test(String(uxp.host?.version || ''));
+const labels = require('./labels.js')(require('photoshop'), session, {legacyPreview,nativeSelection});
 const seen = new Set();
 let sequence = 0;
 let running = false;
@@ -123,13 +124,15 @@ async function refreshMenuContext(folder,now) {
     let shape={available:false},error='';
     try {await checkpoint();shape=await labels.observeShape(context,true,null,checkpoint);await checkpoint();}
     catch(e){if(e.menuReadInterrupted)return true;error=String(e).slice(0,200);}
-    const matches=labels.selectionMatches(context),done=Date.now();
+    let nativeLatest=null;
+    if(nativeSelection){try{nativeLatest=await labels.selectionContextFresh(checkpoint);}catch(e){if(e.menuReadInterrupted)return true;throw e;}}
+    const matches=nativeLatest?nativeLatest.document_id===context.document_id && nativeLatest.layer_ids.join(',')===context.layer_ids.join(','):labels.selectionMatches(context),done=Date.now();
     observation.menu={...observation.menu,shape_ms:done-readDone,shape_error:error,selection_changed:!matches,phase:'completed'};
     // A slow optional read needs fresh eligibility, not a fresh timestamp on
     // old locks/capabilities. A changed identity never enables the editor.
     if(matches) {
       let latest;
-      try {latest=done-readDone>=1000?await labels.selectionContextFresh(checkpoint):context;}
+      try {latest=nativeLatest || (done-readDone>=1000?await labels.selectionContextFresh(checkpoint):context);}
       catch(error){if(error.menuReadInterrupted)return true;throw error;}
       try {await checkpoint();}catch(error){if(error.menuReadInterrupted)return true;throw error;}
       if(latest.document_id===context.document_id && latest.layer_ids.join(',')===context.layer_ids.join(','))
@@ -161,7 +164,7 @@ async function updateLayerContext(folder,now,force=false,prepared=null,checkpoin
   contextReadAt=now;
   let value;
   let error='';
-  try {value=prepared && labels.selectionMatches(prepared)?prepared:await labels.selectionContextFresh(checkpoint);}
+  try {value=prepared && !nativeSelection && labels.selectionMatches(prepared)?prepared:await labels.selectionContextFresh(checkpoint);}
   catch(e) {if(e.menuReadInterrupted){observation.background={interrupted:e.reason,elapsed_ms:Date.now()-now,completed_at_ms:Date.now()};return;}
     error=String(e).slice(0,200);value={session,document_id:null,layer_ids:[],kind:'unknown',mask:0};}
   // Throttle from read completion: if DOM work itself takes over 100ms,
@@ -219,7 +222,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.46', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.47', session, transport: 'plugin-data-files',
         layer_observation:observation,
         shape_clipboard_available:labels.paintClipboardAvailable?.()===true,
         ...await labels.interfacePreferences(),
@@ -294,7 +297,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.46', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.47', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -342,7 +345,8 @@ async function probe(reason) {
       }
       if (request.operation === 'inspect') {
         response.target = labels.documentTarget();
-        if(request.stability_run)response.stability=await labels.stability.read(request.stability_run);
+        if(request.stability_run)response.stability=await (/^24\.2(?:\.\d+)*$/.test(String(uxp.host?.version || ''))?require('photoshop').core.executeAsModal(()=>labels.stability.read(request.stability_run),{commandName:'Read isolated target',timeOut:0}):labels.stability.read(request.stability_run));
+        if(request.stability_run && request.native_selection_test)response.native_selection=await labels.selectionContextNative();
         if(request.shape_inspect)response.shape_editor=await labels.observeShape(await labels.selectionContextFresh(),true);
       }
       if (request.operation === 'capture') response.target = await labels.capture();

@@ -101,6 +101,7 @@ static Json testedShapePaint;
 static size_t testedShapeGrants=0;
 static std::vector<Json> testedMaskEvents;
 static void emitMaskPreview(bool commit=false,bool returnToMenu=false) {
+    if(stabilityInspection)return;
     if(!shapeEditor.livePreview)return;
     maskPreviewStarted=true;
     shapeEditor.lastPreview=shapeEditor.draft;
@@ -134,6 +135,7 @@ static void copyShapeHex(const Json& rgb) {
     shapeEditor.copiedAt=GetTickCount64();
 }
 static void commitShapeDraft() {
+    if(stabilityInspection)return;
     if(!shapeEditor.ready() || (!shapeEditor.dirty && !maskPreviewStarted) || !shapeEditor.valid()){send("hide");return;}
     // Both draft and preview confirmation return from the foreground menu to
     // its own backend. Preserve the same bounded focus grant for both paths.

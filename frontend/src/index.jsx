@@ -133,7 +133,7 @@ function App() {
     async function stop(){try{const result=await call('stability.stop');setState(previous=>({...previous,stability:result}));}catch{}}
     async function download(){try{const report=await call('stability.export');const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='ps-menu-stability-'+report.run_id+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{}}
     return <section id="stability-test"><h2>{t('自动稳定性测试')}</h2>
-      <p>{t('在隔离临时文档中反复识别图层、修改标签、增加图层、调整颜色／羽化并核验撤销。测试期间请勿操作PS；可停留在后台管理窗口。')}</p>
+      <p>{t('在隔离临时文档中反复唤起／收起原生菜单，核验图层读取和按钮恢复，并测试标签、增层、颜色／羽化及撤销。菜单会短暂显示；请勿操作PS，可停留在后台管理窗口。')}</p>
       <label class="advanced-field"><span>{t('测试强度')}</span><select aria-label={t('测试强度')} disabled={disabled() || test().active} value={profile()} onChange={e=>setProfile(e.target.value)}><option value="standard">{t('标准：3轮，24次新增图层')}</option><option value="extended">{t('持续：10轮，80次新增图层')}</option></select></label>
       <p role="status">{t(test().message || '尚未开始测试')}</p>
       <Show when={test().active || test().ready}><p class="caption">{test().round || 0} / {test().rounds || 0} {t('轮')} · {test().completed_steps || 0} {t('个步骤')} · {test().samples || 0} {t('个系统采样')}</p></Show>

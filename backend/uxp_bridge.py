@@ -104,8 +104,8 @@ class UxpTransport:
                     raise RuntimeError('UXP 未就绪，请正常启动 Photoshop 并加载 0.3.x 插件')
                 identity=secrets.token_hex(16)
                 modifying=operation in ('set_label','new_document')
-                if payload.get('stability_run') and version(heartbeat.get('probe_version'))<(0,3,46):
-                    raise RuntimeError('自动稳定性测试需要实际加载 UXP 0.3.46')
+                if payload.get('stability_run') and version(heartbeat.get('probe_version'))<(0,3,47):
+                    raise RuntimeError('自动稳定性测试需要实际加载 UXP 0.3.47')
                 if modifying and version(heartbeat.get('probe_version'))<(0,3,8):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.8，以支持结果核对；未提交修改')
                 if 'capture_current' in payload:

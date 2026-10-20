@@ -24,7 +24,7 @@ STAGE_LABELS={'fixture':'正在创建隔离临时文档','idle-read':'正在检�
     'preview-commit-undo':'正在核验颜色／羽化确认与一次撤销','preview-cancel':'正在核验预览取消恢复',
     'grow-layer':'正在逐步增加图层','growing-layer-read':'正在读取新增图层',
     'select-many':'正在准备多选图层','multi-selection-read':'正在读取多选图层',
-    'select-shape':'正在恢复测试形状选择','finish':'正在关闭测试文档并恢复原文档'}
+    'select-shape':'正在恢复测试形状选择','native-selection-probe':'正在核验批量图层读取','finish':'正在关闭测试文档并恢复原文档'}
 
 
 def summary(rows):
@@ -38,6 +38,15 @@ def summary(rows):
             'p95_ms':ordered[max(0,math.ceil(len(values)*.95)-1)],'max_ms':max(values),
             'first_third_median_ms':statistics.median(values[:part]),'last_third_median_ms':statistics.median(values[-part:])}
     return result
+
+
+def liveness(folder):
+    """Existing file evidence only, including stale pulses; never renews a lease."""
+    try:
+        value=read_heartbeat(folder)
+        return {**{k:value.get(k) for k in ('session','probe_version','photoshop_version','phase','reason','sequence','plugin_time_ms','layer_observation')},
+            'age_ms':round(time.time()*1000-value.get('plugin_time_ms',0),2)}
+    except (OSError,ValueError,TypeError) as error:return {'unavailable':type(error).__name__}
 
 
 class StabilityTest:
@@ -84,7 +93,7 @@ class StabilityTest:
         self.report={'schema':1,'run_id':uuid.uuid4().hex,'phase':'running','message':'正在准备隔离测试',
             'profile':profile,'rounds':3 if profile=='standard' else 10,'round':0,'stage':'preflight',
             'started_at':time.time(),'application_version':APP_VERSION,'steps':[],'system_samples':[],
-            'cleanup':'not-created','scope':{'temporary_document_only':True,'changes_power_plan':False,
+            'cleanup':'not-created','scope':{'native_menu_lifecycle':True,'native_menu_read_only':True,'temporary_document_only':True,'changes_power_plan':False,
             'injects_input':False,'uploads':False,'original_documents_saved_or_closed':False},
             'not_tested':['physical_caps_and_UU_remote','mouse_hit_testing','visible_canvas','real_document_content',
                 'GPU_causality','thermal_throttling_causality','other_OS_or_Photoshop_versions'],
@@ -140,33 +149,43 @@ class StabilityTest:
         value=await asyncio.to_thread(self.app.bridge.transport.call,'inspect',stability_run=self.report['run_id'],shape_inspect=True)
         return {'stability':value['stability'],'shape_editor':value.get('shape_editor',{})}
 
+    async def native_selection_probe(self):
+        value=await asyncio.to_thread(self.app.bridge.transport.call,'inspect',stability_run=self.report['run_id'],native_selection_test=True)
+        native=value['native_selection'];target=value['stability']['target']
+        if any(native.get(k)!=target[k] for k in ('document_id','layer_ids')):raise RuntimeError('批量读取目标与隔离目标不一致')
+        return {'read_path':native['read_path'],'kind':native['kind'],'mask':native['mask'],'identity_verified':True}
+
     async def menu_read(self):
         expected=(await self.inspect())['stability']['target']
-        bridge=self.app.bridge;started=time.monotonic()
-        request=await asyncio.to_thread(bridge.request_menu_context,len(self.report['steps']))
-        if not request:raise RuntimeError('图层读取请求不受支持')
-        phases={};deadline=request['deadline']
+        desktop=self.app.desktop
+        if not desktop:raise RuntimeError('自动测试需要原生菜单组件')
+        started=time.monotonic();epoch=None;phases={};last={}
         try:
+            epoch=await asyncio.to_thread(desktop.begin_stability_menu,self.host_pid,self.check)
+            deadline=time.monotonic()+32
             while time.monotonic()<deadline:
-                self.check()
-                try:
-                    raw=await asyncio.to_thread((request['folder']/'menu-context-result.json').read_text,'utf-8-sig')
-                    value=json.loads(raw)
-                except (OSError,ValueError):value={}
-                if value.get('session')==request['session'] and value.get('menu_request_id')==request['id']:
-                    phase=value.get('menu_phase');phases.setdefault(str(phase),round((time.monotonic()-started)*1000,3))
-                    if phase=='reading':deadline=request['completion_deadline']
-                    if phase=='completed':
-                        value=validate(value,request['session'])
-                        if not fresh(value) or value.get('kind') in ('none','unknown') or any(value.get(k)!=expected[k] for k in ('document_id','layer_ids')):
-                            raise RuntimeError('新鲜图层读取身份或能力校验失败')
-                        return {'request_id':request['id'],'phases_ms':phases,'kind':value['kind'],
-                            'mask':value['mask'],'quick_mask':value.get('quick_mask'),
-                            'snapshot_age_ms':round(time.time()*1000-value['plugin_time_ms'],2),
-                            'timings_ms':value.get('timings_ms',{})}
+                self.check();last=await asyncio.to_thread(desktop.stability_menu_state,epoch)
+                if not last['visible']:raise RuntimeError('原生菜单意外关闭')
+                delivery=last['delivery'];phase=delivery.get('menu_phase',delivery.get('phase'))
+                phases.setdefault(str(phase),round((time.monotonic()-started)*1000,3))
+                if delivery.get('phase') in ('expired','closed','native-rejected'):raise RuntimeError('菜单图层更新未应用: '+delivery['phase'])
+                if delivery.get('phase')=='applied' and phase=='completed':
+                    value=last['context'];bits=last['native']
+                    if not fresh(value) or any(value.get(k)!=expected[k] for k in ('document_id','layer_ids')):raise RuntimeError('菜单新鲜目标不匹配')
+                    if last['frames']<=last.get('frames_start',0) or bits & 0xf800 != 0xf800 or bits&15!=value['mask'] or (bits>>4)&127!=value.get('quick_mask',0):
+                        await asyncio.sleep(.04);continue
+                    result={'request_id':delivery.get('request_id'),'epoch':epoch,'phases_ms':phases,'kind':value['kind'],'mask':value['mask'],
+                        'native_window_visible':True,'native_content_visible':True,'native_buttons_enabled':bool(bits&(1<<15)),
+                        'native_capabilities':bits,'rendered_frames':last['frames'],'delivery':delivery,
+                        'snapshot_age_ms':round(time.time()*1000-value['plugin_time_ms'],2),'timings_ms':value.get('timings_ms',{})}
+                    return result
                 await asyncio.sleep(.04)
-            raise RuntimeError('图层读取超过固定期限；保留原请求，未重发')
-        finally:await asyncio.to_thread(bridge.cancel_menu_context,request)
+            raise RuntimeError('菜单读取／原生接收／按钮恢复超过固定期限')
+        finally:
+            self.report['last_menu_observation']=last
+            if epoch is not None:
+                await asyncio.to_thread(desktop.end_stability_menu)
+                if desktop.visible or desktop.gui.IsWindowVisible(desktop.hwnd):raise RuntimeError('测试菜单未收起')
 
     async def paint(self,cancel=False):
         baseline=await self.inspect();shape=baseline['shape_editor'];checkpoint=baseline['stability']['history_id']
@@ -241,6 +260,7 @@ class StabilityTest:
                 row=await asyncio.to_thread(metrics.sample)
                 if self.report is not report:break
                 row['stage']=self.report.get('stage');row['round']=self.report.get('round')
+                if getattr(self,'heartbeat_folder',None):row['uxp_liveness']=await asyncio.to_thread(liveness,self.heartbeat_folder)
                 task_id=getattr(self.app.bridge,'_active_task_id',None)
                 if task_id:
                     try:
@@ -268,9 +288,10 @@ class StabilityTest:
         monitor=None;owned=False
         try:
             self.host_pid,self.focus_check=await asyncio.to_thread(host_scope)
-            heartbeat=await asyncio.to_thread(lambda:read_heartbeat(self.app.bridge.transport.folder))
+            self.heartbeat_folder=await asyncio.to_thread(lambda:self.app.bridge.transport.folder)
+            heartbeat=await asyncio.to_thread(read_heartbeat,self.heartbeat_folder)
             self.report['versions']={k:heartbeat.get(k) for k in ('probe_version','photoshop_version','session','document_redraw_available','legacy_preview_available')}
-            if version(heartbeat.get('probe_version'))<(0,3,46):raise RuntimeError('请先更新并实际加载 UXP 0.3.46')
+            if version(heartbeat.get('probe_version'))<(0,3,47):raise RuntimeError('请先更新并实际加载 UXP 0.3.47')
             monitor=asyncio.create_task(self.monitor())
             self.report['machine']=await asyncio.to_thread(machine_info)
             desktop=self.app.desktop
@@ -280,6 +301,7 @@ class StabilityTest:
                 'visible_content_and_physical_input_verified':False}
             self.report['cleanup']='fixture-started-outcome-not-yet-verified'
             await self.step('fixture',lambda:self.command('fixture'));owned=True;self.report['cleanup']='owned-document-retained'
+            await self.step('native-selection-probe',self.native_selection_probe)
             for round_number in range(1,self.report['rounds']+1):
                 self.report['round']=round_number
                 await self.step('idle-read',self.menu_read)
@@ -306,6 +328,7 @@ class StabilityTest:
             # Never guess whether a timed-out mutation finished. No rollback,
             # close, resend or new host reads from this failure path.
             if owned:self.report['cleanup']='retained-for-inspection-no-automatic-cleanup'
+            if getattr(self,'heartbeat_folder',None):self.report['last_uxp_liveness']=await asyncio.to_thread(liveness,self.heartbeat_folder)
             self.report['original_request_pending']=bool(self.app.bridge.busy or self.app.bridge.transport.pending.value or self.app.bridge.transport.pending.error)
             self.active=False
             if monitor:

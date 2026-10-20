@@ -130,13 +130,13 @@ def pie_bounds(ps_rect, work_rect, cursor, scale, home=False, color_editor=False
                         (cursor[0]-anchor, cursor[1]-height//2), width, height)
 
 
-def show_popup(gui, hwnd, owner, bounds):
+def show_popup(gui, hwnd, owner, bounds, activate=True):
     """Showing an iconified GLFW viewport does not restore its render surface."""
     import win32con as c
     gui.SetWindowLong(hwnd, c.GWL_HWNDPARENT, owner)
     if gui.IsIconic(hwnd):
-        gui.ShowWindow(hwnd, c.SW_RESTORE)
-    gui.SetWindowPos(hwnd, c.HWND_TOP, *bounds, c.SWP_SHOWWINDOW)
+        gui.ShowWindow(hwnd, c.SW_RESTORE if activate else c.SW_SHOWNOACTIVATE)
+    gui.SetWindowPos(hwnd, c.HWND_TOP, *bounds, c.SWP_SHOWWINDOW | (0 if activate else c.SWP_NOACTIVATE))
 
 
 class Desktop:
@@ -486,6 +486,10 @@ class Desktop:
 
     @window_transition
     def _scope(self):
+        inspection=getattr(self,"_stability_inspection",None)
+        if inspection:
+            try:inspection["check"]();return self._is_photoshop(inspection["root"])
+            except RuntimeError:return False
         if not self.settings["enabled"]:
             return False
         hwnd = self.gui.GetForegroundWindow()
@@ -610,6 +614,54 @@ class Desktop:
             if previous:
                 u.SetThreadDpiAwarenessContext(previous)
 
+    def begin_stability_menu(self, pid, check):
+        """Owned read-only inspection; production popup/context path, no input injection."""
+        import win32process
+        check()
+        if self.visible or getattr(self,'_stability_inspection',None):raise RuntimeError('菜单已打开，测试未覆盖它')
+        roots=[]
+        self.gui.EnumWindows(lambda hwnd,_:roots.append(hwnd) if self.gui.IsWindowVisible(hwnd) and win32process.GetWindowThreadProcessId(hwnd)[1]==pid and self._workspace_root(hwnd)==hwnd else None,None)
+        if len(roots)!=1:raise RuntimeError('无法唯一识别 Photoshop 工作区')
+        root=roots[0];panel=self.panel_context
+        current=panel.snapshot(root)
+        if current.get('input_focused') or current.get('kind')=='text':raise RuntimeError('Photoshop 输入保护生效，测试停止')
+        candidates=[]
+        def visit(hwnd,_):
+            if self.gui.IsWindowVisible(hwnd) and self.gui.GetClassName(hwnd)=='PSViewC':
+                selected=panel.layer_list_window(hwnd,root)
+                if selected and selected not in candidates:candidates.append(selected)
+        self.gui.EnumChildWindows(root,visit,None)
+        if len(candidates)!=1:raise RuntimeError('请显示唯一的图层面板后开始测试')
+        bounds=self.gui.GetWindowRect(candidates[0]);cursor=((bounds[0]+bounds[2])//2,(bounds[1]+bounds[3])//2)
+        inspection={'root':root,'cursor':cursor,'panel':{'kind':'layers','source':'verified-stability-list','hwnd':candidates[0],'input_focused':False},'check':check,'previous_panel':dict(panel.current)}
+        with self.window_lock:
+            inspection['frames_start']=self.gui.SendMessage(self.hwnd,0x800b,0,0)
+            self._stability_inspection=inspection;panel.current=inspection['panel']
+            self.gui.SendMessage(self.hwnd,0x801a,1,0)
+            try:
+                self._open(hold=True,origin=cursor,_inspection=inspection)
+                self.gui.SendMessage(self.hwnd,0x8010,1,0)
+                return self.menu_epoch
+            except Exception:
+                self.end_stability_menu();raise
+
+    @window_transition
+    def stability_menu_state(self, epoch):
+        if not getattr(self,'_stability_inspection',None) or epoch!=self.menu_epoch:raise RuntimeError('测试菜单轮次已变化')
+        return {'epoch':epoch,'frames_start':self._stability_inspection['frames_start'],'visible':bool(self.visible and self.gui.IsWindowVisible(self.hwnd)),
+            'delivery':dict(getattr(self,'menu_context_delivery',{})),
+            'context':dict(self.menu_layer_context or {}),
+            'native':self.gui.SendMessage(self.hwnd,0x801b,epoch,0),
+            'frames':self.gui.SendMessage(self.hwnd,0x800b,0,0)}
+
+    @window_transition
+    def end_stability_menu(self):
+        inspection=getattr(self,'_stability_inspection',None)
+        if not inspection:return
+        self.hide(restore=False)
+        self.gui.SendMessage(self.hwnd,0x801a,0,0)
+        self.panel_context.current=inspection['previous_panel'];self._stability_inspection=None
+
     def _refresh_document_name(self):
         from .document_caption import document_name
         from .photoshop_windows import workspace_root
@@ -628,18 +680,19 @@ class Desktop:
             logging.debug('Document caption unavailable', exc_info=True)
 
     @window_transition
-    def _open(self, context=False, hold=False, origin=None):
+    def _open(self, context=False, hold=False, origin=None, _inspection=None):
         open_started = time.perf_counter()
         import win32api
         import win32con as c
         hwnd = self.gui.GetForegroundWindow()
         foreground = hwnd
+        if _inspection:hwnd=_inspection["root"]
         if self.restore_pending and self._is_menu_window(hwnd) and self._is_photoshop(self.target):
             hwnd = self.target
         if not self.settings["enabled"] or not self._is_photoshop(hwnd):
             raise RuntimeError("请先让 Photoshop 主窗口获得焦点，再唤出操作菜单")
         from .photoshop_windows import workspace_root
-        cursor = win32api.GetCursorPos()
+        cursor = _inspection["cursor"] if _inspection else win32api.GetCursorPos()
         root = workspace_root(self.gui, hwnd)
         rect = self.gui.GetWindowRect(root)
         hovered = self.gui.WindowFromPoint(cursor)
@@ -660,7 +713,7 @@ class Desktop:
         u.GetDpiForWindow.argtypes, u.GetDpiForWindow.restype = [W.HWND], W.UINT
         scale = (u.GetDpiForWindow(hwnd) or 96) / 96
         work = win32api.GetMonitorInfo(win32api.MonitorFromPoint(cursor, c.MONITOR_DEFAULTTONEAREST))["Work"]
-        panel = self.panel_context.snapshot(hwnd) if self.panel_context else {'kind': 'generic'}
+        panel = _inspection['panel'] if _inspection else self.panel_context.snapshot(hwnd) if self.panel_context else {'kind': 'generic'}
         self.menu_layer_context=None
         if self.layer_context_provider and panel.get('kind')!='home':
             from .layer_context import fresh,unavailable
@@ -710,9 +763,9 @@ class Desktop:
         buffer=ctypes.create_string_buffer(payload)
         packet=CopyData(0x53485045,len(payload)+1,ctypes.cast(buffer,ctypes.c_void_p))
         self.gui.SendMessage(self.hwnd,0x4a,0,ctypes.addressof(packet))
-        show_popup(self.gui, self.hwnd, root, bounds)
+        show_popup(self.gui, self.hwnd, root, bounds, activate=not bool(_inspection))
         try:
-            self.gui.SetForegroundWindow(self.hwnd)
+            if not _inspection:self.gui.SetForegroundWindow(self.hwnd)
         except Exception:
             pass
         self._native_config()
@@ -811,7 +864,7 @@ class Desktop:
             self.menu_context_delivery={'phase':'applied' if accepted else 'native-rejected','epoch':pending['epoch'],
                 'menu_phase':phase,'kind':value['kind'],'selection_count':len(value['layer_ids']),
                 'packet_bytes':len(payload)+1,'selection_age_ms':max(0,round(time.time()*1000-value['plugin_time_ms'])),
-                'accepted':accepted,'editor_omitted':editor_omitted}
+                'accepted':accepted,'editor_omitted':editor_omitted,'request_id':pending['id']}
             if accepted:
                 self.menu_layer_context=dict(value);self.color_editor_active=active
                 if phase=='completed':self.menu_context_pending=None
@@ -926,6 +979,13 @@ class Desktop:
         return {"message": "操作菜单已收起"}
 
     def dismiss(self):
+        with self.window_lock:
+            inspection=getattr(self,'_stability_inspection',None)
+            if inspection and not self._is_photoshop(self.gui.GetForegroundWindow()):
+                try:
+                    inspection['check']()
+                    return {'message':'后台只读菜单测试继续'}
+                except RuntimeError:pass
         return self.hide(restore=False)
 
     @window_transition

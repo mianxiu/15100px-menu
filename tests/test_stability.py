@@ -56,7 +56,7 @@ class StabilityTests(unittest.IsolatedAsyncioTestCase):
             self.bridge.busy=True;raise RuntimeError('original pending')
         async def read():return {}
         async def monitor():pass
-        with patch('backend.stability.host_scope',return_value=(1,lambda:None)),patch('backend.stability.read_heartbeat',return_value={'probe_version':'0.3.46'}),patch.object(type(self.bridge.transport),'folder',new_callable=__import__('unittest.mock',fromlist=['PropertyMock']).PropertyMock,return_value=self.root),patch('backend.stability.machine_info',return_value={}),patch.object(self.test,'monitor',monitor),patch.object(self.test,'command',command),patch.object(self.test,'menu_read',read):
+        with patch('backend.stability.host_scope',return_value=(1,lambda:None)),patch('backend.stability.read_heartbeat',return_value={'probe_version':'0.3.47'}),patch.object(type(self.bridge.transport),'folder',new_callable=__import__('unittest.mock',fromlist=['PropertyMock']).PropertyMock,return_value=self.root),patch('backend.stability.machine_info',return_value={}),patch.object(self.test,'monitor',monitor),patch.object(self.test,'command',command),patch.object(self.test,'menu_read',read),patch.object(self.test,'native_selection_probe',read):
             await self.test.run()
         self.assertEqual(calls,['fixture','label']);self.assertTrue(self.test.report['original_request_pending'])
         self.assertEqual(self.test.report['cleanup'],'retained-for-inspection-no-automatic-cleanup')
@@ -65,18 +65,36 @@ class StabilityTests(unittest.IsolatedAsyncioTestCase):
         rows=[{'stage':'x','state':'passed','elapsed_ms':1},{'stage':'x','state':'skipped','elapsed_ms':1000}]
         self.assertEqual(summary(rows)['x']['samples'],1)
         self.assertNotIn('stability.internal',[x['id'] for x in command_contracts()])
-    async def test_menu_reads_completed_mailbox_not_basic_background_cache(self):
+    async def test_menu_requires_native_visible_content_capabilities_and_closes(self):
         import time
         target={'document_id':2,'layer_ids':[3]}
-        request={'folder':self.root,'id':'x','session':'s','deadline':time.monotonic()+.2,'completion_deadline':time.monotonic()+.4}
-        value={'schema':1,'session':'s','menu_request_id':'x','menu_phase':'completed','plugin_time_ms':time.time()*1000,
-            'kind':'shape-fill','mask':15,'quick_mask':127,**target}
-        (self.root/'menu-context-result.json').write_text(json.dumps(value),'utf-8')
-        (self.root/'layer-context.json').write_text(json.dumps({**value,'menu_phase':'basic'}),'utf-8')
-        self.test.report={'steps':[]};self.test.check=lambda:None
-        with patch.object(self.test,'inspect',AsyncMock(return_value={'stability':{'target':target}})),patch.object(self.bridge,'request_menu_context',return_value=request),patch.object(self.bridge,'cancel_menu_context') as cancel:
+        context={'schema':1,'session':'s','plugin_time_ms':time.time()*1000,'kind':'pixel','mask':15,'quick_mask':127,**target}
+        desktop=SimpleNamespace(begin_stability_menu=lambda *x:7,
+            stability_menu_state=lambda epoch:{'visible':True,'delivery':{'phase':'applied','menu_phase':'completed','request_id':'r'},'context':context,'native':0xffff,'frames':5},
+            end_stability_menu=lambda:None,visible=False,hwnd=9,gui=SimpleNamespace(IsWindowVisible=lambda hwnd:False))
+        self.app.desktop=desktop;self.test.host_pid=1;self.test.report={};self.test.check=lambda:None
+        with patch.object(self.test,'inspect',AsyncMock(return_value={'stability':{'target':target}})):
             result=await self.test.menu_read()
-        self.assertEqual(result['kind'],'shape-fill');cancel.assert_called_once_with(request)
+        self.assertTrue(result['native_content_visible']);self.assertTrue(result['native_buttons_enabled']);self.assertEqual(result['epoch'],7)
+        desktop.stability_menu_state=lambda epoch:{'visible':False}
+        with patch.object(self.test,'inspect',AsyncMock(return_value={'stability':{'target':target}})):
+            with self.assertRaisesRegex(RuntimeError,'意外关闭'):await self.test.menu_read()
+
+    async def test_menu_waits_for_native_frame_and_enabled_controls(self):
+        import time
+        target={'document_id':2,'layer_ids':[3]}
+        context={'schema':1,'session':'s','plugin_time_ms':time.time()*1000,'kind':'pixel','mask':15,'quick_mask':127,**target}
+        base={'visible':True,'delivery':{'phase':'applied','menu_phase':'completed'},'context':context,'frames_start':10,'frames':11}
+        snapshots=[{**base,'native':0},{**base,'native':0xffff}]
+        state=__import__('unittest.mock',fromlist=['Mock']).Mock(side_effect=snapshots)
+        close=__import__('unittest.mock',fromlist=['Mock']).Mock()
+        self.app.desktop=SimpleNamespace(begin_stability_menu=lambda *x:7,stability_menu_state=state,end_stability_menu=close,
+            visible=False,hwnd=9,gui=SimpleNamespace(IsWindowVisible=lambda hwnd:False))
+        self.test.host_pid=1;self.test.report={};self.test.check=lambda:None
+        with patch.object(self.test,'inspect',AsyncMock(return_value={'stability':{'target':target}})):
+            result=await self.test.menu_read()
+        self.assertEqual(state.call_count,2);close.assert_called_once();self.assertTrue(result['native_buttons_enabled'])
+
     async def test_internal_completion_updates_fresh_layer_feedback(self):
         import time
         context={'schema':1,'session':'s','plugin_time_ms':time.time()*1000,'kind':'pixel','mask':15,'document_id':7,'layer_ids':[8]}

@@ -13,6 +13,7 @@ export default {
   "正在关闭测试文档并恢复原文档":"Closing the test document and restoring the original",
   "自动稳定性测试":"Automatic stability test",
   "在隔离临时文档中反复识别图层、修改标签、增加图层、调整颜色／羽化并核验撤销。测试期间请勿操作PS；可停留在后台管理窗口。":"Repeats layer reads, labels, layer creation, color/feather edits and undo checks in an isolated temporary document. Leave Photoshop untouched; you may keep this dashboard in front.",
+  '在隔离临时文档中反复唤起／收起原生菜单，核验图层读取和按钮恢复，并测试标签、增层、颜色／羽化及撤销。菜单会短暂显示；请勿操作PS，可停留在后台管理窗口。': 'Repeatedly open and close the native menu in an isolated document, verify layer reads and restored buttons, then test labels, new layers, color/feather and undo. The menu appears briefly; do not operate Photoshop. You may stay in the management window.',
   "测试强度":"Test profile",
   "标准：3轮，24次新增图层":"Standard: 3 rounds, 24 added layers",
   "持续：10轮，80次新增图层":"Extended: 10 rounds, 80 added layers",

@@ -1,5 +1,9 @@
 # Photoshop Menu
 
+208／UXP0.3.47：针对PS24.2.x逐属性DOM读取延迟，改用有界批量标量读取与新鲜身份核对，沿用原能力算法和写前校验；仅显式颜色元数据采用短时只读模态。自动测试补齐标准54次／持续180次原生菜单显示、请求／接收、按钮能力、内容帧和收起，记录心跳失鲜及最后菜单观测。需保存文档、正常关闭PS后更新内置UXP，再手动启动并确认实际0.3.47。
+
+[使用说明和验证边界](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)。PS24.2.0故障机仍待复测；实体Caps、UU远程及调色面板提前关闭未计为已修复。以下为此前版本记录。
+
 [v0.4.207已发布](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.207)／UXP0.3.46新增后台一键自动稳定性测试，自动生成图层读取、持续操作及系统负载报告。[使用方法与验证限制](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)；故障机持续卡顿和UU远程Caps双按仍待定位。
 
 以下为历史版本变更。

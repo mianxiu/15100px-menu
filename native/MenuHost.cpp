@@ -59,6 +59,8 @@ static bool running=true,opened=false,contextMode=false,focusSearch=false;
 static bool allowed=false,capable=false,rightHide=false;
 static std::string document="连接中…",notice;
 static int renderedHit=-1,pendingHit=-1;
+static bool stabilityInspection=false;
+static int lastVisibleVertices=0;
 static bool taskBusy=false,taskFailed=false,taskHasResult=false;
 static bool maskPreviewStarted=false,shapeDraftOnly=false;
 static bool busyFeedback=false;
@@ -106,6 +108,7 @@ static std::string taskStatus() {
     return "";
 }
 static void updateBusy(bool busy,bool queueReady=false,int queueCount=0) {
+    if(stabilityInspection)busy=false;
     if (busy && !taskBusy) taskStarted=GetTickCount64();
     if (busy && window && IsWindowVisible(window)) busyFeedback=true;
     if(!busy && taskBusy && taskHasResult && !taskFailed)completionStarted=GetTickCount64();
@@ -303,6 +306,7 @@ static std::vector<std::string> testedActions;
 static size_t labelTestActionCount=0;
 static ImVec2 bottomRow;
 static void send(const char* action) {
+    if(stabilityInspection)return;
     if(panelKind==0 && (std::string(action)=="moveToTop" || std::string(action)=="moveToBottom" ||
                        std::string(action)=="moveUp" || std::string(action)=="moveDown"))return;
     for(int i=0;i<7;++i)if(std::string(action)==quickActions[i] && !quickEnabled(i))return;
@@ -623,9 +627,16 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     else send(chosen<0?"hide":rowAction(chosen));
 }
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    if(stabilityInspection && ((msg>=WM_MOUSEFIRST && msg<=WM_MOUSELAST) || (msg>=WM_KEYFIRST && msg<=WM_KEYLAST)))return 0;
     if(ImGui::GetCurrentContext() && shapeEyedropMessage(msg,wp,lp))return 0;
     if(msg==WM_WINDOWPOSCHANGED && (reinterpret_cast<WINDOWPOS*>(lp)->flags&SWP_HIDEWINDOW))stopShapeEyedrop();
     if(msg==WM_APP+23){holdOrigin={static_cast<LONG>(wp),static_cast<LONG>(lp)};holdMoved=false;return 0;}
+    if(msg==WM_APP+26){stabilityInspection=wp!=0;if(stabilityInspection){taskBusy=busyFeedback=taskHasResult=false;taskRecovery.clear();allowed=capable=true;}return 0;}
+    if(msg==WM_APP+27){
+        if(!stabilityInspection || static_cast<LPARAM>(wp)!=menuEpoch)return 0;
+        return (layerMask&15)|((quickMask&127)<<4)|(canExecute()?1<<11:0)|
+            (lastVisibleVertices>0?1<<12:0)|(compositionOpacity>.05f?1<<13:0)|(panelKind==2?1<<14:0)|(rowEnabled(1)?1<<15:0);
+    }
     if(msg==WM_COPYDATA){
         auto* data=reinterpret_cast<COPYDATASTRUCT*>(lp);
         // 128 pattern names of 128 characters may exceed 64KiB after JSON
@@ -1611,6 +1622,7 @@ static void benchmarkShapeEditor(const Json& fixture) {
                 ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();io.DeltaTime=1.f/60;
                 const auto start=std::chrono::steady_clock::now();
                 ImGui::NewFrame();drawMenu();ImGui::Render();
+            lastVisibleVertices=ImGui::GetDrawData()->TotalVtxCount;
                 context->OMSetRenderTargets(1,&target,nullptr);const float clear[]={0,0,0,0};context->ClearRenderTargetView(target,clear);
                 ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
                 const double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
@@ -2099,6 +2111,7 @@ int main() {
             }
             if(!preview.empty() && previewOwningEditor && frames>=2)maskPreviewStarted=true;
             ImGui::NewFrame();drawMenu();ImGui::Render();
+            lastVisibleVertices=ImGui::GetDrawData()->TotalVtxCount;
             ++renderedFrames;
             if (!target) throw std::runtime_error("DX11 render target lost after window resize");
             auto bg=ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
@@ -2599,6 +2612,11 @@ int main() {
                     if(PerceptualPickerState::markerHit(i,{100,100},{100+PerceptualPickerState::markerExtent(i)+3.f,100},1))
                         throw std::runtime_error("Marker hit extends beyond its visible padded bounds");
                 }
+                {const auto before=testedActions.size(),events=testedMaskEvents.size();
+                    procedure(window,WM_APP+26,1,0);send("label.red");commitShapeDraft();emitMaskPreview();
+                    if(testedActions.size()!=before || testedMaskEvents.size()!=events)throw std::runtime_error("Read-only menu inspection emitted an action");
+                    if(procedure(window,WM_APP+27,menuEpoch+1,0))throw std::runtime_error("Old menu inspection accepted a different epoch");
+                    procedure(window,WM_APP+26,0,0);}
                 Json shapeFixture={{"available",true},{"live_preview",true},{"revision","test:1"},
                     {"mask",{{"feather",0},{"density",100}}},
                     {"fill",{{"kind","solid"},{"enabled",true},{"rgb",{12,34,56}}}},
