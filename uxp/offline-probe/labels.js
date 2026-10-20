@@ -1583,10 +1583,20 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
 
 // Photoshop 24.2 Windows has severe per-getter DOM overhead outside modal work.
 // No host DOM objects or cross-request capability cache enter this read path.
+async function nativeDocumentCount(ps,checkpoint=null) {
+  if(checkpoint)await checkpoint();
+  const rows=await ps.action.batchPlay([{_obj:'get',_target:[{_ref:'property',_property:'numberOfDocuments'},
+    {_ref:'application',_enum:'ordinal',_value:'targetEnum'}],_options:{dialogOptions:'silent'}}],{});
+  if(checkpoint)await checkpoint();
+  const count=rows?.[0]?.numberOfDocuments;
+  if(!Number.isInteger(count)||count<0)throw Error('Native document state unavailable');
+  return count;
+}
 async function nativeSelectionContext(ps,session,reader,checkpoint=null) {
+  if(await nativeDocumentCount(ps,checkpoint)===0)return {session,document_id:null,layer_ids:[],kind:'none',mask:0};
   const tick=async()=>{if(checkpoint)await checkpoint();};
   const ref=[{_ref:'document',_enum:'ordinal',_value:'targetEnum'}];
-  const property=name=>({_obj:'get',_target:[{_ref:'property',_property:name},...ref],_options:{dialogOptions:'dontDisplay'}});
+  const property=name=>({_obj:'get',_target:[{_ref:'property',_property:name},...ref],_options:{dialogOptions:'silent'}});
   async function batch(commands){await tick();const result=await ps.action.batchPlay(commands,{});await tick();
     if(!Array.isArray(result)||result.length!==commands.length||result.some(v=>!v||v._obj==='error'))throw Error('Native selection unavailable');return result;}
   function identity(rows){
@@ -1600,7 +1610,7 @@ async function nativeSelectionContext(ps,session,reader,checkpoint=null) {
   const total=count+(bg?1:0),documentRef=[{_ref:'document',_id:chosen.id}];
   const [result]=await batch([{_obj:'multiGet',_target:{_ref:documentRef},extendedReference:[
     ['layerID','parentLayerID','itemIndex','layerSection','layerKind','background','layerLocking'],
-    {_obj:'layer',index:bg?0:1,count:total}],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'dontDisplay'}}]);
+    {_obj:'layer',index:bg?0:1,count:total}],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}]);
   if(!Array.isArray(result.list)||result.list.length!==total)throw Error('Incomplete native selection tree');
   const rows=result.list.slice().sort((a,b)=>b.itemIndex-a.itemIndex),layers=[],map=new Map(),stack=[];
   const k=ps.constants.LayerKind,kindMap={1:k.NORMAL,2:k.CURVES,3:k.TEXT,4:k.SOLIDFILL,5:k.SMARTOBJECT,6:k.VIDEO,8:k.THREED,9:k.GRADIENTFILL,10:k.PATTERNFILL,11:k.SOLIDFILL};
@@ -1632,7 +1642,8 @@ async function nativeSelectionContext(ps,session,reader,checkpoint=null) {
 }
 
 async function nativeCapture(ps,session) {
-  const property=(name,layer=false)=>({_obj:'get',_target:[{_ref:'property',_property:name},{_ref:layer?'layer':'document',_enum:'ordinal',_value:'targetEnum'}],_options:{dialogOptions:'dontDisplay'}});
+  if(await nativeDocumentCount(ps)===0)throw Error('No active document; no operation submitted');
+  const property=(name,layer=false)=>({_obj:'get',_target:[{_ref:'property',_property:name},{_ref:layer?'layer':'document',_enum:'ordinal',_value:'targetEnum'}],_options:{dialogOptions:'silent'}});
   const result=await ps.action.batchPlay([property('documentID'),property('targetLayersIDs'),property('layerID',true)],{});
   if(!Array.isArray(result)||result.length!==3||result.some(v=>!v||v._obj==='error'))throw Error('Native target unavailable');
   const id=result[0].documentID,refs=result[1].targetLayersIDs,active=result[2].layerID;

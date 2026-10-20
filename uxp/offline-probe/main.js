@@ -222,7 +222,7 @@ async function probe(reason) {
       heartbeatValue={
         ...await metadata(),
         reason: reason === 'poll' ? 'heartbeat' : reason,
-        sequence: ++sequence, probe_version: '0.3.47', session, transport: 'plugin-data-files',
+        sequence: ++sequence, probe_version: '0.3.48', session, transport: 'plugin-data-files',
         layer_observation:observation,
         shape_clipboard_available:labels.paintClipboardAvailable?.()===true,
         ...await labels.interfacePreferences(),
@@ -297,7 +297,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.47', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.48', operation: request.operation,
       transport: 'plugin-data-files', document_count: app.documents.length,
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

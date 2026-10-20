@@ -2,10 +2,12 @@ const assert=require('node:assert/strict');
 const create=require('../uxp/offline-probe/labels.js');
 const K={NORMAL:'pixel',GROUP:'group',TEXT:'text',SMARTOBJECT:'smart',SOLIDFILL:'fill',GRADIENTFILL:'gradient',PATTERNFILL:'pattern',CURVES:'adjustment',VIDEO:'video',THREED:'3d'};
 const M={RGB:'rgb',CMYK:'cmyk',LAB:'lab',GRAYSCALE:'gray'},B={EIGHT:8,SIXTEEN:16,THIRTYTWO:32};
-let selected=[2],changed=false,malformed=false,reads=0,modals=0;
+let selected=[2],changed=false,malformed=false,reads=0,modals=0,documentCount=1,closedDuringRead=false;
 const raw=[{layerID:1,parentLayerID:-1,itemIndex:3,layerKind:1},{layerID:2,parentLayerID:-1,itemIndex:2,layerKind:3},{layerID:3,parentLayerID:-1,itemIndex:1,layerKind:5}].map(x=>({...x,background:false,layerSection:{_value:'layerSectionContent'},layerLocking:{protectAll:false,protectPosition:false}}));
 const ps={constants:{LayerKind:K,DocumentMode:M,BitsPerChannelType:B},app:new Proxy({},{get(){throw Error('Host DOM must not be read');}}),core:{executeAsModal:async()=>{modals++;throw Error('Idle read must not enter modal');}},action:{batchPlay:async commands=>commands.map(c=>{
- reads++;
+ reads++;assert.equal(c._options.dialogOptions,'silent');
+ if(c._target?.[0]?._property==='numberOfDocuments')return {numberOfDocuments:documentCount};
+ if(documentCount===0 || closedDuringRead)return {_obj:'error',message:'current document unavailable'};
  if(c._obj==='multiGet')return {list:malformed?raw.slice(1):raw};
  assert.equal(c._obj,'get');
  const key=c._target[0]._property;
@@ -14,6 +16,10 @@ const ps={constants:{LayerKind:K,DocumentMode:M,BitsPerChannelType:B},app:new Pr
 })}};
 async function main(){
  const api=create(ps,'s',{nativeSelection:true});
+ documentCount=0;const noDocReads=reads;
+ for(let i=0;i<20;i++)assert.deepEqual(await api.selectionContextFresh(),{session:'s',document_id:null,layer_ids:[],kind:'none',mask:0});
+ assert.equal(reads-noDocReads,20);await assert.rejects(api.capture(),/No active document/);
+ documentCount=1;closedDuringRead=true;await assert.rejects(api.selectionContextFresh(),/Native selection unavailable/);closedDuringRead=false;
  assert.equal((await api.capture()).active_layer_id,2);
  const first=await api.selectionContextFresh();assert.equal(first.kind,'text');assert.equal(first.mask,15);assert.equal(first.quick_mask,127);assert.equal(first.read_path,'native-24.2');assert.equal(modals,0);
  raw[1].layerLocking.protectPosition=true;assert.equal((await api.selectionContextFresh()).locked,true);raw[1].layerLocking.protectPosition=false;

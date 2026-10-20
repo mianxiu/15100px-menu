@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+210本机修正24.2首页“当前文档不可用”弹窗；故障机需实际加载UXP0.3.48。[安装说明](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)。尚未新增Release。
+
 本机209修正取色后重新hover收起：确认调整后返回普通菜单继续操作。UXP仍为0.3.47，未新增Release；实体鼠标和其他宿主待验。[说明](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
 [208已发布](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.208)／UXP0.3.47：针对PS24.2.x逐属性DOM读取延迟，改用有界批量标量读取与新鲜身份核对，沿用原能力算法和写前校验；仅显式颜色元数据采用短时只读模态。自动测试补齐标准54次／持续180次原生菜单显示、请求／接收、按钮能力、内容帧和收起，记录心跳失鲜及最后菜单观测。需保存文档、正常关闭PS后更新内置UXP，再手动启动并确认实际0.3.47。
