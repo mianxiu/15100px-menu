@@ -1,8 +1,8 @@
 # Photoshop Menu
 
-0.4.213本机已更新：菜单空白处右键关闭，屏幕取色时右键先取消取色。UXP仍0.3.48，不需重启PS；[操作与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
+[0.4.213已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.213)：菜单空白处右键关闭，屏幕取色时右键先取消取色。UXP仍0.3.48，不需重启PS；[操作与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
-210本机修正24.2首页“当前文档不可用”弹窗；故障机需实际加载UXP0.3.48。[安装说明](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)。[最新性能版212已发布](https://github.com/mianxiu/15100px-menu/releases/latest)。
+210本机修正24.2首页“当前文档不可用”弹窗；故障机需实际加载UXP0.3.48。[安装说明](https://github.com/mianxiu/15100px-menu/wiki/Stability-test)。[最新版本已发布](https://github.com/mianxiu/15100px-menu/releases/latest)。
 
 本机209修正取色后重新hover收起：确认调整后返回普通菜单继续操作。UXP仍为0.3.47，未新增Release；实体鼠标和其他宿主待验。[说明](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
