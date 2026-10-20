@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 215公开交付：源码／标签、ZIP／SHA及Latest清单匿名下载通过，只保留215 Release，214标签／历史保留。Wiki三页公开核验通过；实际215／UXP50，启动主题字号缓存及正常／低CPU各16秒生产观察通过，CPU／原稿／配置／旧未知保持。其他PS和实体交互待验；本项不等于原24.2持续卡顿已闭环。
+
 - [x] 215主题／字号启动会话缓存代码／构建／实际入口：各项成功后只读取一次，失败／中断仅重试缺项，文档元数据及prefs原时间独立。494回归、11组UXP模拟、冻结启动／重启、实际215／UXP50及PS24.0.1正常／低CPU各16秒生产文件观察通过，CPU资源恢复。原稿／配置／旧未知保持；实体交互及其他PS仍待验。证据.runtime/tests215.log、uxp215-regression.log、recovery215finalreload、runtime215-verified.json。
 
 - [x] 214公开交付：源码／标签、ZIP／SHA及Latest更新清单匿名下载核验通过，只保留214 Release，213标签／历史保持；Wiki三页已推送并公开核验。实际214／UXP49；低78步／36循环、正常58步／27循环均因前台变化安全停止，未记全轮／原24.2故障机通过。证据.runtime/recovery214、runtime214-verified.json、release-0.4.214-public-verification.json、manifest214-verification.json、wiki214-verification.json。
