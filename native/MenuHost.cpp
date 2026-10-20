@@ -628,8 +628,26 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     else send(chosen<0?"hide":rowAction(chosen));
 }
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    // Own both halves even when cancellation hides the window before the up.
+    // The global hook normally handles this, but client blank space must also
+    // work when the hook is being renewed or the menu receives input directly.
+    static bool rightCancelOwned=false;
     if(stabilityInspection && ((msg>=WM_MOUSEFIRST && msg<=WM_MOUSELAST) || (msg>=WM_KEYFIRST && msg<=WM_KEYLAST)))return 0;
-    if(ImGui::GetCurrentContext() && shapeEyedropMessage(msg,wp,lp))return 0;
+    if(msg==WM_RBUTTONUP && rightCancelOwned){rightCancelOwned=false;return 0;}
+    if(ImGui::GetCurrentContext() && shapeEyedropMessage(msg,wp,lp)){
+        if(msg==WM_RBUTTONDOWN)rightCancelOwned=true;
+        return 0;
+    }
+    if(msg==WM_RBUTTONDOWN && IsWindowVisible(hwnd) && (holdMode || taskBusy || busyFeedback)){
+        rightCancelOwned=true;
+        // Invalidate release hits immediately: a later Caps up cannot commit
+        // while the asynchronous hide/cancel event travels to the backend.
+        holdFinished=true;pieReady=false;renderedHit=pendingHit=-1;
+        hoverTip.reset();tipVisual.reset();
+        if(GetCapture()==hwnd)ReleaseCapture();
+        if(ImGui::GetCurrentContext())ImGui::ClearActiveID();
+        setOpacity(0.f);send("hide");return 0;
+    }
     if(msg==WM_WINDOWPOSCHANGED && (reinterpret_cast<WINDOWPOS*>(lp)->flags&SWP_HIDEWINDOW))stopShapeEyedrop();
     if(msg==WM_APP+23){holdOrigin={static_cast<LONG>(wp),static_cast<LONG>(lp)};holdMoved=false;return 0;}
     if(msg==WM_APP+26){stabilityInspection=wp!=0;if(stabilityInspection){taskBusy=busyFeedback=taskHasResult=false;taskRecovery.clear();allowed=capable=true;}return 0;}
@@ -1605,7 +1623,7 @@ static void drawMenu() {
         ImGui::TextDisabled("%s",document.c_str());
         if (!notice.empty()) { ImGui::PushTextWrapPos();ImGui::TextColored(ImGui::GetStyle().Colors[ImGuiCol_Text],"%s",notice.c_str());ImGui::PopTextWrapPos(); }
         if (!holdMode && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-            if (rightHide) send("hide");else ImGui::OpenPopup("context");
+            if (rightHide || !ImGui::IsAnyItemHovered()) send("hide");else ImGui::OpenPopup("context");
         }
         if (ImGui::BeginPopup("context")) {contextItems();ImGui::EndPopup();}
     }
@@ -3231,6 +3249,41 @@ int main() {
                 holdFinished=false;inputFocused=true;numberFrame(ImGuiKey_None,false);
                 if(capsEnabled(0))throw std::runtime_error("Input protection enabled Caps bar");
                 inputFocused=false;capsReady=false;
+                // Real client messages at empty space, independent of the hook.
+                // Cancellation must never become a late release/paint commit.
+                const auto rightActions=testedActions.size();
+                for(int kind:{0,1,2,4}){
+                    panelKind=kind;taskBusy=busyFeedback=false;setHoldMode(true);
+                    SetWindowPos(window,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+                    const auto before=testedActions.size();
+                    procedure(window,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(2,2));
+                    procedure(window,WM_RBUTTONUP,0,MAKELPARAM(2,2));
+                    finishHold({LONG(pieCenter.x),LONG(pieCenter.y)});
+                    if(!holdFinished || pieReady || testedActions.size()!=before+1 || testedActions.back()!="hide" || compositionOpacity!=0.f)
+                        throw std::runtime_error("Blank right-click failed cancellation or allowed a late release");
+                }
+                panelKind=2;layerAware=true;layerKind=6;layerCount=1;layerLocked=layerBackground=false;
+                allowed=capable=true;maskPreviewStarted=false;
+                shapeEditor.prepare(shapeFixture);setHoldMode(true);shapePanelOpen=true;
+                const auto sampleCancelCount=testedActions.size();
+                if(!beginShapeEyedrop())throw std::runtime_error("Right-cancel sampler did not arm");
+                procedure(window,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(2,2));
+                procedure(window,WM_RBUTTONUP,0,MAKELPARAM(2,2));
+                if(shapeEyedropActive || !shapePanelOpen || holdFinished || testedActions.size()!=sampleCancelCount)
+                    throw std::runtime_error("Sampler right-click closed the menu or leaked its up");
+                shapeEditor.current()["rgb"]={11,22,33};shapeEditor.changed();
+                const auto dirtyEvents=testedMaskEvents.size();
+                procedure(window,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(2,2));
+                procedure(window,WM_RBUTTONUP,0,MAKELPARAM(2,2));
+                finishHold({LONG(shapeEditor.bounds.left+5),LONG(shapeEditor.bounds.top+5)});
+                if(testedActions.size()!=sampleCancelCount+1 || testedActions.back()!="hide" || testedMaskEvents.size()!=dirtyEvents)
+                    throw std::runtime_error("Dirty editor blank right-click confirmed instead of cancelling");
+                taskBusy=true;busyFeedback=true;const auto busyRight=testedActions.size();
+                procedure(window,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(2,2));procedure(window,WM_RBUTTONUP,0,MAKELPARAM(2,2));
+                if(!taskBusy || !busyFeedback || testedActions.size()!=busyRight+1 || testedActions.back()!="hide")
+                    throw std::runtime_error("Feedback right-click cleared operation protection");
+                testedActions.resize(rightActions);taskBusy=busyFeedback=false;
+                std::cout<<"Blank right-click client cancellation passed: canvas/layers/home/general, late Caps release, dirty draft, sampler pair and busy protection\n";
                 std::cout<<"Dear ImGui self-test passed: original radial/focus/input/cancel matrix; shape local draft, types, single release, stale cursor, pinned commit; production SHOWWINDOW content and 100 hidden frames\n";break;
             }
             if (!preview.empty() && frames==20) {
