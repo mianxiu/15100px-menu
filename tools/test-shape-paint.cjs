@@ -80,6 +80,25 @@ async function main(){
  await assert.rejects(api.setLabel(r),/普通填充层/);assert.equal(sets,fillSets);
  r=request(data);r.paint.fill.enabled=false;await assert.rejects(api.setLabel(r),/普通填充层/);assert.equal(sets,fillSets);
  r=request(data);r.paint.fill={kind:'pattern',enabled:true,name:'Loaded Pattern'};await assert.rejects(api.setLabel(r),/原生类型/);assert.equal(sets,fillSets);
+ // Native menu JSON sorts object keys. Legacy ordinary-fill preparation must
+ // compare exact values without treating key order as a changed stroke.
+ const legacy=create(ps,'s',{legacyPreview:true});
+ const legacyData=await legacy.observeShape(legacy.selectionContext(),true);
+ const sorted=value=>JSON.parse(JSON.stringify(value,(_,v)=>v && !Array.isArray(v) && typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v));
+ const legacyRequest=()=>({...request(legacyData),command:'shape.legacy.preview',paint:sorted({...request(legacyData).paint,fill:{...legacyData.fill,rgb:[90,80,70]}})});
+ const beforeLegacySets=sets,beforeLegacyHistory=history;
+ const prepared=await legacy.prepareLegacyShape(legacyRequest());
+ assert.deepEqual(prepared.before.stroke,legacyData.stroke);
+ assert.equal(sets,beforeLegacySets);assert.equal(history,beforeLegacyHistory);
+ for(const change of [s=>s.enabled=true,s=>s.width+=.1,s=>s.rgb[0]+=1,s=>s.extra=true]) {
+  const changed=legacyRequest();change(changed.paint.stroke);
+  await assert.rejects(legacy.prepareLegacyShape(changed),/Ordinary fill/);
+ }
+ const disabled=legacyRequest();disabled.paint.fill.enabled=false;
+ await assert.rejects(legacy.prepareLegacyShape(disabled),/Ordinary fill/);
+ const converted=legacyRequest();converted.paint.fill={kind:'pattern',enabled:true,name:'Loaded Pattern'};
+ await assert.rejects(legacy.prepareLegacyShape(converted),/Ordinary fill/);
+ assert.equal(sets,beforeLegacySets);assert.equal(history,beforeLegacyHistory);
  vector=true;fill=vectorFill;stroke=vectorStroke;
  doc.mode='cmyk';assert.equal((await inspect()).available,false);doc.mode='rgb';
  doc.activeLayers=[layer,{id:31,kind:'solid'}];assert.equal((await inspect()).available,false);doc.activeLayers=[layer];

@@ -933,6 +933,10 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
   const batchMasks=createBatchMasks(ps,session,capture,selectionContext,legacyPreview);
   let cache=null,serial=0,catalog=[],catalogAt=0,catalogInfo={};
   const clone=value=>JSON.parse(JSON.stringify(value));
+  // Native menu serialization sorts keys. Preserve exact protected values
+  // and array order while ignoring object insertion order across IPC.
+  const valueKey=value=>JSON.stringify(value,(_,v)=>v && !Array.isArray(v) && typeof v==='object'?
+    Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])):v);
   const rgb=color=>color?._obj==='RGBColor'?[color.red,color.grain??color.green,color.blue].map(v=>Math.round(Number(v))):null;
   function paint(raw) {
     if(raw?._obj==='solidColorLayer') {const c=rgb(raw.color);return c && c.every(v=>Number.isFinite(v))?{kind:'solid',rgb:c}:null;}
@@ -1315,7 +1319,7 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
     if(!before.available || before.revision!==request.paint.revision)throw Error('填充／描边已改变，请重新打开菜单；本次未修改');
     if(request.paint.mask && (!before.vector || !before.mask))throw Error('Vector mask unavailable');
     if(!before.vector && (request.paint.fill.kind!==before.fill.kind || !request.paint.fill.enabled ||
-      JSON.stringify(request.paint.stroke)!==JSON.stringify(before.stroke)))throw Error('Ordinary fill type must remain unchanged');
+      valueKey(request.paint.stroke)!==valueKey(before.stroke)))throw Error('Ordinary fill type must remain unchanged');
     const doc=ps.app.activeDocument,anchor=doc.activeLayers[0];
     if(doc.id!==actual.document_id || doc.activeLayers.length!==1 || anchor?.id!==actual.active_layer_id)throw Error('Legacy prepare selection changed');
     return {before:clone(before),raw:clone(cache.raw),parent_id:anchor.parent?.id??null,

@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+220／UXP0.3.53已构建并更新本机：修复普通填充层点色后误拒绝并关闭面板。按用户要求优先发布；收尾速度候选已撤回，完整实机回归及取消场景复测后置。
+
 [219／UXP0.3.52已公开发布](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.219)并更新本机实际入口，公开ZIP／SHA／Latest清单匿名核验通过；仅保留219 Release，旧标签／历史保留。七项创建的原生读取策略省去被丢弃的DOM反馈快照，完成前的新鲜核验保持；[速度对照及实测范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
 以下为历史交付记录，反映当时状态；旧版链接指向保留的源码标签，发行页只保留最新版。
