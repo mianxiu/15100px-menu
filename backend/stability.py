@@ -9,12 +9,13 @@ import time
 import uuid
 
 from .settings import atomic_json
-from .uxp_bridge import UxpBridge, read_heartbeat
+from .uxp_bridge import UxpBridge, UxpRequestFailed, read_heartbeat
 from .plugins import version
 from .layer_context import validate, fresh
 from .mask_preview import MaskPreview
 from .stability_metrics import Metrics, machine_info, host_scope
 from .version import APP_VERSION
+from .stability_failures import describe
 
 
 class Stopped(RuntimeError):pass
@@ -52,6 +53,7 @@ def liveness(folder):
 class StabilityTest:
     def __init__(self,app):
         self.app=app;self.folder=Path(app.runtime)/'stability-reports';self.task=None;self.active=False
+        self.finalizing=False
         self.stop_requested=False;self.report={};self.write_lock=asyncio.Lock();self.preview=None
         try:
             value=json.loads((self.folder/'latest.json').read_text('utf-8'))
@@ -69,9 +71,20 @@ class StabilityTest:
         except (OSError,ValueError):pass
 
     def snapshot(self):
-        return {k:self.report.get(k) for k in ('run_id','phase','message','profile','round','rounds','stage','started_at','finished_at','error','summary','cleanup','save_error')} | {
+        return {k:self.report.get(k) for k in ('run_id','phase','message','profile','round','rounds','stage','started_at','finished_at','error','summary','cleanup','save_error','problem','cleanup_problem')} | {
             'active':self.active,'stop_requested':self.stop_requested,'ready':bool(self.report),
+            'cleanup_available':bool(self.retained_fixture() and self.report.get('original_request_pending') is False and not self.report.get('read_request_pending') and not self.active and not self.app.bridge.busy and not self.app.operation_lock.locked()),
             'completed_steps':sum(row.get('state')!='running' for row in self.report.get('steps',[])), 'samples':len(self.report.get('system_samples',[]))}
+
+    def retained_fixture(self):
+        """Only a verified fixture owned by this original run is eligible."""
+        if 'retained' not in self.report.get('cleanup',''):return None
+        for row in self.report.get('steps',[]):
+            value=row.get('evidence',{}).get('result',{})
+            target=value.get('target',{})
+            if row.get('stage')=='fixture' and row.get('state')=='passed' and value.get('verified') is True and target.get('session') and isinstance(target.get('document_id'),int):
+                return target
+        return None
 
     async def save(self):
         async with self.write_lock:
@@ -85,11 +98,22 @@ class StabilityTest:
         app=self.app
         if self.active or app.operation_lock.locked() or app.bridge.busy:raise RuntimeError('请等待当前操作结束；测试不排队')
         if not isinstance(app.bridge,UxpBridge):raise RuntimeError('自动测试需要 UXP 执行端')
+        if app.bridge.transport.pending.value or app.bridge.transport.pending.error:raise RuntimeError('原请求仍待核对，未开始新的测试')
         app.require_uxp_enabled()
         if getattr(app,'diagnostics',None) and app.diagnostics.snapshot().get('phase')=='collecting':raise RuntimeError('请等待只读诊断结束后再开始稳定性测试')
         if app.photoshop_launcher.active or app.desktop and app.desktop.visible:raise RuntimeError('请先收起菜单并等待 Photoshop 就绪')
         await app.operation_lock.acquire()
-        self.active=True;self.stop_requested=False
+        try:
+            previous=self.retained_fixture()
+            if previous:
+                if self.report.get('original_request_pending') is not False or self.report.get('read_request_pending'):
+                    raise RuntimeError('上次测试结果尚未核对，不能重复开始；请保留原报告和文档')
+                heartbeat=await asyncio.to_thread(lambda:read_heartbeat(app.bridge.transport.folder))
+                if heartbeat.get('session')==previous['session']:
+                    raise RuntimeError('上次测试的临时文档仍保留；请先导出报告，再点击“结束上次测试文档”')
+        except Exception:
+            app.operation_lock.release();raise
+        self.active=True;self.finalizing=False;self.stop_requested=False
         self.report={'schema':1,'run_id':uuid.uuid4().hex,'phase':'running','message':'正在准备隔离测试',
             'profile':profile,'rounds':3 if profile=='standard' else 10,'round':0,'stage':'preflight',
             'started_at':time.time(),'application_version':APP_VERSION,'steps':[],'system_samples':[],
@@ -105,6 +129,54 @@ class StabilityTest:
             self.active=False;app.operation_lock.release();raise
         self.task=asyncio.create_task(self.run())
         return self.snapshot()
+
+    async def cleanup(self):
+        app=self.app
+        if self.active or app.operation_lock.locked() or app.bridge.busy:raise RuntimeError('请等待当前操作结束；收尾不排队')
+        if not isinstance(app.bridge,UxpBridge):raise RuntimeError('收尾需要原 UXP 执行端')
+        if self.report.get('original_request_pending') is not False or self.report.get('read_request_pending') or app.bridge.transport.pending.value or app.bridge.transport.pending.error:
+            raise RuntimeError('原请求仍待核对，禁止清理、重发或重新测试')
+        if not self.retained_fixture():raise RuntimeError('没有可核验的原测试文档；未提交清理')
+        app.require_uxp_enabled()
+        if app.photoshop_launcher.active or app.desktop and app.desktop.visible:raise RuntimeError('请先收起菜单并等待 Photoshop 就绪')
+        await app.operation_lock.acquire()
+        self.active=True;self.finalizing=False;self.stop_requested=False
+        self.report.update(message='正在核验并结束原测试文档',cleanup_phase='running')
+        try:await self.save()
+        except Exception:
+            self.active=False;app.operation_lock.release();raise
+        self.task=asyncio.create_task(self.run_cleanup())
+        return self.snapshot()
+
+    async def run_cleanup(self):
+        try:
+            _,check=await asyncio.to_thread(host_scope)
+            previous=self.retained_fixture()
+            heartbeat=await asyncio.to_thread(lambda:read_heartbeat(self.app.bridge.transport.folder))
+            if not previous or heartbeat.get('session')!=previous['session']:
+                raise RuntimeError('原UXP会话已变化，不能核验旧测试所有权；未提交清理')
+            async def before_dispatch(_):
+                check()
+                if self.stop_requested:raise Stopped('已停止尚未提交的收尾')
+            check()
+            result=await self.app.bridge.execute_stability(self.report['run_id'],'finish',before_dispatch)
+            value=json.loads(result['result'])['result']
+            if value.get('closed_owned_document') is not True or value.get('original_active_restored') is not True:
+                raise RuntimeError('原测试文档收尾凭据不完整，未标记已恢复')
+            self.report.update(phase='cleaned',message='原测试文档已关闭，原文档已恢复；可以重新开始测试',
+                cleanup='verified-closed-and-original-restored',cleanup_phase='completed',cleanup_evidence={'task_id':result['task_id'],**value},cleanup_finished_at=time.time())
+            self.report.pop('cleanup_problem',None)
+        except Exception as error:
+            pending=bool(self.app.bridge.busy or self.app.bridge.transport.pending.value or self.app.bridge.transport.pending.error)
+            self.report.update(message='收尾未完成；原测试报告和现场保持',cleanup_phase='failed',cleanup_problem=describe(error,'cleanup',pending))
+        finally:
+            self.report['original_request_pending']=bool(self.app.bridge.busy or self.app.bridge.transport.pending.value or self.app.bridge.transport.pending.error)
+            try:await self.save()
+            finally:
+                self.active=False
+                self.app.operation_lock.release()
+                await self.app.broadcast({'type':'operation','busy':self.app.bridge.busy})
+                await self.app.broadcast({'type':'stability','data':self.snapshot()})
 
     def stop(self):
         if self.active:
@@ -146,11 +218,23 @@ class StabilityTest:
 
     async def inspect(self):
         self.check()
-        value=await asyncio.to_thread(self.app.bridge.transport.call,'inspect',stability_run=self.report['run_id'],shape_inspect=True)
+        value=await self.test_read(shape_inspect=True)
         return {'stability':value['stability'],'shape_editor':value.get('shape_editor',{})}
 
+    async def test_read(self,**payload):
+        # Read-only calls do not use the durable mutation journal. A missing
+        # reply still cannot authorize a new cleanup mutation. Fail closed;
+        # a timeout, heartbeat or menu close is not execution-exit proof.
+        self.report['read_request_pending']=True
+        try:value=await asyncio.to_thread(self.app.bridge.transport.call,'inspect',stability_run=self.report['run_id'],**payload)
+        except UxpRequestFailed:
+            self.report['read_request_pending']=False
+            raise
+        self.report['read_request_pending']=False
+        return value
+
     async def native_selection_probe(self):
-        value=await asyncio.to_thread(self.app.bridge.transport.call,'inspect',stability_run=self.report['run_id'],native_selection_test=True)
+        value=await self.test_read(native_selection_test=True)
         native=value['native_selection'];target=value['stability']['target']
         if any(native.get(k)!=target[k] for k in ('document_id','layer_ids')):raise RuntimeError('批量读取目标与隔离目标不一致')
         return {'read_path':native['read_path'],'kind':native['kind'],'mask':native['mask'],'identity_verified':True}
@@ -255,8 +339,9 @@ class StabilityTest:
         metrics=None;report=self.report
         try:
             metrics=await asyncio.to_thread(Metrics,self.host_pid)
-            while self.active and self.report is report:
+            while self.active and not self.finalizing and self.report is report:
                 await asyncio.sleep(1)
+                if self.finalizing:break
                 row=await asyncio.to_thread(metrics.sample)
                 if self.report is not report:break
                 row['stage']=self.report.get('stage');row['round']=self.report.get('round')
@@ -321,16 +406,16 @@ class StabilityTest:
             await self.step('finish',lambda:self.command('finish'));owned=False
             self.report.update(phase='completed',message='自动测试完成，报告已保存',cleanup='verified-closed-and-original-restored')
         except Stopped as error:
-            self.report.update(phase='stopped',message=str(error))
+            self.report.update(phase='stopped',message=str(error),problem=describe(error,self.report.get('stage')))
         except Exception as error:
-            self.report.update(phase='failed',message='测试已停止，已保留故障证据',error=str(error)[:500])
+            self.report.update(phase='failed',message='测试已停止，已保留故障证据',error=str(error)[:500],problem=describe(error,self.report.get('stage'),bool(self.report.get('read_request_pending') or self.app.bridge.busy or self.app.bridge.transport.pending.value or self.app.bridge.transport.pending.error)))
         finally:
             # Never guess whether a timed-out mutation finished. No rollback,
             # close, resend or new host reads from this failure path.
             if owned:self.report['cleanup']='retained-for-inspection-no-automatic-cleanup'
             if getattr(self,'heartbeat_folder',None):self.report['last_uxp_liveness']=await asyncio.to_thread(liveness,self.heartbeat_folder)
-            self.report['original_request_pending']=bool(self.app.bridge.busy or self.app.bridge.transport.pending.value or self.app.bridge.transport.pending.error)
-            self.active=False
+            self.report['original_request_pending']=bool(self.report.get('read_request_pending') or self.app.bridge.busy or self.app.bridge.transport.pending.value or self.app.bridge.transport.pending.error)
+            self.finalizing=True
             if monitor:
                 try:await asyncio.wait_for(asyncio.shield(monitor),5)
                 except asyncio.TimeoutError:pass
@@ -344,8 +429,10 @@ class StabilityTest:
             self.report['interpretation']='Timing and resource observations only; low total CPU or low frequency alone does not identify Windows, GPU, thermal or power causality.'
             try:await self.save()
             finally:
+                self.active=False;self.finalizing=False
                 self.app.operation_lock.release()
                 await self.app.broadcast({'type':'operation','busy':self.app.bridge.busy})
+                await self.app.broadcast({'type':'stability','data':self.snapshot()})
 
     def export(self):
         if not self.report:raise ValueError('还没有测试报告')

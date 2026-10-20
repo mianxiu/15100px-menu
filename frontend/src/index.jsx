@@ -5,6 +5,7 @@ import {translate} from './i18n.mjs';
 import {diagnosticClock,diagnosticScopes,diagnosticComponents,diagnosticFinding} from './diagnostics.mjs';
 import {healthView,healthFinding} from './version-health.mjs';
 import {applyMenuTheme} from './theme.mjs';
+import {stabilityIssue} from './stability.mjs';
 import {prefixOptions,triggerKeys,keyLabel,shortcutParts,triggerAllowed,changePrefix,changeTrigger,shortcutErrors} from './shortcuts.mjs';
 import './admin.css';
 
@@ -129,16 +130,19 @@ function App() {
   function StabilityPanel(){
     const [profile,setProfile]=createSignal('standard');
     const test=()=>state().stability || {};
+    const issue=()=>stabilityIssue(test());
     async function start(){try{const result=await call('stability.start',{profile:profile()});setState(previous=>({...previous,stability:result}));}catch{}}
     async function stop(){try{const result=await call('stability.stop');setState(previous=>({...previous,stability:result}));}catch{}}
+    async function cleanup(){try{const result=await call('stability.cleanup');setState(previous=>({...previous,stability:result}));}catch{}}
     async function download(){try{const report=await call('stability.export');const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='ps-menu-stability-'+report.run_id+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{}}
     return <section id="stability-test"><h2>{t('自动稳定性测试')}</h2>
       <p>{t('在隔离临时文档中反复唤起／收起原生菜单，核验图层读取和按钮恢复，并测试标签、增层、颜色／羽化及撤销。菜单会短暂显示；请勿操作PS，可停留在后台管理窗口。')}</p>
       <label class="advanced-field"><span>{t('测试强度')}</span><select aria-label={t('测试强度')} disabled={disabled() || test().active} value={profile()} onChange={e=>setProfile(e.target.value)}><option value="standard">{t('标准：3轮，24次新增图层')}</option><option value="extended">{t('持续：10轮，80次新增图层')}</option></select></label>
       <p role="status">{t(test().message || '尚未开始测试')}</p>
       <Show when={test().active || test().ready}><p class="caption">{test().round || 0} / {test().rounds || 0} {t('轮')} · {test().completed_steps || 0} {t('个步骤')} · {test().samples || 0} {t('个系统采样')}</p></Show>
-      <Show when={test().error}><p class="error">{test().error}</p></Show>
+      <Show when={issue()}>{problem=><><p class={['user-stopped','foreground-changed'].includes(problem().code)?'caption':'error'}>{t(problem().message)}</p><p class="caption">{t(problem().hint)}</p><details><summary>{t('错误详情')}</summary><p class="caption">{t('测试阶段')} · {t(problem().stage)}</p><p>{problem().detail}</p></details></>}</Show>
       <Show when={!test().active && test().cleanup?.includes('retained')}><p>{t('临时文档已保留供检查，未自动关闭或重发操作。')}</p></Show>
+      <Show when={test().cleanup_available}><div class="buttons"><button disabled={disabled() || test().active} onClick={cleanup}>{t('结束上次测试文档')}</button></div><p class="caption">{t('仅核验并关闭原测试临时文档，恢复原活动文档；未知请求、会话或目标变化时不执行。')}</p></Show>
       <div class="buttons"><button class="primary" disabled={disabled() || test().active || state().photoshop.busy || !state().photoshop.uxp_ready || state().menu?.visible} onClick={start}>{t('一键开始测试')}</button><button disabled={disabled() || !test().active || test().stop_requested} onClick={stop}>{t('停止后续测试')}</button><button disabled={disabled() || !test().ready} onClick={download}>{t('导出测试报告')}</button></div>
       <p class="caption">{t('自动保存本地报告，记录每步耗时、逐核CPU、频率、内存及磁盘等待；不改变电源计划，不上传。停止会等待当前请求结束，未知结果保留保护。')}</p>
       <p class="caption">{t('未支持的实时预览单独标记；实体Caps、UU远程、鼠标手感及画布目视不计为自动通过。')}</p>

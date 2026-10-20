@@ -316,6 +316,7 @@ class Application(web.Application):
             raise RuntimeError('应用正在更新，本次操作未接受')
         if action=='stability.start':return await self.stability.start(args.get('profile','standard'))
         if action=='stability.stop':return self.stability.stop()
+        if action=='stability.cleanup':return await self.stability.cleanup()
         if action=='stability.status':return self.stability.snapshot()
         if action=='stability.export':return self.stability.export()
         if getattr(getattr(self,'stability',None),'active',False) and action in ('diagnostics.start','panel.inspect','panel.calibrate','settings.save'):

@@ -48,6 +48,10 @@ def read_heartbeat(folder):
             if getattr(error,'winerror',None) not in (5,32) or attempt==7:raise
         time.sleep(.004)
 
+class UxpRequestFailed(RuntimeError):
+    """A matching terminal failure proves this original request has exited."""
+
+
 class UxpResultUnknown(RuntimeError):
     result_unknown = True
 
@@ -196,6 +200,8 @@ class UxpTransport:
                             if preview is not None:getattr(preview,'execution_finished',preview.execution_check)()
                             if response.get('phase')!='completed':
                                 if response.get('result_unknown'):raise UxpResultUnknown(response.get('error','新建结果未知，请检查 Photoshop'))
+                                if response.get('phase')=='failed' and all(response.get(k)==request[k] for k in ('id','session','operation')):
+                                    raise UxpRequestFailed(response.get('error','UXP failed'))
                                 raise RuntimeError(response.get('error','UXP failed'))
                             return response
                     except (FileNotFoundError,PermissionError,json.JSONDecodeError):pass

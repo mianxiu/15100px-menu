@@ -156,6 +156,21 @@ class UxpPublicationTests(unittest.TestCase):
             self.assertEqual(destination.read_bytes(),b'old');self.assertFalse(source.exists())
 
 class UxpDiscoveryTests(unittest.TestCase):
+    def test_only_matching_terminal_read_failure_proves_request_exit(self):
+        from backend.uxp_bridge import UxpRequestFailed
+        folder=self.heartbeat(24);self.transport.config.write_text('{"token":"test"}','utf-8')
+        for mismatch in (None,'session','operation','phase'):
+            def publish(source,destination):
+                request=json.loads(source.read_text('utf-8'));source.replace(destination)
+                response={k:request[k] for k in ('id','session','operation')}
+                response.update(phase='failed',error='Known test failure')
+                if mismatch:response[mismatch]='different'
+                (folder/'probe-response.json').write_text(json.dumps(response),'utf-8')
+            with self.subTest(mismatch=mismatch),patch('backend.uxp_bridge.publish_request',side_effect=publish):
+                try:self.transport.call('inspect')
+                except RuntimeError as error:self.assertEqual(isinstance(error,UxpRequestFailed),mismatch is None)
+                else:self.fail('Failure response unexpectedly succeeded')
+
     def test_direct_caps_rejects_old_session_unsupported_or_conflicting_binding(self):
         folder=self.heartbeat(24);self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.34',session='s')

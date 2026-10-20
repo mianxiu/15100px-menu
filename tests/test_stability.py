@@ -35,6 +35,77 @@ class StabilityTests(unittest.IsolatedAsyncioTestCase):
         self.test.folder.mkdir();(self.test.folder/'latest.json').write_text(json.dumps({'schema':1,'phase':'running','run_id':'a'*32}),'utf-8')
         restored=StabilityTest(self.app)
         self.assertEqual(restored.snapshot()['phase'],'interrupted');self.assertFalse(restored.active);self.assertIsNone(restored.task)
+
+    def retained(self):
+        self.test.report={'schema':1,'run_id':'a'*32,'phase':'stopped','cleanup':'retained-for-inspection-no-automatic-cleanup',
+            'original_request_pending':False,'steps':[{'stage':'fixture','state':'passed','evidence':{'result':{
+                'verified':True,'target':{'session':'original-session','document_id':7}}}}]}
+
+    async def test_retained_owner_blocks_new_run_without_overwriting_report(self):
+        self.retained();original=self.test.export()
+        with patch.object(type(self.bridge.transport),'folder',new_callable=__import__('unittest.mock',fromlist=['PropertyMock']).PropertyMock,return_value=self.root),patch('backend.stability.read_heartbeat',return_value={'session':'original-session'}):
+            with self.assertRaisesRegex(RuntimeError,'临时文档仍保留'):await self.test.start()
+        self.assertEqual(self.test.export(),original);self.assertFalse(self.app.operation_lock.locked())
+        self.assertTrue(self.test.snapshot()['cleanup_available'])
+
+    async def test_unknown_never_allows_cleanup_or_start(self):
+        self.retained();self.test.report['original_request_pending']=True
+        with patch.object(self.bridge,'execute_stability',new_callable=AsyncMock) as execute:
+            with self.assertRaisesRegex(RuntimeError,'禁止清理'):await self.test.cleanup()
+            self.assertFalse(self.test.snapshot()['cleanup_available']);execute.assert_not_called()
+        self.bridge.transport.pending.error='corrupt original record'
+        with self.assertRaisesRegex(RuntimeError,'原请求仍待核对'):await self.test.start()
+        self.bridge.transport.pending.error=None
+
+    async def test_cleanup_uses_original_identity_and_requires_complete_proof(self):
+        self.retained();await self.app.operation_lock.acquire();self.test.active=True
+        async def execute(run,step,before):
+            self.assertEqual((run,step),('a'*32,'finish'));await before(None)
+            return {'task_id':'original-cleanup-task','result':json.dumps({'result':{'closed_owned_document':True,'original_active_restored':True}})}
+        with patch('backend.stability.host_scope',return_value=(1,lambda:None)),patch.object(type(self.bridge.transport),'folder',new_callable=__import__('unittest.mock',fromlist=['PropertyMock']).PropertyMock,return_value=self.root),patch('backend.stability.read_heartbeat',return_value={'session':'original-session'}),patch.object(self.bridge,'execute_stability',side_effect=execute) as call:
+            await self.test.run_cleanup()
+        call.assert_awaited_once();self.assertEqual(self.test.report['phase'],'cleaned')
+        self.assertFalse(self.test.snapshot()['cleanup_available']);self.assertFalse(self.app.operation_lock.locked())
+        self.assertEqual(self.test.report['steps'][0]['state'],'passed')
+
+    async def test_cleanup_session_change_submits_nothing_and_preserves_owner(self):
+        self.retained();await self.app.operation_lock.acquire();self.test.active=True
+        with patch('backend.stability.host_scope',return_value=(1,lambda:None)),patch.object(type(self.bridge.transport),'folder',new_callable=__import__('unittest.mock',fromlist=['PropertyMock']).PropertyMock,return_value=self.root),patch('backend.stability.read_heartbeat',return_value={'session':'different-session'}),patch.object(self.bridge,'execute_stability',new_callable=AsyncMock) as call:
+            await self.test.run_cleanup()
+        call.assert_not_awaited();self.assertEqual(self.test.report['phase'],'stopped')
+        self.assertIn('原UXP会话',self.test.report['cleanup_problem']['detail'])
+        self.assertIn('retained',self.test.report['cleanup']);self.assertFalse(self.app.operation_lock.locked())
+
+    async def test_cleanup_remains_active_until_evidence_saved_and_lock_released(self):
+        self.retained();await self.app.operation_lock.acquire();self.test.active=True
+        entered=asyncio.Event();release=asyncio.Event()
+        async def save():entered.set();await release.wait()
+        result={'task_id':'cleanup','result':json.dumps({'result':{'closed_owned_document':True,'original_active_restored':True}})}
+        with patch('backend.stability.host_scope',return_value=(1,lambda:None)),patch.object(type(self.bridge.transport),'folder',new_callable=__import__('unittest.mock',fromlist=['PropertyMock']).PropertyMock,return_value=self.root),patch('backend.stability.read_heartbeat',return_value={'session':'original-session'}),patch.object(self.bridge,'execute_stability',new_callable=AsyncMock,return_value=result),patch.object(self.test,'save',side_effect=save):
+            task=asyncio.create_task(self.test.run_cleanup());await entered.wait()
+            self.assertTrue(self.test.snapshot()['active']);self.assertTrue(self.app.operation_lock.locked())
+            with self.assertRaisesRegex(RuntimeError,'不排队'):await self.test.start()
+            release.set();await task
+        self.assertFalse(self.test.snapshot()['active']);self.assertFalse(self.app.operation_lock.locked())
+
+    def test_english_failure_keeps_raw_detail_and_never_authorizes_unknown_retry(self):
+        from backend.stability_failures import describe
+        raw='An owned test document is still retained'
+        self.assertEqual(describe(raw,'fixture')['code'],'fixture-retained')
+        self.assertEqual(describe(raw,'fixture')['detail'],raw)
+        self.assertEqual(describe(raw,'fixture',True)['code'],'result-pending')
+
+    async def test_read_timeout_cannot_authorize_cleanup_but_matching_terminal_failure_can(self):
+        from backend.uxp_bridge import UxpResultUnknown,UxpRequestFailed
+        self.retained()
+        with patch.object(self.bridge.transport,'call',side_effect=UxpResultUnknown('timeout')):
+            with self.assertRaises(UxpResultUnknown):await self.test.test_read()
+        self.assertTrue(self.test.report['read_request_pending']);self.assertFalse(self.test.snapshot()['cleanup_available'])
+        with self.assertRaisesRegex(RuntimeError,'禁止清理'):await self.test.cleanup()
+        self.test.report['read_request_pending']=False
+        with patch.object(self.bridge.transport,'call',side_effect=UxpRequestFailed('known failed')):
+            with self.assertRaises(UxpRequestFailed):await self.test.test_read()
+        self.assertFalse(self.test.report['read_request_pending']);self.assertTrue(self.test.snapshot()['cleanup_available'])
     async def test_stop_does_not_cancel_inflight_and_partial_report_persists(self):
         self.test.report={'run_id':'a'*32,'started_at':__import__('time').time(),'steps':[],'round':1,'skipped':[]}
         self.test.focus_check=lambda:None
