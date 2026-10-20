@@ -168,6 +168,30 @@ class CapsInputTests(unittest.TestCase):
     d.hide=Mock();d.menu_context_requester=Mock();d.gui.SendMessage.return_value=1
     d._close_completed_menu();d.hide.assert_called_once_with(restore=True)
     d.menu_context_requester.assert_not_called();self.assertIsNone(d.menu_context_pending)
+ def test_slow_result_file_never_holds_window_lock_or_overwrites_reopened_menu(self):
+  import threading
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);self.result(folder)
+   entered,release=threading.Event(),threading.Event();read=Path.read_text
+   def slow(path,*args,**kwargs):
+    if path.name=='menu-context-result.json':
+     entered.set()
+     if not release.wait(2):raise TimeoutError('test barrier')
+    return read(path,*args,**kwargs)
+   with patch.object(Path,'read_text',slow):
+    worker=threading.Thread(target=d._finish_menu_context);worker.start()
+    try:
+     self.assertTrue(entered.wait(1))
+     acquired=d.window_lock.acquire(blocking=False)
+     self.assertTrue(acquired,'Slow file read must not block Caps/open/hide')
+     if acquired:
+      try:
+       d.menu_epoch=8;replacement={'epoch':8,'unpublished':True,'deadline':time.monotonic()+3}
+       d.menu_context_pending=replacement
+      finally:d.window_lock.release()
+    finally:release.set();worker.join(2)
+   self.assertFalse(worker.is_alive());self.assertIs(d.menu_context_pending,replacement)
+   d.gui.SendMessage.assert_not_called()
  def test_hover_return_queues_once_and_waits_for_completed_fresh_snapshot(self):
   with tempfile.TemporaryDirectory() as folder:
    d=self.ready(folder);d.hide=Mock();d.menu_context_requester=Mock();d.gui.SendMessage.side_effect=lambda hwnd,msg,*a:2 if msg==0x801c else 1

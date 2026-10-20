@@ -807,6 +807,9 @@ class Desktop:
     def _publish_menu_context(self):
         with self.window_lock:
             pending=self.menu_context_pending
+            if pending and (pending.get('resume') or not self.visible or self.menu_epoch!=pending['epoch']
+                    or time.monotonic()>pending['deadline']):
+                return self._apply_menu_context(pending,None,None)
             if not pending or not pending.get('unpublished'):return
             if pending.get('resume'):self.menu_context_pending=None;return
             if not self.visible or self.menu_epoch!=pending['epoch'] or self.stop.is_set() or time.monotonic()>pending['deadline']:
@@ -826,17 +829,34 @@ class Desktop:
                 self.menu_context_pending=request
             else:self.menu_context_pending=None
 
-    @window_transition
     def _finish_menu_context(self):
-        pending=self.menu_context_pending
+        # Disk I/O and schema/catalog validation must not hold the same lock
+        # used by Caps/open/hide. Revalidate the exact pending object on commit.
+        with self.window_lock:
+            pending=self.menu_context_pending
         if not pending:return
+        if 'id' not in pending:
+            return self._apply_menu_context(pending,None,None)
+        try:
+            snapshot=json.loads((pending['folder']/'menu-context-result.json').read_text('utf-8-sig'))
+            prepared=None
+            if snapshot.get('menu_phase','completed') in ('basic','completed'):
+                from .layer_context import validate
+                from .shape_paint import metadata
+                value=validate(snapshot,pending['session'])
+                prepared=(value,metadata(value.get('shape_editor')))
+        except (OSError,ValueError,KeyError,TypeError):return
+        self._apply_menu_context(pending,snapshot,prepared)
+
+    @window_transition
+    def _apply_menu_context(self,pending,snapshot,prepared):
+        if self.menu_context_pending is not pending:return
         if pending.get('resume'):self.menu_context_pending=None;return
         if not self.visible or self.menu_epoch!=pending['epoch'] or time.monotonic()>pending['deadline']:
             self.menu_context_delivery={'phase':'expired' if self.visible and self.menu_epoch==pending['epoch'] else 'closed','epoch':pending['epoch']}
             self.menu_context_pending=None;return
         if 'id' not in pending:return
         try:
-            snapshot=json.loads((pending['folder']/'menu-context-result.json').read_text('utf-8-sig'))
             if snapshot.get('menu_request_id')!=pending['id']:return
             phase=snapshot.get('menu_phase','completed')
             if phase=='reading':
@@ -850,16 +870,16 @@ class Desktop:
             if phase not in ('basic','completed') or pending.get('applied_phase')==phase:return
             if pending.get('hover_return') and (phase!='completed' or getattr(self,'preview_input_guard',None)
                     or getattr(self,'mask_preview',None) and not self.mask_preview.closed):return
-            from .layer_context import validate,flags
-            value=validate(snapshot,pending['session'])
+            from .layer_context import fresh,flags
+            if prepared is None:return
+            value,shape=prepared
+            if not fresh(value):return
             if value.get('kind') in ('unknown','none'):return
             if pending.get('applied_phase')=='basic' and any(
                     value.get(key)!=(self.menu_layer_context or {}).get(key) for key in ('session','document_id','layer_ids')):
                 self.menu_context_pending=None;return
             panel=self.panel_context.current
             if panel.get('kind')!='layers' or panel.get('input_focused') or not self._scope():return
-            from .shape_paint import metadata
-            shape=metadata(value.get('shape_editor'))
             active=shape_editor_allowed(panel,shape,True,value)
             envelope={'epoch':pending['epoch'],'flags':flags(value),'shape':shape if active else {'available':False}}
             if pending.get('hover_return'):envelope.update(hover_return=True,next_epoch=self.menu_epoch+1)
