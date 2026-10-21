@@ -98,6 +98,12 @@
     function clone(d) { var copy = new ActionDescriptor(); copy.fromStream(d.toStream()); return copy; }
     function pathStream() { if (!prepared.raw.vector) return null; var r = new ActionReference(); r.putEnumerated(s('path'), s('path'), s('vectorMask')); return executeActionGet(r).toStream(); }
     function mask(d) { return {feather:d.getDouble(s('vectorMaskFeather')), density:d.getInteger(s('vectorMaskDensity')) * 100 / 255}; }
+    function vectorMaskChanged(d, expected) {
+        // ExtendScript does not reliably give && precedence over ||.
+        // Branch before touching vector-only state on ordinary fill layers.
+        if (!prepared.raw.vector) return false;
+        return !maskClose(mask(d), expected);
+    }
     function maskClose(a, b) { return Math.abs(a.feather - b.feather) < .01 && Math.abs(a.density - b.density) <= 100 / 255 + .001; }
     function raw(d) {
         var fillList = d.getList(s('adjustment')), fill = object(fillList.getObjectValue(0)); fill._obj = name(fillList.getObjectType(0));
@@ -145,7 +151,7 @@
             else if (v.kind === 'gradient') {
                 if (v.method !== undefined && v.method!=='classic' && v.method!=='linear' && v.method!=='perceptual') throw Error('Invalid gradient interpolation');
                 if (!(v.stops instanceof Array) || v.stops.length < 2 || v.stops.length > 32) throw Error('Invalid gradient');
-                for (var i=0;i<v.stops.length;i++) if (!color(v.stops[i].rgb) || !range(v.stops[i].location,0,4096) || Math.floor(v.stops[i].location)!==v.stops[i].location || i && v.stops[i].location<v.stops[i-1].location) throw Error('Invalid gradient stop');
+                for (var i=0;i<v.stops.length;i++) if (!color(v.stops[i].rgb) || !range(v.stops[i].location,0,4096) || Math.floor(v.stops[i].location)!==v.stops[i].location || (i && v.stops[i].location<v.stops[i-1].location)) throw Error('Invalid gradient stop');
             } else if (v.kind === 'pattern') { if (typeof v.name !== 'string' || !v.name || v.name.length > 128) throw Error('Invalid pattern'); }
             else throw Error('Invalid paint kind');
         }
@@ -194,7 +200,7 @@
     function setMaskProperty(key, unitID, value) { stage='write-'+key;target();var d=new ActionDescriptor(),r=new ActionReference(),v=new ActionDescriptor();r.putIdentifier(c('Lyr '),anchor.id);d.putReference(c('null'),r);v.putUnitDouble(s(key),c(unitID),value);d.putObject(c('T   '),c('Lyr '),v);executeAction(c('setd'),d,DialogModes.NO); }
     function apply(p) {
         progress('read',0,1,true);stage='read-before-frame';validate(p);target();var d=layerDescriptor();
-        if(!same(raw(d),expectedRaw) || prepared.raw.vector && !maskClose(mask(d),applied.mask || originalMask))throw Error('Style changed outside preview');
+        if(!same(raw(d),expectedRaw) || vectorMaskChanged(d,applied.mask || originalMask))throw Error('Style changed outside preview');
         progress('read',1,1);progress('write',0,1,true);
         var fillChanged=!same(p.fill,applied.fill),strokeChanged=!same(p.stroke,applied.stroke),frameChanged=false,to,newFill,newStroke,r,command;
         if(fillChanged || strokeChanged){
@@ -209,7 +215,7 @@
         }
         if(p.mask){if(Math.abs(p.mask.feather-(applied.mask || originalMask).feather)>.00001){setMaskProperty('vectorMaskFeather','#Pxl',p.mask.feather);changed=true;frameChanged=true;}if(Math.abs(p.mask.density-(applied.mask || originalMask).density)>.00001){setMaskProperty('vectorMaskDensity','#Prc',p.mask.density);changed=true;frameChanged=true;}}
         progress('write',1,1);progress('verify',0,1,true);stage='verify-frame';target();d=layerDescriptor();verifyPaint(d,p);expectedRaw=raw(d);applied=p;updates++;
-        progress('verify',1,1);if(frameChanged){progress('redraw',0,0,true);stage='redraw';app.refresh();redraws++;target();}progress('ready',1,1,true);
+        progress('verify',1,1);if(frameChanged){progress('redraw',0,0,true);stage='redraw';app.refresh();redraws++;stage='verify-after-redraw';target();}progress('ready',1,1,true);
     }
     function readControl() {
         if(!mailbox.exists || mailbox.length>16384)return null;mailbox.encoding='UTF-8';if(!mailbox.open('r'))return null;var text;try{text=mailbox.read();}finally{mailbox.close();}return decode(text.replace(/^\uFEFF/,''));
@@ -240,7 +246,7 @@
         r.putIdentifier(c('Lyr '),request.target.active_layer_id);r.putIdentifier(s('document'),request.target.document_id);
         d.putReference(c('null'),r);d.putBoolean(c('MkVs'),false);executeAction(c('slct'),d,DialogModes.NO);target();
     }
-    function rollback() { restoring=true;progress('restore',0,0,true);target();var current=layerDescriptor(),dirty=changed || !same(raw(current),raw(baseline)) || prepared.raw.vector && !maskClose(mask(current),originalMask);stage='restore-history';doc.activeHistoryState=originalHistory;restoreSingleSelection();if(dirty){progress('redraw',0,0,true);stage='restore-redraw';app.refresh();redraws++;}progress('verify',0,1,true);stage='restore-verify';var d=invariants();if(!same(raw(d),raw(baseline)) || prepared.raw.vector && !maskClose(mask(d),originalMask))throw Error('Legacy rollback readback mismatch');progress('verify',1,1,true); }
+    function rollback() { restoring=true;progress('restore',0,0,true);target();var current=layerDescriptor(),dirty=changed || !same(raw(current),raw(baseline)) || vectorMaskChanged(current,originalMask);stage='restore-history';doc.activeHistoryState=originalHistory;restoreSingleSelection();if(dirty){progress('redraw',0,0,true);stage='restore-redraw';app.refresh();redraws++;}progress('verify',0,1,true);stage='restore-verify';var d=invariants();if(!same(raw(d),raw(baseline)) || vectorMaskChanged(d,originalMask))throw Error('Legacy rollback readback mismatch');progress('verify',1,1,true); }
     function batchRun() {
         var records=[],batchHistory=null,batchStarted=false,batchChanged=false,batchCommit=false,batchSeq=0,batchUpdates=0,batchRedraws=0,batchLatest=request.paint;
         var batchAbort={},actionResidue='',batchNativeCalls=0,nativeReads=false;
@@ -262,11 +268,11 @@
             if(current.sort(function(a,b){return a-b;}).join(',')!==selectionIDs)throw Error('Batch selection changed');
             selectionStream=stream;
         }
-        function unlocked(l){var kind=l.typename;while(kind==='ArtLayer'||kind==='LayerSet'){if(l.allLocked || kind==='ArtLayer' && (l.pixelsLocked||l.positionLocked||l.transparentPixelsLocked||l.isBackgroundLayer))throw Error('Batch layer locked');l=l.parent;kind=l.typename;}}
+        function unlocked(l){var kind=l.typename;while(kind==='ArtLayer'||kind==='LayerSet'){if(l.allLocked || (kind==='ArtLayer' && (l.pixelsLocked||l.positionLocked||l.transparentPixelsLocked||l.isBackgroundLayer)))throw Error('Batch layer locked');l=l.parent;kind=l.typename;}}
         function batchTarget(){batchIdentity();if(nativeReads){nativeLocks(null);return;}for(var i=0;i<records.length;i++)unlocked(records[i].layer);}
         function batchValidate(p) {
             if(!p || p.mask_batch!==true || p.revision!==request.paint.revision || !p.mask || p.fill || p.stroke)throw Error('Invalid batch parameters');
-            var n=0;for(var k in p.mask)if(p.mask.hasOwnProperty(k)){if(k!=='feather'&&k!=='density' || !range(p.mask[k],0,k==='feather'?1000:100))throw Error('Invalid batch mask');n++;}if(!n)throw Error('Empty batch mask');
+            var n=0;for(var k in p.mask)if(p.mask.hasOwnProperty(k)){if((k!=='feather'&&k!=='density') || !range(p.mask[k],0,k==='feather'?1000:100))throw Error('Invalid batch mask');n++;}if(!n)throw Error('Empty batch mask');
         }
         function desc(id){var r=new ActionReference();r.putIdentifier(c('Lyr '),id);return executeActionGet(r);}
         // Native reads are scoped to ONE synchronous validation. No DOM proxy,
@@ -466,7 +472,7 @@
     else try {
         if(!app.documents.length)throw Error('Preview document closed');doc=app.activeDocument;anchor=doc.activeLayer;originalHistory=doc.activeHistoryState;
         target();validate(request.paint);if(prepared.before.revision!==request.paint.revision)throw Error('Prepared revision changed');stage='read-baseline';baseline=layerDescriptor();
-        if(!same(raw(baseline),{fill:prepared.raw.fill,stroke:prepared.raw.stroke,vector:prepared.raw.vector}) || prepared.before.mask && !maskClose(mask(baseline),prepared.before.mask))throw Error('Prepared style changed before native dispatch');
+        if(!same(raw(baseline),{fill:prepared.raw.fill,stroke:prepared.raw.stroke,vector:prepared.raw.vector}) || (prepared.before.mask && !maskClose(mask(baseline),prepared.before.mask)))throw Error('Prepared style changed before native dispatch');
         stage='clone-original';var list=baseline.getList(s('adjustment'));originalFill=clone(list.getObjectValue(0));originalFillType=list.getObjectType(0);originalStroke=baseline.hasKey(s('AGMStrokeStyleInfo'))?clone(baseline.getObjectValue(s('AGMStrokeStyleInfo'))):defaultStroke();
         stage='snapshot-invariants';originalPath=pathStream();originalPixel=pixelMask(baseline);originalOrder=order();originalParent=parentID();originalMask=prepared.raw.vector?mask(baseline):null;expectedRaw=raw(baseline);applied=prepared.before;latest=request.paint;
         if(originalParent!==prepared.parent_id || originalOrder.join(',')!==prepared.order.join(','))throw Error('Prepared parent or order changed');
@@ -477,9 +483,10 @@
         result.preview={updates:updates,redraws:redraws,last_seq:lastSeq,engine:'standalone-extendscript'};
         result={schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'completed',result:result};
     } catch(error) {
-        var unknown=false,failureStage=stage,rollbackError='';
+        var unknown=false,failureStage=stage,rollbackError='',failureLine=error.line;
         if(historyStarted){try{rollback();}catch(restoreError){unknown=true;rollbackError=String(restoreError);}}
         result={schema:1,id:request.id,session:request.session,operation:request.operation,token:request.token,phase:'failed',error:String(error),stage:failureStage,result_unknown:unknown};
+        if(typeof failureLine==='number')result.error_line=failureLine;
         if(rollbackError){result.rollback_error=rollbackError;result.rollback_stage=stage;}
     }
     var text=encode(result),temporary=new File(folder+'/legacy-result-'+request.id+'.tmp');

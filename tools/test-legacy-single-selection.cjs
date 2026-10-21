@@ -2,6 +2,7 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const source=fs.readFileSync('jsx/legacy_shape_preview.jsx','utf8');
 const target=source.slice(source.indexOf('    function target()'),source.indexOf('    function order()'));
+const vectorMask=source.slice(source.indexOf('    function vectorMaskChanged('),source.indexOf('    function maskClose('));
 const rollback=source.slice(source.indexOf('    function restoreSingleSelection()')>=0?source.indexOf('    function restoreSingleSelection()'):source.indexOf('    function rollback()'),source.indexOf('    function batchRun()'));
 function fixture(){
  let active=26,document=59,style='preview';const events=[];
@@ -20,7 +21,7 @@ function fixture(){
   executeAction(k,d){assert.equal(k,'slct');assert.deepEqual(d.values.null.parts,[['Lyr ',26],['document',59]]);
    assert.equal(d.values.MkVs,false);events.push('select');active=26;},
  };
- vm.createContext(context);vm.runInContext(target+rollback+'this.rollbackTest=rollback;',context);
+ vm.createContext(context);vm.runInContext(vectorMask+target+rollback+'this.rollbackTest=rollback;',context);
  context.invariants=()=>{context.target();events.push('verify');return {style};};
  f.run=context.rollbackTest;f.context=context;return f;
 }
