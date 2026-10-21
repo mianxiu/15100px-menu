@@ -689,6 +689,29 @@ module.exports = function createLabels(ps, session, options={}) {
     }
     return {samples,equivalent:signature(samples.before.value)===signature(samples.after.value),scope:'native-feedback-reads-only'};
   }
+  async function styleReadComparison(run,order=0) {
+    if(![0,1].includes(order))throw Error('Invalid style comparison order');
+    return ps.core.executeAsModal(async context=>{
+      stability.guard(run);const actual=await capture(),doc=ps.app.activeDocument,samples={};
+      const now=()=>typeof performance!=='undefined' && typeof performance.now==='function'?performance.now():Date.now();
+      for(const strategy of order?['after','before']:['before','after']) {
+        if(context.isCancelled)throw Error('Style comparison cancelled');
+        stability.guard(run);const stats={calls:0,descriptors:0,response_bytes:0},returns=[];
+        const host={action:{async batchPlay(commands,options){
+          stats.calls++;stats.descriptors+=commands.length;const result=await ps.action.batchPlay(commands,options);
+          returns.push(result);return result;
+        }}};
+        const started=now();
+        const values=strategy==='after'?await readLayerEffects(host,doc,actual.layer_ids):
+          await host.action.batchPlay(actual.layer_ids.map(id=>({_obj:'get',_target:[{_ref:'layer',_id:id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})),{});
+        const ms=now()-started;
+        for(const value of returns)stats.response_bytes+=encodeURIComponent(JSON.stringify(value)).replace(/%[0-9A-F]{2}/g,'_').length;
+        if(values.length!==actual.layer_ids.length || values.some((v,i)=>v?._obj==='error' || v?.layerID!==actual.layer_ids[i]))throw Error('Style comparison target mismatch');
+        samples[strategy]={ms,...stats,values:values.map(v=>({layerID:v.layerID,layerEffects:v.layerEffects??null}))};stability.guard(run);
+      }
+      return {samples,equivalent:JSON.stringify(samples.before.values)===JSON.stringify(samples.after.values),scope:'native-layer-style-reads-only'};
+    },{commandName:'Read isolated layer styles',timeOut:0});
+  }
   async function labelInheritanceComparison(run,order=0) {
     if(![0,1].includes(order))throw Error('Invalid label comparison order');
     return ps.core.executeAsModal(async context=>{
@@ -745,7 +768,7 @@ module.exports = function createLabels(ps, session, options={}) {
     return {samples,equivalent:Object.values(samples).every(sample=>signature(sample.value)===signature(samples.dom.value)),
       constant_contract:{layer_kinds:Object.fromEntries(Object.entries(ps.constants.LayerKind))}};
   }
-  return {readText:textTools.read,searchLayers:layerSearch.search,labelInheritanceComparison,feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
+  return {readText:textTools.read,searchLayers:layerSearch.search,styleReadComparison,labelInheritanceComparison,feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
     if(!nativeSelection)return shapePaint.observe(...args);
     // Only explicit optional editor reads enter a short read-only modal scope.
     // Idle selection polling uses batchPlay and never occupies modal execution.
@@ -790,6 +813,7 @@ function createStabilityFixture(ps,session,capture,documentTarget) {
     const fixtureCount=request.test_layers===undefined?5:request.test_layers;
     if(step==='fixture' && ![4,5,100,300].includes(fixtureCount))throw Error('Invalid bounded fixture size');
     if(step==='fixture' && request.test_background!==undefined && typeof request.test_background!=='boolean')throw Error('Invalid fixture background');
+    if(step==='fixture' && request.test_effects!==undefined && typeof request.test_effects!=='boolean')throw Error('Invalid fixture effects');
     if(step==='fixture')return ps.core.executeAsModal(async context=>{
       if(owner && !Array.from(ps.app.documents).some(d=>d.id===owner.document_id) && equal(originals(),owner.originals))owner=null;
       if(owner)throw Error('An owned test document is still retained');
@@ -819,6 +843,11 @@ function createStabilityFixture(ps,session,capture,documentTarget) {
         owner.expected=stamp(doc);
       }
       await batch([{_obj:'select',_target:[{_ref:'layer',_id:owner.shape_id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}}]);
+      if(request.test_effects===true)await batch([{_obj:'set',_target:[{_ref:'property',_property:'layerEffects'},
+        {_ref:'layer',_id:owner.shape_id},{_ref:'document',_id:doc.id}],to:{_obj:'layerEffects',scale:{_unit:'percentUnit',_value:100},
+          frameFX:{_obj:'frameFX',enabled:true,style:{_enum:'frameStyle',_value:'outsetFrame'},paintType:{_enum:'frameFill',_value:'solidColor'},
+            mode:{_enum:'blendMode',_value:'normal'},opacity:{_unit:'percentUnit',_value:100},size:{_unit:'pixelsUnit',_value:3},
+            color:{_obj:'RGBColor',red:220,grain:40,blue:80}}},_options:{dialogOptions:'dontDisplay'}}]);
       accept(run);return {verified:true,...await read(run)};
     },{commandName:'Menu isolated test fixture',timeOut:0});
     guard(run);
@@ -1403,6 +1432,21 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
   return {observe,apply,prepareLegacy,finishLegacy};
 }
 
+async function readLayerEffects(ps,doc,ids) {
+  let values;
+  try {values=await ps.action.batchPlay(ids.map(id=>({_obj:'multiGet',
+    _target:{_ref:[{_ref:'layer',_id:id},{_ref:'document',_id:doc.id}]},
+    extendedReference:[['layerID','layerEffects']],
+    options:{failOnMissingProperty:false,failOnMissingElement:true},_options:{dialogOptions:'dontDisplay'}})),{});}
+  catch(_) {} // Read-only compatibility fallback; no modifying command is retried.
+  if(!values || Array.isArray(values) && values.some(v=>v?._obj==='error'))values=await ps.action.batchPlay(ids.map(id=>({_obj:'get',
+    _target:[{_ref:'layer',_id:id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})),{});
+  if(!Array.isArray(values) || values.length!==ids.length || values.some((v,i)=>!v || v._obj==='error' || v.layerID!==ids[i] ||
+      v.layerEffects!==undefined && (!v.layerEffects || typeof v.layerEffects!=='object' || Array.isArray(v.layerEffects))))
+    throw Error('Layer style readback unavailable or target changed');
+  return values;
+}
+
 // Fixed reference-Caps actions. No menu letters, synthetic keys or IME changes.
 function createCapsActions(ps,session,capture,selectionContext,readNativeTree,captureSelection,nativeSelection=false) {
   // The native strategy prepares fresh feedback after modal exit; its DOM copy is discarded.
@@ -1530,7 +1574,7 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
       const mutate=!selecting && command!=='copyStyle';
       if(mutate && selected.some(l=>l.isBackgroundLayer || l.allLocked || l.positionLocked))throw Error('请先解锁目标图层');
       async function batch(descriptors){const values=await ps.action.batchPlay(descriptors,{});if(values.some(v=>v._obj==='error')){const v=values.find(v=>v._obj==='error');const e=Error(v.message || 'Photoshop rejected command');e.cancelled=v.result===-128;throw e;}return values;}
-      async function effects(){const [v]=await batch([{_obj:'get',_target:[{_ref:'layer',_id:active.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}}]);return v.layerEffects;}
+      async function effects(){return (await readLayerEffects(ps,doc,[active.id]))[0].layerEffects;}
       let history=null;
       if(mutate && command!=='editStyle')history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu '+command});
       try {
@@ -1559,7 +1603,7 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
           await batch([{_obj:'copyEffects',_options:{dialogOptions:'dontDisplay'}}]);
         } else if(command==='pasteStyle') {
           await batch([{_obj:'pasteEffects',_options:{dialogOptions:'dontDisplay'}}]);
-          const values=await batch(selected.map(l=>({_obj:'get',_target:[{_ref:'layer',_id:l.id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}})));
+          const values=await readLayerEffects(ps,doc,selected.map(l=>l.id));
           if(values.some(v=>!v.layerEffects))throw Error('粘贴样式未通过读回核验');
         } else {
           // Photoshop edits the current effects object in its own dialog.

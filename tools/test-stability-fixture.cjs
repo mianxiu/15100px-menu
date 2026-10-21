@@ -2,7 +2,7 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const source=fs.readFileSync('uxp/offline-probe/labels.js','utf8');
 const start=source.indexOf('function createStabilityFixture('),end=source.indexOf('\n// Session-local native paint clipboard.',start);
 const context={};vm.createContext(context);vm.runInContext(source.slice(start,end)+';this.create=createStabilityFixture;',context);
-const original={id:1,activeHistoryState:{id:10},activeLayers:[{id:5}]},docs=[original];let active=original,next=100,closed=[],replaceStarter=false;
+const original={id:1,activeHistoryState:{id:10},activeLayers:[{id:5}]},docs=[original];let active=original,next=100,closed=[],replaceStarter=false,effects=0;
 const ps={app:{documents:docs,get activeDocument(){return active;},set activeDocument(v){active=v;},async createDocument(){
  const doc={id:2,layers:[{id:++next}],activeHistoryState:{id:20},historyStates:[{id:20}],async closeWithoutSaving(){closed.push(this.id);docs.splice(docs.indexOf(this),1);active=docs[0];}};
  doc.activeLayers=[doc.layers[0]];docs.push(doc);active=doc;return doc;
@@ -12,6 +12,7 @@ const ps={app:{documents:docs,get activeDocument(){return active;},set activeDoc
   else active.layers.unshift(l);
   active.activeLayers=[l];active.activeHistoryState={id:++next};active.historyStates.push(active.activeHistoryState);}
  if(c._obj==='select'){active.activeLayers=[active.layers.find(l=>l.id===c._target[0]._id)];}
+ if(c._obj==='set'){assert.equal(c._target[0]._property,'layerEffects');assert.equal(c._target[1]._id,active.activeLayers[0].id);assert.equal(c._target[2]._id,active.id);assert.equal(c.to.frameFX.enabled,true);effects++;active.activeHistoryState={id:++next};active.historyStates.push(active.activeHistoryState);}
  return {};
 });}}};
 const docTarget=()=>({session:'s',document_ids:docs.map(d=>d.id),active_document_id:active.id});
@@ -20,6 +21,7 @@ const f=context.create(ps,'s',capture,docTarget),run='a'.repeat(32);
 const req=step=>({stability_run:run,test_step:step,target:docTarget(),expires_at_ms:Date.now()+10000});
 (async()=>{
  await assert.rejects(f.execute({...req('fixture'),test_layers:301}),/bounded fixture size/);assert.equal(docs.length,1);
+ await assert.rejects(f.execute({...req('fixture'),test_effects:'true'}),/fixture effects/);assert.equal(docs.length,1);
  await f.execute(req('fixture'));assert.equal(docs.length,2);await f.read(run);
  await assert.rejects(f.execute({...req('select-root'),test_index:999}),/bounded root selection/);
  await f.execute({...req('select-root'),test_index:0});await f.read(run);
@@ -36,5 +38,6 @@ const req=step=>({stability_run:run,test_step:step,target:docTarget(),expires_at
   assert.equal((await f.read(run)).layer_count,count,'Native replacement must not skew the requested actual size');
   await f.execute(req('finish'));assert.equal(active,original);
  }
+ assert.equal(effects,0);await f.execute({...req('fixture'),test_layers:4,test_effects:true});await f.read(run);assert.equal(effects,1);await f.execute(req('finish'));assert.equal(active,original);
  console.log('PASS owned fixture: changed original/selection/document/session rejected; exact one-undo checkpoint; only owned document closed');
 })().catch(e=>{console.error(e);process.exitCode=1;});
