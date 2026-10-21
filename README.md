@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-本机候选运行版231／UXP0.3.60：清除标签减少无关组读取；代码／构建／实际版本与部分低CPU PS接口已核验，完整实测尚未完成。[当前证据与待验范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。公开下载仍为已核验的230，包含图层搜索、文本拆分／普通替换及正常长任务自检修复。
+本机已切换231／UXP0.3.60：清除标签的继承检查只读取所选层祖先，原提示和一次撤销保持；低CPU／正常PS接口及实际入口已核验。[速度对照与未验范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。公开下载230包含图层搜索、文本拆分／普通替换和长任务自检修复。
 
 227／UXP0.3.57起：后台新增图层搜索，按打开文档文件名、图层名与类型筛选，明确点击后按ID跨文档定位并保留隐藏状态。[操作和验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-search)。
 
