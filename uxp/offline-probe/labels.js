@@ -325,6 +325,33 @@ module.exports = function createLabels(ps, session, options={}) {
     const ids=Array.from(doc.activeLayers,l=>l.id).sort((a,b)=>a-b);
     return ps.app.activeDocument.id===doc.id && doc.id===value.document_id && ids.join(',')===value.layer_ids.join(',');
   }
+  async function inheritedLabels(actual,host=ps) {
+    const doc=host.app.activeDocument,selected=Array.from(doc.activeLayers),known=new Map();
+    if(doc.id!==actual.document_id || selected.map(l=>l.id).sort((a,b)=>a-b).join(',')!==actual.layer_ids.join(','))
+      throw Error('Label inheritance target changed');
+    let inherited=0;
+    for(const layer of selected) {
+      let parent=layer.parent,colored=false;const path=[],seen=new Set();
+      while(parent) {
+        const id=parent.id;
+        if(!Number.isInteger(id)||id<=0||seen.has(id))throw Error('Invalid label parent chain');
+        seen.add(id);
+        if(known.has(id)){colored=known.get(id);break;}
+        const result=await host.action.batchPlay([{_obj:'get',_target:[{_ref:'property',_property:'color'},
+          {_ref:'layer',_id:id},{_ref:'document',_id:doc.id}],_options:{dialogOptions:'dontDisplay'}}],{});
+        const value=result?.[0]?.color?._value;
+        if(!Array.isArray(result) || result.length!==1 || result[0]?._obj==='error' || typeof value!=='string' || !value)
+          throw Error('Parent label readback unavailable');
+        path.push(id);
+        if(value!=='none'){colored=true;break;}
+        parent=parent.parent;
+      }
+      for(const id of path)known.set(id,colored);
+      if(colored)inherited++;
+    }
+    if(!selectionMatches(actual))throw Error('Label inheritance target changed');
+    return inherited;
+  }
   async function setLabel(request,previewIO=null) {
     if(request.command==='text.replace')return textTools.replace(request);
     if(request.command==='text.split')return textTools.split(request);
@@ -549,15 +576,7 @@ module.exports = function createLabels(ps, session, options={}) {
         if (verified.length !== actual.layer_ids.length || verified.some(v=>!v.color || v.color._value !== request.color))
           throw Error('Label readback mismatch');
         let inherited=0;
-        if(request.color==='none') {
-          async function scan(layers, parentColored) { for(const layer of layers) {
-            const group=layer.kind===ps.constants.LayerKind.GROUP;
-            if(actual.layer_ids.includes(layer.id)&&parentColored)inherited++;
-            if(group) {const [v]=await ps.action.batchPlay([{_obj:'get',_target:[{_ref:'property',_property:'color'},{_ref:'layer',_id:layer.id}]}],{});
-              await scan(layer.layers,parentColored || v.color._value!=='none');}
-          }}
-          if(ps.constants)await scan(ps.app.activeDocument.layers,false);
-        }
+        if(request.color==='none' && ps.constants)inherited=await inheritedLabels(actual);
         await context.hostControl.resumeHistory(history, true);
         return {verified:true, count:actual.layer_ids.length, inherited, color:request.color, target:actual};
       } catch (error) {
@@ -670,6 +689,35 @@ module.exports = function createLabels(ps, session, options={}) {
     }
     return {samples,equivalent:signature(samples.before.value)===signature(samples.after.value),scope:'native-feedback-reads-only'};
   }
+  async function labelInheritanceComparison(run,order=0) {
+    if(![0,1].includes(order))throw Error('Invalid label comparison order');
+    return ps.core.executeAsModal(async context=>{
+      stability.guard(run);const actual=await capture(),samples={};
+      const now=()=>typeof performance!=='undefined' && typeof performance.now==='function'?performance.now():Date.now();
+      for(const strategy of order?['after','before']:['before','after']) {
+        if(context.isCancelled)throw Error('Label comparison cancelled');
+        stability.guard(run);const stats={calls:0,descriptors:0,response_bytes:0};
+        const host={app:ps.app,constants:ps.constants,action:{async batchPlay(commands,options){
+          stats.calls++;stats.descriptors+=commands.length;
+          const result=await ps.action.batchPlay(commands,options);stats.response_bytes+=JSON.stringify(result).length;return result;
+        }}};
+        const started=now();let inherited=0;
+        if(strategy==='after')inherited=await inheritedLabels(actual,host);
+        else {
+          // Frozen UXP59 baseline; diagnostic reads only, never used for writes.
+          async function scan(layers,parentColored) {for(const layer of layers) {
+            const group=layer.kind===host.constants.LayerKind.GROUP;
+            if(actual.layer_ids.includes(layer.id)&&parentColored)inherited++;
+            if(group) {const [v]=await host.action.batchPlay([{_obj:'get',_target:[{_ref:'property',_property:'color'},{_ref:'layer',_id:layer.id}]}],{});
+              await scan(layer.layers,parentColored || v.color._value!=='none');}
+          }}
+          await scan(host.app.activeDocument.layers,false);
+        }
+        samples[strategy]={inherited,ms:now()-started,...stats};stability.guard(run);
+      }
+      return {samples,equivalent:samples.before.inherited===samples.after.inherited,scope:'label-inheritance-reads-only'};
+    },{commandName:'Read isolated label inheritance',timeOut:0});
+  }
   async function nativeReadComparison(run,order=0,checkpoint=null) {
     if(![0,1,2].includes(order))throw Error('Invalid bounded native comparison order');
     const samples={};
@@ -697,7 +745,7 @@ module.exports = function createLabels(ps, session, options={}) {
     return {samples,equivalent:Object.values(samples).every(sample=>signature(sample.value)===signature(samples.dom.value)),
       constant_contract:{layer_kinds:Object.fromEntries(Object.entries(ps.constants.LayerKind))}};
   }
-  return {readText:textTools.read,searchLayers:layerSearch.search,feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
+  return {readText:textTools.read,searchLayers:layerSearch.search,labelInheritanceComparison,feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
     if(!nativeSelection)return shapePaint.observe(...args);
     // Only explicit optional editor reads enter a short read-only modal scope.
     // Idle selection polling uses batchPlay and never occupies modal execution.
