@@ -1,8 +1,8 @@
 # Photoshop Menu
 
-223已完成普通填充取消异常修复及本机8项真实接口验证，UXP仍0.3.53；已构建并切换实际入口，公开发布核验进行中。旧PS取消仍约1.4秒，不宣称收尾延迟已消除。[用法和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
+[223已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.223)：普通填充取消异常修复及本机8项真实接口验证通过，UXP仍0.3.53；公开ZIP／SHA／Latest清单及精简Wiki已核验，仅保留223 Release。旧PS取消仍约1.4秒，不宣称收尾延迟已消除。[用法和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
-[222已发布](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.222)，UXP仍0.3.53：同一菜单结果不再反复读盘、解析。重复轮询本地开销减少约0.10–0.31ms／次，首次处理增加约0.21–0.33ms；不代表PS读取或整体操作等比例提速。[对照和范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
+[222历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.222)，UXP仍0.3.53：同一菜单结果不再反复读盘、解析。重复轮询本地开销减少约0.10–0.31ms／次，首次处理增加约0.21–0.33ms；不代表PS读取或整体操作等比例提速。[对照和范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
 [221历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.221)，UXP仍0.3.53：预览确认／取消改为立即发送，保留完整终态校验。低CPU热态收尾4组对照中位201→172ms、P95 261→206ms；正常配置及实体／故障机待验。[速度口径和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
