@@ -268,7 +268,8 @@ class PhotoshopBridge:
             self._operation_future = future
             dispatched = True
             future.add_done_callback(finished)
-            result = await asyncio.wait_for(asyncio.shield(future), None if action=='editStyle' or interactive else self.operation_timeout)
+            execution_timeout = 120 if action=='text.split' else self.operation_timeout
+            result = await asyncio.wait_for(asyncio.shield(future), None if action=='editStyle' or interactive else execution_timeout)
             if result_target:target=result_target(result)
             return {"message": self._result_message(action,result), "result": str(result or ""), "target":target, 'task_id':task_id}
         except asyncio.TimeoutError:

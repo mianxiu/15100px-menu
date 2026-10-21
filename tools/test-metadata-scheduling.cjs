@@ -10,7 +10,7 @@ async function host(initialCommand=false,registration='ready'){
   const snapshot=()=>({session:c.session,document_id:1,layer_ids:[2],kind:'pixel',mask:15,quick_mask:127});
   const labels={selectionContextFresh:async checkpoint=>{if(checkpoint)await checkpoint();c.selection++;if(c.onSelection)c.onSelection();return snapshot();},
     interfacePreferences:async()=>{c.preferences++;if(c.block)await new Promise(resolve=>{release=resolve;});return {ui_theme:'light-gray',ui_font_size:'large',ui_preferences_complete:true,ui_preferences_time_ms:c.now};},
-    capture:async()=>{c.captures++;return snapshot();},documentTarget:()=>({document_ids:[1]}),paintClipboardAvailable:()=>false};
+    capture:async()=>{c.captures++;return snapshot();},setLabel:async()=>({verified:true,selection_context:null}),documentTarget:()=>({document_ids:[1]}),paintClipboardAvailable:()=>false};
   const app={get documents(){c.documents++;if(c.onDocuments)c.onDocuments();return [{title:'original'}];},activeDocument:{title:'original'}};
   function command(id){files.set('probe-request.json',JSON.stringify({token:'token',id,operation:'capture',expires_at_ms:c.now+9000}));}
   if(initialCommand)command('initial');
@@ -90,5 +90,10 @@ async function host(initialCommand=false,registration='ready'){
     const count=h.c.selection;h.c.now+=1100;await h.poll();
     assert.ok(h.c.selection>count,'Polling must survive failed registration');
   }
+  h=await host();const selectionBefore=h.c.selection,id='b'.repeat(32);
+  h.files.set('probe-request.json',JSON.stringify({token:'token',id,operation:'set_label',command:'selectAbove',target:{session:h.c.session,document_id:1,layer_ids:[2]},expires_at_ms:h.c.now+9000}));
+  await h.poll();const terminal=JSON.parse(h.files.get('result-'+id+'.json'));
+  assert.equal(terminal.phase,'completed');assert.equal(terminal.layer_context.document_id,1);
+  assert.equal(h.c.selection,selectionBefore+1,'Fresh native feedback must precede the persisted terminal');
   console.log('PASS metadata scheduling: cold/due command and menu priority; awaited-call ownership; pure JS pulse; original ages; getter checkpoints; no replay');
 })().catch(error=>{console.error(error);process.exitCode=1;});

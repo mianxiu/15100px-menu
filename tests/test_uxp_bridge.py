@@ -156,6 +156,23 @@ class UxpPublicationTests(unittest.TestCase):
             self.assertEqual(destination.read_bytes(),b'old');self.assertFalse(source.exists())
 
 class UxpDiscoveryTests(unittest.TestCase):
+    def test_utf8_text_maximum_fits_wire_limit_without_disabling_byte_boundary(self):
+        folder=self.heartbeat(26);self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        (folder/'probe-last.json').write_text(json.dumps({'session':'s','probe_version':'0.3.59','photoshop_version':'26.0.0','plugin_time_ms':time.time()*1000}),'utf-8')
+        self.transport.pending.storage=self.transport.storage;self.transport.task_id='b'*32
+        with patch('backend.uxp_bridge.publish_request') as publish:
+            with self.assertRaisesRegex(ValueError,'协议长度'):self.transport.call('inspect',extra='猫'*3000)
+            publish.assert_not_called()
+        params={'revision':'s:1','find':'猫'*200,'replacement':'鸟'*500}
+        def publish(source,destination):
+            raw=source.read_bytes();request=json.loads(raw)
+            self.assertLessEqual(len(raw),4096);self.assertIn('猫',raw.decode('utf-8'));self.assertEqual(request['text'],params)
+            response={k:request[k] for k in ('id','session','operation')};response.update(schema=1,phase='completed',result={'verified':True})
+            (folder/('result-'+request['id']+'.json')).write_text(json.dumps(response),'utf-8');source.replace(destination)
+        with patch('backend.uxp_bridge.publish_request',side_effect=publish) as published:
+            response=self.transport.call('set_label',command='text.replace',target={'session':'s','document_id':1,'active_layer_id':2,'layer_ids':[2]},text=params)
+        self.assertTrue(response['result']['verified']);self.assertEqual(published.call_count,1)
+
     def test_only_matching_terminal_read_failure_proves_request_exit(self):
         from backend.uxp_bridge import UxpRequestFailed
         folder=self.heartbeat(24);self.transport.config.write_text('{"token":"test"}','utf-8')

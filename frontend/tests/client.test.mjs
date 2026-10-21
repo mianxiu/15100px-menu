@@ -13,6 +13,18 @@ class FakeSocket {
 }
 globalThis.WebSocket = FakeSocket;
 
+test('only bounded text split batch gets the longer response wait', async()=>{
+  const original=globalThis.setTimeout,delays=[],client=new Client('ws://localhost',()=>{},()=>{});
+  globalThis.setTimeout=(_,delay)=>{delays.push(delay);return {};};
+  try {
+    client.connect();client.socket.open();
+    for(const action of ['text.split','text.replace','action.execute']){
+      const pending=client.request(action);client.socket.receive({type:'response',id:client.socket.sent.id,ok:true,data:{}});await pending;
+    }
+    assert.deepEqual(delays,[175000,50000,50000]);assert.equal(client.pending.size,0);
+  }finally{client.close();globalThis.setTimeout=original;}
+});
+
 test('app installation disconnect is reported separately and never replayed', async () => {
   const client=new Client('ws://localhost',()=>{},()=>{});
   client.connect();client.socket.open();const old=client.socket;

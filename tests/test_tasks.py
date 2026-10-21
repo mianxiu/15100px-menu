@@ -59,6 +59,15 @@ class TaskTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.bridge.tasks.get(task_id)['state'],'cancelled')
             self.bridge._execute.assert_not_called()
         finally:release.set()
+
+    async def test_text_split_has_bounded_batch_wait_without_changing_capture_or_other_commands(self):
+        original=asyncio.wait_for;timeouts=[];self.bridge.operation_timeout=.2
+        async def wait(future,timeout):
+            timeouts.append(timeout);return await original(future,1)
+        with patch('backend.photoshop_bridge.asyncio.wait_for',side_effect=wait):
+            result=await self.bridge._execute_task('text.split',execute=lambda _: '{"verified":true,"count":64}')
+        self.assertEqual(timeouts,[.2,120]);self.assertEqual(self.bridge.operation_timeout,.2)
+        self.assertEqual(self.bridge.tasks.get(result['task_id'])['state'],'succeeded')
     async def test_late_write_error_updates_same_unknown_task(self):
         release=threading.Event();self.bridge.operation_timeout=.02
         def write(action):

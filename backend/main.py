@@ -314,6 +314,14 @@ class Application(web.Application):
             raise RuntimeError('服务正在退出，本次操作未接受')
         if getattr(self,'updating',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
             raise RuntimeError('应用正在更新，本次操作未接受')
+        if action in ('layers.search','layers.focus'):
+            from .layer_search import LayerSearch
+            if not getattr(self,'layer_search',None):self.layer_search=LayerSearch(self)
+            return await getattr(self.layer_search,'search' if action=='layers.search' else 'focus')(args)
+        if action in ('text.read','text.replace','text.split'):
+            from .text_tools import TextTools
+            if not getattr(self,'text_tools',None):self.text_tools=TextTools(self)
+            return await getattr(self.text_tools,action.split('.')[1])(args)
         if action=='stability.start':return await self.stability.start(args.get('profile','standard'))
         if action=='stability.stop':return self.stability.stop()
         if action=='stability.cleanup':return await self.stability.cleanup()
@@ -485,6 +493,8 @@ class Application(web.Application):
         if action == "action.execute":
             name = args.get("name")
             if name=='stability.internal':raise ValueError('测试命令仅能通过隔离测试入口执行')
+            if name=='layer.focus':raise ValueError('请从图层搜索结果点击定位')
+            if name in ('text.replace','text.split'):raise ValueError('请从文本工具预览后确认')
             if name=='document.recent':raise ValueError('请从首页最近预设列表选择尺寸')
             validate_command(name, args.get("params"))
             from .commands import CAPS_ACTIONS

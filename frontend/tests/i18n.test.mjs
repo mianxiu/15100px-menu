@@ -12,7 +12,7 @@ test('default Chinese and English labels, unknown diagnostics stay verbatim',()=
   assert.equal(translate('My document.psd','en'),'My document.psd');
 });
 test('every static interface translation has an English entry',()=>{
-  const tree=parse(readFileSync(new URL('../src/index.jsx',import.meta.url),'utf8'),{sourceType:'module',plugins:['jsx']});
+  const trees=['index.jsx','LayerSearch.jsx','TextTools.jsx'].map(name=>parse(readFileSync(new URL('../src/'+name,import.meta.url),'utf8'),{sourceType:'module',plugins:['jsx']}));
   let count=0;
   function visit(node){
     if(!node || typeof node!=='object')return;
@@ -21,5 +21,5 @@ test('every static interface translation has an English entry',()=>{
     }
     for(const value of Object.values(node))if(Array.isArray(value))value.forEach(visit);else if(value&&typeof value==='object')visit(value);
   }
-  visit(tree);assert.ok(count>150);
+  trees.forEach(visit);assert.ok(count>150);
 });

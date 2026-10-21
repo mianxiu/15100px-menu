@@ -25,7 +25,7 @@ def machine_info():
 
 
 def host_scope():
-    """Pin the existing PS process and current approved browser/backend surface."""
+    """Pin the existing PS process; permit only the authorized foreground apps."""
     import win32api,win32gui,win32process
     hosts=[]
     for pid in win32process.EnumProcesses():
@@ -38,16 +38,19 @@ def host_scope():
     if len(hosts)!=1:raise RuntimeError('测试需要一个已运行的 Photoshop 实例')
     hwnd=win32gui.GetForegroundWindow()
     front=win32process.GetWindowThreadProcessId(hwnd)[1] if hwnd else None
-    if front not in (hosts[0],os.getpid()):
-        h=win32api.OpenProcess(0x410,False,front)
-        try:name=os.path.basename(win32process.GetModuleFileNameEx(h,0)).lower()
-        finally:h.Close()
-        if name not in ('chrome.exe','msedge.exe','codex.exe','chatgpt.exe'):
-            raise RuntimeError('请在 Photoshop 或后台管理窗口开始测试')
-    allowed={front,hosts[0],os.getpid()}
+    def permitted(pid):
+        if pid in (hosts[0],os.getpid()):return True
+        if not pid:return False
+        try:
+            h=win32api.OpenProcess(0x410,False,pid)
+            try:name=os.path.basename(win32process.GetModuleFileNameEx(h,0)).lower()
+            finally:h.Close()
+            return name in ('chrome.exe','msedge.exe','codex.exe','chatgpt.exe','deepseek harness.exe')
+        except Exception:return False
+    if not permitted(front):raise RuntimeError('请在 Photoshop 或已授权的后台窗口开始测试')
     def check():
         hwnd=win32gui.GetForegroundWindow()
-        if not hwnd or win32process.GetWindowThreadProcessId(hwnd)[1] not in allowed:
+        if not hwnd or not permitted(win32process.GetWindowThreadProcessId(hwnd)[1]):
             raise RuntimeError('前台应用已变化，测试停止；未提交下一步')
     return hosts[0],check
 

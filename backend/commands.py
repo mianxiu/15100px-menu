@@ -29,6 +29,9 @@ CAPS_ACTIONS = {
     "convertSmartObject":{"label":"转换为智能对象"},
 }
 COMMANDS = {**CAPS_ACTIONS,**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS,'shape.paint':{'label':'调整形状填充与描边'},
+    'layer.focus':{'label':'定位图层'},
+    'text.replace':{'label':'文本查找替换'},
+    'text.split':{'label':'拆分文字图层'},
     'shape.copyPaint':{'label':'复制形状填充与描边'},'shape.pastePaint':{'label':'粘贴形状填充与描边'}}
 
 
@@ -63,6 +66,9 @@ REGISTRY = MappingProxyType({
         target_document='captured-UXP-session-and-document-set; cancel-if-changed', target_layers='not-applicable'),
     'shape.paint':Command('shape.paint','调整形状填充与描边','paint-and-vector-identity-read-back',
         channel='uxp-local-files',parameters=('revision','fill','stroke')),
+    'layer.focus':Command('layer.focus','定位图层','destination-and-selection-read-back',channel='uxp-local-files'),
+    'text.replace':Command('text.replace','文本查找替换','text-style-and-layout-read-back',channel='uxp-local-files'),
+    'text.split':Command('text.split','拆分文字图层','text-style-position-and-order-read-back',channel='uxp-local-files'),
     **{name:Command(name,COMMANDS[name]['label'],'native-paint-path-mask-order-read-back',channel='uxp-local-files')
        for name in ('shape.copyPaint','shape.pastePaint')},
 })

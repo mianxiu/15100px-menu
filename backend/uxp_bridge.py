@@ -137,6 +137,12 @@ class UxpTransport:
                     raise RuntimeError('UXP 未就绪，请正常启动 Photoshop 并加载 0.3.x 插件')
                 identity=secrets.token_hex(16)
                 modifying=operation in ('set_label','new_document')
+                if (payload.get('text_inspect') or payload.get('command')=='text.replace') and version(heartbeat.get('probe_version'))<(0,3,58):
+                    raise RuntimeError('文本工具需要正常重启PS加载UXP0.3.58')
+                if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,59):
+                    raise RuntimeError('文字拆分需要正常重启PS加载UXP0.3.59')
+                if payload.get('command')=='layer.focus' and (version(heartbeat.get('probe_version'))<(0,3,57) or payload.get('target',{}).get('session')!=heartbeat.get('session')):
+                    raise RuntimeError('搜索会话或UXP版本已改变，请重新搜索')
                 if payload.get('stability_run') and version(heartbeat.get('probe_version'))<(0,3,47):
                     raise RuntimeError('自动稳定性测试需要实际加载 UXP 0.3.47')
                 if modifying and version(heartbeat.get('probe_version'))<(0,3,8):
@@ -173,7 +179,7 @@ class UxpTransport:
                     raise RuntimeError('实时预览需要更新并加载UXP0.3.43，以核验脚本退出并恢复PS原生操作；未提交操作')
                 if preview is not None and getattr(preview,'trace',False):payload['preview_trace']=True
                 request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
-                encoded=json.dumps(request)
+                encoded=json.dumps(request,ensure_ascii=False)
                 if len(encoded.encode('utf-8'))>4096:raise ValueError('UXP 请求超出本地协议长度，未提交操作')
                 temporary=folder/(identity+'.tmp')
                 if modifying:self.pending.begin(request,folder,self.task_id)
@@ -510,6 +516,39 @@ class UxpBridge(PhotoshopBridge):
             raise ValueError('Invalid frozen batch mask target')
         self._captured_app=target['session'];self._captured_target={**bound,'session':target['session']}
         return {**self._captured_target,'instance_binding':self._captured_app}
+
+    async def execute_focus(self,session,destination):
+        if self.execution_guard:self.execution_guard()
+        def capture():
+            target=self._capture_target()
+            if target['session']!=session:raise RuntimeError('搜索会话已改变，请重新搜索')
+            return target
+        def write(action):
+            if self.focus_guard:self.focus_guard()
+            self.transport.task_id=self._active_task_id;self._uxp_worker_active=True
+            try:
+                response=self.transport.call('set_label',command='layer.focus',target=self._captured_target,destination=destination)
+                value=validate(response.get('layer_context'),session)
+                self.layer_context=value if fresh(value) else unavailable()
+                return json.dumps(response['result'])
+            finally:self._uxp_worker_active=False
+        return await self._execute_task('layer.focus',capture=capture,execute=write)
+
+    async def execute_text(self,target,params,action):
+        from .text_tools import replace_parameters,split_parameters
+        if action not in ('text.replace','text.split'):raise ValueError('无效的文字操作')
+        params=(split_parameters if action=='text.split' else replace_parameters)(params)
+        if self.execution_guard:self.execution_guard()
+        def write(action):
+            if self.focus_guard:self.focus_guard()
+            self.transport.task_id=self._active_task_id;self._uxp_worker_active=True
+            try:
+                response=self.transport.call('set_label',command=action,target=self._captured_target,text=params)
+                value=validate(response.get('layer_context'),self._captured_app)
+                self.layer_context=value if fresh(value) else unavailable()
+                return json.dumps(response['result'])
+            finally:self._uxp_worker_active=False
+        return await self._execute_task(action,capture=lambda:self._bind_menu_target(target),execute=write)
 
     async def execute_shape(self, params, before_dispatch=None, frozen_target=None, preview=None, _stability_run=None):
         from .shape_paint import parameters

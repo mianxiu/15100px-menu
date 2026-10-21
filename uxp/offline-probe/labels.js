@@ -1,10 +1,12 @@
 // Experimental executor: only fixed-target labels, no arbitrary scripts.
 module.exports = function createLabels(ps, session, options={}) {
   const nativeSelection=options.nativeSelection===true;
+  const layerSearch=createLayerSearch(ps,session,captureSelection);
+  const textTools=createTextTools(ps,session,captureSelection,creationTree);
   // A bounded work-planning hint only. Every result still reads and validates
   // current identity/count/locks; this never supplies target capabilities.
   const nativePlan={total:null,single:true};
-  const caps=createCapsActions(ps,session,capture,selectionContext,capsTree,captureSelection);
+  const caps=createCapsActions(ps,session,capture,selectionContext,capsTree,captureSelection,nativeSelection);
   const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
   const shapePaint=createShapePaint(ps,session,capture,selectionContext,options.legacyPreview===true);
   const paintClipboard=createPaintClipboard(ps,session,captureSelection,selectionContext,creationTree);
@@ -324,6 +326,9 @@ module.exports = function createLabels(ps, session, options={}) {
     return ps.app.activeDocument.id===doc.id && doc.id===value.document_id && ids.join(',')===value.layer_ids.join(',');
   }
   async function setLabel(request,previewIO=null) {
+    if(request.command==='text.replace')return textTools.replace(request);
+    if(request.command==='text.split')return textTools.split(request);
+    if(request.command==='layer.focus')return layerSearch.focus(request);
     if(request.command==='stability.internal')return stability.execute(request,setLabel);
     if(['shape.copyPaint','shape.pastePaint'].includes(request.command))return paintClipboard.execute(request);
     if(caps.commands.includes(request.command))return caps.execute(request);
@@ -692,7 +697,7 @@ module.exports = function createLabels(ps, session, options={}) {
     return {samples,equivalent:Object.values(samples).every(sample=>signature(sample.value)===signature(samples.dom.value)),
       constant_contract:{layer_kinds:Object.fromEntries(Object.entries(ps.constants.LayerKind))}};
   }
-  return {feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
+  return {readText:textTools.read,searchLayers:layerSearch.search,feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
     if(!nativeSelection)return shapePaint.observe(...args);
     // Only explicit optional editor reads enter a short read-only modal scope.
     // Idle selection polling uses batchPlay and never occupies modal execution.
@@ -1351,7 +1356,9 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
 }
 
 // Fixed reference-Caps actions. No menu letters, synthetic keys or IME changes.
-function createCapsActions(ps,session,capture,selectionContext,readNativeTree,captureSelection) {
+function createCapsActions(ps,session,capture,selectionContext,readNativeTree,captureSelection,nativeSelection=false) {
+  // The native strategy prepares fresh feedback after modal exit; its DOM copy is discarded.
+  const readFeedback=()=>nativeSelection?null:selectionContext();
   const commands=['selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle','convertSmartObject'];
   async function convert(request) {
     return ps.core.executeAsModal(async context=>{
@@ -1366,7 +1373,7 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
       const parent=selected[0].parent;
       if(selected.some(l=>l.parent!==parent))throw Error('请在同一父组内选择要转换的图层');
       if(selected.length===1 && selected[0].layer.kind===k.SMARTOBJECT)
-        return {verified:true,unchanged:true,count:1,command:'convertSmartObject',selection_context:selectionContext()};
+        return {verified:true,unchanged:true,count:1,command:'convertSmartObject',selection_context:readFeedback()};
       const removed=new Set();
       function packed(l){removed.add(l.id);if(l.kind===k.GROUP)for(const child of l.layers)packed(child);}
       for(const item of selected)packed(item.layer);
@@ -1380,7 +1387,7 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
         if(after.document_id!==actual.document_id || after.layer_ids.length!==1 || !made || made.layer.kind!==k.SMARTOBJECT || made.parent!==parent ||
            JSON.stringify(now.filter(l=>l.id!==made.id).map(l=>[l.id,l.parent]))!==JSON.stringify(unchanged))
           throw Error('智能对象类型／选择／原图层顺序读回不符，已回滚');
-        const selection=selectionContext();
+        const selection=readFeedback();
         await context.hostControl.resumeHistory(history,true);
         return {verified:true,count:selected.length,command:'convertSmartObject',smart_object_id:made.id,selection_context:selection};
       } catch(error) {
@@ -1433,7 +1440,7 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
         } catch(error) {
           const unknown=Error('选层失败，原选择恢复结果待核对；不重发');unknown.resultUnknown=true;throw unknown;
         }
-        if(rejected.result===-128 || rejected.cancelled===true)return {verified:true,cancelled:true,rollback_verified:true,count:0,command,selection_context:selectionContext(),selection_timings_ms:timings};
+        if(rejected.result===-128 || rejected.cancelled===true)return {verified:true,cancelled:true,rollback_verified:true,count:0,command,selection_context:readFeedback(),selection_timings_ms:timings};
         throw Error(rejected.message||'Photoshop rejected selection');
       }
       timings.select_ms=Date.now()-at;at=Date.now();
@@ -1442,9 +1449,9 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
       if(extend?actual.layer_ids.some(id=>!after.layer_ids.includes(id)):after.layer_ids.length!==1)throw Error('Layer selection readback mismatch');
       if(now.join(',')!==before.join(','))throw Error('Caps layer order changed');
       timings.after_tree_ms=Date.now()-at;at=Date.now();
-      const feedback=selectionContext();
+      const feedback=readFeedback();
       // No deferred old snapshot: complete only with current capabilities.
-      if(feedback.document_id!==after.document_id || feedback.layer_ids.join(',')!==after.layer_ids.join(','))throw Error('Caps feedback identity changed');
+      if(feedback && (feedback.document_id!==after.document_id || feedback.layer_ids.join(',')!==after.layer_ids.join(',')))throw Error('Caps feedback identity changed');
       timings.feedback_ms=Date.now()-at;
       return {verified:true,count:actual.layer_ids.length,command,selection_context:feedback,selection_timings_ms:timings};
     },{commandName:'Menu '+request.command,timeOut:0});
@@ -1518,10 +1525,10 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
         if(selecting && (command.startsWith('extend')?actual.layer_ids.some(id=>!after.layer_ids.includes(id)):after.layer_ids.length!==1))throw Error('Layer selection readback mismatch');
         if(!['moveUp','moveDown'].includes(command) && now.join(',')!==order.join(','))throw Error('Caps layer order changed');
         if(history)await context.hostControl.resumeHistory(history,true);
-        return {verified:true,count:selected.length,command,selection_context:selectionContext()};
+        return {verified:true,count:selected.length,command,selection_context:readFeedback()};
       } catch(error) {
         if(history){try{await context.hostControl.resumeHistory(history,false);}catch(_){error.resultUnknown=true;}}
-        if(error.cancelled)return {verified:true,cancelled:true,count:0,command,selection_context:selectionContext()};
+        if(error.cancelled)return {verified:true,cancelled:true,count:0,command,selection_context:readFeedback()};
         throw error;
       }
     },{commandName:'Menu '+command,interactive:command==='editStyle',timeOut:0});
@@ -1861,4 +1868,352 @@ async function nativeCapture(ps,session) {
   const after=await ps.action.batchPlay([property('documentID'),property('targetLayersIDs')],{});
   if(after?.[0]?.documentID!==id||!Array.isArray(after[1]?.targetLayersIDs)||after[1].targetLayersIDs.map(x=>x._id).sort((a,b)=>a-b).join(',')!==ids.join(','))throw Error('Target changed during native capture');
   return {session,document_id:id,active_layer_id:active,layer_ids:ids};
+}
+function createLayerSearch(ps,session,capture) {
+  const types=['all','pixel','text','group','shape','smart-object','adjustment','fill','other'];
+  const property=(name,ref)=>({_obj:'get',_target:[{_ref:'property',_property:name},...ref],_options:{dialogOptions:'silent'}});
+  const fields=['layerID','name','layerKind','layerSection','parentLayerID','itemIndex','hasVectorMask'];
+  function type(row) {
+    if(row.layerSection?._value==='layerSectionStart')return 'group';
+    if(row.layerKind===4||row.layerKind===11)return row.hasVectorMask===true?'shape':'fill';
+    return ({1:'pixel',2:'adjustment',3:'text',5:'smart-object',9:'fill',10:'fill'})[row.layerKind] || 'other';
+  }
+  async function batch(commands,checkpoint) {
+    if(checkpoint)await checkpoint();
+    const result=await ps.action.batchPlay(commands,{});
+    if(checkpoint)await checkpoint();
+    if(!Array.isArray(result)||result.length!==commands.length||result.some(r=>!r||r._obj==='error'))throw Error('图层读取失败，请重新搜索');
+    return result;
+  }
+  const docRef=id=>[{_ref:'document',_id:id}];
+  async function header(ref,checkpoint) {
+    const rows=await batch(['documentID','title','numberOfLayers','hasBackgroundLayer'].map(key=>property(key,ref)),checkpoint);
+    const id=rows[0].documentID,title=rows[1].title,count=rows[2].numberOfLayers,bg=rows[3].hasBackgroundLayer;
+    if(!Number.isSafeInteger(id)||id<=0||typeof title!=='string'||title.length>2000||!Number.isSafeInteger(count)||count<0||count>100000||typeof bg!=='boolean')throw Error('文档读取不完整，请重新搜索');
+    return {id,title,count,bg};
+  }
+  function validRow(row) {
+    return Number.isSafeInteger(row?.layerID)&&row.layerID>0&&typeof row.name==='string'&&row.name.length<=2000&&Number.isSafeInteger(row.parentLayerID)&&Number.isInteger(row.layerKind)&&['layerSectionContent','layerSectionStart'].includes(row.layerSection?._value);
+  }
+  async function search(query,checkpoint) {
+    if(!query||typeof query.name!=='string'||query.name.length>200||typeof query.document!=='string'||query.document.length>200||!types.includes(query.type))throw Error('无效的搜索条件');
+    const count=await nativeDocumentCount(ps,checkpoint);
+    if(count>64)throw Error('打开的文档超过64个，请先关闭不需要的文档');
+    const matches=[],documents=[],seen=new Set(),needle=query.name.toLowerCase(),file=query.document.toLowerCase();
+    let scanned=0,truncated=false;
+    for(let index=1;index<=count;index++) {
+      const doc=await header([{_ref:'document',_index:index}],checkpoint);
+      if(seen.has(doc.id))throw Error('打开的文档已改变，请重新搜索');
+      seen.add(doc.id);documents.push(doc.id);
+      if(!doc.title.toLowerCase().includes(file))continue;
+      const total=doc.count+(doc.bg?1:0),ids=new Set();
+      for(let offset=0;offset<total;offset+=128) {
+        if(scanned>=20000){truncated=true;break;}
+        const size=Math.min(128,total-offset,20000-scanned);
+        const [value]=await batch([{_obj:'multiGet',_target:{_ref:docRef(doc.id)},extendedReference:[fields,{_obj:'layer',index:(doc.bg?0:1)+offset,count:size}],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}],checkpoint);
+        if(!Array.isArray(value.list)||value.list.length!==size)throw Error('图层列表已改变，请重新搜索');
+        scanned+=size;
+        for(const row of value.list) {
+          if(row.layerSection?._value==='layerSectionEnd')continue;
+          if(!validRow(row)||ids.has(row.layerID))throw Error('图层列表不完整，请重新搜索');
+          ids.add(row.layerID);
+          const kind=type(row);
+          if((query.type==='all'||kind===query.type)&&row.name.toLowerCase().includes(needle)) {
+            matches.push({document_id:doc.id,document_name:doc.title,layer_id:row.layerID,name:row.name,type:kind,layer_kind:row.layerKind,parent_id:row.parentLayerID});
+            if(matches.length===500){truncated=true;break;}
+          }
+        }
+        if(truncated)break;
+      }
+      const after=await header(docRef(doc.id),checkpoint);
+      if(JSON.stringify(after)!==JSON.stringify(doc))throw Error('文档已改变，请重新搜索');
+      if(truncated)break;
+    }
+    if(await nativeDocumentCount(ps,checkpoint)!==count)throw Error('打开的文档已改变，请重新搜索');
+    return {session,items:matches,scanned,truncated,document_count:count};
+  }
+  async function focus(request) {
+    const expected=request.target,row=request.destination;
+    if(expected?.session!==session||!row||!Number.isSafeInteger(row.document_id)||row.document_id<=0||!Number.isSafeInteger(row.layer_id)||row.layer_id<=0||typeof row.name!=='string'||row.name.length>2000||typeof row.document_name!=='string'||row.document_name.length>2000||!types.includes(row.type)||!Number.isSafeInteger(row.parent_id)||!Number.isInteger(row.layer_kind))throw Error('搜索结果无效，请重新搜索');
+    let uncertain=false;
+    try {return await ps.core.executeAsModal(async context=>{
+      const original=await capture();
+      const sameTarget=(a,b)=>a.session===b.session&&a.document_id===b.document_id&&a.active_layer_id===b.active_layer_id&&a.layer_ids.join(',')===b.layer_ids.join(',');
+      if(context.isCancelled||Date.now()>request.expires_at_ms||!sameTarget(original,expected))throw Error('当前选择已改变，定位已取消');
+      const doc=await header(docRef(row.document_id));
+      const [value]=await batch([{_obj:'multiGet',_target:{_ref:[{_ref:'layer',_id:row.layer_id},...docRef(row.document_id)]},extendedReference:[fields],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}]);
+      const actual=value;
+      if(doc.title!==row.document_name||!validRow(actual)||actual.layerID!==row.layer_id||actual.name!==row.name||actual.layerKind!==row.layer_kind||actual.parentLayerID!==row.parent_id||type(actual)!==row.type)throw Error('搜索结果已改变，请重新搜索');
+      if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('定位已取消');
+      const chooseDoc=id=>batch([{_obj:'select',_target:docRef(id),_options:{dialogOptions:'silent'}}]);
+      const chooseLayer=(id,add=false)=>batch([{_obj:'select',_target:[{_ref:'layer',_id:id}],makeVisible:false,...(add?{selectionModifier:{_enum:'selectionModifierType',_value:'addToSelection'}}:{}),_options:{dialogOptions:'silent'}}]);
+      try {
+        if(original.document_id!==row.document_id)await chooseDoc(row.document_id);
+        await chooseLayer(row.layer_id);
+        const selected=await capture();
+        if(selected.document_id!==row.document_id||selected.layer_ids.join(',')!==String(row.layer_id)||selected.active_layer_id!==row.layer_id)throw Error('定位结果未确认');
+        return {verified:true,count:1,destination:row};
+      } catch(error) {
+        try {
+          await chooseDoc(original.document_id);
+          const order=original.layer_ids.filter(id=>id!==original.active_layer_id).concat(original.active_layer_id);
+          for(let i=0;i<order.length;i++)await chooseLayer(order[i],i>0);
+          if(!sameTarget(await capture(),original))throw Error('Selection restore mismatch');
+        } catch(_) {uncertain=true;}
+        throw error;
+      }
+    },{commandName:'定位图层',timeOut:0});}
+    catch(error){if(uncertain){const unknown=Error('定位恢复结果待核对');unknown.resultUnknown=true;throw unknown;}throw error;}
+  }
+  return {search,focus};
+}
+function createTextTools(ps,session,capture,readTree) {
+  let snapshot=null,serial=0;
+  const clone=value=>JSON.parse(JSON.stringify(value));
+  const stable=value=>JSON.stringify(value,(key,item)=>item&&!Array.isArray(item)&&typeof item==='object'?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+  const same=(a,b)=>stable(a)===stable(b);
+  const sameTarget=(a,b)=>a?.session===b?.session&&a.document_id===b.document_id&&a.active_layer_id===b.active_layer_id&&a.layer_ids.join(',')===b.layer_ids.join(',');
+  async function batch(commands) {
+    const rows=await ps.action.batchPlay(commands,{});
+    if(!Array.isArray(rows)||rows.length!==commands.length)throw Error('文本读取或写入结果不完整');
+    const failure=rows.find(row=>!row||row._obj==='error');
+    if(rows.some(row=>!row||row._obj==='error'))throw Error((commands[0]._obj==='set'?'文本写入失败：':'文本读取失败：')+(failure?.message||'Photoshop rejected command')+' ('+failure?.result+')');
+    return rows;
+  }
+  const ref=target=>[{_ref:'layer',_id:target.active_layer_id},{_ref:'document',_id:target.document_id}];
+  async function descriptor(target) {
+    if(target?.session!==session||target.layer_ids.length!==1)throw Error('请单选一个文字图层');
+    const [row]=await batch([{_obj:'multiGet',_target:{_ref:ref(target)},extendedReference:[['layerID','name','layerKind','layerLocking','textKey']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}]);
+    if(row.layerID!==target.active_layer_id||row.layerKind!==3||!row.textKey||typeof row.textKey.textKey!=='string')throw Error('请单选一个文字图层');
+    if(row.layerLocking&&Object.entries(row.layerLocking).some(([key,value])=>key!=='_obj'&&value===true))throw Error('请先解锁文字图层');
+    if(row.textKey.textKey.length>20000||JSON.stringify(row.textKey).length>524288)throw Error('文本或样式超出本次处理上限');
+    if(row.textKey.kerningRange?.length)throw Error('含手动字距的文本暂不支持替换');
+    if(!sameTarget(await capture(),target))throw Error('文字目标已改变，请重新读取');
+    return clone(row);
+  }
+  function styleRuns(raw,key) {
+    const ranges=raw[key];let end=0;
+    if(!Array.isArray(ranges)||!ranges.length||ranges.length>1024)throw Error('文本样式范围不完整');
+    for(const range of ranges) {
+      if(!Number.isInteger(range.from)||!Number.isInteger(range.to)||range.from!==end||range.to<=end||range.to>raw.textKey.length+1)throw Error('文本样式范围不完整');
+      if(!range[key==='textStyleRange'?'textStyle':'paragraphStyle']||typeof range[key==='textStyleRange'?'textStyle':'paragraphStyle']!=='object')throw Error('文本样式范围不完整');
+      if(key==='textStyleRange'&&(range.textStyle?.fontAvailable===false||range.textStyle?.baseParentStyle?.fontAvailable===false))throw Error('文本包含缺失字体，请先在PS中处理');
+      end=range.to;
+    }
+    if(end<raw.textKey.length)throw Error('文本样式范围不完整');
+    return ranges;
+  }
+  function plan(raw,params) {
+    if(!params||typeof params.find!=='string'||!params.find||params.find.length>200||typeof params.replacement!=='string'||params.replacement.length>500)throw Error('查找内容不能为空，查找／替换内容超出上限');
+    const find=params.find.replace(/\r\n|\n/g,'\r'),replacement=params.replacement.replace(/\r\n|\n/g,'\r');
+    for(const char of find+replacement)if(char.length===1&&char.charCodeAt(0)>=0xd800&&char.charCodeAt(0)<=0xdfff)throw Error('文字包含不完整的Unicode字符');
+    const text=raw.textKey,origins=[],parts=[];let cursor=0,count=0,hit,lastHit=-1;
+    function append(from,to){parts.push(text.slice(from,to));for(let i=from;i<to;i++)origins.push(i);}
+    while((hit=text.indexOf(find,cursor))!==-1) {
+      append(cursor,hit);parts.push(replacement);for(let i=0;i<replacement.length;i++)origins.push(hit);
+      cursor=hit+find.length;lastHit=hit;count++;
+      if(origins.length>20000)throw Error('替换后的文本超过20000字符');
+    }
+    append(cursor,text.length);origins.push(cursor<text.length?text.length:(lastHit>=0?lastHit:text.length));
+    const value=parts.join('');
+    if(!value.length||value.length>20000)throw Error('替换后的文本为空或超过20000字符');
+    return {value:mappedText(raw,value,origins),count};
+  }
+  function mappedText(raw,value,origins) {
+    const result={_obj:'textLayer',textKey:value};
+    for(const key of ['antiAlias','orientation','textGridding'])if(raw[key]!==undefined)result[key]=clone(raw[key]);
+    for(const key of ['textStyleRange','paragraphStyleRange']) {
+      const ranges=styleRuns(raw,key),mapped=[];let index=0,previous=-1;
+      // PS omits the shared parent on later runs; independent text needs those defaults explicitly.
+      const field=key==='textStyleRange'?'textStyle':'paragraphStyle',base=ranges[0][field].baseParentStyle||{};
+      const copy=source=>({...clone(source),[field]:{...clone(base),...clone(source[field])}});
+      if(key==='paragraphStyleRange') {
+        let from=0;
+        while(from<=value.length) {
+          while(index<ranges.length-1&&origins[from]>=ranges[index].to)index++;
+          const newline=value.indexOf('\r',from),to=newline<0?value.length+1:newline+1;
+          mapped.push({...copy(ranges[index]),from,to});from=to;
+        }
+        result[key]=mapped;continue;
+      }
+      for(let offset=0;offset<origins.length;offset++) {
+        while(index<ranges.length-1&&origins[offset]>=ranges[index].to)index++;
+        const source=ranges[index],prior=mapped[mapped.length-1];
+        if(prior&&previous===index)prior.to=offset+1;
+        else mapped.push({...copy(source),from:offset,to:offset+1});
+        previous=index;
+      }
+      result[key]=mapped;
+    }
+    return result;
+  }
+  function styleSignature(style) {
+    if(!style||typeof style!=='object')return style;
+    const value={...(style.baseParentStyle?styleSignature(style.baseParentStyle):{})};
+    for(const [key,item] of Object.entries(style))if(!['_obj','baseParentStyle','styleSheetHasParent','fontAvailable','fontName','fontStyleName'].includes(key)&&!key.startsWith('implied'))value[key]=item;
+    return value;
+  }
+  function stylesMatch(actual,wanted) {
+    for(const [key,field] of [['textStyleRange','textStyle'],['paragraphStyleRange','paragraphStyle']]) {
+      const a=styleRuns(actual,key),b=styleRuns(wanted,key);let ai=0,bi=0;
+      const signatures=ranges=>ranges.map(row=>stable({...styleSignature(ranges[0][field].baseParentStyle),...styleSignature(row[field])}));
+      const signaturesA=signatures(a),signaturesB=signatures(b);
+      for(let offset=0;offset<=wanted.textKey.length;offset++) {
+        while(ai<a.length-1&&offset>=a[ai].to)ai++;
+        while(bi<b.length-1&&offset>=b[bi].to)bi++;
+        if(signaturesA[ai]!==signaturesB[bi])return false;
+      }
+    }
+    return true;
+  }
+  function layout(raw) {
+    return {antiAlias:raw.antiAlias,textGridding:raw.textGridding,orientation:raw.orientation,textClickPoint:raw.textClickPoint,transform:raw.transform,warp:raw.warp,
+      textShape:raw.textShape?.map(shape=>({shapeType:shape.shapeType,orientation:shape.orientation,transform:shape.transform,
+        ...(shape.char?._value==='box'?{bounds:shape.bounds}:{}),char:shape.char}))};
+  }
+  async function read() {
+    snapshot=null;
+    const target=await capture(),row=await descriptor(target);
+    styleRuns(row.textKey,'textStyleRange');styleRuns(row.textKey,'paragraphStyleRange');
+    const revision=session+':text:'+String(++serial);
+    snapshot={target,row,revision,time:Date.now()};
+    return {target,revision,text:row.textKey.textKey,name:row.name};
+  }
+  async function replace(request) {
+    const saved=snapshot,params=request.text;
+    if(!saved||params?.revision!==saved.revision||!sameTarget(saved.target,request.target)||Date.now()-saved.time>60000)throw Error('文本预览已过期，请重新读取');
+    const wanted=plan(saved.row.textKey,params);
+    if(!wanted.count||wanted.value.textKey===saved.row.textKey.textKey)return {verified:true,count:0};
+    let uncertain=false;
+    try {return await ps.core.executeAsModal(async context=>{
+      if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
+      const before=await descriptor(request.target);
+      if(!same(before,saved.row))throw Error('文字内容或样式已改变，请重新读取');
+      const history=await context.hostControl.suspendHistory({documentID:request.target.document_id,name:'文本查找替换'});
+      try {
+        if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
+        // PS24.0 rejects a document-qualified textLayer identifier. The modal
+        // fresh capture above binds the active text reference to this exact ID.
+        await batch([{_obj:'set',_target:[{_ref:'textLayer',_enum:'ordinal',_value:'targetEnum'}],to:wanted.value,_options:{dialogOptions:'silent'}}]);
+        const after=await descriptor(request.target);
+        if(after.textKey.textKey!==wanted.value.textKey||!stylesMatch(after.textKey,wanted.value)||!same(layout(after.textKey),layout(before.textKey)))throw Error('文本或样式读回不一致');
+        await context.hostControl.resumeHistory(history,true);snapshot=null;
+        return {verified:true,count:wanted.count};
+      } catch(error) {
+        try {
+          await context.hostControl.resumeHistory(history,false);
+          if(!same(await descriptor(request.target),before))throw Error('Text restore mismatch');
+        } catch(_) {uncertain=true;}
+        throw error;
+      }
+    },{commandName:'文本查找替换',timeOut:0});}
+    catch(error){if(uncertain){const unknown=Error('文字恢复结果待核对');unknown.resultUnknown=true;throw unknown;}throw error;}
+  }
+  async function split(request) {
+    const saved=snapshot,params=request.text,ends=params?.breaks,raw=saved?.row.textKey;
+    if(!saved||params?.revision!==saved.revision||!sameTarget(saved.target,request.target)||Date.now()-saved.time>60000)throw Error('文本预览已过期，请重新读取');
+    if(!Array.isArray(ends)||ends.length<2||ends.length>64||ends[ends.length-1]!==raw.textKey.length||ends.some((end,index)=>!Number.isInteger(end)||end<1||end>raw.textKey.length||(index>0&&end<=ends[index-1])||(end<raw.textKey.length&&raw.textKey[end-1]!=='\r')))throw Error('分组必须按原行顺序完整覆盖文字，最多64组');
+    let from=0;const groups=[];
+    for(const end of ends) {
+      const to=raw.textKey[end-1]==='\r'?end-1:end,text=raw.textKey.slice(from,to);
+      if(/\S/.test(text))groups.push({from,to,text});from=end;
+    }
+    if(groups.length<2)throw Error('拆分需要至少两组非空文字');
+    const shape=raw.textShape?.[0],matrix=raw.transform||{xx:1,xy:0,yx:0,yy:1};
+    // shortcut: path/warp/effect text is rejected until its glyph geometry can be verified.
+    if(raw.textShape?.length!==1||!['paint','box'].includes(shape?.char?._value)||raw.warp?.warpStyle?._value!=='warpNone'||
+        (shape.columnCount??1)!==1||(shape.rowCount??1)!==1||shape.char._value==='box'&&raw.orientation?._value!=='horizontal'||
+        shape.transform&&(['xx','yy'].some(key=>shape.transform[key]!==1)||['xy','yx'].some(key=>shape.transform[key]!==0))||
+        ['xx','xy','yx','yy'].some(key=>!Number.isFinite(matrix[key]))||Math.abs(matrix.xx*matrix.yy-matrix.xy*matrix.yx)<.000001)throw Error('此文字的路径或变形暂不能安全拆分');
+    let uncertain=false;
+    try {return await ps.core.executeAsModal(async context=>{
+      if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
+      const before=await descriptor(request.target);
+      if(!same(before,saved.row))throw Error('文字内容或样式已改变，请重新读取');
+      const [flags]=await batch([{_obj:'multiGet',_target:{_ref:ref(request.target)},extendedReference:[['visible','group','layerEffects']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}]);
+      if(typeof flags.visible!=='boolean'||typeof flags.group!=='boolean'||flags.group===true||flags.layerEffects&&Object.keys(flags.layerEffects).some(key=>!['_obj','scale'].includes(key)))throw Error('带剪贴或图层效果的文字暂不能安全拆分');
+      const doc=ps.app.activeDocument,width=doc.width,height=doc.height;
+      if(doc.id!==request.target.document_id||!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)throw Error('无法读取文字画布尺寸');
+      const tree=await readTree(doc),original=request.target.active_layer_id,index=tree.order.indexOf(original),parent=tree.rows.find(row=>row.layerID===original)?.parentLayerID;
+      if(index<0||!Number.isInteger(parent))throw Error('文字位置已改变，请重新读取');
+      const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'拆分文字图层'}),created=[],positions=[];
+      const property=target=>({_obj:'multiGet',_target:{_ref:ref(target)},extendedReference:[['layerID','textKey','parentLayerID']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}});
+      function ink(value) {
+        const box=value.boundingBox,values=['left','top','right','bottom'].map(key=>box?.[key]?._unit==='pixelsUnit'?box[key]._value:NaN);
+        if(values.some(value=>!Number.isFinite(value))||values[2]<=values[0]||values[3]<=values[1])throw Error('无法读取独立文字字形');
+        return values;
+      }
+      const write=value=>batch([{_obj:'set',_target:[{_ref:'textLayer',_enum:'ordinal',_value:'targetEnum'}],to:value,_options:{dialogOptions:'silent'}}]);
+      try {
+        for(const group of groups) {
+          if(context.isCancelled)throw Error('文本操作已取消');
+          await batch([{_obj:'duplicate',_target:ref(request.target),_options:{dialogOptions:'silent'}}]);
+          const target=await capture();
+          if(target.document_id!==doc.id||target.layer_ids.length!==1||tree.order.includes(target.active_layer_id)||created.includes(target.active_layer_id))throw Error('新文字图层身份未确认');
+          created.push(target.active_layer_id);
+          await batch([{_obj:'hide',_target:[{_ref:'layer',_id:target.active_layer_id}],_options:{dialogOptions:'silent'}}]);
+          let originalTop=null;
+          if(shape.char._value==='box'&&group.from) {
+            const resolution=doc.resolution,originalBox=ink(raw),distance=2*(originalBox[3]-originalBox[1])+100;
+            if(!Number.isFinite(resolution)||resolution<=0)throw Error('无法核对文字分辨率');
+            const prefix=raw.textKey.slice(0,group.to),origins=Array.from({length:prefix.length+1},(_,i)=>Math.min(i,group.to-1)),probe=mappedText(raw,prefix,origins);
+            // Preserve the real prefix's wrapping; move only its ink below the target to read that target's top.
+            probe.textStyleRange=probe.textStyleRange.flatMap(range=>{
+              if(range.from>=group.from)return [range];
+              const shifted=clone(range),style=shifted.textStyle,baseline=style.baselineShift;
+              if(baseline&&(baseline._unit!=='pixelsUnit'||!Number.isFinite(baseline._value)))throw Error('无法核对文字基线');
+              shifted.to=Math.min(range.to,group.from);style.baselineShift={_unit:'pixelsUnit',_value:(baseline?baseline._value:0)-distance};delete style.impliedBaselineShift;
+              return range.to>group.from?[shifted,{...range,from:group.from}]:[shifted];
+            });
+            const outgoing=clone(probe);
+            for(const range of outgoing.textStyleRange)if(range.from<group.from)range.textStyle.baselineShift={_unit:'pointsUnit',_value:range.textStyle.baselineShift._value*72/resolution};
+            await write(outgoing);
+            const [measured]=await batch([property(target)]);
+            if(measured.textKey.textKey!==prefix||!stylesMatch(measured.textKey,probe))throw Error('文字基线测量读回不一致');
+            originalTop=ink(measured.textKey)[1];
+            if(originalTop<originalBox[1]-.05||originalTop>originalBox[3]+.05)throw Error('溢出文本框的文字暂不能安全拆分');
+          }
+          const masked=raw.textKey.slice(0,group.from).replace(/[^\r]/g,' ')+group.text;
+          const maskedOrigins=Array.from({length:masked.length+1},(_,index)=>Math.min(index,group.to-1));
+          await write(mappedText(raw,masked,maskedOrigins));
+          const [maskRow]=await batch([property(target)]),expected=ink(maskRow.textKey);
+          const origins=Array.from({length:group.text.length+1},(_,index)=>Math.min(group.from+index,group.to-1)),value=mappedText(raw,group.text,origins);
+          await write(value);
+          const [isolated]=await batch([property(target)]),box=ink(isolated.textKey);
+          if(isolated.parentLayerID!==parent)throw Error('拆分后的父组改变，已取消');
+          if(!stylesMatch(isolated.textKey,value))throw Error('拆分后的文字样式改变，已取消');
+          if(Math.abs((expected[2]-expected[0])-(box[2]-box[0]))>.05||Math.abs((expected[3]-expected[1])-(box[3]-box[1]))>.05)throw Error('拆分会改变字形排版，已取消（'+expected.map((v,i)=>Math.round((v-box[i])*1000)/1000).join(',')+'）');
+          if(shape.char._value==='box'&&(originalTop??expected[1])+box[3]-box[1]>ink(raw)[3]+.05)throw Error('溢出文本框的文字暂不能安全拆分');
+          const localX=expected[0]-box[0],localY=(originalTop??expected[1])-box[1],dx=matrix.xx*localX+matrix.yx*localY,dy=matrix.xy*localX+matrix.yy*localY;
+          const click=clone(raw.textClickPoint);
+          if(click?.horizontal?._unit!=='percentUnit'||click?.vertical?._unit!=='percentUnit'||!Number.isFinite(click.horizontal._value)||!Number.isFinite(click.vertical._value))throw Error('无法核对文字锚点');
+          click.horizontal._value+=dx/width*100;click.vertical._value+=dy/height*100;
+          await write({...value,textClickPoint:click});
+          const [placed]=await batch([property(target)]),actualClick=placed.textKey.textClickPoint;
+          if(placed.layerID!==target.active_layer_id||placed.parentLayerID!==parent||placed.textKey.textKey!==group.text||!stylesMatch(placed.textKey,value)||!Number.isFinite(actualClick?.horizontal?._value)||!Number.isFinite(actualClick?.vertical?._value)||
+              !same(placed.textKey.antiAlias,raw.antiAlias)||!same(placed.textKey.textGridding,raw.textGridding)||!same(placed.textKey.orientation,raw.orientation)||!same(placed.textKey.transform,raw.transform)||Math.abs((actualClick?.horizontal?._value-click.horizontal._value)*width/100)>.05||Math.abs((actualClick?.vertical?._value-click.vertical._value)*height/100)>.05)throw Error('拆分位置或样式读回不一致');
+          positions.push({layer_id:target.active_layer_id,dx,dy});
+        }
+        await batch([{_obj:'select',_target:[{_ref:'layer',_id:original}],makeVisible:false,_options:{dialogOptions:'silent'}}]);
+        if(!same(await descriptor(request.target),before))throw Error('原文字已改变，已取消拆分');
+        await batch([{_obj:'hide',_target:[{_ref:'layer',_id:original}],_options:{dialogOptions:'silent'}},
+          ...(flags.visible?created.map(id=>({_obj:'show',_target:[{_ref:'layer',_id:id}],_options:{dialogOptions:'silent'}})):[]),
+          {_obj:'delete',_target:ref(request.target),_options:{dialogOptions:'silent'}},
+          {_obj:'select',_target:[{_ref:'layer',_id:created[0]}],makeVisible:false,_options:{dialogOptions:'silent'}}]);
+        const after=await readTree(doc),wanted=tree.order.slice();wanted.splice(index,1,...created);
+        if(after.order.join(',')!==wanted.join(',')||created.some(id=>after.rows.find(row=>row.layerID===id)?.parentLayerID!==parent))throw Error('拆分图层顺序读回不一致');
+        await context.hostControl.resumeHistory(history,true);snapshot=null;
+        return {verified:true,count:created.length,layer_ids:created,positions};
+      } catch(error) {
+        try {
+          await context.hostControl.resumeHistory(history,false);
+          await batch([{_obj:'select',_target:[{_ref:'layer',_id:original}],makeVisible:false,_options:{dialogOptions:'silent'}}]);
+          if(!same(await descriptor(request.target),before)||(await readTree(doc)).order.join(',')!==tree.order.join(','))throw Error('Text split restore mismatch');
+        } catch(_) {uncertain=true;}
+        throw error;
+      }
+    },{commandName:'拆分文字图层',timeOut:0});}
+    catch(error){if(uncertain){const unknown=Error('文字拆分恢复结果待核对');unknown.resultUnknown=true;throw unknown;}throw error;}
+  }
+  return {read,replace,split};
 }

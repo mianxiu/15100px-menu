@@ -22,6 +22,7 @@ let pendingResponse=null;
 let completedReceipts=[];
 let lastWorkAt=0;
 let menuRefreshId='';
+let searchRefreshId='';
 let heartbeatValue=null;
 let heartbeatFolder=null,heartbeatWriting=false,metadataReadAt=0;
 let interfacePreferencesValue=null;
@@ -145,6 +146,23 @@ async function refreshMenuContext(folder,now) {
   }
   return true;
 }
+async function refreshLayerSearch(folder,now,priorityCheckpoint) {
+  let request;
+  try {request=JSON.parse(await(await folder.getEntry('layer-search-request.json')).read());}catch(_){return false;}
+  if(request.token!==token||request.session!==session||!/^[0-9a-f]{32}$/.test(request.id)||request.id===searchRefreshId||!Number.isFinite(request.expires_at_ms)||request.expires_at_ms<now||request.expires_at_ms>now+30000)return false;
+  searchRefreshId=request.id;
+  async function checkpoint() {
+    await priorityCheckpoint();
+    let current;
+    try {current=JSON.parse(await(await folder.getEntry('layer-search-request.json')).read());}catch(_){}
+    if(current?.id!==request.id||current?.token!==token||current?.session!==session||Date.now()>request.expires_at_ms)throw Error('搜索已取消或超时，请重新搜索');
+  }
+  const result={schema:1,id:request.id,session};
+  try {result.result=await labels.searchLayers(request.query,checkpoint);await checkpoint();}
+  catch(error){result.error=error.menuReadInterrupted?'菜单或操作已优先执行，请重新搜索':error.message||String(error);}
+  await record(folder,'layer-search-result.json',result);
+  return true;
+}
 async function finishResponse(folder,response) {
   // Store the final outcome before the compatibility response slot. If storage
   // is temporarily unavailable, retain the outcome in memory and only retry
@@ -265,7 +283,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.55', session, transport: 'plugin-data-files',
+        probe_version: '0.3.59', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
@@ -295,6 +313,7 @@ async function probe(reason) {
     async function idleRead() {
       if(now-lastWorkAt<80)return;
       if(await refreshMenuContext(folder,now))return;
+      if(await refreshLayerSearch(folder,now,idleCheckpoint))return;
       await updateLayerContext(folder,now,false,null,idleCheckpoint);
       await refreshMetadata(folder,idleCheckpoint);
     }
@@ -339,7 +358,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.55', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.59', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -385,7 +404,8 @@ async function probe(reason) {
         await record(folder,'result-'+request.id+'.json',{...response,phase:'accepted'});
         request={...request,target:captured};
       }
-      if (request.operation === 'inspect') {
+      if(request.operation==='inspect'&&request.text_inspect===true)response.text=await labels.readText();
+      else if (request.operation === 'inspect') {
         response.target = labels.documentTarget();
         response.document_count = response.target.document_ids.length;
         if(request.stability_run)response.stability=await (/^24\.2(?:\.\d+)*$/.test(String(uxp.host?.version || ''))?require('photoshop').core.executeAsModal(()=>labels.stability.read(request.stability_run),{commandName:'Read isolated target',timeOut:0}):labels.stability.read(request.stability_run));

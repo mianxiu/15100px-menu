@@ -53,7 +53,12 @@ class CapsInputTests(unittest.TestCase):
   return d
  def result(self,folder,**changes):
   v={'schema':1,'session':'s','menu_request_id':'test','document_id':2,'layer_ids':[3],'mask':15,'quick_mask':127,'kind':'pixel','plugin_time_ms':time.time()*1000,**changes}
-  (Path(folder)/'menu-context-result.json').write_text(json.dumps(v),'utf-8')
+  path=Path(folder)/'menu-context-result.json';path.write_text(json.dumps(v),'utf-8')
+  # Back-to-back fixture writes can share Windows' timestamp tick; each
+  # simulated publication here must have its own file version.
+  import os
+  self._fixture_stamp=max(time.time_ns(),getattr(self,'_fixture_stamp',0)+1_000_000)
+  os.utime(path,ns=(self._fixture_stamp,self._fixture_stamp))
  def test_only_the_current_menu_request_can_enable_controls(self):
   with tempfile.TemporaryDirectory() as folder:
    d=self.ready(folder);self.result(folder,menu_request_id='previous');d._finish_menu_context();d.gui.SendMessage.assert_not_called()

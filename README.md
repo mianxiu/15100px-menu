@@ -1,18 +1,12 @@
 # Photoshop Menu
 
-本机已切换225／UXP0.3.55：修复多选收拢后选层取消／报错丢失原选择；恢复并读回原多选，不能确认时保留未知。513后端／28组Node、真实UXP8项四向选层及14项通用接口回归通过；错误分支另以生产函数＋真实PS选层进行受控注入验证。实体／故障机及实际UXP自然错误仍待验，公开版保持224。[用法与限制](https://github.com/mianxiu/15100px-menu/wiki/Caps-execution)。
+本机已切换229／UXP0.3.59：文本工具支持普通查找替换、按换行或连续行号分组拆分，确认后生成独立可编辑文字层，合并为一次撤销。低CPU／正常真实PS接口及实际后台确认通过；实体键鼠、其他宿主及300dpi自动换行段落像素补测仍待验。[用法和限制](https://github.com/mianxiu/15100px-menu/wiki/Text-tools)。
 
-[224已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.224)／UXP0.3.54：修正图层／文档通知注册和读取期间的失效保护；513项后端、28组Node及实际入口／组件一致性通过，真实PS已核验注册与close回调。低CPU／正常各7项接口检查、原稿和资源恢复通过；脚本事件不保证发通知，轮询保持，实体和原故障机待验，不宣称已消除持续卡顿。公开下载和Latest清单已核验，发行页仅保留224。[使用与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-tests)。
+227／UXP0.3.57起：后台新增图层搜索，按打开文档文件名、图层名与类型筛选，明确点击后按ID跨文档定位并保留隐藏状态。[操作和验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-search)。
 
-[223已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.223)：普通填充取消异常修复及本机8项真实接口验证通过，UXP仍0.3.53；公开ZIP／SHA／Latest清单及精简Wiki已核验，仅保留223 Release。旧PS取消仍约1.4秒，不宣称收尾延迟已消除。[用法和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
+226／UXP0.3.56起：原生选层策略省去无效DOM反馈，保留写前与终态新鲜核验。513后端／28组Node和低CPU／正常22项真实PS接口检查通过；[速度与未验范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
-[222历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.222)，UXP仍0.3.53：同一菜单结果不再反复读盘、解析。重复轮询本地开销减少约0.10–0.31ms／次，首次处理增加约0.21–0.33ms；不代表PS读取或整体操作等比例提速。[对照和范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
-
-[221历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.221)，UXP仍0.3.53：预览确认／取消改为立即发送，保留完整终态校验。低CPU热态收尾4组对照中位201→172ms、P95 261→206ms；正常配置及实体／故障机待验。[速度口径和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
-
-[220／UXP0.3.53历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.220)：修复普通填充层点色后误拒绝并关闭面板；公开ZIP／SHA／Latest更新清单已核验，发行页只保留220。此前收尾候选无稳定收益，未随220发布；完整实体交互及普通填充取消待验。[用法和验证限制](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
-
-[219／UXP0.3.52历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.219)并更新本机实际入口，公开ZIP／SHA／Latest清单匿名核验通过；仅保留219 Release，旧标签／历史保留。七项创建的原生读取策略省去被丢弃的DOM反馈快照，完成前的新鲜核验保持；[速度对照及实测范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
+[公开下载225](https://github.com/mianxiu/15100px-menu/releases/latest)／UXP0.3.55：选层取消／失败后恢复原多选，不能确认则保留未知。公开ZIP／SHA／Latest清单已核验，仅保留225 Release，旧标签和源码历史保留。[用法与限制](https://github.com/mianxiu/15100px-menu/wiki/Caps-execution)。
 
 以下为历史交付记录，反映当时状态；旧版链接指向保留的源码标签，发行页只保留最新版。
 

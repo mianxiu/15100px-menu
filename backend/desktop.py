@@ -519,6 +519,24 @@ class Desktop:
         except Exception:
             return False
 
+    def focus_search_result(self):
+        # A deliberate result click may activate PS; ordinary shortcuts keep
+        # their existing foreground-only guard.
+        roots=[]
+        self.gui.EnumWindows(lambda hwnd,_:roots.append(hwnd) if self._is_photoshop(hwnd) and self._workspace_root(hwnd)==hwnd else None,None)
+        if len(roots)!=1:raise RuntimeError('请仅保留一个可用的Photoshop工作区')
+        root=roots[0]
+        self.hide(restore=False)
+        if self._workspace_root(self.gui.GetForegroundWindow())!=root:
+            try:self.gui.SetForegroundWindow(root)
+            except Exception:logging.info('Foreground activation not acknowledged; checking actual Photoshop focus',exc_info=True)
+        if self._workspace_root(self.gui.GetForegroundWindow())!=root:
+            # Cross-thread foreground activation is asynchronous; wait outside the menu lock.
+            try:self.gui.SendMessageTimeout(root,0,0,0,2,200)
+            except Exception as error:raise RuntimeError('Photoshop未及时响应，本次未执行') from error
+        if self._workspace_root(self.gui.GetForegroundWindow())!=root:raise RuntimeError('Windows未允许激活Photoshop，本次未执行；请先激活PS后重试')
+        self.require_action_focus()
+
     @window_transition
     def require_action_focus(self, allow_home=False):
         if not self._scope():

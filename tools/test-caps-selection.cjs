@@ -103,6 +103,22 @@ async function run(command){return labels.setLabel({command,target:await labels.
  for(const corrupt of [()=>{[nodes[0],nodes[1]]=[nodes[1],nodes[0]];},()=>{nodes.pop();},()=>{selected=[1,2];active=1;}]){
   large();afterWrite=corrupt;await assert.rejects(run('selectAbove'),/order changed|identity changed|readback mismatch/);afterWrite=null;
  }
+ // Native feedback is prepared by main.js after modal exit, never twice.
+ const source=require('node:fs').readFileSync('uxp/offline-probe/labels.js','utf8'),box={};
+ require('node:vm').runInNewContext(source.slice(source.indexOf('function createCapsActions('),source.indexOf('// Selected vector masks only.'))+'this.make=createCapsActions;',box);
+ nodes.splice(0,nodes.length,...[1,2,3,4].map(id=>({id,kind:'pixel',parent:null,allLocked:false,positionLocked:false})));selected=[2];active=2;
+ let feedbackCalls=0;
+ const make=native=>box.make(ps,'test',labels.capture,()=>{feedbackCalls++;return labels.selectionContext();},async()=>({order:nodes.map(l=>l.id)}),labels.captureSelection,native);
+ const nativeCaps=make(true);
+ for(const command of ['selectAbove','selectBelow','extendAbove','extendBelow']){
+  selected=[2];active=2;
+  const value=await nativeCaps.execute({command,target:await labels.capture(),expires_at_ms:Date.now()+1000});
+  assert.equal(value.selection_context,null);assert.equal(feedbackCalls,0);
+ }
+ selectError=-128;const nativeCancel=await nativeCaps.execute({command:'selectAbove',target:await labels.capture(),expires_at_ms:Date.now()+1000});
+ assert.equal(nativeCancel.rollback_verified,true);assert.equal(nativeCancel.selection_context,null);assert.equal(feedbackCalls,0);selectError=null;
+ selected=[2];active=2;const dom=await make(false).execute({command:'selectAbove',target:await labels.capture(),expires_at_ms:Date.now()+1000});
+ assert.ok(dom.selection_context);assert.equal(feedbackCalls,1);
  console.log('Caps single selection, additive Shift selection, reverse direction, multi-to-single and stale-target tests passed');
  console.log('PASS: large/background scalar path, malformed fallback, cancellation, order/count/selection corruption detection');
 })().catch(e=>{console.error(e);process.exitCode=1;});

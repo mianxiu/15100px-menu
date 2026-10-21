@@ -33,7 +33,7 @@ export class Client {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error('响应超时，操作结果未知；请检查 Photoshop，避免重复执行'));
-      }, 50000);
+      }, action==='text.split'?175000:50000);
       this.pending.set(id, {resolve, reject, timer, action});
       try { this.socket.send(JSON.stringify({id, action, args})); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
