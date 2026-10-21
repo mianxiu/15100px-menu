@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict');
 const create=require('../uxp/offline-probe/labels.js');
-let selectionReads=0,selectionFault=null,selectError=null;
+let selectionReads=0,selectionFault=null,selectError=null,ordinalErrorOnly=false,throwOrdinal=false,restoreError=false,onSelectError=null;
 let selected=[3],active=3,writes=0,nativeReads=0,nativeFault=null,kindReads=0,afterWrite=null,modalContext;
 const nodes=[1,2,3,4,5].map(id=>({id,kind:'pixel',allLocked:false,positionLocked:false,parent:null}));
 const doc={id:1,layers:nodes,mode:'RGB',bitsPerChannel:8,get activeLayers(){return nodes.filter(l=>selected.includes(l.id));}};
@@ -30,9 +30,14 @@ const ps={app:{documents:[doc],activeDocument:doc},constants:{LayerKind:{NORMAL:
    return {list:rows};
   }
   if(d._obj==='get')return {layerID:active};
-  if(d._obj==='select' && selectError)return {_obj:'error',result:selectError,message:'Rejected'};
+  if(d._obj==='select' && restoreError && d.selectionModifier && d._target[0]._id)return {_obj:'error',result:-1,message:'Restore rejected'};
+  if(d._obj==='select' && selectError && (!ordinalErrorOnly || !d._target[0]._id)){
+   if(onSelectError)onSelectError();
+   if(throwOrdinal)throw Error('Rejected');
+   return {_obj:'error',result:selectError,message:'Rejected'};
+  }
   assert.equal(d._obj,'select');assert.equal(d.makeVisible,false);assert.equal(d._options.dialogOptions,'dontDisplay');writes++;
-  if(d._target[0]._id){active=d._target[0]._id;selected=[active];return {};}
+  if(d._target[0]._id){active=d._target[0]._id;selected=d.selectionModifier?[...new Set([...selected,active])]:[active];return {};}
   const up=d._target[0]._value==='forwardEnum',indices=selected.map(id=>nodes.findIndex(l=>l.id===id));
   const i=up?Math.min(...indices):Math.max(...indices),next=nodes[(i+(up?-1:1)+nodes.length)%nodes.length];
   if(next){active=next.id;selected=d.selectionModifier?[...new Set([...selected,active])]:[active];}
@@ -81,6 +86,19 @@ async function run(command){return labels.setLabel({command,target:await labels.
  large();selectError=-128;const cancelledWrites=writes;
  const cancel=await run('selectAbove');assert.equal(cancel.cancelled,true);assert.equal(writes,cancelledWrites);
  selectError=-1;await assert.rejects(run('selectAbove'),/Rejected/);assert.equal(writes,cancelledWrites);selectError=null;
+ for(const failure of [-128,-1,'throw']){
+  large();selected=[20,50];active=50;ordinalErrorOnly=true;selectError=failure;throwOrdinal=failure==='throw';
+  if(failure===-128){const value=await run('selectAbove');assert.equal(value.cancelled,true);assert.equal(value.rollback_verified,true);}
+  else await assert.rejects(run('selectAbove'),/Rejected/);
+  assert.deepEqual(selected.sort((a,b)=>a-b),[20,50]);assert.equal(active,50);
+ }
+ large();selected=[20,50];active=50;selectError=-128;throwOrdinal=false;restoreError=true;
+ await assert.rejects(run('selectAbove'),error=>error.resultUnknown===true);restoreError=false;
+ large();selected=[20,50];active=50;const beforeChanged=writes;
+ onSelectError=()=>{selected=[11];active=11;};
+ await assert.rejects(run('selectAbove'),error=>error.resultUnknown===true);
+ assert.deepEqual(selected,[11]);assert.equal(writes,beforeChanged+1,'Never restore over a changed target');onSelectError=null;
+ selectError=null;ordinalErrorOnly=false;
  nativeFault='cancelled';large();const writesBefore=writes;await assert.rejects(run('selectAbove'),/Cancelled/);assert.equal(writes,writesBefore);nativeFault=null;
  for(const corrupt of [()=>{[nodes[0],nodes[1]]=[nodes[1],nodes[0]];},()=>{nodes.pop();},()=>{selected=[1,2];active=1;}]){
   large();afterWrite=corrupt;await assert.rejects(run('selectAbove'),/order changed|identity changed|readback mismatch/);afterWrite=null;

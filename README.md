@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+本机已切换225／UXP0.3.55：修复多选收拢后选层取消／报错丢失原选择；恢复并读回原多选，不能确认时保留未知。513后端／28组Node、真实UXP8项四向选层及14项通用接口回归通过；错误分支另以生产函数＋真实PS选层进行受控注入验证。实体／故障机及实际UXP自然错误仍待验，公开版保持224。[用法与限制](https://github.com/mianxiu/15100px-menu/wiki/Caps-execution)。
+
 [224已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.224)／UXP0.3.54：修正图层／文档通知注册和读取期间的失效保护；513项后端、28组Node及实际入口／组件一致性通过，真实PS已核验注册与close回调。低CPU／正常各7项接口检查、原稿和资源恢复通过；脚本事件不保证发通知，轮询保持，实体和原故障机待验，不宣称已消除持续卡顿。公开下载和Latest清单已核验，发行页仅保留224。[使用与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-tests)。
 
 [223已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.223)：普通填充取消异常修复及本机8项真实接口验证通过，UXP仍0.3.53；公开ZIP／SHA／Latest清单及精简Wiki已核验，仅保留223 Release。旧PS取消仍约1.4秒，不宣称收尾延迟已消除。[用法和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。

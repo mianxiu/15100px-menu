@@ -1413,10 +1413,27 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
       const descriptors=[];
       if(!extend && actual.layer_ids.length>1)descriptors.push({_obj:'select',_target:[{_ref:'layer',_id:actual.active_layer_id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}});
       descriptors.push(step);at=Date.now();
-      const results=await ps.action.batchPlay(descriptors,{});
-      const rejected=results.find(v=>v._obj==='error');
+      let rejected;
+      try {rejected=(await ps.action.batchPlay(descriptors,{})).find(v=>v._obj==='error');}
+      catch(error) {rejected=error;}
       if(rejected) {
-        if(rejected.result===-128)return {verified:true,cancelled:true,count:0,command,selection_context:selectionContext(),selection_timings_ms:timings};
+        try {
+          const sameTarget=value=>value.document_id===actual.document_id && value.active_layer_id===actual.active_layer_id && value.layer_ids.join(',')===actual.layer_ids.join(',');
+          const current=await captureSelection(),currentOrder=await order();
+          if(current.document_id!==actual.document_id || currentOrder.join(',')!==before.join(','))throw Error('Selection recovery target changed');
+          if(!sameTarget(current)) {
+            // Only undo our verified multi-selection collapse, never a later target change.
+            if(descriptors.length!==2 || current.active_layer_id!==actual.active_layer_id || current.layer_ids.join(',')!==String(actual.active_layer_id))throw Error('Selection recovery identity changed');
+            const ids=actual.layer_ids.filter(id=>id!==actual.active_layer_id).concat(actual.active_layer_id);
+            const restore=ids.map((id,i)=>({_obj:'select',_target:[{_ref:'layer',_id:id},{_ref:'document',_id:actual.document_id}],makeVisible:false,
+              ...(i?{selectionModifier:{_enum:'selectionModifierType',_value:'addToSelection'}}:{}),_options:{dialogOptions:'dontDisplay'}}));
+            const results=await ps.action.batchPlay(restore,{});
+            if(results.some(v=>v._obj==='error') || !sameTarget(await captureSelection()) || (await order()).join(',')!==before.join(','))throw Error('Selection recovery readback mismatch');
+          }
+        } catch(error) {
+          const unknown=Error('选层失败，原选择恢复结果待核对；不重发');unknown.resultUnknown=true;throw unknown;
+        }
+        if(rejected.result===-128 || rejected.cancelled===true)return {verified:true,cancelled:true,rollback_verified:true,count:0,command,selection_context:selectionContext(),selection_timings_ms:timings};
         throw Error(rejected.message||'Photoshop rejected selection');
       }
       timings.select_ms=Date.now()-at;at=Date.now();
