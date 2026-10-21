@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+本机已更新至224／UXP0.3.54：修正图层／文档通知注册和读取期间的失效保护；513项后端、28组Node及实际入口／组件一致性通过，真实PS已核验注册与close回调。低CPU／正常各7项接口检查、原稿和资源恢复通过；脚本事件不保证发通知，轮询保持，实体和原故障机待验，不宣称已消除持续卡顿。公开Release仍223。[使用与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-tests)。
+
 [223已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.223)：普通填充取消异常修复及本机8项真实接口验证通过，UXP仍0.3.53；公开ZIP／SHA／Latest清单及精简Wiki已核验，仅保留223 Release。旧PS取消仍约1.4秒，不宣称收尾延迟已消除。[用法和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
 [222历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.222)，UXP仍0.3.53：同一菜单结果不再反复读盘、解析。重复轮询本地开销减少约0.10–0.31ms／次，首次处理增加约0.21–0.33ms；不代表PS读取或整体操作等比例提速。[对照和范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。

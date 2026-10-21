@@ -15,6 +15,7 @@ let lastRequest = null;
 let lastHeartbeat = 0;
 let pluginManifest = null;
 let contextReadAt=0,contextWriteAt=0,contextSignature='';
+let contextGeneration=0;
 let contextInterval=100;
 let observation={};
 let pendingResponse=null;
@@ -73,7 +74,7 @@ async function refreshMenuContext(folder,now) {
   let request;
   try {request=JSON.parse(await (await folder.getEntry('menu-context-request.json')).read());}catch(_){return false;}
   if(request.token!==token || request.session!==session || !/^[0-9a-f]{32}$/.test(request.id) || request.id===menuRefreshId || !Number.isFinite(request.expires_at_ms) || request.expires_at_ms<now || request.expires_at_ms>now+10000)return false;
-  const started=Date.now();
+  const started=Date.now(),generation=contextGeneration;
   // Yield only between read-only host calls. Never abandon a Photoshop call
   // or consume/replay an operation here: the next poll owns its normal dispatch.
   async function checkpoint() {
@@ -112,7 +113,7 @@ async function refreshMenuContext(folder,now) {
     observation.menu={selection_ms:Date.now()-started,error:String(error).slice(0,200),completed_at_ms:Date.now()};
     return true;
   }
-  const readDone=Date.now();contextReadAt=readDone;
+  const readDone=Date.now();contextReadAt=generation===contextGeneration?readDone:0;
   const needsShape=!context.locked && !context.background && (context.kind==='shape-fill' && context.layer_ids.length===1 || context.layer_ids.length>=2 && context.layer_ids.length<=128);
   const basic={...context,shape_editor:{available:false},schema:1,plugin_time_ms:readDone,
     menu_request_id:request.id,menu_phase:needsShape?'basic':'completed',timings_ms:{selection_ms:readDone-started}};
@@ -163,6 +164,7 @@ async function finishResponse(folder,response) {
 }
 async function updateLayerContext(folder,now,force=false,prepared=null,checkpoint=null) {
   if(!force && now-contextReadAt<contextInterval)return;
+  const generation=contextGeneration;
   contextReadAt=now;
   let value;
   let error='';
@@ -171,7 +173,7 @@ async function updateLayerContext(folder,now,force=false,prepared=null,checkpoin
     error=String(e).slice(0,200);value={session,document_id:null,layer_ids:[],kind:'unknown',mask:0};}
   // Throttle from read completion: if DOM work itself takes over 100ms,
   // measuring from its start would immediately launch another costly read.
-  const readDone=Date.now();contextReadAt=readDone;
+  const readDone=Date.now();contextReadAt=generation===contextGeneration?readDone:0;
   contextInterval=Math.max(error?1000:100,Math.min(1000,readDone-now));
   observation.background={selection_ms:readDone-now,interval_ms:contextInterval,completed_at_ms:readDone,error};
   // Vector properties and the pattern catalog are only needed for an opened
@@ -263,7 +265,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.53', session, transport: 'plugin-data-files',
+        probe_version: '0.3.54', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
@@ -337,7 +339,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.53', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.54', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -471,9 +473,16 @@ module.exports = {commands: {probe: () => probe('command')}};
 probe('startup');
 // Notifications make selection/type/lock changes visible on the next poll;
 // the bounded DOM poll also covers changes made by external COM scripts.
-try {require('photoshop').action.addNotificationListener(
-  ['select','make','delete','set','undo','redo'].map(event=>({event})),()=>{contextReadAt=0;});}
-catch(_) {}
+observation.notifications={state:'pending',received:0};
+Promise.resolve().then(()=>require('photoshop').action.addNotificationListener(
+  ['select','make','delete','set','undo','redo','open','close'],event=>{
+    contextGeneration++;contextReadAt=0;
+    observation.notifications={...observation.notifications,received:observation.notifications.received+1,
+      last_event:event,last_event_at_ms:Date.now()};
+  })).then(()=>{observation.notifications.state='ready';},error=>{
+    observation.notifications.state='failed';observation.notifications.error=String(error).slice(0,200);
+    console.log('Selection notifications unavailable',String(error));
+  });
 setInterval(() => probe('poll'), 16);
 setInterval(executionPulse,1000);
 // A pending asynchronous Photoshop call leaves JS responsive. Renew only the

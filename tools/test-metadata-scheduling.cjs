@@ -2,13 +2,13 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync('uxp/offline-probe/main.js','utf8');
 const settle=async()=>{for(let n=0;n<30;n++)await new Promise(resolve=>setImmediate(resolve));};
-async function host(initialCommand=false){
+async function host(initialCommand=false,registration='ready'){
   const files=new Map(),c={now:100000,captures:0,preferences:0,documents:0,selection:0};
   const timers=new Map();let release;
   const folder={async getEntry(name){if(!files.has(name))throw Error('missing');return {read:async()=>files.get(name)};},
     async createFile(name){return {write:async text=>files.set(name,text)};}};
   const snapshot=()=>({session:c.session,document_id:1,layer_ids:[2],kind:'pixel',mask:15,quick_mask:127});
-  const labels={selectionContextFresh:async checkpoint=>{if(checkpoint)await checkpoint();c.selection++;return snapshot();},
+  const labels={selectionContextFresh:async checkpoint=>{if(checkpoint)await checkpoint();c.selection++;if(c.onSelection)c.onSelection();return snapshot();},
     interfacePreferences:async()=>{c.preferences++;if(c.block)await new Promise(resolve=>{release=resolve;});return {ui_theme:'light-gray',ui_font_size:'large',ui_preferences_complete:true,ui_preferences_time_ms:c.now};},
     capture:async()=>{c.captures++;return snapshot();},documentTarget:()=>({document_ids:[1]}),paintClipboardAvailable:()=>false};
   const app={get documents(){c.documents++;if(c.onDocuments)c.onDocuments();return [{title:'original'}];},activeDocument:{title:'original'}};
@@ -17,7 +17,12 @@ async function host(initialCommand=false){
   const sandbox={console,Date:class extends Date{static now(){return c.now;}},module:{exports:{}},
     setInterval(fn,ms){timers.set(ms,fn);},setTimeout,clearTimeout,
     require(name){
-      if(name==='photoshop')return {app,action:{addNotificationListener(){}},core:{}};
+      if(name==='photoshop')return {app,action:{addNotificationListener(events,listener){
+        assert.deepEqual(Array.from(events),['select','make','delete','set','undo','redo','open','close']);
+        if(registration==='throw')throw Error('registration failed');
+        if(registration==='reject')return Promise.reject(Error('registration failed'));
+        c.notify=listener;return Promise.resolve();
+      }},core:{}};
       if(name==='uxp')return {host:{version:'24.2.0'},versions:{uxp:'6.4'},storage:{localFileSystem:{getDataFolder:async()=>folder,getPluginFolder:async()=>{throw Error('optional');}}}};
       if(name==='./labels.js')return (ps,session)=>{c.session=session;return labels;};
       if(name==='./probe-config.js')return 'token';throw Error(name);
@@ -63,5 +68,27 @@ async function host(initialCommand=false){
   h=await host();h.c.now+=6000;h.c.onDocuments=()=>h.command('during-document-get');
   const previous=h.heartbeat().metadata_time_ms;await h.poll();assert.equal(h.heartbeat().metadata_time_ms,previous);
   await h.poll();assert.equal(h.c.captures,1);
+  // Callbacks only invalidate; the existing poll owns all host reads.
+  h=await host();const reads=h.c.selection;
+  h.c.now+=1;h.c.notify('select',{});h.c.notify('set',{});
+  assert.equal(h.c.selection,reads);await h.poll();assert.equal(h.c.selection,reads+1);
+  await h.poll();assert.equal(h.c.selection,reads+1,'Notifications coalesce into one read');
+  // An event arriving inside the read must survive its completion timestamp.
+  h.c.onSelection=()=>{h.c.onSelection=null;h.c.notify('delete',{});};
+  h.c.notify('make',{});await h.poll();const during=h.c.selection;
+  await h.poll();assert.equal(h.c.selection,during+1,'In-flight invalidation was lost');
+  h.c.onSelection=()=>{h.c.onSelection=null;h.c.notify('select',{});};
+  h.menu();await h.poll();const menuReads=h.c.selection;
+  await h.poll();assert.equal(h.c.selection,menuReads+1,'Menu read erased a notification');
+  h.c.now+=6000;await h.pulse();await settle();
+  assert.equal(h.heartbeat().layer_observation.notifications.state,'ready');
+  assert.equal(h.heartbeat().layer_observation.notifications.received,5);
+  for(const failure of ['throw','reject']){
+    h=await host(false,failure);h.c.now+=6000;await h.pulse();await settle();
+    assert.equal(h.heartbeat().layer_observation.notifications.state,'failed');
+    assert.match(h.heartbeat().layer_observation.notifications.error,/registration failed/);
+    const count=h.c.selection;h.c.now+=1100;await h.poll();
+    assert.ok(h.c.selection>count,'Polling must survive failed registration');
+  }
   console.log('PASS metadata scheduling: cold/due command and menu priority; awaited-call ownership; pure JS pulse; original ages; getter checkpoints; no replay');
 })().catch(error=>{console.error(error);process.exitCode=1;});
