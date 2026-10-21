@@ -52,6 +52,7 @@ with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as bundle:
     bundle.write(ROOT/'docs/PERCEPTUAL-COLOR.md','docs/PERCEPTUAL-COLOR.md')
     bundle.write(ROOT/'docs/LEGACY-PREVIEW.md','docs/LEGACY-PREVIEW.md')
     bundle.write(ROOT/'docs/VERSION-HEALTH.md','docs/VERSION-HEALTH.md')
+    bundle.write(ROOT/'docs/TEXT-TOOLS.md','docs/TEXT-TOOLS.md')
     bundle.write(ROOT/'docs/STABILITY-TEST.md','docs/STABILITY-TEST.md')
     bundle.write(ROOT/'tools/inspect-panels.ps1','tools/inspect-panels.ps1')
     bundle.write(ROOT/'tools/inspect-uxp.ps1','tools/inspect-uxp.ps1')
