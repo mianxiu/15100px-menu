@@ -45,6 +45,25 @@ class MaskPreviewTests(unittest.TestCase):
         self.assertEqual(value['phase'],'commit')
         self.assertEqual(value['paint']['mask'],{'feather':25,'density':40})
 
+    def test_only_terminal_changes_notify_outside_the_value_lock(self):
+        preview=MaskPreview(8,paint());calls=[]
+        def notify():
+            self.assertTrue(preview.lock.acquire(False))
+            preview.lock.release();calls.append(preview.phase)
+        preview.set_terminal_notifier(notify)
+        preview.update(paint(10));self.assertEqual(calls,[])
+        preview.update(paint(25),commit=True);preview.cancel()
+        self.assertEqual(calls,['commit']);self.assertIsNotNone(preview.terminal_requested_at)
+        preview=MaskPreview(8,paint());preview.set_terminal_notifier(notify)
+        preview.cancel();preview.cancel();self.assertEqual(calls,['commit','cancel'])
+
+    def test_terminal_mailbox_time_is_not_renewed_by_lease_heartbeats(self):
+        preview=MaskPreview(8,paint());preview.bind(self.folder,self.request)
+        preview.update(paint(25),commit=True);preview.publish()
+        published=preview.terminal_published_at
+        self.assertIsNotNone(published);self.assertGreaterEqual(published,preview.terminal_requested_at)
+        preview.published_at=0;preview.publish();self.assertEqual(preview.terminal_published_at,published)
+
     def test_cancel_never_accepts_later_release(self):
         preview=MaskPreview(8,paint());preview.bind(self.folder,self.request)
         preview.cancel()
@@ -107,6 +126,53 @@ class MaskPreviewTests(unittest.TestCase):
         self.assertEqual(result['epoch'],9);self.assertEqual(result['stage'],'cancel-wait')
         self.assertEqual(desktop.mask_preview.epoch,8)
 
+
+
+class TerminalPublisherWakeTests(unittest.IsolatedAsyncioTestCase):
+    async def exercise(self, cancel):
+        from backend.mask_preview import run_preview
+        preview=MaskPreview(7,paint());bound=asyncio.Event();waiting=asyncio.Event();published=asyncio.Event()
+        loop=asyncio.get_running_loop();events=[]
+        with tempfile.TemporaryDirectory() as temporary:
+            folder=Path(temporary);identity={'id':'c'*32,'session':'s','token':'test'}
+            original_publish=preview.publish
+            def publish():
+                original_publish()
+                path=folder/('mask-preview-'+identity['id']+'.json')
+                if path.exists() and json.loads(path.read_text('utf-8'))['phase'] in ('commit','cancel'):
+                    loop.call_soon_threadsafe(published.set)
+            preview.publish=publish
+            desktop=SimpleNamespace(menu_epoch=7,visible=True,mask_preview=preview,_scope=lambda:True,
+                require_action_focus=lambda:None,require_menu_layer_target=lambda *_:None,event=events.append)
+            desktop.hide=lambda **_:setattr(desktop,'visible',False)
+            async def execute(*_,**__):
+                await asyncio.to_thread(preview.bind,folder,identity);bound.set()
+                await published.wait();return {'message':'confirmed'}
+            bridge=SimpleNamespace(execute_shape=execute,busy=False,layer_context={})
+            async def broadcast(_):pass
+            lock=asyncio.Lock();await lock.acquire()
+            app=SimpleNamespace(bridge=bridge,desktop=desktop,operation_lock=lock,broadcast=broadcast,_mask_preview=preview)
+            # Disable heartbeat timeout progress altogether. Only an actual
+            # terminal notification can let the publisher make another pass.
+            async def no_heartbeat(awaitable,timeout):
+                self.assertEqual(timeout,.08);waiting.set();return await awaitable
+            with patch('backend.mask_preview.asyncio.wait_for',side_effect=no_heartbeat):
+                async with asyncio.timeout(2):
+                    task=asyncio.create_task(run_preview(app,preview,{}))
+                    await bound.wait();await waiting.wait()
+                    if cancel:await asyncio.to_thread(preview.cancel)
+                    else:await asyncio.to_thread(preview.update,paint(25),commit=True)
+                    await task
+            self.assertTrue(published.is_set());self.assertFalse(lock.locked())
+            self.assertIsNone(preview.terminal_notifier)
+            packet=json.loads((folder/('mask-preview-'+identity['id']+'.json')).read_text('utf-8'))
+            self.assertEqual(packet['phase'],'cancel' if cancel else 'commit')
+
+    async def test_commit_publishes_without_waiting_for_heartbeat(self):
+        await self.exercise(False)
+
+    async def test_cancel_publishes_without_waiting_for_heartbeat(self):
+        await self.exercise(True)
 
 
 class PreviewPendingFeedbackTests(unittest.TestCase):

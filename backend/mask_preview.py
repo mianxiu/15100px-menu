@@ -30,6 +30,19 @@ class MaskPreview:
         self.progress_value = None
         self.execution_check = None
         self.execution_exited = False
+        self.terminal_notifier = None
+        self.terminal_requested_at = None
+        self.terminal_published_at = None
+
+    def set_terminal_notifier(self, notifier):
+        with self.lock:
+            self.terminal_notifier = notifier
+
+    @staticmethod
+    def notify_terminal(notifier):
+        if notifier:
+            try:notifier()
+            except RuntimeError:pass  # A closed event loop cannot alter the original transaction.
 
     def execution_finished(self):
         if not self.execution_exited and self.execution_check:
@@ -51,13 +64,20 @@ class MaskPreview:
             if commit:
                 self.phase = 'commit'
                 self.return_to_menu = return_to_menu
-            return True
+                self.terminal_requested_at = time.perf_counter()
+            notifier = self.terminal_notifier if commit else None
+        self.notify_terminal(notifier)
+        return True
 
     def cancel(self):
+        notifier = None
         with self.lock:
             if not self.closed and self.phase == 'preview':
                 self.phase = 'cancel'
                 self.seq += 1
+                self.terminal_requested_at = time.perf_counter()
+                notifier = self.terminal_notifier
+        self.notify_terminal(notifier)
 
     def bind(self, folder, request):
         with self.lock:
@@ -83,6 +103,9 @@ class MaskPreview:
             temporary = folder/(identity['id']+'.preview.tmp')
             temporary.write_text(data, 'utf-8')
             publish_request(temporary, folder/('mask-preview-'+identity['id']+'.json'))
+            if value['phase'] in ('commit','cancel'):
+                with self.lock:
+                    if self.terminal_published_at is None:self.terminal_published_at=time.perf_counter()
             self.published=key;self.published_at=time.monotonic()
 
     def progress(self, read=True):
@@ -172,11 +195,18 @@ async def dispatch_preview(app, action, args):
 
 async def run_preview(app, preview, target):
     stopped=asyncio.Event()
+    terminal_wake=asyncio.Event()
+    loop=asyncio.get_running_loop()
+    set_notifier=getattr(preview,'set_terminal_notifier',None)
+    if set_notifier:set_notifier(lambda:loop.call_soon_threadsafe(terminal_wake.set))
     menu_confirmed=False
     last_progress=None
     async def pump():
         nonlocal last_progress
         while not stopped.is_set():
+            # Clear before copying/publishing the latest value. A terminal
+            # arriving during I/O stays signalled for another immediate pass.
+            terminal_wake.clear()
             try:
                 if preview.execution_exited:return
                 if preview.phase=='preview' and (not app.desktop.visible or app.desktop.menu_epoch!=preview.epoch
@@ -198,7 +228,7 @@ async def run_preview(app, preview, target):
                 preview.cancel()
                 logging.exception('Mask preview publication failed')
                 return
-            try:await asyncio.wait_for(stopped.wait(),.08)
+            try:await asyncio.wait_for(terminal_wake.wait(),.08)
             except asyncio.TimeoutError:pass
     publisher=asyncio.create_task(pump())
     try:
@@ -228,7 +258,8 @@ async def run_preview(app, preview, target):
         await app.broadcast({'type':'notice','scope':'operation','action':'shape.paint','ok':False,'message':str(error)})
         logging.exception('Mask preview ended with error')
     finally:
-        stopped.set();await publisher
+        stopped.set();terminal_wake.set();await publisher
+        if set_notifier:set_notifier(None)
         host_exited=not app.bridge.busy or await asyncio.to_thread(preview.execution_finished)
         finish_guard=getattr(app.desktop,'finish_preview_input_guard',None)
         if finish_guard:
@@ -255,3 +286,11 @@ async def run_preview(app, preview, target):
         app._mask_preview=app.desktop.mask_preview=None
         app.desktop.event({'type':'mask.preview','active':False})
         await app.broadcast({'type':'operation','busy':app.bridge.busy})
+        requested=getattr(preview,'terminal_requested_at',None)
+        published=getattr(preview,'terminal_published_at',None)
+        if requested is not None:
+            logging.info('Preview terminal timing: %s',{
+                'epoch':preview.epoch,'phase':preview.phase,
+                'mailbox_ms':None if published is None else round((published-requested)*1000,3),
+                'controller_ms':round((time.perf_counter()-requested)*1000,3),
+                'execution_exited':host_exited,'busy_remaining':app.bridge.busy})
