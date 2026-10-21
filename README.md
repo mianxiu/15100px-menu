@@ -6,7 +6,7 @@
 
 226／UXP0.3.56起：原生选层策略省去无效DOM反馈，保留写前与终态新鲜核验。513后端／28组Node和低CPU／正常22项真实PS接口检查通过；[速度与未验范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
-[公开下载225](https://github.com/mianxiu/15100px-menu/releases/latest)／UXP0.3.55：选层取消／失败后恢复原多选，不能确认则保留未知。公开ZIP／SHA／Latest清单已核验，仅保留225 Release，旧标签和源码历史保留。[用法与限制](https://github.com/mianxiu/15100px-menu/wiki/Caps-execution)。
+[公开下载230](https://github.com/mianxiu/15100px-menu/releases/latest)／UXP0.3.59：图层搜索、文本拆分／替换与正常长任务自检修复。公开ZIP／SHA／Latest清单已匿名下载核验，仅保留230 Release，旧标签和源码历史保留。[用法与限制](https://github.com/mianxiu/15100px-menu/wiki/Caps-execution)。
 
 以下为历史交付记录，反映当时状态；旧版链接指向保留的源码标签，发行页只保留最新版。
 
