@@ -114,6 +114,44 @@ class CapsInputTests(unittest.TestCase):
    d._finish_menu_context();self.assertEqual(d.gui.SendMessage.call_count,1)
    self.result(folder,kind='shape-fill',menu_phase='completed');d._finish_menu_context()
    self.assertIsNone(d.menu_context_pending);self.assertEqual(d.gui.SendMessage.call_count,2)
+ def test_unchanged_result_reuses_file_work_but_not_age_or_input_eligibility(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.menu_context_pending['deadline']=time.monotonic()+10
+   d.panel_context.current['input_focused']=True;self.result(folder)
+   read=Path.read_text;reads=[]
+   def counted(path,*args,**kwargs):reads.append(path);return read(path,*args,**kwargs)
+   with patch.object(Path,'read_text',counted):
+    d._finish_menu_context();d._finish_menu_context()
+    self.assertEqual(len(reads),1);d.gui.SendMessage.assert_not_called()
+    d.panel_context.current['input_focused']=False
+    with patch('backend.layer_context.time.time',return_value=time.time()+3):d._finish_menu_context()
+    d.gui.SendMessage.assert_not_called()
+    d._finish_menu_context();self.assertEqual(d.gui.SendMessage.call_count,1)
+    self.assertEqual(len(reads),1)
+ def test_same_path_with_another_request_requires_a_new_read_and_matching_identity(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);self.result(folder);d.panel_context.current['input_focused']=True
+   read=Path.read_text;reads=[]
+   def counted(path,*args,**kwargs):reads.append(path);return read(path,*args,**kwargs)
+   with patch.object(Path,'read_text',counted):
+    d._finish_menu_context()
+    d.menu_context_pending={**d.menu_context_pending,'id':'next'};d.panel_context.current['input_focused']=False
+    d._finish_menu_context()
+   self.assertEqual(len(reads),2);d.gui.SendMessage.assert_not_called()
+ def test_cached_preparation_cannot_share_mutable_target_with_native_consumer(self):
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);self.result(folder,menu_phase='basic');d._finish_menu_context()
+   d.menu_layer_context['layer_ids'].append(9)
+   self.assertEqual(d._menu_context_file_cache[3][0]['layer_ids'],[3])
+ def test_atomic_replacement_with_same_time_and_length_invalidates_cached_result(self):
+  import os
+  with tempfile.TemporaryDirectory() as folder:
+   d=self.ready(folder);d.panel_context.current['input_focused']=True;self.result(folder)
+   source=Path(folder)/'menu-context-result.json';stamp=source.stat();d._finish_menu_context()
+   replacement=Path(folder)/'next.json';replacement.write_text(source.read_text('utf-8').replace('[3]','[4]'),'utf-8')
+   os.utime(replacement,ns=(stamp.st_atime_ns,stamp.st_mtime_ns));os.replace(replacement,source)
+   d.panel_context.current['input_focused']=False;d._finish_menu_context()
+   self.assertEqual(d.menu_layer_context['layer_ids'],[4])
  def test_accepted_basic_has_bounded_completion_window_without_extending_unaccepted_reads(self):
   with tempfile.TemporaryDirectory() as folder:
    d=self.ready(folder);d.menu_context_pending.update(deadline=110,completion_deadline=130)

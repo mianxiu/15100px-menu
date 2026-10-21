@@ -1,5 +1,6 @@
 """Scoped Photoshop hotkeys and a separate C++ Dear ImGui menu process."""
 import ctypes
+import copy
 from ctypes import wintypes as W
 import logging
 import os
@@ -840,17 +841,31 @@ class Desktop:
         # used by Caps/open/hide. Revalidate the exact pending object on commit.
         with self.window_lock:
             pending=self.menu_context_pending
-        if not pending:return
+        if not pending:
+            self._menu_context_file_cache=None
+            return
         if 'id' not in pending:
             return self._apply_menu_context(pending,None,None)
         try:
-            snapshot=json.loads((pending['folder']/'menu-context-result.json').read_text('utf-8-sig'))
-            prepared=None
-            if snapshot.get('menu_phase','completed') in ('basic','completed'):
-                from .layer_context import validate
-                from .shape_paint import metadata
-                value=validate(snapshot,pending['session'])
-                prepared=(value,metadata(value.get('shape_editor')))
+            source=pending['folder']/'menu-context-result.json'
+            def version(stat):
+                return (stat.st_dev,stat.st_ino,stat.st_mtime_ns,stat.st_ctime_ns,stat.st_size)
+            key=version(source.stat())
+            cached=getattr(self,'_menu_context_file_cache',None)
+            if cached and cached[0] is pending and cached[1]==key:
+                snapshot,prepared=cached[2],copy.deepcopy(cached[3])
+            else:
+                snapshot=json.loads(source.read_text('utf-8-sig'))
+                prepared=None
+                if snapshot.get('menu_phase','completed') in ('basic','completed'):
+                    from .layer_context import validate
+                    value=validate(snapshot,pending['session'])
+                    # validate already normalizes optional editor metadata.
+                    prepared=(value,value.get('shape_editor',{'available':False}))
+                # Cache only one stable file version for this exact request.
+                # The application step still checks original age, identity,
+                # epoch, deadline, input/focus and native acceptance each pass.
+                self._menu_context_file_cache=(pending,key,snapshot,copy.deepcopy(prepared)) if version(source.stat())==key else None
         except (OSError,ValueError,KeyError,TypeError):return
         self._apply_menu_context(pending,snapshot,prepared)
 

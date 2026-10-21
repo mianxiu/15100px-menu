@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+222已构建并更新本机，UXP仍0.3.53：同一菜单结果不再反复读盘、解析。重复轮询本地开销减少约0.10–0.31ms／次，首次处理增加约0.21–0.33ms；不代表PS读取或整体操作等比例提速。[对照和范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
+
 [221已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.221)，UXP仍0.3.53：预览确认／取消改为立即发送，保留完整终态校验。低CPU热态收尾4组对照中位201→172ms、P95 261→206ms；正常配置及实体／故障机待验。[速度口径和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
 [220／UXP0.3.53历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.220)：修复普通填充层点色后误拒绝并关闭面板；公开ZIP／SHA／Latest更新清单已核验，发行页只保留220。此前收尾候选无稳定收益，未随220发布；完整实体交互及普通填充取消待验。[用法和验证限制](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
