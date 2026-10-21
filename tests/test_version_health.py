@@ -80,6 +80,28 @@ class VersionHealthTests(unittest.IsolatedAsyncioTestCase):
   s=state();s['photoshop'].update(busy=True,uxp_recovery={'active':True});s['menu']['visible']=True
   result=await self.check(s);self.assertTrue(result['attention']);self.assertEqual(p.read_bytes(),b'original unknown request')
   self.assertIn('result_unconfirmed',[f['code'] for f in result['findings']])
+ async def test_matching_live_request_defers_check_without_false_unknown_then_finishes(self):
+  s=state();s['photoshop'].update(busy=True,uxp_recovery={'active':True,'state':'checking',
+   'session_current':True,'task_id':'b'*32,'request_id':'a'*32})
+  s['tasks']['items']=[{'id':'b'*32,'state':'running','channel':'uxp-local-files'}]
+  original=copy.deepcopy(s)
+  await self.check(s);self.assertIsNone(self.h.task)
+  self.assertNotIn('result_unconfirmed',[f['code'] for f in assessment(s,'Windows')[2]])
+  self.assertEqual(s,original)
+  s['photoshop'].update(busy=False,uxp_recovery={'active':False})
+  s['tasks']['items'][0]['state']='succeeded'
+  self.assertFalse((await self.check(s))['attention'])
+ async def test_unmatched_unknown_restored_or_disconnected_request_still_warns(self):
+  base=state();base['photoshop'].update(busy=True,uxp_recovery={'active':True,'state':'checking',
+   'session_current':True,'task_id':'b'*32,'request_id':'a'*32})
+  base['tasks']['items']=[{'id':'b'*32,'state':'running','channel':'uxp-local-files'}]
+  for task_change,recovery_change in [({'state':'result-unknown'},{}),({'restored':True},{}),
+    ({'id':'c'*32},{}),({'channel':'com'},{}),({}, {'session_current':False}),
+    ({},{'state':'invalid'}),({},{'execution_exited':True}),({},{'task_id':None})]:
+   with self.subTest(task=task_change,recovery=recovery_change):
+    s=copy.deepcopy(base);s['tasks']['items'][0].update(task_change)
+    s['photoshop']['uxp_recovery'].update(recovery_change)
+    self.assertIn('result_unconfirmed',[f['code'] for f in assessment(s,'Windows')[2]])
  async def test_new_failed_task_reopens_notice_after_acknowledgement(self):
   s=state();s['tasks']['items']=[{'id':'first','state':'failed','error':'private-token'}]
   await self.check(s);await self.h.acknowledge();self.assertTrue(self.h.snapshot()['acknowledged'])

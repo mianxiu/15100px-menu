@@ -63,7 +63,14 @@ def assessment(value, system):
     if value.get('_status_format_unknown') is True:
         add('status_format_unknown')
         return versions, capability, findings, True
-    if (ps.get('uxp_recovery') or {}).get('active'):
+    recovery = ps.get('uxp_recovery') or {}
+    running = (recovery.get('state') == 'checking' and recovery.get('session_current') is True
+               and recovery.get('execution_exited') is not True
+               and any(task.get('id') == recovery.get('task_id') and task.get('id')
+                       and task.get('state') == 'running' and not task.get('restored')
+                       and task.get('channel') == 'uxp-local-files'
+                       for task in value.get('tasks', {}).get('items', [])))
+    if recovery.get('active') and not running:
         add('result_unconfirmed')
     latest = (value.get('tasks', {}).get('items') or [{}])[0]
     if latest.get('state') in ('failed', 'result-unknown'):

@@ -151,6 +151,7 @@ class PendingUxp:
         if not self.value: return {'active':False}
         value = self.value
         message = 'UXP 结果待核对，已阻止新操作；只读取原请求结果，不自动重发'
+        session_current = False
         try:
             heartbeat = json.loads((Path(value['folder'])/'probe-last.json').read_text('utf-8-sig'))
             if not isinstance(heartbeat,dict):raise ValueError('Invalid heartbeat')
@@ -158,9 +159,11 @@ class PendingUxp:
                 message = 'UXP 会话已改变，原任务结果尚未确认；保留记录，不自动重发'
             elif time.time()*1000-heartbeat.get('plugin_time_ms', 0)>15000:
                 message = 'UXP 通讯中断，等待原任务最终记录；不自动重发'
+            else:
+                session_current = True
         except (OSError, ValueError, TypeError):
             message = 'UXP 通讯不可用，等待原任务最终记录；不自动重发'
         exited=self.execution_has_exited()
         if exited:message='脚本已退出，PS可正常使用；恢复结果待核对，已暂停插件修改，不自动重发'
         return {'active':True, 'state':'checking', 'message':message,'execution_exited':exited,
-                'task_id':value['task_id'], 'request_id':value['id']}
+                'task_id':value['task_id'], 'request_id':value['id'], 'session_current':session_current}

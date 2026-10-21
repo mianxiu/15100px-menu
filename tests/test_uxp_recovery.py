@@ -68,6 +68,17 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.bridge.busy)
         return self.bridge.tasks.snapshot()['items'][0]['id']
 
+    async def test_pending_session_freshness_is_metadata_only_and_never_clears_unknown(self):
+        await self.unknown()
+        pending=self.bridge.transport.pending;original=pending.path.read_bytes()
+        for session,age,expected in [('one',0,True),('other',0,False),('one',16000,False)]:
+            self.heartbeat(session,age)
+            self.assertIs(pending.snapshot()['session_current'],expected)
+            self.assertEqual(pending.path.read_bytes(),original)
+            self.assertTrue(self.bridge.busy)
+        (self.folder/'probe-last.json').write_text('{')
+        self.assertFalse(pending.snapshot()['session_current'])
+
     def receipt(self, **changes):
         pending = self.bridge.transport.pending.value
         data = {key:pending[key] for key in ('id','session','operation')}
