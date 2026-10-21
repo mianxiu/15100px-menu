@@ -1,8 +1,8 @@
 # Photoshop Menu
 
-221已构建并更新本机，UXP仍0.3.53：预览确认／取消改为立即发送，保留完整终态校验。低CPU热态收尾4组对照中位201→172ms、P95 261→206ms；正常配置及实体／故障机待验。[速度口径和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
+[221已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.221)，UXP仍0.3.53：预览确认／取消改为立即发送，保留完整终态校验。低CPU热态收尾4组对照中位201→172ms、P95 261→206ms；正常配置及实体／故障机待验。[速度口径和范围](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
-[220／UXP0.3.53已发布并更新本机](https://github.com/mianxiu/15100px-menu/releases/tag/v0.4.220)：修复普通填充层点色后误拒绝并关闭面板；公开ZIP／SHA／Latest更新清单已核验，发行页只保留220。此前收尾候选无稳定收益，未随220发布；完整实体交互及普通填充取消待验。[用法和验证限制](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
+[220／UXP0.3.53历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.220)：修复普通填充层点色后误拒绝并关闭面板；公开ZIP／SHA／Latest更新清单已核验，发行页只保留220。此前收尾候选无稳定收益，未随220发布；完整实体交互及普通填充取消待验。[用法和验证限制](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
 [219／UXP0.3.52历史交付](https://github.com/mianxiu/15100px-menu/tree/v0.4.219)并更新本机实际入口，公开ZIP／SHA／Latest清单匿名核验通过；仅保留219 Release，旧标签／历史保留。七项创建的原生读取策略省去被丢弃的DOM反馈快照，完成前的新鲜核验保持；[速度对照及实测范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 
