@@ -17,6 +17,7 @@
 #include <cmath>
 #include <vector>
 #include <sstream>
+#include <regex>
 #include <fstream>
 #include <filesystem>
 #include <chrono>
@@ -233,6 +234,9 @@ static const char* capsActions[]={"copyStyle","pasteStyle","editStyle","selectAb
 static const char* capsKeys[]={"c","v","f","w","s","上移","下移"};
 static const char* capsLabels[]={"复制图层样式","粘贴图层样式","打开图层样式","单选上一个图层（Shift扩展多选）","单选下一个图层（Shift扩展多选）","上移一层","下移一层"};
 static bool capsReady=false;
+static bool layerSearchReady=false,textSplitReady=false;
+static RECT toolRow{};
+static bool menuToolsVisible();
 static int capsCount() {return panelKind==0?5:7;}
 static int capsBottomCount() {return panelKind==2?5:capsCount();}
 
@@ -247,7 +251,8 @@ static bool returnInputsIdle() {
         !(GetAsyncKeyState(VK_CAPITAL)&0x8000) && !(GetAsyncKeyState(VK_LBUTTON)&0x8000) &&
         !(GetAsyncKeyState(VK_RBUTTON)&0x8000) && !(GetAsyncKeyState(VK_MBUTTON)&0x8000);
 }
-static bool canExecute() {return !maskPreviewStarted && (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
+static bool canExecute() {return !menuToolsVisible() && !maskPreviewStarted && (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
+static bool toolEnabled(int i) {return canExecute() && panelKind!=4 && (i==0?layerSearchReady:textSplitReady && panelKind==2 && layerAware && layerKind==4 && layerCount==1 && !layerLocked);}
 static bool capsEnabled(int i) {
     if(i>=capsCount())return false;
     if(!capsReady || !canExecute() || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
@@ -308,6 +313,7 @@ static float previewShapeHeight=0;
 static bool previewLifecycle=false;
 static bool previewLive=false;
 static bool previewShape=false;
+static std::string previewTool;
 static std::string previewProgressStage;
 static std::wstring shapeBenchmarkOutput;
 static bool selfTest=false;
@@ -339,6 +345,14 @@ static std::string normalized(std::string value) {
 static ImVec2 basicLabelExtent(int index);
 static float basicTextOffset();
 #include "ShapeColorEditor.h"
+static void sendMenuTool(const char* action,const Json& params) {
+    if(stabilityInspection)return;
+    if(selfTest){testedActions.emplace_back(action);return;}
+    if(backendParent)AllowSetForegroundWindow(backendParent);
+    std::cout<<Json{{"type","action"},{"action",action},{"session",menuEpoch},{"params",params}}.dump()<<std::endl;
+}
+#include "MenuToolsPanel.h"
+static bool menuToolsVisible(){return menuTools.active || menuTools.opening;}
 static bool matches(int i,const std::string& query) {
     std::string haystack=normalized(std::string(rowLabel(i))+" "+(panelKind==4?"新建 文档 new document create":keywords[i])+" "+rowShortcut(i));
     std::istringstream words(query);std::string word;
@@ -446,6 +460,7 @@ static void resetMenu() {
     holdRows={};
     labelRows={};
     quickRows={};
+    toolRow={};menuTools.reset();
     recentRows.clear();
     pieReady=false;
     if (ImGui::GetCurrentContext()) { ImGui::GetCurrentContext()->OpenPopupStack.clear(); }
@@ -484,6 +499,7 @@ static std::string shortcut(const std::string& raw) {
 }
 static void accept(const Json& event) {
     std::string type=event.value("type","");
+    if(type=="menu.tools.opened" || type=="menu.tools.result"){menuTools.receive(event);return;}
     if(type=="preview.pending") {
         PreviewPendingHint::update(event,window,ImGui::GetStyle(),11+fontIndex());return;
     }
@@ -504,6 +520,7 @@ static void accept(const Json& event) {
     } else if (type=="status") {
         const auto& data=event.at("data"); const auto& ps=data.at("photoshop");
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);capsReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=16);}
+        {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);layerSearchReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=57);textSplitReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=59);}
         recentReady=ps.value("uxp_ready",false) && ps.value("uxp_version",std::string())!="0.3.1";
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);shapeClipboardReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=41);}
         shapeClipboardAvailable=ps.value("shape_clipboard_available",false);
@@ -568,6 +585,7 @@ static bool quickDividerAt(int i,POINT point) {
         (i!=2 && i!=6 && point.x>=quickRows[i].right-scale);
 }
 static int holdActionAt(POINT point) {
+    if(menuToolsVisible())return -1;
     if (shapeEyedropActive || !holdMode || !pieReady || holdFinished || pieAnimating || (!canExecute() && !shapeEditor.ready())) return -1;
     float dx=point.x-pieCenter.x,dy=point.y-pieCenter.y;
     float ox=static_cast<float>(point.x-holdOrigin.x),oy=static_cast<float>(point.y-holdOrigin.y);
@@ -577,6 +595,7 @@ static int holdActionAt(POINT point) {
     if (dx*dx+dy*dy<12*12*scale*scale || (!pinned && !holdMoved)) return -1;
     RECT bounds{};GetWindowRect(window,&bounds);
     if (!PtInRect(&bounds,point)) return -1;
+    if(toolEnabled(1) && PtInRect(&toolRow,point))return 71;
     for(int i=0;i<7;++i)if(capsEnabled(i) && PtInRect(&capsRows[i],point)){
         if(capsDividerAt(i,point))return -1;
         return 40+i;
@@ -627,6 +646,7 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
         {"cursor",{point.x,point.y}},{"frozen_hit",frozenHit},{"current_cursor",{current.x,current.y}},
         {"current_hit",currentHit},{"highlight",renderedHit},{"chosen",chosen}}).dump()<<std::endl;
     if(shapeEyedropActive){stopShapeEyedrop();chosen=-1;}
+    if(chosen==71){pinned=true;pieReady=false;menuTools.open("split");return;}
     if(chosen==100){commitShapeDraft();holdFinished=true;pieReady=false;setOpacity(0.f);return;}
     holdFinished=true;pieReady=false;
     setOpacity(0.f);
@@ -712,6 +732,8 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     // release, then hides this window without querying Photoshop or replaying actions.
     if (msg==WM_APP+24) return IsWindowVisible(hwnd) && completionReady() && (!busyMenuWake || returnInputsIdle());
     if (msg==WM_APP+28) return (shapeReturning || hoverReturnConfirmed)?2:busyMenuWake?1:0;
+    if(msg==WM_APP+29)return (menuTools.active?1:0)|(menuTools.ready?2:0)|(menuTools.pending?4:0)|
+        (menuTools.mode=="split"?8:0)|(!menuTools.revision.empty()?16:0)|(!menuTools.error.empty()?32:0)|(menuTools.split.count<<8);
     if (msg==WM_APP+25) {
         // The foreground menu process can hand activation back to its owner;
         // the backend process often cannot, especially after a native script.
@@ -1359,14 +1381,33 @@ static void drawCapsBar() {
         }
     }
 }
+static void drawToolBar() {
+    toolRow={};
+    if(panelKind!=2 || !layerAware || layerKind!=4 || layerCount!=1)return;
+    const char* label="拆分文字";
+    const float h=menuControlHeight*scale,y=pieCenter.y+143*scale;
+    const auto extent=ImGui::GetFont()->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,label);
+    const float width=extent.x+2*figmaBasicLeftPadding*scale,x=pieCenter.x-width*.5f;
+    auto* draw=ImGui::GetWindowDrawList();POINT cursor{};GetCursorPos(&cursor);
+    const ImVec2 a={x,y};
+    toolRow={LONG(x),LONG(y),LONG(x+width),LONG(y+h)};
+    const bool enabled=toolEnabled(1),hover=enabled && !pieAnimating && PtInRect(&toolRow,cursor);
+    draw->AddRectFilled(a,{x+width,y+h},tint(hover?ImGuiCol_HeaderHovered:ImGuiCol_Button),ImGui::GetStyle().FrameRounding);
+    draw->AddText(ImGui::GetFont(),basicLabelSize(),{x+(width-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),label);
+    if(pinned && !pieAnimating && enabled && !holdFinished){
+        ImGui::SetCursorScreenPos(a);
+        if(ImGui::InvisibleButton("##split-tool",{width,h}))menuTools.open("split");
+    }
+    draw->AddRect(a,{x+width,y+h},tint(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
+}
 static void shapeEditorKeys() {
     // The hook leaves letters with the editor so focused RGB/Hex fields keep
     // normal typing. Only an unfocused editor frame handles these shortcuts.
-    if(shapeEditor.ready() && !shapeEyedropActive && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput && !holdFinished && !pieAnimating){
+    if(!menuToolsVisible() && shapeEditor.ready() && !shapeEyedropActive && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput && !holdFinished && !pieAnimating){
         const ImGuiKey keys[]={ImGuiKey_C,ImGuiKey_V,ImGuiKey_F,ImGuiKey_W,ImGuiKey_S};
         if(!ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeySuper)
             for(int i=0;i<5;++i)if(ImGui::IsKeyPressed(keys[i],false)){
-                const int action=ImGui::GetIO().KeyCtrl?-1:i;
+                const int action=ImGui::GetIO().KeyCtrl || i==2 && !(GetAsyncKeyState(VK_CAPITAL)&0x8000)?-1:i;
                 if(action>=0 && capsEnabled(action) && (!ImGui::GetIO().KeyShift || i>=3)){
                     holdFinished=true;send(ImGui::GetIO().KeyShift?(i==3?"extendAbove":"extendBelow"):capsActions[action]);break;
                 }
@@ -1377,7 +1418,7 @@ static void drawPie() {
     auto* draw=ImGui::GetWindowDrawList();
     ImVec2 pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
     pieCenter={pos.x+size.x*.5f,pos.y+size.y*.5f};
-    if(panelKind==2 && size.x>700*scale)pieCenter.x=pos.x+std::max(size.x*.5f,std::min(650*scale,size.x-270*scale));
+    if((panelKind==2 || menuToolsVisible()) && size.x>700*scale)pieCenter.x=pos.x+std::max(size.x*.5f,std::min(650*scale,size.x-270*scale));
     if(panelKind==4)pieCenter.x=pos.x+270*scale;
     if (!pieStarted) pieStarted=GetTickCount64();
     float elapsed=previewAnimationMs>=0?previewAnimationMs:selfTest?60.f:float(GetTickCount64()-pieStarted);
@@ -1388,6 +1429,16 @@ static void drawPie() {
     // SetWindowPos(SWP_SHOWWINDOW), our production entry, need not deliver
     // WM_SHOWWINDOW. Query the HWND instead of relying on that message's cache.
     setOpacity(IsWindowVisible(window) && !holdFinished?fac:0.f);
+    if(menuToolsVisible()) {
+        holdRows={};labelRows={};capsRows={};quickRows={};toolRow={};pieReady=false;
+        draw->AddCircle(pieCenter,19*scale,tint(ImGuiCol_Border),40,scale);
+        menuTools.draw(scale,pieCenter,allowed && !taskBusy && !busyFeedback && !inputFocused && !maskPreviewStarted);
+        drawFooter({document,menuTools.error},pieCenter.y+32*scale);
+        return;
+    }
+    if(toolEnabled(0) && !shapePanelVisible() && !shapeEyedropActive && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput &&
+        !ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper &&
+        !(GetAsyncKeyState(VK_CAPITAL)&0x8000) && ImGui::IsKeyPressed(ImGuiKey_F,false))menuTools.open("search");
     // Blender 5.2 defaults: 20-unit widgets, pie rows 1.5 widgets high,
     // 100-unit radius to the inner edge, roundness .4 of a widget.
     const float rowHeight=figmaWidgetHeight*scale,padding=figmaPadding*scale,rounding=ImGui::GetStyle().FrameRounding;
@@ -1430,7 +1481,7 @@ static void drawPie() {
     if(!editing && panelKind!=4 && panelKind!=3 && layerAware)for(int i=0;i<7;++i){int group=i>=3,n=group?i-3:i;
         float x=pieCenter.x+(65+figmaDisplayIconWidth*n)*scale,y=pieCenter.y+quickGroupY(group)*scale;
         quickRows[i]={LONG(x),LONG(y),LONG(x+figmaDisplayIconWidth*scale),LONG(y+figmaDisplayWidgetHeight*scale)};}
-    if(!editing)drawCapsBar();
+    if(!editing){drawCapsBar();drawToolBar();}else toolRow={};
     shapeEditorKeys();
     POINT cursor{};GetCursorPos(&cursor);int selected=holdActionAt(cursor);
     if(!preview.empty() && previewCapsHover>=0 && previewCapsHover<7 && capsEnabled(previewCapsHover))selected=40+previewCapsHover;
@@ -1541,7 +1592,7 @@ static void drawPie() {
     if(shapeEyedropActive)messages.push_back("屏幕取色：点击颜色；右键取消取色");
     if(shapeEditor.ready() && shapeEditor.copyFailed)messages.push_back("剪贴板暂时不可用，未复制颜色");
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
-    drawFooter(messages,pieCenter.y+(!editing && capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
+    drawFooter(messages,pieCenter.y+(!editing && capsReady && panelKind!=4?(toolRow.right?173.f:143.f):116.f)*scale,panelKind==4);
     const int tipAction=shapeEditor.ready() && shapeTipCandidate>=200?shapeTipCandidate:actionTipText(selected)?selected:-1;
     const bool ownEditorTip=tipAction>=200 && tipAction<200+shapeTipCount && shapeEditor.ready();
     const bool showTip=!pieAnimating && !holdFinished && !inputFocused && !ImGui::IsAnyItemActive() && (ownEditorTip || canExecute());
@@ -1786,6 +1837,7 @@ int main() {
         else if (i+1<argc && arg==L"--preview-kind") {
             std::wstring kind=argv[++i];previewKind=kind==L"context"?"context":kind==L"hold"?"hold":kind==L"busy"?"busy":"menu";
         }
+        else if(i+1<argc && arg==L"--preview-tool") {std::wstring value=argv[++i];if(value==L"search" || value==L"split")previewTool=std::string(value.begin(),value.end());}
         else if (i+1<argc && arg==L"--preview-theme") {
             std::wstring value=argv[++i];std::string name(value.begin(),value.end());
             if (knownTheme(name)) uiTheme=name;
@@ -1810,6 +1862,7 @@ int main() {
         else if (i+1<argc && arg==L"--preview-layer-context") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
             capsReady=data.value("caps_ready",false);
+            layerSearchReady=textSplitReady=data.value("tools_ready",false);
             layerAware=true;layerMask=data.value("mask",0);
             quickMask=data.value("quick_mask",0);
             const std::string kind=data.value("kind","unknown");
@@ -2046,6 +2099,20 @@ int main() {
             panelKind=3;if (rowVisible(0)) throw std::runtime_error("Text panel routing failed");
             panelKind=2;if (!rowVisible(3)) throw std::runtime_error("Layer panel routing failed");
             panelKind=2;
+            {
+                const auto p=menuSplitPreview("猫😀\r第二\r末","1,2,3");
+                if(!p.error.empty() || p.breaks!=Json({4,7,8}) || p.count!=3 || p.text.find("猫😀")==std::string::npos)
+                    throw std::runtime_error("Caps text split lost UTF-16 offsets");
+                const auto blank=menuSplitPreview("A\r\rB\r","1,2,3,4");
+                if(!blank.error.empty() || blank.count!=2 || blank.breaks!=Json({2,3,5}))throw std::runtime_error("Caps split blank-line preservation failed");
+                for(const char* invalid:{"", "1,3", "1,2,", "2,3", "1-4", "1,1,2", "999999999999999999999"})
+                    if(menuSplitPreview("a\rb\rc",invalid).error.empty())throw std::runtime_error("Invalid Caps split grouping accepted");
+                const auto comma=menuSplitPreview("a\rb\rc","1-2，3");
+                if(!comma.error.empty() || comma.breaks!=Json({4,5}) || comma.count!=2)throw std::runtime_error("Caps split merged lines failed");
+                std::string many="a";for(int i=1;i<200;++i)many+="\ra";
+                const auto bounded=menuSplitPreview(many,menuDefaultGroups(many));
+                if(!bounded.error.empty() || bounded.count>64)throw std::runtime_error("Caps split default exceeded group limit");
+            }
             if (!matches(2,"CapsLock+w") || !matches(0,"组内") || !matches(1,"orange color") || matches(3,"top") || matches(0,"missing"))
                 throw std::runtime_error("Search self-test failed");
         }
@@ -2056,8 +2123,16 @@ int main() {
     if (!selfTest) {ShowWindow(window,preview.empty()?SW_SHOWNORMAL:SW_SHOWNOACTIVATE);UpdateWindow(window);}
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
-            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):440)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((previewShape || !previewTool.empty()?920:panelKind==4?820:620)*scale),static_cast<int>((!previewTool.empty()?620:previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):500)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);shapePanelOpen=previewShape && !previewOrdinary;
+            if(!previewTool.empty()) {
+                layerSearchReady=textSplitReady=true;holdFinished=false;pinned=true;capable=allowed=true;
+                menuTools.receive(Json{{"type","menu.tools.opened"},{"epoch",menuEpoch},{"mode",previewTool}});
+                if(previewTool=="split")menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.read"},{"ok",true},
+                    {"result",{{"name","标题与说明"},{"text","作品标题\r第一段说明文字\r第二段说明文字"},{"revision","preview"}}}});
+                else {menuTools.submit("layers.search",Json::object());menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","layers.search"},{"ok",true},
+                    {"result",{{"search_id","preview"},{"scanned",24},{"items",Json::array({Json{{"name","产品标题"},{"document_name","商品详情.psd"}},Json{{"name","产品说明"},{"document_name","商品详情.psd"}}})}}}});}
+            }
             if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
             if(!previewProgressStage.empty())accept({{"type","preview.progress"},{"epoch",menuEpoch},{"phase","preview"},{"stage",previewProgressStage},{"done",12},{"total",previewProgressStage=="redraw"?0:32},{"frame",2}});
         }
@@ -3334,6 +3409,34 @@ int main() {
                 if(!taskBusy || !busyFeedback || testedActions.size()!=busyRight+1 || testedActions.back()!="hide")
                     throw std::runtime_error("Feedback right-click cleared operation protection");
                 testedActions.resize(rightActions);taskBusy=busyFeedback=false;
+                {
+                    const auto before=testedActions.size();
+                    panelKind=2;layerAware=true;layerKind=4;layerCount=1;layerLocked=false;
+                    layerSearchReady=textSplitReady=capable=allowed=true;taskHasResult=false;taskRecovery.clear();
+                    shapeEditor.prepare(Json{{"available",false}});setHoldMode(true);holdMoved=true;
+                    for(int kind:{0,1,2,4}){
+                        panelKind=kind;layerKind=2;numberFrame(ImGuiKey_None,false);
+                        if(toolRow.right)throw std::runtime_error("Caps retained a search entry or a non-text split entry");
+                    }
+                    panelKind=2;layerKind=4;
+                    numberFrame(ImGuiKey_None,false);
+                    const auto r=toolRow;if(r.right<=r.left || !toolEnabled(1))throw std::runtime_error("Text Caps entry unavailable");
+                    renderedHit=71;finishHold({(r.left+r.right)/2,(r.top+r.bottom)/2});
+                    if(!menuTools.opening || !pinned || testedActions.back()!="menu.tools.open")throw std::runtime_error("Caps tool gesture did not pin an editor");
+                    menuTools.receive(Json{{"type","menu.tools.opened"},{"epoch",menuEpoch},{"mode","split"}});
+                    const int request=menuTools.request;
+                    menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch-1},{"request",request},{"action","text.read"},{"ok",true},{"result",Json::object()}});
+                    if(!menuTools.pending)throw std::runtime_error("Stale Caps tool response accepted");
+                    menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",request},{"action","text.read"},{"ok",true},
+                        {"result",{{"text","a\rb"},{"name","source"},{"revision","r"}}}});
+                    if(menuTools.pending || menuTools.split.breaks!=Json({2,3}) || canExecute())throw std::runtime_error("Caps text preview is not isolated");
+                    numberFrame(ImGuiKey_None,false);
+                    if(pieReady || holdRows[0].right || capsRows[0].right || quickRows[0].right || holdActionAt(POINT{LONG(pieCenter.x),LONG(pieCenter.y)})!=-1)
+                        throw std::runtime_error("Tool editor retained radial command hits");
+                    const auto count=testedActions.size();finishHold({(r.left+r.right)/2,(r.top+r.bottom)/2});
+                    if(testedActions.size()!=count)throw std::runtime_error("Opening split submitted a write");
+                    menuTools.reset();testedActions.resize(before);layerSearchReady=textSplitReady=false;
+                }
                 std::cout<<"Blank right-click client cancellation passed: canvas/layers/home/general, late Caps release, dirty draft, sampler pair and busy protection\n";
                 std::cout<<"Dear ImGui self-test passed: original radial/focus/input/cancel matrix; shape local draft, types, single release, stale cursor, pinned commit; production SHOWWINDOW content and 100 hidden frames\n";break;
             }

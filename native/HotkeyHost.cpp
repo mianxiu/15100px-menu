@@ -14,8 +14,8 @@
 #include <vector>
 #include "ScreenSample.h"
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal };
-static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal"};
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers };
+static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
 struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr; ULONGLONG sequence=0; std::array<Binding,16> bindings{}; };
 // Opt-in remote clicks qualify only on a matching release in the same verified
@@ -76,6 +76,9 @@ struct KeyMachine {
             if (key==VK_CAPITAL) for (const auto& b:cfg.bindings) for (int i=0;i<b.count;++i)
                 if (b.keys[i]==VK_CAPITAL) {consumed[key]=true;return true;}
             return false;
+        }
+        if(key=='F' && !modified() && !held[VK_CAPITAL] && !cfg.textInput && !(cfg.colorEditor && visible)) {
+            consumed[key]=true;action=SearchLayers;return true;
         }
         const Binding* match=nullptr;
         bool tabPrefix=false;
@@ -712,7 +715,8 @@ static void writeActions() {
         if (!closing.load()) WaitForSingleObject(available,intent.wait());
     }
 }
-static void check(bool value) { if (!value) throw std::runtime_error("Native hook self-test failed"); }
+static void checkAt(bool value,int line) { if (!value) throw std::runtime_error("Native hook self-test failed at line "+std::to_string(line)); }
+#define check(value) checkAt(value,__LINE__)
 static bool renewalAllowed(ULONGLONG now,ULONGLONG last,bool capsHeld,bool winHeld,bool mouseHeld) {
     return !capsHeld && !winHeld && !mouseHeld && now-last>=250;
 }
@@ -785,6 +789,29 @@ static int selfTest() {
         c.textInput=true;check(!state.event(VK_F5,true,true,c,false,a,1030) && a==None);
         state.event(VK_F5,false,true,c,false,a,1040);c.textInput=false;
         check(!routeKey(state,VK_F5,true,false,true,c,false,a,1050) && a==None);
+    }
+    {
+        Config c;c.bindings[0]={Toggle,{VK_CAPITAL},1};c.bindings[1]={EditStyle,{VK_CAPITAL,'F'},2};Action action;
+        KeyMachine f;
+        check(f.event('F',true,true,c,false,action) && action==SearchLayers);
+        check(f.event('F',true,true,c,false,action) && action==None);
+        check(f.event('F',false,false,c,false,action) && action==None);
+        for(int modifier:{VK_SHIFT,VK_CONTROL,VK_MENU,VK_LWIN,VK_RWIN}) {
+            KeyMachine modified;modified.event(modifier,true,true,c,false,action);
+            check(!modified.event('F',true,true,c,false,action) && action==None);
+            modified.event(modifier,false,true,c,false,action);
+            check(!modified.event('F',false,true,c,false,action));
+        }
+        for(int guarded=0;guarded<3;++guarded) {
+            KeyMachine input;c.textInput=guarded==0;c.colorEditor=guarded==1;
+            check(!routeKey(input,'F',true,guarded!=2,true,c,true,action,1000) && action==None);
+            check(!input.event('F',false,false,c,true,action));
+        }
+        c.textInput=c.colorEditor=false;KeyMachine chord;
+        check(chord.event(VK_CAPITAL,true,true,c,false,action) && action==HoldBegin);
+        check(chord.event('F',true,true,c,false,action) && action==EditStyle);
+        check(chord.event('F',false,true,c,false,action));
+        check(chord.event(VK_CAPITAL,false,true,c,false,action) && action==HoldCancel);
     }
     // Complete remote click pairs only: opt-in, same valid workspace and 2s.
     RemoteClickIntent remote;
@@ -885,7 +912,8 @@ static int selfTest() {
         for(bool pinned:{false,true}) {
             KeyMachine machine;Action result;
             if(!pinned)check(machine.event(20,true,true,ref,false,result,1000) && result==HoldBegin);
-            check(machine.event(pair.first,true,true,ref,pinned,result,1100) && result==pair.second);
+            const Action expected=pinned && pair.first=='F'?SearchLayers:pair.second;
+            check(machine.event(pair.first,true,true,ref,pinned,result,1100) && result==expected);
             check(machine.event(pair.first,true,true,ref,pinned,result,1110) && result==None);
             check(machine.event(pair.first,false,true,ref,pinned,result,1120) && result==None);
             if(!pinned)check(machine.event(20,false,true,ref,pinned,result,1200) && result==HoldCancel);

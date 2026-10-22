@@ -148,6 +148,7 @@ class Desktop:
         self.target = self.hwnd = None
         self.visible = False
         self.hold_active = False
+        self.menu_tools_active = False
         self.restore_pending = False
         self.menu_epoch = 0
         self.menu_context_requester=None
@@ -221,7 +222,7 @@ class Desktop:
         guarded=guard and not guard.get('release')
         value={"enabled": self.settings["enabled"],
             "text_input": bool(self.panel_context and (self.panel_context.current['kind'] == 'text' or self.panel_context.current.get('input_focused'))),
-            "color_editor": bool(self.visible and getattr(self,'color_editor_active',False)),
+            "color_editor": bool(self.visible and (getattr(self,'color_editor_active',False) or getattr(self,'menu_tools_active',False))),
             "diagnostic_trace": bool(getattr(self,"diagnostic_trace",False)),
             "remote_compatibility": self.settings.get("remote_compatibility",False),
             "right_click_open": False,
@@ -403,7 +404,7 @@ class Desktop:
                 self.menu_ready.clear()
 
     def event(self, event):
-        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress','mask.preview','preview.progress','preview.menu.confirmed'):
+        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress','mask.preview','preview.progress','preview.menu.confirmed','menu.tools.opened','menu.tools.result'):
             return
         preview=getattr(self,'mask_preview',None)
         if preview and event.get('type')=='preview.progress' and event.get('epoch')==preview.epoch:
@@ -519,14 +520,18 @@ class Desktop:
         except Exception:
             return False
 
-    def focus_search_result(self):
+    def focus_search_result(self, keep_menu=False):
         # A deliberate result click may activate PS; ordinary shortcuts keep
         # their existing foreground-only guard.
         roots=[]
         self.gui.EnumWindows(lambda hwnd,_:roots.append(hwnd) if self._is_photoshop(hwnd) and self._workspace_root(hwnd)==hwnd else None,None)
         if len(roots)!=1:raise RuntimeError('请仅保留一个可用的Photoshop工作区')
         root=roots[0]
-        self.hide(restore=False)
+        if not keep_menu:self.hide(restore=False)
+        elif self._is_menu_window(self.gui.GetForegroundWindow()):
+            self.gui.SendMessageTimeout(self.hwnd,0x8019,root,0,2,200)
+        if keep_menu and self._workspace_root(self.gui.GetForegroundWindow())!=root:
+            raise RuntimeError('菜单未能将焦点交回PS或前台已改变，本次未执行')
         if self._workspace_root(self.gui.GetForegroundWindow())!=root:
             try:self.gui.SetForegroundWindow(root)
             except Exception:logging.info('Foreground activation not acknowledged; checking actual Photoshop focus',exc_info=True)
@@ -547,6 +552,46 @@ class Desktop:
                 raise RuntimeError('正在编辑输入框，请先退出输入再执行图层操作')
             if panel['kind'] == 'home' and not allow_home:
                 raise RuntimeError('当前为 Photoshop 首页，请进入文档后执行图层操作')
+
+    @window_transition
+    def require_menu_tools(self, epoch):
+        if not self.visible or epoch != self.menu_epoch or not self.menu_tools_active:
+            raise RuntimeError('操作面板已关闭或重新打开，本次未执行')
+        self.require_action_focus()
+
+    def open_menu_tools(self, mode, epoch=None):
+        with self.window_lock:
+            if epoch is not None and (not self.visible or self.menu_epoch != epoch):
+                raise RuntimeError('菜单已关闭或重新打开')
+            self.require_action_focus()
+            if getattr(self,'mask_preview',None):raise RuntimeError('请先完成颜色或羽化调整')
+            if not self.visible:self.open(hold=True,keyboard_anchor=True)
+            if mode=='split':
+                value=self.menu_layer_context or {}
+                if value.get('kind')!='text' or len(value.get('layer_ids',[]))!=1:
+                    raise RuntimeError('请在图层面板单选文字图层后打开拆分')
+            self.hold_active=False;self.menu_tools_active=True
+            self.menu_epoch+=1
+            self.gui.SendMessage(self.hwnd,0x800d,1,self.menu_epoch)
+            self.gui.SendMessage(self.hwnd,0x8010,1,0)
+            import win32api
+            anchor=win32api.GetCursorPos()
+            rect=self.gui.GetWindowRect(self.target)
+            work=win32api.GetMonitorInfo(win32api.MonitorFromPoint(tuple(anchor),2))['Work']
+            if not (rect[0]<=anchor[0]<rect[2] and rect[1]<=anchor[1]<rect[3]):rect=work
+            dpi=self.icons.u.GetDpiForWindow(self.hwnd) or 96
+            bounds=pie_bounds(rect,work,anchor,dpi/96,color_editor=True)
+            self.gui.SetWindowPos(self.hwnd,0,*bounds,0x4|0x10)
+            scale=dpi/96
+            self.preview_hint_anchor=[round(bounds[0]+max(bounds[2]*.5,min(650*scale,bounds[2]-270*scale))),round(bounds[1]+bounds[3]*.5)]
+            current=self.menu_epoch
+        sequence=self._native_config()
+        with self.native_applied:
+            ready=bool(sequence) and self.native_applied.wait_for(lambda:self.native_applied_sequence>=sequence,.5)
+        if not ready:
+            self.hide();raise RuntimeError('面板输入保护未就绪，本次未打开')
+        self.require_menu_tools(current)
+        return current
 
     @window_transition
     def require_move_context(self, name):
@@ -623,11 +668,12 @@ class Desktop:
             self.hide(restore=False)
         self._native_config()
 
-    def open(self, context=False, hold=False, origin=None):
+    def open(self, context=False, hold=False, origin=None, keyboard_anchor=False):
         u = ctypes.WinDLL("user32", use_last_error=True)
         u.SetThreadDpiAwarenessContext.argtypes, u.SetThreadDpiAwarenessContext.restype = [W.HANDLE], W.HANDLE
         previous = u.SetThreadDpiAwarenessContext(W.HANDLE(-4))
         try:
+            if keyboard_anchor:return self._open(context,hold,origin,keyboard_anchor=True)
             return self._open(context, hold, origin) if origin is not None else self._open(context, hold)
         finally:
             if previous:
@@ -701,7 +747,7 @@ class Desktop:
             logging.debug('Document caption unavailable', exc_info=True)
 
     @window_transition
-    def _open(self, context=False, hold=False, origin=None, _inspection=None):
+    def _open(self, context=False, hold=False, origin=None, _inspection=None, keyboard_anchor=False):
         open_started = time.perf_counter()
         import win32api
         import win32con as c
@@ -722,7 +768,8 @@ class Desktop:
             rect = (min(rect[0], floating[0]), min(rect[1], floating[1]),
                     max(rect[2], floating[2]), max(rect[3], floating[3]))
         if not (rect[0] <= cursor[0] < rect[2] and rect[1] <= cursor[1] < rect[3]):
-            raise RuntimeError("鼠标需要位于 Photoshop 窗口内")
+            if not keyboard_anchor:raise RuntimeError("鼠标需要位于 Photoshop 窗口内")
+            rect=win32api.GetMonitorInfo(win32api.MonitorFromPoint(cursor,c.MONITOR_DEFAULTTONEAREST))["Work"]
         if hold and origin is not None:cursor=tuple(origin)
         self.target = root
         self.caption_window = hwnd
@@ -760,6 +807,7 @@ class Desktop:
         # Recheck after setup: focus can change while a hotkey request is queued.
         if self.gui.GetForegroundWindow() != foreground or not self._is_photoshop(hwnd):
             raise RuntimeError("Photoshop 焦点已改变，已取消唤出")
+        self.menu_tools_active = False
         self.visible = True
         self.preview_hint_anchor=[round(bounds[0]+(max(bounds[2]*.5,min(650*scale,bounds[2]-270*scale))
             if panel.get('kind')=='layers' and bounds[2]>700*scale else bounds[2]*.5)),
@@ -1044,6 +1092,7 @@ class Desktop:
         self.restore_pending = bool(owned_foreground and self.target)
         self.visible = False
         self.hold_active = False
+        self.menu_tools_active = False
         if self.hwnd and self.gui.IsWindow(self.hwnd):
             self.gui.ShowWindow(self.hwnd, 0)
         self._native_config()
@@ -1097,6 +1146,7 @@ class Desktop:
             # must not prevent CapsLock from closing a paused menu.
             if not self._scope():
                 raise RuntimeError('请先让 Photoshop 或其菜单获得焦点')
+            if getattr(self,'menu_tools_active',False):return self.hide()
             if getattr(self,'color_editor_active',False):
                 self.gui.SendMessage(self.hwnd,0x8016,0,0)
                 return {'message':'已结束形状颜色调整'}

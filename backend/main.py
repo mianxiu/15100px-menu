@@ -324,6 +324,10 @@ class Application(web.Application):
             raise RuntimeError('服务正在退出，本次操作未接受')
         if getattr(self,'updating',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
             raise RuntimeError('应用正在更新，本次操作未接受')
+        if action in ('menu.tools.open','menu.tools.request'):
+            from .menu_tools import MenuTools
+            if not getattr(self,'menu_tools',None):self.menu_tools=MenuTools(self)
+            return await getattr(self.menu_tools,'open' if action.endswith('open') else 'request')(args)
         if action in ('layers.search','layers.focus'):
             from .layer_search import LayerSearch
             if not getattr(self,'layer_search',None):self.layer_search=LayerSearch(self)
@@ -698,6 +702,8 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
                     return
             mapping = {"toggle": "panel.toggle", "context": "panel.context", "open": "panel.open", "hide": "panel.hide", "dismiss": "panel.dismiss", "hold_begin": "panel.hold_begin", "hold_release": "panel.hold_release", "hold_cancel": "panel.hold_cancel", "control": "control.open", "quit": "service.quit"}
             mapping['hold_pin'] = 'panel.hold_pin'
+            mapping['tools.search']='menu.tools.open'
+            mapping.update({name:name for name in ('menu.tools.open','menu.tools.request')})
             mapping['document.new'] = 'document.new'
             mapping.update({name:name for name in ('mask.preview.update','mask.preview.commit')})
             if action.startswith('document.recent.'):
@@ -707,6 +713,8 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             await app.dispatch(mapping.get(action, "action.execute"), event_args if action in mapping else {**event_args,"name": action})
         except Exception as exc:
             logging.exception("Desktop action failed")
+            if action in ('tools.search','menu.tools.open') and app.desktop:
+                await asyncio.to_thread(app.desktop.hide)
             if action in ('mask.preview.update','mask.preview.commit') and not getattr(app,'_mask_preview',None) and app.desktop:
                 app.desktop.event({'type':'mask.preview','active':False})
             await app.broadcast({"type": "notice", "scope": "interaction", "ok": False, "message": str(exc)})

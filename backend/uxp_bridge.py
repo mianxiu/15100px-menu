@@ -517,7 +517,7 @@ class UxpBridge(PhotoshopBridge):
         self._captured_app=target['session'];self._captured_target={**bound,'session':target['session']}
         return {**self._captured_target,'instance_binding':self._captured_app}
 
-    async def execute_focus(self,session,destination):
+    async def execute_focus(self,session,destination,before_dispatch=None):
         if self.execution_guard:self.execution_guard()
         def capture():
             target=self._capture_target()
@@ -532,9 +532,9 @@ class UxpBridge(PhotoshopBridge):
                 self.layer_context=value if fresh(value) else unavailable()
                 return json.dumps(response['result'])
             finally:self._uxp_worker_active=False
-        return await self._execute_task('layer.focus',capture=capture,execute=write)
+        return await self._execute_task('layer.focus',before_dispatch,capture=capture,execute=write)
 
-    async def execute_text(self,target,params,action):
+    async def execute_text(self,target,params,action,before_dispatch=None):
         from .text_tools import replace_parameters,split_parameters
         if action not in ('text.replace','text.split'):raise ValueError('无效的文字操作')
         params=(split_parameters if action=='text.split' else replace_parameters)(params)
@@ -548,7 +548,7 @@ class UxpBridge(PhotoshopBridge):
                 self.layer_context=value if fresh(value) else unavailable()
                 return json.dumps(response['result'])
             finally:self._uxp_worker_active=False
-        return await self._execute_task(action,capture=lambda:self._bind_menu_target(target),execute=write)
+        return await self._execute_task(action,before_dispatch,capture=lambda:self._bind_menu_target(target),execute=write)
 
     async def execute_shape(self, params, before_dispatch=None, frozen_target=None, preview=None, _stability_run=None):
         from .shape_paint import parameters

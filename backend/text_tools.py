@@ -52,10 +52,10 @@ class TextTools:
     async def replace(self,args):
         return await self._apply(replace_parameters(args),'text.replace')
 
-    async def split(self,args):
-        return await self._apply(split_parameters(args),'text.split')
+    async def split(self,args,menu_guard=None):
+        return await self._apply(split_parameters(args),'text.split',menu_guard)
 
-    async def _apply(self,params,command):
+    async def _apply(self,params,command,menu_guard=None):
         self.available()
         snapshot=self.snapshot
         if not snapshot or params['revision']!=snapshot['revision']:raise ValueError('文本预览已过期，请重新读取')
@@ -63,8 +63,11 @@ class TextTools:
         async with app.operation_lock:
             await app.broadcast({'type':'operation','busy':True,'action':command})
             try:
-                await asyncio.to_thread(app.desktop.focus_search_result)
-                result=await app.bridge.execute_text(snapshot['target'],params,command)
+                if menu_guard:
+                    await menu_guard()
+                    await asyncio.to_thread(app.desktop.focus_search_result,keep_menu=True)
+                else:await asyncio.to_thread(app.desktop.focus_search_result)
+                result=await app.bridge.execute_text(snapshot['target'],params,command,**({'before_dispatch':menu_guard} if menu_guard else {}))
                 self.snapshot=None
                 app.desktop.layer_context=dict(app.bridge.layer_context)
                 return result

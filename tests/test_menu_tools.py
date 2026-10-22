@@ -1,0 +1,179 @@
+import asyncio
+import json
+import os
+import subprocess
+import time
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+from backend.menu_tools import MenuTools
+from backend.text_tools import TextTools
+from backend.layer_search import LayerSearch
+from backend.desktop import Desktop
+from backend.paths import ROOT
+
+
+class MenuToolsTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.app=SimpleNamespace(panel_lock=asyncio.Lock(),desktop=SimpleNamespace(
+            require_menu_tools=Mock(),open_menu_tools=Mock(return_value=7),event=Mock(),
+            menu_layer_context={'session':'s','document_id':1,'layer_ids':[2]}),broadcast=AsyncMock())
+        self.tools=MenuTools(self.app);self.tools.epoch=7
+        self.available=patch('backend.menu_tools.require_available');self.available.start();self.addCleanup(self.available.stop)
+
+    def request(self,action='layers.search',request=1,epoch=7,args=None):
+        return {'menu_epoch':epoch,'params':{'request':request,'action':action,'args':args or {}}}
+
+    async def test_open_is_epoch_bound_and_never_queues(self):
+        await self.tools.open({'menu_epoch':6,'params':{'mode':'split'}})
+        self.app.desktop.open_menu_tools.assert_called_once_with('split',6)
+        self.app.desktop.event.assert_called_once_with({'type':'menu.tools.opened','epoch':7,'mode':'split'})
+        await self.app.panel_lock.acquire()
+        with self.assertRaisesRegex(RuntimeError,'未接受'):await self.tools.open({})
+        self.app.panel_lock.release()
+        self.assertEqual(self.app.desktop.open_menu_tools.call_count,1)
+
+    async def test_stale_menu_and_duplicate_requests_never_call_host(self):
+        self.tools.search.search=AsyncMock(return_value={'message':'done','items':[]})
+        await self.tools.request(self.request(epoch=6))
+        self.tools.search.search.assert_not_called()
+        await self.tools.request(self.request())
+        await self.tools.request(self.request())
+        self.tools.search.search.assert_awaited_once()
+        self.assertFalse(self.tools.pending)
+        self.assertFalse(self.app.desktop.event.call_args.args[0]['ok'])
+
+    async def test_closed_menu_is_checked_before_reads(self):
+        self.app.desktop.require_menu_tools.side_effect=RuntimeError('closed')
+        self.tools.search.search=AsyncMock()
+        await self.tools.request(self.request())
+        self.tools.search.search.assert_not_called()
+        self.assertIn('closed',self.app.desktop.event.call_args.args[0]['error'])
+
+    async def test_changed_text_target_invalidates_snapshot(self):
+        self.tools.text.read=AsyncMock(return_value={'target':{'session':'s','document_id':1,'layer_ids':[999]}})
+        self.tools.text.snapshot={'revision':'old'}
+        await self.tools.request(self.request('text.read'))
+        self.assertIsNone(self.tools.text.snapshot)
+        self.assertIn('目标已改变',self.app.desktop.event.call_args.args[0]['error'])
+
+    async def test_write_rechecks_menu_after_durable_capture(self):
+        async def split(args,menu_guard):
+            self.tools.epoch=8
+            await menu_guard({'document_id':1,'layer_ids':[2]})
+        self.tools.text.split=AsyncMock(side_effect=split)
+        await self.tools.request(self.request('text.split'))
+        self.assertFalse(self.app.desktop.event.call_args.args[0]['ok'])
+        self.assertIn('工具会话已改变',self.app.desktop.event.call_args.args[0]['error'])
+        self.assertFalse(self.app.broadcast.call_args.args[0]['ok'])
+
+    async def test_executor_target_argument_reaches_menu_guard(self):
+        async def focus(args,menu_guard):
+            await menu_guard({'document_id':1,'layer_ids':[2]})
+            return {'message':'done'}
+        self.tools.search.focus=AsyncMock(side_effect=focus)
+        result=await self.tools.request(self.request('layers.focus'))
+        self.assertEqual(result,{'message':'done'})
+        self.assertTrue(self.app.desktop.event.call_args.args[0]['ok'])
+        self.app.desktop.require_menu_tools.assert_called_with(7)
+
+    async def test_pending_request_is_rejected_without_queue(self):
+        self.tools.pending=True;self.tools.search.search=AsyncMock()
+        await self.tools.request(self.request())
+        self.tools.search.search.assert_not_called()
+        self.assertTrue(self.tools.pending)
+
+    async def test_split_and_focus_keep_native_feedback_and_forward_guard(self):
+        app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
+            bridge=SimpleNamespace(execute_text=AsyncMock(return_value={'message':'done'}),execute_focus=AsyncMock(return_value={'message':'done'}),busy=False,layer_context={}),broadcast=AsyncMock())
+        guard=AsyncMock()
+        text=TextTools(app);text.available=Mock();target={'session':'s','document_id':1,'active_layer_id':2,'layer_ids':[2]}
+        text.snapshot={'revision':'r','target':target};params={'revision':'r','breaks':[2,3]}
+        await text.split(params,menu_guard=guard)
+        app.desktop.focus_search_result.assert_called_once_with(keep_menu=True)
+        app.bridge.execute_text.assert_awaited_once_with(target,params,'text.split',before_dispatch=guard)
+        app.desktop.focus_search_result.reset_mock()
+        search=LayerSearch(app);search.available=Mock();search.valid_until=float('inf');row={'layer_id':3}
+        search.result={'search_id':'x','session':'s','items':[row]}
+        await search.focus({'search_id':'x','index':0},menu_guard=guard)
+        app.desktop.focus_search_result.assert_called_once_with(keep_menu=True)
+        app.bridge.execute_focus.assert_awaited_once_with('s',row,before_dispatch=guard)
+
+
+class MenuToolsDesktopTests(unittest.TestCase):
+    def test_native_menu_hands_focus_to_its_verified_owner(self):
+        desktop=Desktop('http://localhost',Mock());desktop.hwnd=2
+        foreground=[2];desktop.gui=Mock();desktop.gui.GetForegroundWindow.side_effect=lambda:foreground[0]
+        desktop._is_photoshop=Mock(return_value=True);desktop._workspace_root=lambda h:1 if h==1 else None
+        desktop._is_menu_window=lambda h:h==2
+        desktop.gui.EnumWindows.side_effect=lambda callback,arg:callback(1,arg)
+        desktop.gui.SendMessageTimeout.side_effect=lambda *args:foreground.__setitem__(0,1)
+        desktop.require_action_focus=Mock();desktop.focus_search_result(keep_menu=True)
+        desktop.gui.SendMessageTimeout.assert_called_once_with(2,0x8019,1,0,2,200)
+        desktop.gui.SetForegroundWindow.assert_not_called()
+
+    def test_foreign_foreground_is_not_activated_over_for_menu_tools(self):
+        desktop=Desktop('http://localhost',Mock());desktop.hwnd=2;desktop.gui=Mock()
+        desktop.gui.GetForegroundWindow.return_value=3
+        desktop._is_photoshop=Mock(return_value=True);desktop._workspace_root=lambda h:1 if h==1 else None
+        desktop._is_menu_window=lambda h:h==2
+        desktop.gui.EnumWindows.side_effect=lambda callback,arg:callback(1,arg)
+        with self.assertRaisesRegex(RuntimeError,'前台已改变'):desktop.focus_search_result(keep_menu=True)
+        desktop.gui.SetForegroundWindow.assert_not_called();desktop.gui.SendMessageTimeout.assert_not_called()
+
+    def test_open_rotates_epoch_and_waits_for_native_input_protection(self):
+        desktop=Desktop('http://localhost',Mock())
+        desktop.visible=True;desktop.hwnd=2;desktop.target=1;desktop.menu_epoch=6
+        desktop.menu_layer_context={'kind':'text','layer_ids':[3]}
+        desktop.preview_hint_anchor=[500,400];desktop.gui=Mock();desktop.gui.GetWindowRect.return_value=(0,0,1920,1080)
+        desktop.icons=Mock();desktop.icons.u.GetDpiForWindow.return_value=96
+        desktop.require_action_focus=Mock();desktop._native_config=Mock(return_value=9);desktop.native_applied_sequence=9
+        with patch('win32api.GetCursorPos',return_value=(1100,600)),patch('win32api.GetMonitorInfo',return_value={'Work':(0,0,1920,1040)}):
+            self.assertEqual(desktop.open_menu_tools('split',6),7)
+        self.assertTrue(desktop.menu_tools_active);self.assertFalse(desktop.hold_active)
+        self.assertEqual(desktop.gui.SendMessage.call_args_list[0].args,(2,0x800d,1,7))
+        desktop.gui.SetWindowPos.assert_called_once_with(2,0,450,290,920,620,0x4|0x10)
+        self.assertEqual(desktop.preview_hint_anchor,[1100,600])
+        with self.assertRaisesRegex(RuntimeError,'重新打开'):desktop.require_menu_tools(6)
+        with patch('win32api.GetCursorPos',return_value=(-1000,500)),patch('win32api.MonitorFromPoint',return_value=1),patch('win32api.GetMonitorInfo',return_value={'Work':(-1920,0,0,1040)}):
+            self.assertEqual(desktop.open_menu_tools('search',7),8)
+        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-1650,190,920,620,0x4|0x10))
+        self.assertEqual(desktop.preview_hint_anchor,[-1000,500])
+
+    def test_tools_caps_closes_instead_of_confirming_a_shape(self):
+        desktop=Desktop('http://localhost',Mock());desktop.visible=True;desktop.hwnd=2
+        desktop.menu_tools_active=desktop.color_editor_active=True
+        desktop._scope=Mock(return_value=True);desktop.hide=Mock(return_value={'message':'closed'});desktop.gui=Mock()
+        desktop.toggle();desktop.hide.assert_called_once();desktop.gui.SendMessage.assert_not_called()
+
+
+@unittest.skipUnless(os.name=='nt' and (ROOT/'native/MenuHost.exe').is_file(),'Windows native menu')
+class NativeMenuToolsTests(unittest.TestCase):
+    def test_setwindowpos_and_session_change_keep_tool_ready(self):
+        import queue,threading,win32gui,win32con as c
+        ready=queue.Queue()
+        process=subprocess.Popen([str(ROOT/'native/MenuHost.exe')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,text=True,encoding='utf-8',creationflags=0x08000000)
+        threading.Thread(target=lambda:ready.put(process.stdout.readline()),daemon=True).start()
+        try:
+            hwnd=json.loads(ready.get(timeout=10))['hwnd']
+            message=lambda code,wp=0,lp=0:win32gui.SendMessageTimeout(hwnd,code,wp,lp,c.SMTO_ABORTIFHUNG,1000)[1]
+            for epoch in range(101,104):
+                message(0x8011,16|2|64,epoch-1)
+                win32gui.SetWindowPos(hwnd,c.HWND_TOP,100,100,620,500,c.SWP_SHOWWINDOW|c.SWP_NOACTIVATE)
+                message(0x800d,1,epoch);message(0x8010,1)
+                win32gui.SetWindowPos(hwnd,0,100,100,920,620,c.SWP_NOZORDER|c.SWP_NOACTIVATE)
+                for event_epoch in (epoch-1,epoch):
+                    process.stdin.write(json.dumps({'type':'menu.tools.opened','epoch':event_epoch,'mode':'search'})+'\n')
+                    process.stdin.flush()
+                deadline=time.monotonic()+3
+                while (message(0x801d)&3!=3 or message(0x8012)!=1000) and time.monotonic()<deadline:time.sleep(.01)
+                self.assertEqual(message(0x801d),3)
+                self.assertEqual(message(0x8012),1000,'A ready tool must also render visible content')
+                win32gui.ShowWindow(hwnd,c.SW_HIDE)
+        finally:
+            process.stdin.close()
+            try:process.wait(timeout=5)
+            except subprocess.TimeoutExpired:process.kill();process.wait(timeout=5)
+            process.stdout.close()

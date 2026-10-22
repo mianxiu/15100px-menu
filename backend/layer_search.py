@@ -73,7 +73,7 @@ class LayerSearch:
             time.sleep(.025)
         raise RuntimeError('搜索超时，未修改文档；请重新搜索')
 
-    async def focus(self,args):
+    async def focus(self,args,menu_guard=None):
         result=self.result
         index=args.get('index')
         if not result or args.get('search_id')!=result['search_id'] or type(index) is not int or not 0<=index<len(result['items']) or time.monotonic()>self.valid_until:
@@ -83,8 +83,11 @@ class LayerSearch:
         async with app.operation_lock:
             await app.broadcast({'type':'operation','busy':True,'action':'layer.focus'})
             try:
-                await asyncio.to_thread(app.desktop.focus_search_result)
-                value=await app.bridge.execute_focus(result['session'],result['items'][index])
+                if menu_guard:
+                    await menu_guard()
+                    await asyncio.to_thread(app.desktop.focus_search_result,keep_menu=True)
+                else:await asyncio.to_thread(app.desktop.focus_search_result)
+                value=await app.bridge.execute_focus(result['session'],result['items'][index],**({'before_dispatch':menu_guard} if menu_guard else {}))
                 app.desktop.layer_context=dict(app.bridge.layer_context)
                 return value
             finally:await app.broadcast({'type':'operation','busy':app.bridge.busy})
