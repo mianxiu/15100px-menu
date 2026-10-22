@@ -61,7 +61,7 @@ class LocalHandler(web.RequestHandler):
 
 class HealthHandler(LocalHandler):
     def get(self):
-        self.write({"ok": True, "app": APP_ID, **service_identity()})
+        self.write({"ok": True, "app": APP_ID, "ready": self.application.startup_ready(), **service_identity()})
 
 
 class StatusHandler(LocalHandler):
@@ -219,6 +219,16 @@ class Application(web.Application):
             (r"/api/uxp/preview", UxpPreviewHandler), (r"/api/uxp/export", UxpExportHandler),
             (r"/(.*)", StaticHandler, {"path": str(ROOT / "frontend/dist"), "default_filename": "index.html"}),
         ], websocket_max_message_size=65536, websocket_ping_interval=20, websocket_ping_timeout=20)
+
+    def startup_ready(self):
+        if self.closing:
+            return False
+        if self.no_desktop or os.name != 'nt':
+            return True
+        desktop, tray = self.desktop, self.tray
+        return bool(desktop and desktop.hwnd and desktop.process and desktop.process.poll() is None
+                    and desktop.native and desktop.native.poll() is None and desktop.ready.is_set()
+                    and tray and tray.hwnd and tray.ready.is_set() and tray.thread.is_alive() and not tray.error)
 
     async def broadcast(self, event):
         if getattr(getattr(self,'stability',None),'active',False):

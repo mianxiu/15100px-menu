@@ -2,9 +2,52 @@ import json
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
-from backend.main import APP_VERSION, reuse, service_identity
+from backend.main import APP_VERSION, Application, reuse, service_identity
+
+
+class StartupTests(unittest.TestCase):
+    def setUp(self):
+        self.app = SimpleNamespace(closing=False, no_desktop=False, headless=True, desktop=Mock(), tray=Mock())
+        self.app.desktop.process.poll.return_value = None
+        self.app.desktop.native.poll.return_value = None
+        self.app.tray.error = ''
+
+    def test_headless_still_requires_menu_hotkeys_and_tray(self):
+        self.assertTrue(Application.startup_ready(self.app))
+        self.app.tray = None
+        self.assertFalse(Application.startup_ready(self.app))
+        self.app.no_desktop = True
+        self.assertTrue(Application.startup_ready(self.app))
+
+    def test_missing_or_failed_desktop_never_reports_ready(self):
+        for component in ('process', 'native'):
+            process = getattr(self.app.desktop, component)
+            process.poll.return_value = 1
+            self.assertFalse(Application.startup_ready(self.app))
+            process.poll.return_value = None
+        self.app.desktop.ready.is_set.return_value = False
+        self.assertFalse(Application.startup_ready(self.app))
+        self.app.desktop = None
+        self.assertFalse(Application.startup_ready(self.app))
+
+    def test_tray_registration_and_thread_must_be_ready(self):
+        self.app.tray.error = 'registration failed'
+        self.assertFalse(Application.startup_ready(self.app))
+        self.app.tray.error = ''
+        self.app.tray.ready.is_set.return_value = False
+        self.assertFalse(Application.startup_ready(self.app))
+        self.app.tray.ready.is_set.return_value = True
+        self.app.tray.thread.is_alive.return_value = False
+        self.assertFalse(Application.startup_ready(self.app))
+        self.app.tray.thread.is_alive.return_value = True
+        self.app.tray.hwnd = None
+        self.assertFalse(Application.startup_ready(self.app))
+
+    def test_shutdown_is_not_ready_even_without_desktop(self):
+        self.app.no_desktop = self.app.closing = True
+        self.assertFalse(Application.startup_ready(self.app))
 
 
 class ReuseTests(unittest.IsolatedAsyncioTestCase):

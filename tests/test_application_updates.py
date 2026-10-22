@@ -131,8 +131,14 @@ class UpdateValidationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):validate_job(path,helper)
                 source.write_bytes(b'new');job['new_version']='0.4.119';atomic_json(path,job)
                 with self.assertRaises(ValueError):validate_job(path,helper)
-            health={'app':'photoshop-menu','version':'0.4.120','executable':str(target),'pid':123}
+            health={'app':'photoshop-menu','version':'0.4.120','executable':str(target),'pid':123,'ready':True}
             self.assertTrue(health_matches(health,target,'0.4.120'))
+            for ready in (False, None, 1, 'true'):
+                health['ready']=ready
+                self.assertFalse(health_matches(health,target,'0.4.120'))
+            del health['ready']
+            self.assertFalse(health_matches(health,target,'0.4.120'))
+            health['ready']=True
             health['executable']=str(runtime/'other.exe');self.assertFalse(health_matches(health,target,'0.4.120'))
 
     def test_replace_preserves_unrelated_files_and_receipt_ownership(self):

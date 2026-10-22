@@ -59,7 +59,9 @@ async def exercise(executable, workspace, port, show_control=False):
                         response = await client.fetch(url+'/api/status',request_timeout=2)
                         status = json.loads(response.body)
                         if status['menu']['ready']:
-                            break
+                            health=json.loads((await client.fetch(url+'/api/health',request_timeout=2)).body)
+                            if health.get('ready') is True:
+                                break
                     except Exception:
                         pass
                     await asyncio.sleep(.2)
@@ -68,6 +70,7 @@ async def exercise(executable, workspace, port, show_control=False):
                 import win32gui,win32process
                 health=json.loads((await client.fetch(url+'/api/health')).body)
                 assert health['version']==status['version']==status['service']['version']
+                assert health['ready'] is True, 'HTTP responds before desktop components are ready'
                 assert Path(status['service']['executable']).resolve()==copy.resolve()
                 history=json.loads((await client.fetch(url+'/api/tasks')).body)
                 assert history['persistent'] and not history['persistence_error']

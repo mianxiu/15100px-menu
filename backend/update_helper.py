@@ -104,7 +104,7 @@ def launch(target, data):
 
 
 def health_matches(health, target, expected):
-    return (health.get('app')=='photoshop-menu' and health.get('version')==expected and
+    return (health.get('app')=='photoshop-menu' and health.get('version')==expected and health.get('ready') is True and
             Path(health.get('executable','')).resolve()==target and type(health.get('pid')) is int)
 
 
@@ -133,11 +133,11 @@ def apply(path):
             try:
                 with client.open(f"http://127.0.0.1:{data['port']}/api/health",timeout=1) as response:health=json.load(response)
                 if health_matches(health,target,data['new_version']) and sha256(target)==data['new_sha256']:
-                    report('completed','应用更新完成，已重新连接；UXP 安装状态请在插件管理中查看',version=data['new_version']);return
+                    report('completed','应用更新完成，启动入口已就绪；UXP 安装状态请在插件管理中查看',version=data['new_version']);return
             except (OSError,ValueError):pass
             if process.poll() is not None:break
             time.sleep(.5)
-        raise RuntimeError('新后台尚未确认启动，检查更新记录；不会强制结束进程')
+        raise RuntimeError('新后台尚未确认启动及桌面组件就绪，检查更新记录；不会强制结束进程')
     except Exception as error:
         if not (folder/'helper-ready.json').exists():
             atomic_json(folder/'helper-ready.json',{'id':folder.name,'ready':False,'error':str(error)[:600]})

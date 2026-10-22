@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-本机运行233／UXP0.3.61：补齐Explorer恢复后的托盘重新注册及启动失败有限重试，实际服务低CPU／正常恢复检查通过；当前用户报告的可见性尚待核实，见[托盘说明](docs/TRAY.md)。232样式按需读取与231清除标签优化已核验，[速度与范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。公开下载仍为已核验的230。
+本机运行234／UXP0.3.61：233托盘恢复注册＋234更新完成前核对菜单／热键／托盘就绪，实际入口与低CPU／正常更新流程已验；另一台图标问题经用户重新启动已恢复，根因待复现，见[说明](docs/TRAY.md)。232／231读取优化的[速度与范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。公开下载仍为已核验的230。
 
 227／UXP0.3.57起：后台新增图层搜索，按打开文档文件名、图层名与类型筛选，明确点击后按ID跨文档定位并保留隐藏状态。[操作和验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-search)。
 
