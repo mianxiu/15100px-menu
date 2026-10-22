@@ -104,6 +104,12 @@ class LayerContextTests(unittest.TestCase):
 if __name__=='__main__':unittest.main()
 
 class DocumentSortTargetTests(unittest.TestCase):
+    def test_individual_smart_allows_cross_parent_but_rejects_locks_and_stale_target(self):
+        value={'session':'s','document_id':1,'layer_ids':[2,3],'kind':'mixed','same_parent':False}
+        require_menu_target(value,'convertSmartObjectsIndividually',value)
+        for change in ({'locked':True},{'background':True},{'kind':'unknown'}):
+            with self.assertRaises(TaskCancelled):require_menu_target({**value,**change},'convertSmartObjectsIndividually',value)
+        with self.assertRaises(TaskCancelled):require_menu_target(value,'convertSmartObjectsIndividually',{**value,'layer_ids':[2]})
     def test_document_sort_rejects_locked_background_cross_parent_and_stale_selection(self):
         base={'session':'s','document_id':1,'layer_ids':[2],'kind':'pixel'}
         for name in ('moveDocumentTop','moveDocumentBottom'):

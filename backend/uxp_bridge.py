@@ -158,6 +158,8 @@ class UxpTransport:
                     raise RuntimeError('文档级排序需要更新并重启PS加载UXP0.3.64')
                 if payload.get('command')=='convertSmartObject' and version(heartbeat.get('probe_version'))<(0,3,18):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.18，以支持转换智能对象；未提交操作')
+                if payload.get('command')=='convertSmartObjectsIndividually' and version(heartbeat.get('probe_version'))<(0,3,65):
+                    raise RuntimeError('逐层转换需要更新并重启PS加载UXP0.3.65；未提交操作')
                 if payload.get('command') in ('shape.copyPaint','shape.pastePaint') and version(heartbeat.get('probe_version'))<(0,3,41):
                     raise RuntimeError('复制／粘贴形状外观需要更新并加载UXP0.3.41；未提交操作')
                 if any('method' in payload.get('paint',{}).get(k,{}) for k in ('fill','stroke')) and version(heartbeat.get('probe_version'))<(0,3,42):

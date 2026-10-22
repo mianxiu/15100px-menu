@@ -230,12 +230,13 @@ static unsigned quickMask=0;
 static const std::array<const char*,7> quickActions={"layer.new","layer.solid","layer.group","adjustment.curves","adjustment.hueSaturation","adjustment.colorBalance","adjustment.blackWhite"};
 static const std::array<const char*,7> quickLabels={"新建空白图层","新建纯色填充图层","选中图层打组","新建曲线调整图层","新建色相饱和度调整图层","新建色彩平衡调整图层","新建黑白调整图层"};
 static std::array<RECT,7> quickRows{};
-static std::array<RECT,9> capsRows{};
-static const char* capsActions[]={"copyStyle","pasteStyle","editStyle","selectAbove","selectBelow","moveUp","moveDown","moveDocumentTop","moveDocumentBottom"};
-static const char* capsKeys[]={"c","v","f","w","s","上移","下移","文档顶","文档底"};
-static const char* capsLabels[]={"复制图层样式","粘贴图层样式","打开图层样式","单选上一个图层（Shift扩展多选）","单选下一个图层（Shift扩展多选）","上移一层","下移一层","移到文档顶部（移出当前组）","移到文档底部（移出当前组）"};
+static std::array<RECT,10> capsRows{};
+static const char* capsActions[]={"copyStyle","pasteStyle","editStyle","selectAbove","selectBelow","moveUp","moveDown","moveDocumentTop","moveDocumentBottom","convertSmartObjectsIndividually"};
+static const char* capsKeys[]={"c","v","f","w","s","上移","下移","文档顶","文档底","逐层智能对象"};
+static const char* capsLabels[]={"复制图层样式","粘贴图层样式","打开图层样式","单选上一个图层（Shift扩展多选）","单选下一个图层（Shift扩展多选）","上移一层","下移一层","移到文档顶部（移出当前组）","移到文档底部（移出当前组）","各自转为智能对象（一次撤销整批）"};
 static bool capsReady=false;
 static bool documentSortReady=false;
+static bool individualSmartReady=false;
 static bool layerSearchReady=false,textSplitReady=false;
 static RECT toolRow{};
 static bool menuToolsVisible();
@@ -256,6 +257,7 @@ static bool returnInputsIdle() {
 static bool canExecute() {return !menuToolsVisible() && !maskPreviewStarted && (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
 static bool toolEnabled(int i) {return canExecute() && panelKind!=4 && (i==0?layerSearchReady:textSplitReady && layerAware && layerKind==4 && layerCount==1 && !layerLocked);}
 static bool capsEnabled(int i) {
+    if(i==9)return individualSmartReady && capsReady && canExecute() && panelKind!=3 && panelKind!=4 && layerAware && layerCount && layerKind && !layerLocked && !layerBackground;
     if(i>=capsCount() || i>=7 && !documentSortReady)return false;
     if(!capsReady || !canExecute() || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
     if((i==0 || i==2) && layerCount!=1)return false;
@@ -277,6 +279,7 @@ static const char* panelTitle() {
 static bool rowVisible(int i) {return panelKind==4?i==0:panelKind!=3 && ((panelKind!=1 && panelKind!=0) || i<2);}
 static float scale=1;
 static bool capsDividerAt(int i,POINT point) {
+    if(i==9)return false;
     const int first=i>=7?7:panelKind==2 && i>=5?5:0;
     const int last=i>=7?8:panelKind==2 && i>=5?6:capsBottomCount()-1;
     return (i>first && point.x<capsRows[i].left+scale) ||
@@ -324,6 +327,7 @@ static size_t labelTestActionCount=0;
 static ImVec2 bottomRow;
 static void send(const char* action) {
     if(stabilityInspection)return;
+    if(std::string(action)==capsActions[9] && !capsEnabled(9))return;
     if(panelKind==0 && (std::string(action)=="moveToTop" || std::string(action)=="moveToBottom" ||
                        std::string(action)=="moveUp" || std::string(action)=="moveDown" || std::string(action)=="moveDocumentTop" || std::string(action)=="moveDocumentBottom"))return;
     for(int i=0;i<7;++i)if(std::string(action)==quickActions[i] && !quickEnabled(i))return;
@@ -521,7 +525,7 @@ static void accept(const Json& event) {
         if (event.contains("name") && event["name"].is_string()) document=event["name"].get<std::string>();
     } else if (type=="status") {
         const auto& data=event.at("data"); const auto& ps=data.at("photoshop");
-        {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);documentSortReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=64);capsReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=16);}
+        {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);documentSortReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=64);individualSmartReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=65);capsReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=16);}
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);layerSearchReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=57);textSplitReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=59);}
         recentReady=ps.value("uxp_ready",false) && ps.value("uxp_version",std::string())!="0.3.1";
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);shapeClipboardReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=41);}
@@ -562,7 +566,7 @@ static void accept(const Json& event) {
             if (action=="shape.pastePaint")taskName="粘贴形状填充与描边";
             for (const auto& label:labelColors) if (action==std::string("label.")+label.id) taskName=std::string(label.name)+"标签";
             for(int i=0;i<7;++i)if(action==quickActions[i])taskName=quickLabels[i];
-            for(int i=0;i<7;++i)if(action==capsActions[i])taskName=capsLabels[i];
+            for(int i=0;i<10;++i)if(action==capsActions[i])taskName=capsLabels[i];
             if(action=="extendAbove")taskName="向上扩展图层多选";
             if(action=="extendBelow")taskName="向下扩展图层多选";
             if(action=="convertSmartObject")taskName="转换为智能对象";
@@ -598,7 +602,7 @@ static int holdActionAt(POINT point) {
     RECT bounds{};GetWindowRect(window,&bounds);
     if (!PtInRect(&bounds,point)) return -1;
     if(toolEnabled(1) && PtInRect(&toolRow,point))return 71;
-    for(int i=0;i<9;++i)if(capsEnabled(i) && PtInRect(&capsRows[i],point)){
+    for(int i=0;i<10;++i)if(capsEnabled(i) && PtInRect(&capsRows[i],point)){
         if(capsDividerAt(i,point))return -1;
         return 40+i;
     }
@@ -652,7 +656,7 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     if(chosen==100){commitShapeDraft();holdFinished=true;pieReady=false;setOpacity(0.f);return;}
     holdFinished=true;pieReady=false;
     setOpacity(0.f);
-    if(chosen>=40 && chosen<49)send(capsActions[chosen-40]);
+    if(chosen>=40 && chosen<50)send(capsActions[chosen-40]);
     else if (chosen>=32 && chosen<39)send(quickActions[chosen-32]);
     else if (chosen>=12) send((std::string("document.recent.")+shownPresets.at(chosen-12).id).c_str());
     else if (chosen>=4) send((std::string("label.")+labelColors[chosen-4].id).c_str());
@@ -1098,7 +1102,7 @@ static const char* actionTipText(int action) {
     if(action==222){const auto method=shapeEditor.current().value("method",std::string("classic"));return method=="perceptual"?"感知渐变；点击切换线性":method=="linear"?"线性渐变；点击切换经典":"经典渐变；点击切换感知";}
     if(action>=200 && action<200+shapeTipCount)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
     if(action>=12 && action<12+int(recentTips.size()) && panelKind==4)return recentTips[action-12].c_str();
-    if(action>=40 && action<49)return capsLabels[action-40];
+    if(action>=40 && action<50)return capsLabels[action-40];
     if(action>=32 && action<39)return quickLabels[action-32];
     if(action>=4 && action<12)return labelColors[action-4].name;
     if(action==0)return panelKind==4?"打开新建文档窗口":layerAware && layerKind!=3?"选择同一父组中的相邻图层":"选择当前组内的图层";
@@ -1110,6 +1114,7 @@ static bool tipOverlaps(ImVec4 tip,RECT r,float gap=0) {
     return r.right>r.left && r.bottom>r.top && tip.x<r.right+gap && tip.z>r.left-gap && tip.y<r.bottom+gap && tip.w>r.top-gap;
 }
 static int tipFamily(int action) {
+    if(action==49)return 49;
     if(action>=200+shapeModeTipBase)return 200+shapeModeTipBase;
     if(action>=200)return action==213 || action==214?213:200;
     if(panelKind==2 && action>=45 && action<47)return 45;
@@ -1120,6 +1125,7 @@ static int tipFamily(int action) {
     return action;
 }
 static RECT tipGroupRect(int action) {
+    if(action==49)return capsRows[9];
     if(action>=200+shapeModeTipBase)return shapeModeBounds;
     if(action>=200)return action==213 || action==214?shapeEditor.maskBounds:shapeEditor.bounds;
     if(panelKind==2 && capsReady && layerAware && tipFamily(action)==2)return {holdRows[2].left,holdRows[2].top,holdRows[3].right,holdRows[3].bottom};
@@ -1140,7 +1146,7 @@ static bool tipGapAt(int action,POINT cursor) {
     const RECT group=tipGroupRect(action);
     if(!PtInRect(&group,cursor))return false;
     // Retain through spacing only, never through disabled buttons or centre.
-    for(int i=0;i<9;++i)if(PtInRect(&capsRows[i],cursor))return capsEnabled(i) && capsDividerAt(i,cursor);
+    for(int i=0;i<10;++i)if(PtInRect(&capsRows[i],cursor))return capsEnabled(i) && capsDividerAt(i,cursor);
     for(int i=0;i<7;++i)if(PtInRect(&quickRows[i],cursor))return quickEnabled(i) && quickDividerAt(i,cursor);
     for(int i:{2,3})if(PtInRect(&holdRows[i],cursor))return rowEnabled(i) && std::abs(cursor.x-pieCenter.x)<scale;
     for(auto r:recentRows)if(PtInRect(&r,cursor))return false;
@@ -1359,7 +1365,7 @@ static void drawCapsBar() {
     const float h=figmaWidgetHeight*scale,r=ImGui::GetStyle().FrameRounding;
     POINT cursor{};GetCursorPos(&cursor);
     auto drawGroup=[&](int first,int last,float x,float y) {
-        float widths[9]{},total=0;
+        float widths[10]{},total=0;
         for(int i=first;i<=last;++i){widths[i]=std::max(24.f*scale,font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]).x+18*scale);total+=widths[i];}
         if(first==0 || first==7)x=pieCenter.x-total*.5f;
         const float left=x;
@@ -1383,6 +1389,8 @@ static void drawCapsBar() {
         d->AddRect({left,y},{x,y+h},tint(ImGuiCol_Border),r,0,scale);
     };
     drawGroup(0,capsBottomCount()-1,0,pieCenter.y+107*scale);
+    if(individualSmartReady && panelKind!=3 && layerCount && layerKind)
+        drawGroup(9,9,pieCenter.x+65*scale,pieCenter.y+((layerKind==4 && layerCount==1)?15.f:-15.f)*scale);
     if(panelKind==2 && documentSortReady)drawGroup(7,8,0,holdRows[2].top-h-menuControlPadding*scale);
     if(panelKind==2 && rowVisible(3)){
         float x=pieCenter.x+65*scale;
@@ -1495,7 +1503,7 @@ static void drawPie() {
     if(!editing){drawCapsBar();drawToolBar();}else toolRow={};
     shapeEditorKeys();
     POINT cursor{};GetCursorPos(&cursor);int selected=holdActionAt(cursor);
-    if(!preview.empty() && previewCapsHover>=0 && previewCapsHover<7 && capsEnabled(previewCapsHover))selected=40+previewCapsHover;
+    if(!preview.empty() && previewCapsHover>=0 && previewCapsHover<10 && capsEnabled(previewCapsHover))selected=40+previewCapsHover;
     if(!preview.empty() && previewQuickHover>=0 && previewQuickHover<7 && quickEnabled(previewQuickHover))selected=32+previewQuickHover;
     if(!preview.empty() && previewRecentHover>=0 && previewRecentHover<int(recentRows.size()) && shownPresets[previewRecentHover].available)selected=12+previewRecentHover;
     if(!preview.empty() && previewActionHover>=0 && previewActionHover<4 && rowVisible(previewActionHover) && rowEnabled(previewActionHover))selected=previewActionHover;
@@ -1906,6 +1914,7 @@ int main() {
         else if (i+1<argc && arg==L"--preview-layer-context") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
             capsReady=data.value("caps_ready",false);
+            individualSmartReady=data.value("individual_smart_ready",false);
             layerSearchReady=textSplitReady=data.value("tools_ready",false);
             layerAware=true;layerMask=data.value("mask",0);
             quickMask=data.value("quick_mask",0);
@@ -3380,7 +3389,6 @@ int main() {
                 shapeFixture["vector"]=true;
                 benchmarkShapeEditor(shapeFixture);
                 if(!running)break;
-                if(!running)break;
                 capsReady=true;panelKind=2;layerAware=true;layerKind=2;layerMask=15;layerCount=1;layerLocked=layerBackground=layerCrossParents=false;
                 shapeEditor.prepare(Json{{"available",false}});taskBusy=busyFeedback=false;
                 setHoldMode(true);shapePanelOpen=true;holdMoved=true;numberFrame(ImGuiKey_None,false);
@@ -3424,6 +3432,29 @@ int main() {
                 panelKind=2;holdFinished=false;numberFrame(ImGuiKey_None,false);
                 if(!rowVisible(2) || !rowVisible(3) || !capsEnabled(5) || !capsEnabled(6) || !capsRows[6].right)
                     throw std::runtime_error("Layers menu lost its reorder controls after generic transition");
+                {
+                    const auto count=testedActions.size();individualSmartReady=true;
+                    for(int kind:{0,1,2}){
+                        panelKind=kind;layerKind=8;layerCount=2;layerCrossParents=true;setHoldMode(true);holdMoved=true;numberFrame(ImGuiKey_None,false);
+                        const auto r=capsRows[9];const POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
+                        if(r.right<=r.left || holdActionAt(middle)!=49 || !actionTipText(49) || tipGroupRect(49).left!=r.left || tipFamily(49)==tipFamily(40))
+                            throw std::runtime_error("Individual Smart Object button lost capability/hit/independent tooltip");
+                        renderedHit=49;finishHold(middle);
+                        if(testedActions.back()!=capsActions[9])throw std::runtime_error("Individual Smart Object gesture failed");
+                        holdFinished=false;layerLocked=true;numberFrame(ImGuiKey_None,false);
+                        const auto before=testedActions.size();send(capsActions[9]);
+                        if(capsEnabled(9) || holdActionAt(middle)!=-1 || testedActions.size()!=before)throw std::runtime_error("Locked individual Smart Object dispatched");
+                        layerLocked=false;inputFocused=true;if(capsEnabled(9))throw std::runtime_error("Input enabled individual Smart Object");inputFocused=false;
+                    }
+                    panelKind=2;layerKind=4;layerCount=1;layerCrossParents=false;holdFinished=false;numberFrame(ImGuiKey_None,false);
+                    if(capsRows[9].top!=LONG(pieCenter.y+15*scale) || capsRows[9].bottom>quickRows[0].top-menuControlPadding*scale+1)
+                        throw std::runtime_error("Individual Smart Object overlaps text split or creation buttons");
+                    for(int kind:{3,4}){panelKind=kind;numberFrame(ImGuiKey_None,false);if(capsRows[9].right || capsEnabled(9))throw std::runtime_error("Input/home retained individual Smart Object");}
+                    panelKind=2;individualSmartReady=false;numberFrame(ImGuiKey_None,false);
+                    const auto before=testedActions.size();send(capsActions[9]);
+                    if(capsRows[9].right || capsEnabled(9) || testedActions.size()!=before)throw std::runtime_error("Old UXP retained individual Smart Object");
+                    testedActions.resize(count);layerKind=2;numberFrame(ImGuiKey_None,false);
+                }
                 holdFinished=false;inputFocused=true;numberFrame(ImGuiKey_None,false);
                 if(capsEnabled(0))throw std::runtime_error("Input protection enabled Caps bar");
                 inputFocused=false;capsReady=false;

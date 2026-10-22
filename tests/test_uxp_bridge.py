@@ -297,6 +297,14 @@ class UxpDiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'0.3.18'):
             self.transport.call('set_label',command='convertSmartObject',target={'session':'s'})
         self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
+    def test_individual_smart_rejects_old_plugin_before_publication(self):
+        folder=self.heartbeat(24)
+        heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.64',session='s')
+        (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+        self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        with self.assertRaisesRegex(RuntimeError,'0.3.65'):
+            self.transport.call('set_label',command='convertSmartObjectsIndividually',target={'session':'s'})
+        self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.transport=UxpTransport(Path(self.temp.name)/'config.json')

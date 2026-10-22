@@ -28,6 +28,7 @@ CAPS_ACTIONS = {
     "copyStyle":{"label":"复制图层样式"}, "pasteStyle":{"label":"粘贴图层样式"},
     "editStyle":{"label":"打开图层样式"},
     "convertSmartObject":{"label":"转换为智能对象"},
+    "convertSmartObjectsIndividually":{"label":"逐层转智能对象"},
 }
 COMMANDS = {**CAPS_ACTIONS,**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS,'shape.paint':{'label':'调整形状填充与描边'},
     'layer.focus':{'label':'定位图层'},

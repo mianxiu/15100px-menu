@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.15100px.menu.offline-probe",
   "name": "Photoshop 快捷菜单 v0.3.60",
-  "version": "0.3.64",
+  "version": "0.3.65",
   "main": "main.js",
   "host": {
     "app": "PS",

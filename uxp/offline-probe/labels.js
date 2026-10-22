@@ -1451,7 +1451,68 @@ async function readLayerEffects(ps,doc,ids) {
 function createCapsActions(ps,session,capture,selectionContext,readNativeTree,captureSelection,nativeSelection=false) {
   // The native strategy prepares fresh feedback after modal exit; its DOM copy is discarded.
   const readFeedback=()=>nativeSelection?null:selectionContext();
-  const commands=['moveDocumentTop','moveDocumentBottom','selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle','convertSmartObject'];
+  const commands=['moveDocumentTop','moveDocumentBottom','selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle','convertSmartObject','convertSmartObjectsIndividually'];
+  async function convertIndividually(request) {
+    return ps.core.executeAsModal(async context=>{
+      const check=()=>{if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');};
+      check();const actual=await capture(),expected=request.target;
+      const sameTarget=value=>value.document_id===actual.document_id && value.active_layer_id===actual.active_layer_id && value.layer_ids.join(',')===actual.layer_ids.join(',');
+      if(expected?.session!==session || !sameTarget(expected))throw Error('Smart object target changed');
+      const doc=ps.app.activeDocument,k=ps.constants.LayerKind;
+      function tree(layers,parent=null){return Array.from(layers).flatMap(l=>[{layer:l,id:l.id,parent},...(l.kind===k.GROUP?tree(l.layers,l.id):[])]);}
+      const before=tree(doc.layers),selected=before.filter(l=>actual.layer_ids.includes(l.id)),byId=new Map(before.map(l=>[l.id,l]));
+      if(!selected.length || selected.length!==actual.layer_ids.length)throw Error('Smart object target missing');
+      for(const item of selected){
+        for(let at=item;at;at=byId.get(at.parent)){
+          if(at.layer.isBackgroundLayer || at.layer.allLocked || at.layer.positionLocked)throw Error('请先解锁目标图层及父组');
+          if(at!==item && actual.layer_ids.includes(at.id))throw Error('不能同时选择父组和其子图层逐层转换');
+        }
+      }
+      const pending=selected.filter(l=>l.layer.kind!==k.SMARTOBJECT),mapping=new Map(selected.map(l=>[l.id,l.id]));
+      if(!pending.length)return {verified:true,unchanged:true,count:selected.length,converted_count:0,command:request.command,selection_context:readFeedback()};
+      const bounds=l=>{const b=l.boundsNoEffects;return ['left','top','right','bottom'].map(key=>b[key]);};
+      const positions=new Map(pending.map(l=>[l.id,bounds(l.layer)]));
+      if([...positions.values()].some(b=>b.some(v=>!Number.isFinite(v))))throw Error('逐层转换位置尚未确认');
+      const removedById=new Map(pending.map(item=>{
+        const ids=new Set([item.id]);for(const l of before)if(ids.has(l.parent))ids.add(l.id);return [item.id,ids];
+      }));
+      const pairs=rows=>rows.map(l=>[l.id,l.parent]);
+      const original=pairs(before);let expectedTree=original;
+      const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'Menu convert each smart object'});
+      async function batch(descriptors){const values=await ps.action.batchPlay(descriptors,{});if(values.some(v=>v._obj==='error'))throw Error('Photoshop 拒绝逐层转换智能对象');}
+      const selectId=id=>({_obj:'select',_target:[{_ref:'layer',_id:id},{_ref:'document',_id:doc.id}],makeVisible:false,_options:{dialogOptions:'dontDisplay'}});
+      try {
+        for(const item of pending){
+          check();await batch([selectId(item.id)]);
+          const current=await capture();
+          if(current.document_id!==doc.id || current.active_layer_id!==item.id || current.layer_ids.join(',')!==String(item.id))throw Error('逐层转换选择核验失败');
+          await batch([{_obj:'newPlacedLayer',_options:{dialogOptions:'dontDisplay'}}]);
+          const after=await capture(),now=tree(doc.layers),made=now.find(l=>l.id===after.active_layer_id);
+          if(after.document_id!==doc.id || after.layer_ids.length!==1 || !made || made.layer.kind!==k.SMARTOBJECT || made.parent!==item.parent || before.some(l=>l.id===made.id))
+            throw Error('逐层转换类型／父组／身份核验失败');
+          const removed=removedById.get(item.id),position=bounds(made.layer),previous=positions.get(item.id);
+          // Native Smart Objects rasterize fractional edges to pixel bounds.
+          if(position.some((v,i)=>!Number.isFinite(v) || Math.abs(v-previous[i])>1))throw Error('逐层转换改变了画面位置');
+          expectedTree=expectedTree.filter(([id])=>id===item.id || !removed.has(id)).map(([id,parent])=>[id===item.id?made.id:id,parent]);
+          if(JSON.stringify(pairs(now))!==JSON.stringify(expectedTree))throw Error('逐层转换改变了原父组或层序');
+          mapping.set(item.id,made.id);
+        }
+        check();const ids=actual.layer_ids.filter(id=>id!==actual.active_layer_id).concat(actual.active_layer_id).map(id=>mapping.get(id));
+        await batch(ids.map((id,i)=>({...selectId(id),...(i?{selectionModifier:{_enum:'selectionModifierType',_value:'addToSelection'}}:{})})));
+        const after=await capture(),wanted=ids.slice().sort((a,b)=>a-b);
+        if(after.document_id!==doc.id || after.active_layer_id!==mapping.get(actual.active_layer_id) || after.layer_ids.join(',')!==wanted.join(',') || JSON.stringify(pairs(tree(doc.layers)))!==JSON.stringify(expectedTree))
+          throw Error('逐层转换最终选择／层序核验失败');
+        const selection=readFeedback();await context.hostControl.resumeHistory(history,true);
+        return {verified:true,count:selected.length,converted_count:pending.length,unchanged_count:selected.length-pending.length,command:request.command,smart_object_ids:ids,selection_context:selection};
+      }catch(error){
+        try{
+          await context.hostControl.resumeHistory(history,false);
+          if(!sameTarget(await capture()) || JSON.stringify(pairs(tree(doc.layers)))!==JSON.stringify(original))throw Error('Rollback readback mismatch');
+        }catch(_){error.resultUnknown=true;}
+        throw error;
+      }
+    },{commandName:'Menu convert each smart object',timeOut:0});
+  }
   async function convert(request) {
     return ps.core.executeAsModal(async context=>{
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
@@ -1552,6 +1613,7 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
     const command=request.command,expected=request.target;
     if(!commands.includes(command) || expected?.session!==session)throw Error('Unsupported Caps command/session');
     if(command==='convertSmartObject')return convert(request);
+    if(command==='convertSmartObjectsIndividually')return convertIndividually(request);
     if(['selectAbove','selectBelow','extendAbove','extendBelow'].includes(command))return select(request);
     return ps.core.executeAsModal(async context=>{
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
