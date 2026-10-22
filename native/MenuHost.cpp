@@ -278,7 +278,7 @@ static float scale=1;
 static bool capsDividerAt(int i,POINT point) {
     const int first=i>=7?7:panelKind==2 && i>=5?5:0;
     const int last=i>=7?8:panelKind==2 && i>=5?6:capsBottomCount()-1;
-    return ((i>first || (panelKind==2 && i==5)) && point.x<capsRows[i].left+scale) ||
+    return (i>first && point.x<capsRows[i].left+scale) ||
            (i<last && point.x>=capsRows[i].right-scale);
 }
 
@@ -610,7 +610,7 @@ static int holdActionAt(POINT point) {
     if (panelKind==4 && recentReady && !pieAnimating) for (size_t i=0;i<recentRows.size();++i)
         if(shownPresets[i].available && PtInRect(&recentRows[i],point))return 12+static_cast<int>(i);
     for (int i=0;i<4;++i) if (rowVisible(i) && rowEnabled(i) && PtInRect(&holdRows[i],point)) {
-        if(i>=2 && (std::abs(point.x-pieCenter.x)<scale || (i==3 && panelKind==2 && capsReady && layerAware && point.x>=holdRows[3].right-scale)))return -1;
+        if(i>=2 && (std::abs(point.x-pieCenter.x)<scale))return -1;
         return i==1?-1:i;
     }
     // Only visible cards/swatches commit. Blank radial sectors are neutral.
@@ -1088,7 +1088,7 @@ static void drawRecentPresets() {
 // Read-only footer: never registers a widget or expands a gesture hit region.
 static ImVec4 footerBounds{};
 // Secondary icons keep the confirmed compact right column beside the ring.
-static float quickGroupY(bool lower) {return lower?-15.f:-15.f-figmaDisplayWidgetHeight-quickGroupGap;}
+static float quickGroupY(bool lower) {return 45.f+(lower?figmaDisplayWidgetHeight+quickGroupGap:0.f);}
 static const char* actionTipText(int action) {
     if(action==200+shapeModeTipBase)return shapePanelOpen?(shapeEditor.batchMask?"羽化／密度":"颜色／羽化"):shapeEditor.batchMask?"展开羽化／密度":"展开颜色／羽化";
     if(action==205)return shapeEditor.channel?"无描边":"无填充";
@@ -1109,7 +1109,8 @@ static bool tipOverlaps(ImVec4 tip,RECT r,float gap=0) {
 static int tipFamily(int action) {
     if(action>=200+shapeModeTipBase)return 200+shapeModeTipBase;
     if(action>=200)return action==213 || action==214?213:200;
-    if(panelKind==2 && ((action>=45 && action<47) || action==2 || action==3))return 2;
+    if(panelKind==2 && action>=45 && action<47)return 45;
+    if(panelKind==2 && (action==2 || action==3))return 2;
     if(action>=40 && action<49)return 40;
     if(action>=32)return 32;
     if(action>=12 && action<12+int(shownPresets.size()))return shownPresets[action-12].name=="剪贴板"?80+action:12;
@@ -1118,7 +1119,7 @@ static int tipFamily(int action) {
 static RECT tipGroupRect(int action) {
     if(action>=200+shapeModeTipBase)return shapeModeBounds;
     if(action>=200)return action==213 || action==214?shapeEditor.maskBounds:shapeEditor.bounds;
-    if(panelKind==2 && capsReady && layerAware && tipFamily(action)==2)return {holdRows[2].left,holdRows[2].top,capsRows[6].right,capsRows[6].bottom};
+    if(panelKind==2 && capsReady && layerAware && tipFamily(action)==2)return {holdRows[2].left,holdRows[2].top,holdRows[3].right,holdRows[3].bottom};
     if(action>=47 && action<49)return {capsRows[7].left,capsRows[7].top,capsRows[8].right,capsRows[8].bottom};
     if(action>=40 && action<49){
         const int first=panelKind==2 && action>=45?5:0;
@@ -1132,13 +1133,13 @@ static RECT tipGroupRect(int action) {
     return holdRows[action];
 }
 static bool tipGapAt(int action,POINT cursor) {
-    if(action<0 || (tipFamily(action)!=12 && tipFamily(action)!=32 && tipFamily(action)!=40 && tipFamily(action)!=2))return false;
+    if(action<0 || (tipFamily(action)!=12 && tipFamily(action)!=32 && tipFamily(action)!=40 && tipFamily(action)!=45 && tipFamily(action)!=2))return false;
     const RECT group=tipGroupRect(action);
     if(!PtInRect(&group,cursor))return false;
     // Retain through spacing only, never through disabled buttons or centre.
     for(int i=0;i<9;++i)if(PtInRect(&capsRows[i],cursor))return capsEnabled(i) && capsDividerAt(i,cursor);
     for(int i=0;i<7;++i)if(PtInRect(&quickRows[i],cursor))return quickEnabled(i) && quickDividerAt(i,cursor);
-    for(int i:{2,3})if(PtInRect(&holdRows[i],cursor))return rowEnabled(i) && (std::abs(cursor.x-pieCenter.x)<scale || (i==3 && cursor.x>=holdRows[3].right-scale));
+    for(int i:{2,3})if(PtInRect(&holdRows[i],cursor))return rowEnabled(i) && std::abs(cursor.x-pieCenter.x)<scale;
     for(auto r:recentRows)if(PtInRect(&r,cursor))return false;
     return true;
 }
@@ -1215,6 +1216,7 @@ static ImVec4 actionTipBounds(int action) {
         for(int i=0;i<4;++i)if(rowVisible(i) && tipOverlaps(tip,holdRows[i],2*scale))return false;
         for(auto r:capsRows)if(tipOverlaps(tip,r,2*scale))return false;
         for(auto r:quickRows)if(tipOverlaps(tip,r,2*scale))return false;
+        if(tipOverlaps(tip,toolRow,2*scale))return false;
         for(auto r:recentRows)if(tipOverlaps(tip,r,2*scale))return false;
         if(tipOverlaps(tip,shapeModeBounds,2*scale))return false;
         if(panelKind==4 && tipOverlaps(tip,recentPanelBounds,2*scale))return false;
@@ -1377,10 +1379,10 @@ static void drawCapsBar() {
     drawGroup(0,capsBottomCount()-1,0,pieCenter.y+107*scale);
     if(panelKind==2 && documentSortReady)drawGroup(7,8,0,holdRows[2].top-h-menuControlPadding*scale);
     if(panelKind==2 && rowVisible(3)){
-        float x=holdRows[3].right;
+        float x=pieCenter.x+65*scale;
         for(int i:{5,6}){
             const float width=ImGui::GetFont()->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,capsKeys[i]).x+basicTextOffset()+figmaBasicRightPadding*scale;
-            capsRows[i]={LONG(x),holdRows[3].top,LONG(x+width),holdRows[3].bottom};x+=width;
+            capsRows[i]={LONG(x),LONG(pieCenter.y-(15+figmaDisplayWidgetHeight+quickGroupGap)*scale),LONG(x+width),LONG(pieCenter.y-(15+quickGroupGap)*scale)};x+=width;
         }
     }
 }
@@ -1388,9 +1390,9 @@ static void drawToolBar() {
     toolRow={};
     if(panelKind==3 || panelKind==4 || !layerAware || layerKind!=4 || layerCount!=1)return;
     const char* label="拆分文字";
-    const float h=menuControlHeight*scale,y=pieCenter.y+143*scale;
+    const float h=menuControlHeight*scale,y=pieCenter.y-15*scale;
     const auto extent=ImGui::GetFont()->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,label);
-    const float width=extent.x+2*figmaBasicLeftPadding*scale,x=pieCenter.x-width*.5f;
+    const float width=extent.x+2*figmaBasicLeftPadding*scale,x=pieCenter.x+65*scale;
     auto* draw=ImGui::GetWindowDrawList();POINT cursor{};GetCursorPos(&cursor);
     const ImVec2 a={x,y};
     toolRow={LONG(x),LONG(y),LONG(x+width),LONG(y+h)};
@@ -1548,29 +1550,32 @@ static void drawPie() {
         }
     }
     if(!editing && panelKind==2 && capsReady && layerAware && rowVisible(2)){
-        const RECT group=tipGroupRect(2);
+        auto drawSortGroup=[&](int first,int last,RECT group){
         draw->AddRectFilled({float(group.left),float(group.top)},{float(group.right),float(group.bottom)},tint(ImGuiCol_Button),rounding);
-        for(int n=0;n<4;++n){
+        for(int n=first;n<=last;++n){
             const int action=n<2?n+2:n+43;
             const RECT r=n<2?holdRows[n+2]:capsRows[n+3];
             const bool enabled=n<2?rowEnabled(n+2):capsEnabled(n+3),active=enabled && selected==action;
             const ImVec2 a={float(r.left),float(r.top)},b={float(r.right),float(r.bottom)};
-            if(active)draw->AddRectFilled(a,b,tint(ImGuiCol_HeaderHovered),rounding,n==0?ImDrawFlags_RoundCornersLeft:n==3?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone);
-            if(n)draw->AddLine(a,{a.x,b.y},tint(ImGuiCol_Border),scale);
+            if(active)draw->AddRectFilled(a,b,tint(ImGuiCol_HeaderHovered),rounding,n==first?ImDrawFlags_RoundCornersLeft:n==last?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone);
+            if(n>first)draw->AddLine(a,{a.x,b.y},tint(ImGuiCol_Border),scale);
             const ImU32 ink=tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled);
             const ImVec2 at={a.x+figmaBasicLeftPadding*scale,a.y+(rowHeight-figmaBasicIconSize*scale)*.5f};
             if(n<2)drawFigmaSortIcon(draw,n+2,at,figmaBasicIconSize*scale,ink);
             else drawStyledMenuIcon(draw,n+7,at,figmaBasicIconSize*scale,ink,tint(active?ImGuiCol_HeaderHovered:ImGuiCol_Button));
             draw->AddText(ImGui::GetFont(),basicLabelSize(),{a.x+basicTextOffset(),roundf(a.y+(rowHeight-basicLabelSize())*.5f)},ink,n<2?rowLabel(n+2):capsKeys[n+3]);
             if(pinned && !pieAnimating && enabled && !holdFinished){
-                ImGui::SetCursorScreenPos({a.x+(n?scale:0),a.y});ImGui::PushID(460+n);
-                if(ImGui::InvisibleButton("##reorder",{b.x-a.x-(n?scale:0)-(n<3?scale:0),b.y-a.y})){
+                ImGui::SetCursorScreenPos({a.x+(n>first?scale:0),a.y});ImGui::PushID(460+n);
+                if(ImGui::InvisibleButton("##reorder",{b.x-a.x-(n>first?scale:0)-(n<last?scale:0),b.y-a.y})){
                     holdFinished=true;send(n<2?rowAction(n+2):capsActions[n+3]);
                 }
                 ImGui::PopID();
             }
         }
         draw->AddRect({float(group.left),float(group.top)},{float(group.right),float(group.bottom)},tint(ImGuiCol_Border),rounding,0,scale);
+        };
+        drawSortGroup(0,1,tipGroupRect(2));
+        drawSortGroup(2,3,{capsRows[5].left,capsRows[5].top,capsRows[6].right,capsRows[6].bottom});
     }
     else if(!editing && rowVisible(2) && rowVisible(3)) {
         const auto left=holdRows[2],right=holdRows[3];
@@ -1594,7 +1599,7 @@ static void drawPie() {
     if(shapeEyedropActive)messages.push_back("屏幕取色：点击颜色；右键取消取色");
     if(shapeEditor.ready() && shapeEditor.copyFailed)messages.push_back("剪贴板暂时不可用，未复制颜色");
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
-    drawFooter(messages,pieCenter.y+(!editing && capsReady && panelKind!=4?(toolRow.right?173.f:143.f):116.f)*scale,panelKind==4);
+    drawFooter(messages,pieCenter.y+(!editing && capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
     const int tipAction=shapeEditor.ready() && shapeTipCandidate>=200?shapeTipCandidate:actionTipText(selected)?selected:-1;
     const bool ownEditorTip=tipAction>=200 && tipAction<200+shapeTipCount && shapeEditor.ready();
     const bool showTip=!pieAnimating && !holdFinished && !inputFocused && !ImGui::IsAnyItemActive() && (ownEditorTip || canExecute());
@@ -2566,7 +2571,7 @@ int main() {
                 }
                 // Canvas and Layers keep the confirmed near-centre column.
                 panelKind=1;numberFrame(ImGuiKey_None,false);
-                if(std::abs(quickRows[3].top-(pieCenter.y-15*scale))>scale)throw std::runtime_error("Canvas quick column moved away from ring");
+                if(std::abs(quickRows[0].top-(pieCenter.y+45*scale))>scale)throw std::runtime_error("Canvas creation group must align with label colors");
                 for(int i=0;i<7;++i) {
                     auto tip=quickTipBounds(i);
                     if(tip.z<=tip.x)throw std::runtime_error("Canvas icon tooltip missing");
@@ -2579,7 +2584,7 @@ int main() {
                     for(auto r:quickRows)if(tipOverlaps(tip,r))throw std::runtime_error("Canvas tooltip covers an icon");
                 }
                 panelKind=2;numberFrame(ImGuiKey_None,false);
-                if(std::abs(quickRows[3].top-(pieCenter.y-15*scale))>scale)throw std::runtime_error("Layers quick column moved away from ring");
+                if(std::abs(quickRows[0].top-(pieCenter.y+45*scale))>scale)throw std::runtime_error("Layers creation group must align with label colors");
                 for(int action:{0,2,3}) {
                     const auto tip=actionTipBounds(action);
                     if(tip.w>holdRows[action].top)throw std::runtime_error("Basic tooltip must prefer above its button");
@@ -3342,12 +3347,11 @@ int main() {
                 for(int i=0;i<7;++i){
                     const auto r=capsRows[i];POINT centre={(r.left+r.right)/2,(r.top+r.bottom)/2};
                     if(r.right<=r.left || holdActionAt(centre)!=40+i || !actionTipText(40+i))throw std::runtime_error("Caps bar geometry/hit/tooltip mismatch");
-                    if(i!=0 && holdActionAt({r.left,centre.y})!=-1)throw std::runtime_error("Caps separator gained a hit");
+                    if(i!=0 && i!=5 && holdActionAt({r.left,centre.y})!=-1)throw std::runtime_error("Caps separator gained a hit");
                 }
-                if(capsRows[5].top!=holdRows[3].top || capsRows[6].bottom!=holdRows[3].bottom ||
-                   capsRows[5].left!=holdRows[3].right || capsRows[4].top<=capsRows[5].bottom)
-                    throw std::runtime_error("Layer step controls must sit beside upper sorting, outside bottom bar");
-                if(tipFamily(40)==tipFamily(45) || tipGroupRect(45).top!=capsRows[5].top || tipFamily(45)!=tipFamily(2) ||
+                if(capsRows[5].top!=LONG(pieCenter.y-(15+figmaDisplayWidgetHeight+quickGroupGap)*scale) || capsRows[5].left!=LONG(pieCenter.x+65*scale) || capsRows[6].left!=capsRows[5].right || capsRows[4].top<=capsRows[5].bottom)
+                    throw std::runtime_error("Layer step controls must replace the original right-side creation row");
+                if(tipFamily(40)==tipFamily(45) || tipGroupRect(45).top!=capsRows[5].top || tipFamily(45)==tipFamily(2) ||
                    tipGroupRect(40).right!=capsRows[4].right)
                     throw std::runtime_error("Relocated step tooltip retained old bottom geometry");
                 for(int i:{5,6}){
@@ -3420,7 +3424,7 @@ int main() {
                 {
                     const auto before=testedActions.size();
                     panelKind=2;layerAware=true;layerKind=4;layerCount=1;layerLocked=false;
-                    layerSearchReady=textSplitReady=capable=allowed=true;taskHasResult=false;taskRecovery.clear();
+                    layerSearchReady=textSplitReady=capsReady=capable=allowed=true;taskHasResult=false;taskRecovery.clear();
                     shapeEditor.prepare(Json{{"available",false}});setHoldMode(true);holdMoved=true;
                     for(int kind:{0,1,2,3,4}){
                         panelKind=kind;layerKind=2;numberFrame(ImGuiKey_None,false);
@@ -3437,6 +3441,9 @@ int main() {
                     }
                     panelKind=2;layerKind=4;
                     numberFrame(ImGuiKey_None,false);
+                    if(toolRow.left!=LONG(pieCenter.x+65*scale) || toolRow.top!=LONG(pieCenter.y-15*scale))throw std::runtime_error("Split must replace original right-side creation position");
+                    if(capsRows[5].left!=toolRow.left || capsRows[5].bottom+quickGroupGap*scale!=toolRow.top)throw std::runtime_error("Move controls must sit above split on the right");
+                    for(int i=0;i<7;++i){const auto tip=quickTipBounds(i);if(tip.z>tip.x && tipOverlaps(tip,toolRow,2*scale))throw std::runtime_error("Creation tooltip covers relocated split");}
                     const auto r=toolRow;if(r.right<=r.left || !toolEnabled(1))throw std::runtime_error("Text Caps entry unavailable");
                     renderedHit=71;finishHold({(r.left+r.right)/2,(r.top+r.bottom)/2});
                     if(!menuTools.opening || !pinned || testedActions.back()!="menu.tools.open")throw std::runtime_error("Caps tool gesture did not pin an editor");

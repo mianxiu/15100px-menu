@@ -1,5 +1,8 @@
 # Photoshop Menu
 
+246／UXP0.3.64本机：新建／调整图层图标下移到颜色标签右边；上移／下移及拆分文字移到原右侧位置，绘制与命中同步。565回归、低CPU原生矩阵、当前主题CPU布局及实际入口匹配通过，PS无需重启；实体手感／GPU实屏仍待验。[菜单布局](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide)。公开Release仍230。
+
+
 245／UXP0.3.64本机：图层菜单新增“文档顶／文档底”，可将单层、整组或同组多选移到文档根层级；原置顶／置底仍在组内排序。565回归、34组Node、真实PS低CPU／正常六组排序和一次撤销通过，已切换实际入口。[用法与限制](https://github.com/mianxiu/15100px-menu/wiki/Layer-sorting)。公开下载仍230。
 
 
