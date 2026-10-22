@@ -147,6 +147,15 @@ class MenuToolsDesktopTests(unittest.TestCase):
         desktop._scope=Mock(return_value=True);desktop.hide=Mock(return_value={'message':'closed'});desktop.gui=Mock()
         desktop.toggle();desktop.hide.assert_called_once();desktop.gui.SendMessage.assert_not_called()
 
+    def test_split_rejects_non_text_unknown_locked_and_multiple_targets_before_opening(self):
+        for value in ({'kind':'pixel','layer_ids':[3]}, {'kind':'unknown','layer_ids':[3]},
+                      {'kind':'text','layer_ids':[3,4]}, {'kind':'text','layer_ids':[3],'locked':True}):
+            with self.subTest(value=value):
+                desktop=Desktop('http://localhost',Mock());desktop.visible=True;desktop.menu_epoch=6
+                desktop.menu_layer_context=value;desktop.gui=Mock();desktop.require_action_focus=Mock()
+                with self.assertRaisesRegex(RuntimeError,'未锁定的文字图层'):desktop.open_menu_tools('split',6)
+                desktop.gui.SendMessage.assert_not_called();self.assertFalse(desktop.menu_tools_active)
+
 
 @unittest.skipUnless(os.name=='nt' and (ROOT/'native/MenuHost.exe').is_file(),'Windows native menu')
 class NativeMenuToolsTests(unittest.TestCase):

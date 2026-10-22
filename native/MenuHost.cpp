@@ -252,7 +252,7 @@ static bool returnInputsIdle() {
         !(GetAsyncKeyState(VK_RBUTTON)&0x8000) && !(GetAsyncKeyState(VK_MBUTTON)&0x8000);
 }
 static bool canExecute() {return !menuToolsVisible() && !maskPreviewStarted && (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
-static bool toolEnabled(int i) {return canExecute() && panelKind!=4 && (i==0?layerSearchReady:textSplitReady && panelKind==2 && layerAware && layerKind==4 && layerCount==1 && !layerLocked);}
+static bool toolEnabled(int i) {return canExecute() && panelKind!=4 && (i==0?layerSearchReady:textSplitReady && layerAware && layerKind==4 && layerCount==1 && !layerLocked);}
 static bool capsEnabled(int i) {
     if(i>=capsCount())return false;
     if(!capsReady || !canExecute() || panelKind==4 || !layerAware || !layerCount || !layerKind)return false;
@@ -1383,7 +1383,7 @@ static void drawCapsBar() {
 }
 static void drawToolBar() {
     toolRow={};
-    if(panelKind!=2 || !layerAware || layerKind!=4 || layerCount!=1)return;
+    if(panelKind==3 || panelKind==4 || !layerAware || layerKind!=4 || layerCount!=1)return;
     const char* label="拆分文字";
     const float h=menuControlHeight*scale,y=pieCenter.y+143*scale;
     const auto extent=ImGui::GetFont()->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,label);
@@ -3414,9 +3414,18 @@ int main() {
                     panelKind=2;layerAware=true;layerKind=4;layerCount=1;layerLocked=false;
                     layerSearchReady=textSplitReady=capable=allowed=true;taskHasResult=false;taskRecovery.clear();
                     shapeEditor.prepare(Json{{"available",false}});setHoldMode(true);holdMoved=true;
-                    for(int kind:{0,1,2,4}){
+                    for(int kind:{0,1,2,3,4}){
                         panelKind=kind;layerKind=2;numberFrame(ImGuiKey_None,false);
                         if(toolRow.right)throw std::runtime_error("Caps retained a search entry or a non-text split entry");
+                        layerKind=4;numberFrame(ImGuiKey_None,false);
+                        const bool textMenu=kind<3;
+                        if(bool(toolRow.right)!=textMenu || toolEnabled(1)!=textMenu)
+                            throw std::runtime_error("Text tool eligibility depends on mouse panel instead of selected layer");
+                        layerCount=2;numberFrame(ImGuiKey_None,false);
+                        if(toolRow.right || toolEnabled(1))throw std::runtime_error("Multi-selection enabled single-text tools");
+                        layerCount=1;layerLocked=true;numberFrame(ImGuiKey_None,false);
+                        if(toolEnabled(1))throw std::runtime_error("Locked text enabled split");
+                        layerLocked=false;
                     }
                     panelKind=2;layerKind=4;
                     numberFrame(ImGuiKey_None,false);

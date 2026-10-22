@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-本机运行239／UXP0.3.61：PS工作区单独F打开图层搜索，Shift+F交给PS，Caps+F仍为图层样式；搜索仅由F唤出，Caps单选文字层菜单可直接拆分。菜单按打开时鼠标位置定位，边缘避让。[用法与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide)。自动切换ENG输入法尚未实现，见[评估](docs/INPUT-LANGUAGE-ASSESSMENT.md)。公开下载仍为已核验的230。
+242／UXP0.3.63本机：PS工作区单独F打开图层搜索，Shift+F交给PS，Caps+F仍为图层样式；搜索不放进Caps。Caps拆分按实际单选文字层识别，在画布、图层或通用菜单均可用；非文字／多选／未知隐藏，锁定文字禁用。菜单保持鼠标锚点，普通Caps已有PS窗口与屏幕可用区域交集内避让。自动ENG尚未实现，公开下载仍230。[用法与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Text-tools)。[输入法评估](docs/INPUT-LANGUAGE-ASSESSMENT.md)。
 
 233托盘恢复注册＋234更新完成前核对菜单／热键／托盘就绪已保留；另一台图标问题经用户重新启动已恢复，根因待复现，见[说明](docs/TRAY.md)。232／231读取优化的[速度与范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。
 

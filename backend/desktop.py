@@ -568,8 +568,8 @@ class Desktop:
             if not self.visible:self.open(hold=True,keyboard_anchor=True)
             if mode=='split':
                 value=self.menu_layer_context or {}
-                if value.get('kind')!='text' or len(value.get('layer_ids',[]))!=1:
-                    raise RuntimeError('请在图层面板单选文字图层后打开拆分')
+                if value.get('kind')!='text' or len(value.get('layer_ids',[]))!=1 or value.get('locked'):
+                    raise RuntimeError('请单选未锁定的文字图层后打开拆分')
             self.hold_active=False;self.menu_tools_active=True
             self.menu_epoch+=1
             self.gui.SendMessage(self.hwnd,0x800d,1,self.menu_epoch)

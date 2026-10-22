@@ -2081,19 +2081,25 @@ function createTextTools(ps,session,capture,readTree) {
     if(row.textKey.textKey.length>20000||JSON.stringify(row.textKey).length>524288)throw Error('文本或样式超出本次处理上限');
     if(row.textKey.kerningRange?.length)throw Error('含手动字距的文本暂不支持替换');
     if(!sameTarget(await capture(),target))throw Error('文字目标已改变，请重新读取');
-    return clone(row);
+    const result=clone(row);
+    for(const key of ['textStyleRange','paragraphStyleRange'])result.textKey[key]=styleRuns(result.textKey,key);
+    return result;
   }
   function styleRuns(raw,key) {
     const ranges=raw[key];let end=0;
     if(!Array.isArray(ranges)||!ranges.length||ranges.length>1024)throw Error('文本样式范围不完整');
+    const field=key==='textStyleRange'?'textStyle':'paragraphStyle',base=styleSignature(ranges[0]?.[field]?.baseParentStyle),normalized=[];
     for(const range of ranges) {
-      if(!Number.isInteger(range.from)||!Number.isInteger(range.to)||range.from!==end||range.to<=end||range.to>raw.textKey.length+1)throw Error('文本样式范围不完整');
-      if(!range[key==='textStyleRange'?'textStyle':'paragraphStyle']||typeof range[key==='textStyleRange'?'textStyle':'paragraphStyle']!=='object')throw Error('文本样式范围不完整');
+      if(!range[field]||typeof range[field]!=='object')throw Error('文本样式范围不完整');
       if(key==='textStyleRange'&&(range.textStyle?.fontAvailable===false||range.textStyle?.baseParentStyle?.fontAvailable===false))throw Error('文本包含缺失字体，请先在PS中处理');
-      end=range.to;
+      const previous=normalized[normalized.length-1];
+      // PS may repeat the same complete style range after reopening a PSD.
+      if(previous&&range.from===previous.from&&range.to===previous.to&&range[field].styleSheetHasParent===previous[field].styleSheetHasParent&&same({...base,...styleSignature(previous[field])},{...base,...styleSignature(range[field])}))continue;
+      if(!Number.isInteger(range.from)||!Number.isInteger(range.to)||range.from!==end||range.to<=end||range.to>raw.textKey.length+1)throw Error('文本样式范围不完整');
+      end=range.to;normalized.push(range);
     }
     if(end<raw.textKey.length)throw Error('文本样式范围不完整');
-    return ranges;
+    return normalized;
   }
   function plan(raw,params) {
     if(!params||typeof params.find!=='string'||!params.find||params.find.length>200||typeof params.replacement!=='string'||params.replacement.length>500)throw Error('查找内容不能为空，查找／替换内容超出上限');
@@ -2158,6 +2164,16 @@ function createTextTools(ps,session,capture,readTree) {
     }
     return true;
   }
+  function textWriter(raw) {
+    const ranges=styleRuns(raw,'paragraphStyleRange');
+    const uniform=ranges.every(range=>same(range.paragraphStyle,ranges[0].paragraphStyle));
+    return value=>{
+      const to={...value};
+      // Rewriting identical inherited paragraphs materializes PS defaults and changes their representation.
+      if(uniform)delete to.paragraphStyleRange;
+      return batch([{_obj:'set',_target:[{_ref:'textLayer',_enum:'ordinal',_value:'targetEnum'}],to,_options:{dialogOptions:'silent'}}]);
+    };
+  }
   function layout(raw) {
     return {antiAlias:raw.antiAlias,textGridding:raw.textGridding,orientation:raw.orientation,textClickPoint:raw.textClickPoint,transform:raw.transform,warp:raw.warp,
       textShape:raw.textShape?.map(shape=>({shapeType:shape.shapeType,orientation:shape.orientation,transform:shape.transform,
@@ -2166,7 +2182,6 @@ function createTextTools(ps,session,capture,readTree) {
   async function read() {
     snapshot=null;
     const target=await capture(),row=await descriptor(target);
-    styleRuns(row.textKey,'textStyleRange');styleRuns(row.textKey,'paragraphStyleRange');
     const revision=session+':text:'+String(++serial);
     snapshot={target,row,revision,time:Date.now()};
     return {target,revision,text:row.textKey.textKey,name:row.name};
@@ -2186,7 +2201,7 @@ function createTextTools(ps,session,capture,readTree) {
         if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
         // PS24.0 rejects a document-qualified textLayer identifier. The modal
         // fresh capture above binds the active text reference to this exact ID.
-        await batch([{_obj:'set',_target:[{_ref:'textLayer',_enum:'ordinal',_value:'targetEnum'}],to:wanted.value,_options:{dialogOptions:'silent'}}]);
+        await textWriter(before.textKey)(wanted.value);
         const after=await descriptor(request.target);
         if(after.textKey.textKey!==wanted.value.textKey||!stylesMatch(after.textKey,wanted.value)||!same(layout(after.textKey),layout(before.textKey)))throw Error('文本或样式读回不一致');
         await context.hostControl.resumeHistory(history,true);snapshot=null;
@@ -2235,7 +2250,7 @@ function createTextTools(ps,session,capture,readTree) {
         if(values.some(value=>!Number.isFinite(value))||values[2]<=values[0]||values[3]<=values[1])throw Error('无法读取独立文字字形');
         return values;
       }
-      const write=value=>batch([{_obj:'set',_target:[{_ref:'textLayer',_enum:'ordinal',_value:'targetEnum'}],to:value,_options:{dialogOptions:'silent'}}]);
+      const write=textWriter(raw);
       try {
         for(const group of groups) {
           if(context.isCancelled)throw Error('文本操作已取消');

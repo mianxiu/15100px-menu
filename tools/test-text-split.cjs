@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync('uxp/offline-probe/labels.js','utf8'),clone=value=>JSON.parse(JSON.stringify(value));
-let layers,active=11,serial=100,rollbackFail=false,failSet=false,history=0,commits=0,before,compactStyles=false,wrapWidth=0;
+let layers,active=11,serial=100,rollbackFail=false,failSet=false,history=0,commits=0,before,compactStyles=false,wrapWidth=0,materializeParagraphs=false,wrongParagraph=false;
 const ink=(text,ranges=[])=>{let points=[],y=0,x=0,offset=0;for(const char of text){if(char==='\r'){y+=10;x=0;}else{const advance=wrapWidth&&char!==' '?2:1;if(wrapWidth&&x+advance>wrapWidth){x=0;y+=10;}const shift=ranges.find(r=>r.from<=offset&&r.to>offset)?.textStyle.baselineShift?._value||0;if(char!==' ')points.push([x,y-shift]);x+=advance;}offset+=char.length;}return {_obj:'boundingBox',...Object.fromEntries(['left','top','right','bottom'].map((key,index)=>[key,{_unit:'pixelsUnit',_value:points.length?(index===0?Math.min(...points.map(p=>p[0])):index===1?Math.min(...points.map(p=>p[1])):index===2?Math.max(...points.map(p=>p[0]))+1:Math.max(...points.map(p=>p[1]))+5):0}]))};};
 const original={layerID:11,parentLayerID:7,name:'source',layerKind:3,layerLocking:{protectAll:false},visible:true,group:false,textKey:{_obj:'textLayer',textKey:'AA\rBB\rCC',
  textStyleRange:[{from:0,to:9,textStyle:{fontPostScriptName:'Font',size:14}}],paragraphStyleRange:[{from:0,to:9,paragraphStyle:{align:'left'}}],kerningRange:[],
@@ -12,7 +12,11 @@ const ps={app:{activeDocument:{id:1,width:400,height:400,resolution:72}},core:{e
  const ref=c._target?._ref||c._target,id=ref?.[0]?._id||active,row=layers.find(l=>l.layerID===id);
  if(c._obj==='multiGet'){if(!row)return {_obj:'error'};const result=Object.fromEntries(c.extendedReference[0].filter(key=>row[key]!==undefined).map(key=>[key,clone(row[key])]));if(compactStyles&&result.textKey)for(const range of result.textKey.textStyleRange.slice(1)){delete range.textStyle.fill;delete range.textStyle.lineWidth;}return result;}
  if(c._obj==='duplicate'){const next=clone(row);next.layerID=++serial;layers.splice(layers.indexOf(row),0,next);active=next.layerID;return {};}
- if(c._obj==='set'){if(failSet)return {_obj:'error'};assert.equal(c._target[0]._value,'targetEnum');row.textKey={...row.textKey,antiAlias:{_value:'antiAliasSharp'},...clone(c.to)};for(const range of row.textKey.textStyleRange)if(range.textStyle.baselineShift?._unit==='pointsUnit')range.textStyle.baselineShift={_unit:'pixelsUnit',_value:range.textStyle.baselineShift._value*ps.app.activeDocument.resolution/72};row.textKey.boundingBox=ink(row.textKey.textKey,row.textKey.textStyleRange);return {};}
+ if(c._obj==='set'){if(failSet)return {_obj:'error'};assert.equal(c._target[0]._value,'targetEnum');row.textKey={...row.textKey,antiAlias:{_value:'antiAliasSharp'},...clone(c.to)};
+  if(!c.to.paragraphStyleRange)row.textKey.paragraphStyleRange=[{...clone(row.textKey.paragraphStyleRange[0]),from:0,to:row.textKey.textKey.length+1}];
+  if(materializeParagraphs && c.to.paragraphStyleRange)for(const range of row.textKey.paragraphStyleRange)range.paragraphStyle={align:'left',hyphenate:false,...range.paragraphStyle};
+  if(wrongParagraph)row.textKey.paragraphStyleRange[0].paragraphStyle.align='right';
+  for(const range of row.textKey.textStyleRange)if(range.textStyle.baselineShift?._unit==='pointsUnit')range.textStyle.baselineShift={_unit:'pixelsUnit',_value:range.textStyle.baselineShift._value*ps.app.activeDocument.resolution/72};row.textKey.boundingBox=ink(row.textKey.textKey,row.textKey.textStyleRange);return {};}
  if(c._obj==='hide'||c._obj==='show'){row.visible=c._obj==='show';return {};}
  if(c._obj==='select'){assert.equal(c.makeVisible,false);active=id;return {};}
  if(c._obj==='delete'){layers.splice(layers.indexOf(row),1);return {};}
@@ -25,6 +29,13 @@ async function request(breaks=[3,6,8]){const read=await tools.read();return {tar
  let result=await tools.split(await request());assert.equal(result.count,3);assert.equal(history,1);assert.equal(commits,1);
  assert.deepEqual(layers.slice(1,-1).map(l=>l.textKey.textKey),['AA','BB','CC']);assert.deepEqual(Array.from(result.positions,r=>r.dy),[0,10,20]);assert.ok(layers.slice(1,-1).every(l=>l.parentLayerID===7&&l.visible));
  assert.ok(layers.slice(1,-1).every(l=>l.textKey.antiAlias._value==='antiAliasCrisp'));
+ reset();layers[1].textKey.textStyleRange.push(clone(layers[1].textKey.textStyleRange[0]));
+ result=await tools.split(await request());assert.equal(result.count,3);
+ reset();materializeParagraphs=true;layers[1].textKey.paragraphStyleRange=[{from:0,to:3,paragraphStyle:{styleSheetHasParent:true,textComposerEngine:{_value:'textOptycaComposer'}}},{from:3,to:9,paragraphStyle:{styleSheetHasParent:true,textComposerEngine:{_value:'textOptycaComposer'}}}];
+ result=await tools.split(await request());assert.equal(result.count,3);assert.ok(layers.slice(1,-1).every(l=>l.textKey.paragraphStyleRange.every(r=>!('align' in r.paragraphStyle))));materializeParagraphs=false;
+ reset();wrongParagraph=true;const changedParagraph=await request();await assert.rejects(tools.split(changedParagraph),/文字样式改变/);assert.deepEqual(layers[1],original);wrongParagraph=false;
+ reset();layers[1].textKey.paragraphStyleRange=[{from:0,to:3,paragraphStyle:{align:'left'}},{from:3,to:9,paragraphStyle:{align:'center'}}];
+ result=await tools.split(await request());assert.deepEqual(layers.slice(1,-1).map(l=>l.textKey.paragraphStyleRange[0].paragraphStyle.align),['left','center','center']);
  reset();result=await tools.split(await request([6,8]));assert.deepEqual(layers.slice(1,-1).map(l=>l.textKey.textKey),['AA\rBB','CC']);
  reset();let req=await request([2,8]);const oldHistory=history;await assert.rejects(tools.split(req),/分组必须/);assert.equal(history,oldHistory);
  reset();req=await request();failSet=true;await assert.rejects(tools.split(req),/写入失败/);assert.deepEqual(layers.map(l=>l.layerID),[10,11,12]);assert.deepEqual(layers[1],original);
