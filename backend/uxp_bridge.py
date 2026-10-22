@@ -154,6 +154,8 @@ class UxpTransport:
                         raise RuntimeError('UXP 版本或会话已改变，未提交快捷键操作')
                 if payload.get('command') in ('selectAbove','selectBelow','extendAbove','extendBelow') and version(heartbeat.get('probe_version'))<(0,3,16):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.16，以支持单选与Shift多选；未提交操作')
+                if payload.get('command') in ('moveDocumentTop','moveDocumentBottom') and version(heartbeat.get('probe_version'))<(0,3,64):
+                    raise RuntimeError('文档级排序需要更新并重启PS加载UXP0.3.64')
                 if payload.get('command')=='convertSmartObject' and version(heartbeat.get('probe_version'))<(0,3,18):
                     raise RuntimeError('请更新并重新加载 UXP 0.3.18，以支持转换智能对象；未提交操作')
                 if payload.get('command') in ('shape.copyPaint','shape.pastePaint') and version(heartbeat.get('probe_version'))<(0,3,41):

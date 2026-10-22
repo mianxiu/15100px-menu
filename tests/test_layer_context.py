@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock,patch
 from backend.layer_context import validate,flags,require_menu_target,unavailable
+from backend.tasks import TaskCancelled
 from backend.desktop import Desktop
 from backend.uxp_bridge import UxpBridge
 
@@ -101,3 +102,12 @@ class LayerContextTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
 
 if __name__=='__main__':unittest.main()
+
+class DocumentSortTargetTests(unittest.TestCase):
+    def test_document_sort_rejects_locked_background_cross_parent_and_stale_selection(self):
+        base={'session':'s','document_id':1,'layer_ids':[2],'kind':'pixel'}
+        for name in ('moveDocumentTop','moveDocumentBottom'):
+            require_menu_target(base,name,base)
+            for value in (None,{**base,'locked':True},{**base,'background':True},{**base,'same_parent':False}):
+                with self.assertRaises(TaskCancelled):require_menu_target(value,name,base)
+            with self.assertRaises(TaskCancelled):require_menu_target(base,name,{**base,'layer_ids':[3]})

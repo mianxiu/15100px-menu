@@ -549,7 +549,7 @@ class Application(web.Application):
                     if not self.bridge.busy:
                         await self.broadcast({"type":"operation","busy":True,"action":name})
                     await asyncio.to_thread(self.desktop.require_action_focus)
-                    if name in ('moveToTop','moveToBottom','moveUp','moveDown'):
+                    if name in ('moveToTop','moveToBottom','moveUp','moveDown','moveDocumentTop','moveDocumentBottom'):
                         await asyncio.to_thread(self.desktop.require_move_context,name)
                     async with self.panel_lock:
                         if 'menu_epoch' in args and args['menu_epoch'] != self.desktop.menu_epoch:
@@ -561,7 +561,7 @@ class Application(web.Application):
                             frozen_target['active_layer_id']=(snapshot.get('shape_editor',{}).get('active_layer_id') if name in ('shape.paint','shape.pastePaint') and snapshot.get('shape_editor',{}).get('mask_batch') else snapshot['layer_ids'][0])
                     async def before_dispatch(target):
                         async with self.panel_lock:
-                            if name in ('moveToTop','moveToBottom','moveUp','moveDown'):
+                            if name in ('moveToTop','moveToBottom','moveUp','moveDown','moveDocumentTop','moveDocumentBottom'):
                                 await asyncio.to_thread(self.desktop.require_move_context,name)
                             if 'menu_epoch' in args and args['menu_epoch'] != self.desktop.menu_epoch:
                                 raise TaskCancelled('菜单已重新打开，已取消旧操作')

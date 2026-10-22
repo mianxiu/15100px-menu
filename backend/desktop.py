@@ -628,7 +628,7 @@ class Desktop:
         # The open generic menu deliberately has no reordering operations.
         # Keep standalone PS chords unchanged; block stale menu/native-hook
         # dispatches too, rather than just hiding their buttons.
-        if (name in ('moveToTop','moveToBottom','moveUp','moveDown') and self.visible
+        if (name in ('moveToTop','moveToBottom','moveUp','moveDown','moveDocumentTop','moveDocumentBottom') and self.visible
                 and self.panel_context and self.panel_context.current['kind']=='generic'):
             raise RuntimeError('通用操作不提供图层移动，请在图层面板重新打开菜单')
 

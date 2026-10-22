@@ -62,6 +62,7 @@ def require_menu_target(value,name,target):
         if any(value.get(k)!=target.get(k) for k in ('session','document_id','layer_ids')):raise TaskCancelled('文档或图层选择已改变，请重新打开菜单；本次未修改图层')
         return
     if name in CAPS_ACTIONS:
+        if name in ('moveDocumentTop','moveDocumentBottom') and (not value or value.get('locked') or value.get('background') or value.get('same_parent') is False):raise TaskCancelled('请先解锁并选择同一父组内的图层')
         if not value or not value.get('layer_ids') or value.get('kind') in ('unknown','none'):
             raise TaskCancelled('图层状态待确认，请重新打开菜单')
         if name in ('copyStyle','editStyle') and len(value['layer_ids'])!=1:

@@ -1451,7 +1451,7 @@ async function readLayerEffects(ps,doc,ids) {
 function createCapsActions(ps,session,capture,selectionContext,readNativeTree,captureSelection,nativeSelection=false) {
   // The native strategy prepares fresh feedback after modal exit; its DOM copy is discarded.
   const readFeedback=()=>nativeSelection?null:selectionContext();
-  const commands=['selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle','convertSmartObject'];
+  const commands=['moveDocumentTop','moveDocumentBottom','selectAbove','selectBelow','extendAbove','extendBelow','moveUp','moveDown','copyStyle','pasteStyle','editStyle','convertSmartObject'];
   async function convert(request) {
     return ps.core.executeAsModal(async context=>{
       if(context.isCancelled || Date.now()>request.expires_at_ms)throw Error('Cancelled or expired');
@@ -1598,6 +1598,27 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
           if(anchor && !anchor.isBackgroundLayer){const chosen=siblings.filter(l=>actual.layer_ids.includes(l.id));for(const layer of up?chosen:chosen.reverse())await layer.move(anchor,up?ps.constants.ElementPlacement.PLACEBEFORE:ps.constants.ElementPlacement.PLACEAFTER);}
           const next=Array.from(parent?parent.layers:doc.layers,l=>l.id),expectedOrder=siblings.map(l=>l.id);
           if(anchor && !anchor.isBackgroundLayer){const chosen=expectedOrder.filter(id=>actual.layer_ids.includes(id)),others=expectedOrder.filter(id=>!actual.layer_ids.includes(id));let at=others.indexOf(anchor.id)+(up?0:1);others.splice(at,0,...chosen);if(next.join(',')!==others.join(','))throw Error('Step order readback mismatch');}
+        } else if(command==='moveDocumentTop' || command==='moveDocumentBottom') {
+          const parentId=l=>l.parent?.id===doc.id?null:l.parent?.id??null;
+          const parent=parentId(active);
+          if(selected.some(l=>parentId(l)!==parent))throw Error('请在同一父组内选择图层');
+          for(let p=active.parent;p && p.id!==doc.id;p=p.parent)if(p.allLocked || p.positionLocked)throw Error('请先解锁父组');
+          const tree=layers=>Array.from(layers).flatMap(l=>[[l.id,parentId(l)],...(l.kind===ps.constants.LayerKind.GROUP?tree(l.layers):[])]);
+          const before=tree(doc.layers),ids=new Set(actual.layer_ids),moving=new Set(walk(selected).map(l=>l.id));
+          const siblings=Array.from(active.parent?.layers??doc.layers),chosen=siblings.filter(l=>ids.has(l.id));
+          if(chosen.length!==selected.length)throw Error('文档排序目标不完整');
+          const top=command==='moveDocumentTop',roots=Array.from(doc.layers),others=roots.filter(l=>!ids.has(l.id));
+          const anchor=top?others[0]:others.at(-1),background=anchor?.isBackgroundLayer;
+          if(anchor)for(const l of top || background?chosen:[...chosen].reverse()) {
+            if(context.isCancelled)throw Error('Cancelled');
+            await l.move(anchor,top || background?ps.constants.ElementPlacement.PLACEBEFORE:ps.constants.ElementPlacement.PLACEAFTER);
+          }
+          const now=tree(doc.layers),expected=chosen.map(l=>l.id),rootIds=Array.from(doc.layers).filter(l=>!l.isBackgroundLayer).map(l=>l.id);
+          const edge=top?rootIds.slice(0,chosen.length):rootIds.slice(-chosen.length);
+          if(edge.join(',')!==expected.join(',') || chosen.some(l=>parentId(l)!==null) ||
+             JSON.stringify(now.filter(([id])=>!moving.has(id)))!==JSON.stringify(before.filter(([id])=>!moving.has(id))) ||
+             JSON.stringify(now.filter(([id])=>moving.has(id)))!==JSON.stringify(before.filter(([id])=>moving.has(id)).map(([id,parent])=>[id,ids.has(id)?null:parent])))
+            throw Error('文档排序父组／层序读回不符，已回滚');
         } else if(command==='copyStyle') {
           if(!await effects())throw Error('当前图层没有可复制的样式');
           await batch([{_obj:'copyEffects',_options:{dialogOptions:'dontDisplay'}}]);
@@ -1615,7 +1636,7 @@ function createCapsActions(ps,session,capture,selectionContext,readNativeTree,ca
         if(after.document_id!==actual.document_id || now.length!==order.length || now.some(id=>!membership.has(id)))throw Error('Caps document/layer identity changed');
         if(!selecting && after.layer_ids.join(',')!==actual.layer_ids.join(','))throw Error('Caps selection changed');
         if(selecting && (command.startsWith('extend')?actual.layer_ids.some(id=>!after.layer_ids.includes(id)):after.layer_ids.length!==1))throw Error('Layer selection readback mismatch');
-        if(!['moveUp','moveDown'].includes(command) && now.join(',')!==order.join(','))throw Error('Caps layer order changed');
+        if(!['moveUp','moveDown','moveDocumentTop','moveDocumentBottom'].includes(command) && now.join(',')!==order.join(','))throw Error('Caps layer order changed');
         if(history)await context.hostControl.resumeHistory(history,true);
         return {verified:true,count:selected.length,command,selection_context:readFeedback()};
       } catch(error) {

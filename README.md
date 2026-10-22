@@ -1,5 +1,8 @@
 # Photoshop Menu
 
+245／UXP0.3.64本机：图层菜单新增“文档顶／文档底”，可将单层、整组或同组多选移到文档根层级；原置顶／置底仍在组内排序。565回归、34组Node、真实PS低CPU／正常六组排序和一次撤销通过，已切换实际入口。[用法与限制](https://github.com/mianxiu/15100px-menu/wiki/Layer-sorting)。公开下载仍230。
+
+
 244／UXP0.3.63本机：F打开鼠标附近单框自动搜索，类型直接点标签；文件名／图层名双字段和类型下拉已移除。空白处拖动，PS窗口内避让；Caps文字拆分保留。有限范围画布自动ENG已实现，输入恢复与未知保护保留，完整中文实体输入矩阵待验。公开下载仍230。[搜索用法](https://github.com/mianxiu/15100px-menu/wiki/Layer-search)／[ENG范围](https://github.com/mianxiu/15100px-menu/wiki/Input-language)。
 
 233托盘恢复注册＋234更新完成前核对菜单／热键／托盘就绪已保留；另一台图标问题经用户重新启动已恢复，根因待复现，见[说明](docs/TRAY.md)。232／231读取优化的[速度与范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。

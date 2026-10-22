@@ -1,13 +1,13 @@
 VSVersionInfo(
-  ffi=FixedFileInfo(filevers=(0,4,244,0), prodvers=(0,4,244,0), mask=0x3f,
+  ffi=FixedFileInfo(filevers=(0,4,245,0), prodvers=(0,4,245,0), mask=0x3f,
                    flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0,0)),
   kids=[StringFileInfo([StringTable('040904B0', [
     StringStruct('CompanyName', 'Photoshop Menu'),
     StringStruct('FileDescription', 'Photoshop Menu desktop application'),
-    StringStruct('FileVersion', '0.4.244'),
+    StringStruct('FileVersion', '0.4.245'),
     StringStruct('InternalName', 'PhotoshopMenu'),
     StringStruct('OriginalFilename', 'PhotoshopMenu.exe'),
     StringStruct('ProductName', 'Photoshop Menu'),
-    StringStruct('ProductVersion', '0.4.244')
+    StringStruct('ProductVersion', '0.4.245')
   ])]), VarFileInfo([VarStruct('Translation', [1033,1200])])]
 )
