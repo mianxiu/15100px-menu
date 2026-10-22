@@ -81,7 +81,7 @@ class LanguageTests(unittest.TestCase):
 class LanguageApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_ui_switch_does_not_apply_native_settings_or_plugin_files(self):
         with tempfile.TemporaryDirectory() as tmp:
-            app=Application(0,bridge=Mock(tasks=None,status=AsyncMock(return_value={'connected':False})),runtime=tmp);app.desktop=Mock()
+            app=Application(0,bridge=Mock(tasks=None,status=AsyncMock(return_value={'connected':False})),runtime=tmp);app.desktop=Mock(input_language=None)
             with patch.object(app,'broadcast',new_callable=unittest.mock.AsyncMock):
                 await app.dispatch('language.set',{'language':'en'})
             app.desktop.apply_settings.assert_not_called()

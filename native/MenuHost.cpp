@@ -1431,9 +1431,8 @@ static void drawPie() {
     setOpacity(IsWindowVisible(window) && !holdFinished?fac:0.f);
     if(menuToolsVisible()) {
         holdRows={};labelRows={};capsRows={};quickRows={};toolRow={};pieReady=false;
-        draw->AddCircle(pieCenter,19*scale,tint(ImGuiCol_Border),40,scale);
         menuTools.draw(scale,pieCenter,allowed && !taskBusy && !busyFeedback && !inputFocused && !maskPreviewStarted);
-        drawFooter({document,menuTools.error},pieCenter.y+32*scale);
+        drawFooter({document,menuTools.error},pos.y+size.y-60*scale);
         return;
     }
     if(toolEnabled(0) && !shapePanelVisible() && !shapeEyedropActive && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput &&
@@ -2123,7 +2122,7 @@ int main() {
     if (!selfTest) {ShowWindow(window,preview.empty()?SW_SHOWNORMAL:SW_SHOWNOACTIVATE);UpdateWindow(window);}
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
-            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((previewShape || !previewTool.empty()?920:panelKind==4?820:620)*scale),static_cast<int>((!previewTool.empty()?620:previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):500)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((!previewTool.empty()?432:previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((!previewTool.empty()?620:previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):500)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);shapePanelOpen=previewShape && !previewOrdinary;
             if(!previewTool.empty()) {
                 layerSearchReady=textSplitReady=true;holdFinished=false;pinned=true;capable=allowed=true;
@@ -2550,6 +2549,12 @@ int main() {
                     if(holdActionAt(seam)!=-1 || !tipGapAt(32+i,seam))
                         throw std::runtime_error("Horizontal divider must retain tooltip but cancel gesture");
                     const auto before=testedActions.size();
+                    const RECT dragWindow{-1000,100,-568,720},dragLimit{-1800,50,-100,1000};
+                    const auto dragInside=MenuToolsPanel::dragPosition(dragWindow,dragLimit,{10,20});
+                    const auto dragLow=MenuToolsPanel::dragPosition(dragWindow,dragLimit,{-5000,-5000});
+                    const auto dragHigh=MenuToolsPanel::dragPosition(dragWindow,dragLimit,{5000,5000});
+                    if(dragInside.x!=-990 || dragInside.y!=120 || dragLow.x!=-1800 || dragLow.y!=50 || dragHigh.x!=-532 || dragHigh.y!=380)
+                        throw std::runtime_error("Tool drag escaped Photoshop/work-area bounds");
                     holdFinished=false;pieReady=true;renderedHit=32+i;
                     finishHold(seam,true,&seam);
                     if(testedActions.size()!=before+1 || testedActions.back()!="hide")
@@ -3444,6 +3449,14 @@ int main() {
                         throw std::runtime_error("Tool editor retained radial command hits");
                     const auto count=testedActions.size();finishHold({(r.left+r.right)/2,(r.top+r.bottom)/2});
                     if(testedActions.size()!=count)throw std::runtime_error("Opening split submitted a write");
+                    menuTools.reset();menuTools.active=menuTools.ready=true;menuTools.mode="search";
+                    menuTools.changeSearch(1);
+                    if(menuTools.searchDue(1.17) || !menuTools.searchDue(1.19))throw std::runtime_error("Search debounce failed");
+                    menuTools.searchDirty=false;menuTools.submit("layers.search",Json::object());
+                    menuTools.changeSearch(2);
+                    if(menuTools.searchDue(3))throw std::runtime_error("Search overlapped a pending read");
+                    menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","layers.search"},{"ok",true},{"result",{{"items",Json::array()}}}});
+                    if(menuTools.pending || !menuTools.results.is_null() || !menuTools.searchDue(3))throw std::runtime_error("Stale search became selectable or latest query lost");
                     menuTools.reset();testedActions.resize(before);layerSearchReady=textSplitReady=false;
                 }
                 std::cout<<"Blank right-click client cancellation passed: canvas/layers/home/general, late Caps release, dirty draft, sampler pair and busy protection\n";

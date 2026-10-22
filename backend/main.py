@@ -455,6 +455,7 @@ class Application(web.Application):
                              "native_hotkeys": bool(self.desktop and self.desktop.native and self.desktop.native.poll() is None and self.desktop.ready.is_set()),
                              "hotkey_pid": self.desktop.native.pid if self.desktop and self.desktop.native else None},
                     "desktop": self.desktop.message if self.desktop else "无桌面模式",
+                    "input_language": dict(self.desktop.input_language.report) if self.desktop and self.desktop.input_language else {'state':'unavailable'},
                     "tray_error": self.tray.error if self.tray else ""}
             self.version_health.observe(value)
             value['version_health']=self.version_health.snapshot()
@@ -743,6 +744,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             if isinstance(app.bridge,UxpBridge):app.bridge.document_guard=app.desktop.require_home
             if isinstance(app.bridge,UxpBridge):
                 app.desktop.layer_context_provider=app.bridge.read_layer_context
+                app.desktop.input_language_busy=lambda:app.bridge.busy or app.operation_lock.locked()
                 app.desktop.menu_context_requester=app.bridge.request_menu_context
                 app.desktop.menu_context_canceller=app.bridge.cancel_menu_context
             await asyncio.to_thread(app.desktop.start)

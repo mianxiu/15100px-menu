@@ -28,6 +28,18 @@ def window_transition(method):
     return call
 
 
+def per_monitor_dpi(method):
+    @wraps(method)
+    def call(self,*args,**kwargs):
+        user=ctypes.WinDLL('user32',use_last_error=True)
+        user.SetThreadDpiAwarenessContext.argtypes,user.SetThreadDpiAwarenessContext.restype=[W.HANDLE],W.HANDLE
+        previous=user.SetThreadDpiAwarenessContext(W.HANDLE(-4))
+        try:return method(self,*args,**kwargs)
+        finally:
+            if previous:user.SetThreadDpiAwarenessContext(previous)
+    return call
+
+
 def shape_editor_allowed(panel, shape, hold, context=None):
     context=context or {}
     from .shape_paint import editor_matches
@@ -175,6 +187,7 @@ class Desktop:
         self.menu_ready = threading.Event()
         self.window_lock = threading.RLock()
         self.panel_context = None
+        self.input_language = None
         self.layer_context_provider=None
         self.layer_monitor=None
         self.layer_context={}
@@ -187,6 +200,9 @@ class Desktop:
         import win32gui
         self.gui = win32gui
         self.panel_context = PanelContext(win32gui)
+        from .input_language import InputLanguage
+        self.input_language=InputLanguage(self)
+        self.input_language.thread.start()
         self.icons = WindowIcons()
         self.ready = threading.Event()
         host = ROOT / "native/HotkeyHost.exe"
@@ -332,6 +348,9 @@ class Desktop:
                 elif event.get('type') == 'panel.click':
                     if self.panel_context:
                         self.panel_context.record_click(event['hwnd'], event['root'])
+                    if self.input_language:self.input_language.click(event['hwnd'],event['root'])
+                elif event.get('type') == 'input.language.protect':
+                    if self.input_language:self.input_language.protect()
                 elif event.get("type") == "action":
                     logging.info('Native hook action: %s cursor=%s', event['action'], event.get('cursor'))
                     self.notify({'action':event['action'],'cursor':event['cursor']} if 'cursor' in event else event['action'])
@@ -559,6 +578,7 @@ class Desktop:
             raise RuntimeError('操作面板已关闭或重新打开，本次未执行')
         self.require_action_focus()
 
+    @per_monitor_dpi
     def open_menu_tools(self, mode, epoch=None):
         with self.window_lock:
             if epoch is not None and (not self.visible or self.menu_epoch != epoch):
@@ -577,13 +597,12 @@ class Desktop:
             import win32api
             anchor=win32api.GetCursorPos()
             rect=self.gui.GetWindowRect(self.target)
-            work=win32api.GetMonitorInfo(win32api.MonitorFromPoint(tuple(anchor),2))['Work']
-            if not (rect[0]<=anchor[0]<rect[2] and rect[1]<=anchor[1]<rect[3]):rect=work
+            work=win32api.GetMonitorInfo(win32api.MonitorFromWindow(self.target,2))['Work']
             dpi=self.icons.u.GetDpiForWindow(self.hwnd) or 96
-            bounds=pie_bounds(rect,work,anchor,dpi/96,color_editor=True)
+            bounds=panel_bounds(rect,work,(round(anchor[0]+12*dpi/96),round(anchor[1]+12*dpi/96)),round(432*dpi/96),round((300 if mode=='search' else 620)*dpi/96))
             self.gui.SetWindowPos(self.hwnd,0,*bounds,0x4|0x10)
             scale=dpi/96
-            self.preview_hint_anchor=[round(bounds[0]+max(bounds[2]*.5,min(650*scale,bounds[2]-270*scale))),round(bounds[1]+bounds[3]*.5)]
+            self.preview_hint_anchor=[round(bounds[0]+bounds[2]*.5),round(bounds[1]+bounds[3]*.5)]
             current=self.menu_epoch
         sequence=self._native_config()
         with self.native_applied:
@@ -592,6 +611,17 @@ class Desktop:
             self.hide();raise RuntimeError('面板输入保护未就绪，本次未打开')
         self.require_menu_tools(current)
         return current
+
+    @per_monitor_dpi
+    @window_transition
+    def resize_menu_tools(self,epoch,rows):
+        self.require_menu_tools(epoch)
+        import win32api
+        current=self.gui.GetWindowRect(self.hwnd);rect=self.gui.GetWindowRect(self.target)
+        work=win32api.GetMonitorInfo(win32api.MonitorFromWindow(self.target,2))['Work']
+        scale=(self.icons.u.GetDpiForWindow(self.hwnd) or 96)/96
+        bounds=panel_bounds(rect,work,current[:2],current[2]-current[0],round((300+46*min(6,max(0,rows)))*scale))
+        self.gui.SetWindowPos(self.hwnd,0,*bounds,0x4|0x10)
 
     @window_transition
     def require_move_context(self, name):
@@ -668,16 +698,10 @@ class Desktop:
             self.hide(restore=False)
         self._native_config()
 
+    @per_monitor_dpi
     def open(self, context=False, hold=False, origin=None, keyboard_anchor=False):
-        u = ctypes.WinDLL("user32", use_last_error=True)
-        u.SetThreadDpiAwarenessContext.argtypes, u.SetThreadDpiAwarenessContext.restype = [W.HANDLE], W.HANDLE
-        previous = u.SetThreadDpiAwarenessContext(W.HANDLE(-4))
-        try:
-            if keyboard_anchor:return self._open(context,hold,origin,keyboard_anchor=True)
-            return self._open(context, hold, origin) if origin is not None else self._open(context, hold)
-        finally:
-            if previous:
-                u.SetThreadDpiAwarenessContext(previous)
+        if keyboard_anchor:return self._open(context,hold,origin,keyboard_anchor=True)
+        return self._open(context, hold, origin) if origin is not None else self._open(context, hold)
 
     def begin_stability_menu(self, pid, check, observe_busy=False):
         """Owned read-only inspection; production popup/context path, no input injection."""
@@ -769,7 +793,6 @@ class Desktop:
                     max(rect[2], floating[2]), max(rect[3], floating[3]))
         if not (rect[0] <= cursor[0] < rect[2] and rect[1] <= cursor[1] < rect[3]):
             if not keyboard_anchor:raise RuntimeError("鼠标需要位于 Photoshop 窗口内")
-            rect=win32api.GetMonitorInfo(win32api.MonitorFromPoint(cursor,c.MONITOR_DEFAULTTONEAREST))["Work"]
         if hold and origin is not None:cursor=tuple(origin)
         self.target = root
         self.caption_window = hwnd
@@ -780,7 +803,7 @@ class Desktop:
         u = ctypes.WinDLL("user32", use_last_error=True)
         u.GetDpiForWindow.argtypes, u.GetDpiForWindow.restype = [W.HWND], W.UINT
         scale = (u.GetDpiForWindow(hwnd) or 96) / 96
-        work = win32api.GetMonitorInfo(win32api.MonitorFromPoint(cursor, c.MONITOR_DEFAULTTONEAREST))["Work"]
+        work = win32api.GetMonitorInfo(win32api.MonitorFromWindow(root,c.MONITOR_DEFAULTTONEAREST) if keyboard_anchor else win32api.MonitorFromPoint(cursor,c.MONITOR_DEFAULTTONEAREST))["Work"]
         panel = _inspection['panel'] if _inspection else self.panel_context.snapshot(hwnd) if self.panel_context else {'kind': 'generic'}
         self.menu_layer_context=None
         if self.layer_context_provider and panel.get('kind')!='home':
@@ -1155,6 +1178,7 @@ class Desktop:
 
     def close(self):
         self.stop.set()
+        if self.input_language:self.input_language.thread.join(2)
         if self.native:
             try:
                 self.native.stdin.close()

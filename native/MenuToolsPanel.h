@@ -3,10 +3,20 @@
 struct MenuToolsPanel {
     bool active=false,opening=false,ready=false,pending=false,focus=false;
     std::string mode,error,source,sourceDisplay,revision,layerName;
-    char name[801]{},file[801]{},grouping[4001]{};
+    char name[801]{},grouping[4001]{};
+    bool searchDirty=false;
+    double searchChanged=0;
+    void changeSearch(double now){searchDirty=true;searchChanged=now;results=Json();error.clear();}
+    bool searchDue(double now)const{return searchDirty && !pending && ready && now-searchChanged>=.18;}
     int kind=0,request=0;
     Json results;
     MenuSplitPreview split;
+    bool dragging=false;
+    POINT dragPointer{};
+    static POINT dragPosition(RECT own,RECT limit,POINT delta) {
+        return {std::clamp(own.left+delta.x,limit.left,std::max(limit.left,limit.right-(own.right-own.left))),
+                std::clamp(own.top+delta.y,limit.top,std::max(limit.top,limit.bottom-(own.bottom-own.top)))};
+    }
 
     void reset(){*this=MenuToolsPanel{};}
     void open(const char* value){reset();opening=true;mode=value;sendMenuTool("menu.tools.open",Json{{"mode",value}});}
@@ -21,10 +31,12 @@ struct MenuToolsPanel {
             if(!event.value("ok",true)){reset();active=true;error=event.value("error",std::string("面板未能打开"));requireText(error);return;}
             reset();active=ready=focus=true;mode=event.at("mode").get<std::string>();
             if(mode=="split")submit("text.read",Json::object());
+            else changeSearch(ImGui::GetTime()-.18);
             return;
         }
         if(!active || !pending || event.value("request",-1)!=request)return;
         pending=false;
+        if(event.value("action",std::string())=="layers.search" && searchDirty)return;
         if(!event.value("ok",false)){error=event.value("error",std::string("操作失败"));requireText(error);return;}
         const auto action=event.value("action",std::string());const auto& result=event.at("result");
         if(action=="layers.search") {
@@ -39,11 +51,11 @@ struct MenuToolsPanel {
     void draw(float scale,ImVec2 center,bool available) {
         const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
         const float gap=menuControlPadding*scale,padding=menuControlPadding*scale,h=menuControlHeight*scale;
-        const float width=std::min(420*scale,std::max(160*scale,center.x-pos.x-175*scale));
+        const float width=std::max(1.f,std::min(420*scale,size.x-gap*2));
         const int rows=results.is_null()?0:std::min(6,int(results.at("items").size()));
         const float contentHeight=mode=="search"?(218+46*rows)*scale:510*scale;
-        const float height=std::min(contentHeight,size.y-gap*2);
-        const ImVec2 at={pos.x+gap,std::clamp(center.y-h*.5f,pos.y+gap,pos.y+size.y-height-gap)};
+        const float height=std::max(1.f,std::min(contentHeight,size.y-70*scale));
+        const ImVec2 at={pos.x+gap,pos.y+gap};
         ImGui::SetCursorScreenPos(at);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding,ImGui::GetStyle().FrameRounding);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{padding,padding});
@@ -51,17 +63,27 @@ struct MenuToolsPanel {
         ImGui::BeginChild("##caps-tools",{width,height},ImGuiChildFlags_Borders|ImGuiChildFlags_AlwaysUseWindowPadding);
         ImGui::PopStyleColor();ImGui::PopStyleVar(2);
         if(opening || !ready){ImGui::TextWrapped("%s",error.empty()?"正在准备输入保护…":error.c_str());if(ImGui::Button("关闭",{0,h}))send("hide");ImGui::EndChild();return;}
-        ImGui::BeginDisabled(pending || !available);
+        ImGui::BeginDisabled((pending && mode!="search") || !available);
         if(mode=="search") {
-            ImGui::TextUnformatted("文件名包含");ImGui::SetNextItemWidth(-1);
-            ImGui::InputText("##file",file,sizeof(file));
-            ImGui::TextUnformatted("图层名包含");ImGui::SetNextItemWidth(-1);
+            ImGui::SetNextItemWidth(-1);
             if(focus){ImGui::SetKeyboardFocusHere();focus=false;}
-            const bool enter=ImGui::InputText("##layer",name,sizeof(name),ImGuiInputTextFlags_EnterReturnsTrue);
-            const char* kinds[]={"全部类型","像素图层","文字图层","图层组","形状图层","智能对象","调整图层","填充图层","其他图层"};
+            const bool enter=ImGui::InputTextWithHint("##layer","搜索图层…",name,sizeof(name),ImGuiInputTextFlags_EnterReturnsTrue);
+            if(ImGui::IsItemEdited())changeSearch(ImGui::GetTime());
+            const char* kinds[]={"全部","像素","文字","组","形状","智能对象","调整","填充","其他"};
             const char* ids[]={"all","pixel","text","group","shape","smart-object","adjustment","fill","other"};
-            ImGui::SetNextItemWidth(-1);ImGui::Combo("##kind",&kind,kinds,IM_ARRAYSIZE(kinds));
-            if(ImGui::Button("搜索图层",{0,h}) || enter){results=Json();submit("layers.search",Json{{"name",name},{"document",file},{"type",ids[kind]}});}
+            for(int i=0;i<IM_ARRAYSIZE(kinds);++i) {
+                const float buttonWidth=ImGui::CalcTextSize(kinds[i]).x+ImGui::GetStyle().FramePadding.x*2;
+                if(i && ImGui::GetItemRectMax().x+ImGui::GetStyle().ItemSpacing.x+buttonWidth<ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x)ImGui::SameLine();
+                ImGui::PushID(i);
+                if(ImGui::Selectable(kinds[i],kind==i,ImGuiSelectableFlags_None,{buttonWidth,h})) {
+                    kind=i;changeSearch(ImGui::GetTime()-.18);
+                }
+                ImGui::PopID();
+            }
+            if(enter && !pending)changeSearch(ImGui::GetTime()-.18);
+            if(available && searchDue(ImGui::GetTime())) {
+                searchDirty=false;submit("layers.search",Json{{"name",name},{"type",ids[kind]}});
+            }
             if(!results.is_null()) {
                 ImGui::Text("找到图层：%d · 已扫描：%d",int(results.at("items").size()),results.value("scanned",0));
                 if(results.value("truncated",false))ImGui::TextWrapped("达到搜索上限，请缩小条件");
@@ -70,8 +92,9 @@ struct MenuToolsPanel {
                 int index=0;
                 for(const auto& row:results.at("items")) {
                     ImGui::PushID(index);
+                    ImGui::BeginDisabled(pending);
                     if(ImGui::Button("定位",{0,h}))submit("layers.focus",Json{{"search_id",results.at("search_id")},{"index",index}});
-                    ImGui::SameLine();ImGui::BeginGroup();
+                    ImGui::EndDisabled();ImGui::SameLine();ImGui::BeginGroup();
                     ImGui::TextUnformatted(row.at("name").get_ref<const std::string&>().c_str());
                     const auto type=row.value("type",std::string("other"));int typeIndex=8;
                     for(int i=0;i<IM_ARRAYSIZE(ids);++i)if(type==ids[i])typeIndex=i;
@@ -99,6 +122,21 @@ struct MenuToolsPanel {
         ImGui::EndDisabled();
         if(pending)ImGui::TextUnformatted("正在处理…");
         if(ImGui::Button("关闭",{0,h}))send("hide");
+        if(ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered() && !ImGui::IsAnyItemActive()) {
+            dragging=true;GetCursorPos(&dragPointer);
+        }
+        if(!available || pending || !ImGui::IsMouseDown(ImGuiMouseButton_Left))dragging=false;
+        if(dragging && !pending) {
+            POINT pointer{};GetCursorPos(&pointer);
+            RECT own{},owner{},limit{};GetWindowRect(window,&own);
+            HWND target=GetWindow(window,GW_OWNER);
+            MONITORINFO monitor{sizeof(MONITORINFO)};
+            if(target && GetWindowRect(target,&owner) && GetMonitorInfoW(MonitorFromWindow(target,MONITOR_DEFAULTTONEAREST),&monitor) && IntersectRect(&limit,&owner,&monitor.rcWork)) {
+                const auto at=dragPosition(own,limit,{pointer.x-dragPointer.x,pointer.y-dragPointer.y});
+                SetWindowPos(window,nullptr,at.x,at.y,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
+            }
+            dragPointer=pointer;
+        }
         ImGui::EndChild();
     }
 };

@@ -171,6 +171,9 @@ class ManagementTests(unittest.TestCase):
         self.assertTrue(desktop.visible)
         args = desktop.gui.SetWindowPos.call_args.args
         self.assertEqual(args[2:6],(540,600,360,300))
+        with patch('win32api.GetCursorPos',return_value=(50,50)),patch('win32api.GetMonitorInfo',return_value={'Work':(0,0,1920,1080)}),patch('win32api.MonitorFromWindow',return_value=1):
+            desktop._open(keyboard_anchor=True)
+        self.assertEqual(desktop.gui.SetWindowPos.call_args.args[2:6],(100,100,360,300))
 
     def test_bounds_stay_inside_photoshop_and_work_area(self):
         self.assertEqual(panel_bounds((100,100,900,900),(0,0,1920,1080),(850,850),750,600),(150,300,750,600))

@@ -50,7 +50,10 @@ class MenuTools:
             if value['request']<=self.last_request:raise RuntimeError('已忽略重复工具请求')
             self.last_request=value['request']
             action,params=value['action'],value['args']
-            if action=='layers.search':result=await self.search.search(params)
+            if action=='layers.search':
+                result=await self.search.search(params)
+                await guard()
+                await asyncio.to_thread(self.app.desktop.resize_menu_tools,epoch,len(result['items']))
             elif action=='layers.focus':result=await self.search.focus(params,menu_guard=guard)
             elif action=='text.read':
                 result=await self.text.read(params)

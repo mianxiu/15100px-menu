@@ -18,7 +18,7 @@ class MenuToolsTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.app=SimpleNamespace(panel_lock=asyncio.Lock(),desktop=SimpleNamespace(
             require_menu_tools=Mock(),open_menu_tools=Mock(return_value=7),event=Mock(),
-            menu_layer_context={'session':'s','document_id':1,'layer_ids':[2]}),broadcast=AsyncMock())
+            menu_layer_context={'session':'s','document_id':1,'layer_ids':[2]},resize_menu_tools=Mock()),broadcast=AsyncMock())
         self.tools=MenuTools(self.app);self.tools.epoch=7
         self.available=patch('backend.menu_tools.require_available');self.available.start();self.addCleanup(self.available.stop)
 
@@ -133,13 +133,28 @@ class MenuToolsDesktopTests(unittest.TestCase):
             self.assertEqual(desktop.open_menu_tools('split',6),7)
         self.assertTrue(desktop.menu_tools_active);self.assertFalse(desktop.hold_active)
         self.assertEqual(desktop.gui.SendMessage.call_args_list[0].args,(2,0x800d,1,7))
-        desktop.gui.SetWindowPos.assert_called_once_with(2,0,450,290,920,620,0x4|0x10)
-        self.assertEqual(desktop.preview_hint_anchor,[1100,600])
+        desktop.gui.SetWindowPos.assert_called_once_with(2,0,1112,420,432,620,0x4|0x10)
+        self.assertTrue(all(type(v) is int for v in desktop.gui.SetWindowPos.call_args.args[2:6]))
+        self.assertEqual(desktop.preview_hint_anchor,[1328,730])
         with self.assertRaisesRegex(RuntimeError,'重新打开'):desktop.require_menu_tools(6)
-        with patch('win32api.GetCursorPos',return_value=(-1000,500)),patch('win32api.MonitorFromPoint',return_value=1),patch('win32api.GetMonitorInfo',return_value={'Work':(-1920,0,0,1040)}):
+        desktop.gui.GetWindowRect.return_value=(-1800,100,-100,1000)
+        with patch('win32api.GetCursorPos',return_value=(-1000,500)),patch('win32api.MonitorFromWindow',return_value=1),patch('win32api.GetMonitorInfo',return_value={'Work':(-1920,0,0,1040)}):
             self.assertEqual(desktop.open_menu_tools('search',7),8)
-        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-1650,190,920,620,0x4|0x10))
-        self.assertEqual(desktop.preview_hint_anchor,[-1000,500])
+        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-988,512,432,300,0x4|0x10))
+        self.assertEqual(desktop.preview_hint_anchor,[-772,662])
+        with patch('win32api.GetCursorPos',return_value=(2500,2000)),patch('win32api.GetMonitorInfo',return_value={'Work':(-1920,0,0,1040)}):
+            desktop.open_menu_tools('search',8)
+        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-532,700,432,300,0x4|0x10))
+
+    def test_search_results_resize_within_ps_and_closed_epoch_rejects(self):
+        desktop=Desktop('http://localhost',Mock());desktop.hwnd=2;desktop.target=1;desktop.gui=Mock()
+        desktop.require_menu_tools=Mock();desktop.icons=Mock();desktop.icons.u.GetDpiForWindow.return_value=96
+        desktop.gui.GetWindowRect.side_effect=lambda h:(1500,800,1932,1100) if h==2 else (100,100,1900,1100)
+        with patch('win32api.GetMonitorInfo',return_value={'Work':(0,0,1920,1040)}):desktop.resize_menu_tools(7,10)
+        desktop.gui.SetWindowPos.assert_called_once_with(2,0,1468,464,432,576,0x4|0x10)
+        desktop.require_menu_tools.side_effect=RuntimeError('closed')
+        with self.assertRaisesRegex(RuntimeError,'closed'):desktop.resize_menu_tools(8,0)
+        self.assertEqual(desktop.gui.SetWindowPos.call_count,1)
 
     def test_tools_caps_closes_instead_of_confirming_a_shape(self):
         desktop=Desktop('http://localhost',Mock());desktop.visible=True;desktop.hwnd=2
@@ -178,7 +193,7 @@ class NativeMenuToolsTests(unittest.TestCase):
                     process.stdin.flush()
                 deadline=time.monotonic()+3
                 while (message(0x801d)&3!=3 or message(0x8012)!=1000) and time.monotonic()<deadline:time.sleep(.01)
-                self.assertEqual(message(0x801d),3)
+                self.assertEqual(message(0x801d)&3,3)
                 self.assertEqual(message(0x8012),1000,'A ready tool must also render visible content')
                 win32gui.ShowWindow(hwnd,c.SW_HIDE)
         finally:

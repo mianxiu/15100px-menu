@@ -14,8 +14,8 @@
 #include <vector>
 #include "ScreenSample.h"
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers };
-static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search"};
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers, LanguageProtect };
+static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search", "input.language.protect"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
 struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr; ULONGLONG sequence=0; std::array<Binding,16> bindings{}; };
 // Opt-in remote clicks qualify only on a matching release in the same verified
@@ -404,6 +404,10 @@ static bool menuWindow(HWND hwnd) {
     GetWindowThreadProcessId(hwnd,&pid);GetWindowThreadProcessId(config.overlay,&owner);
     return pid && pid==owner;
 }
+static bool textLanguageIntent(int key,const KeyMachine& state) {
+    return key=='T' && !state.held[VK_CONTROL] && !state.held[VK_MENU] &&
+        !state.held[VK_CAPITAL] && !state.held[VK_LWIN] && !state.held[VK_RWIN];
+}
 static bool routeKey(KeyMachine& state,int raw,bool down,bool commandScope,bool processScope,
                      const Config& cfg,bool visible,Action& action,ULONGLONG now) {
     // Reserve only CapsLock in PS-owned non-workspace windows. Other keys keep
@@ -446,6 +450,8 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
         bool unusedPrefix=keys.pending!=-1 && !keys.used;
         bool blocked=routeKey(keys,input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
                      commandScope,processScope,localConfig,IsWindowVisible(config.overlay),action,GetTickCount64());
+        if(commandScope && !blocked && !repeat && !(input.flags&LLKHF_INJECTED) &&
+            (message==WM_KEYDOWN || message==WM_SYSKEYDOWN) && textLanguageIntent(input.vkCode,keys))emit(LanguageProtect);
         bool traceConfigured=false;
         if(config.diagnostic && GetTickCount64()<diagnosticUntil) for(const auto& b:config.bindings)
             if(b.action==Toggle && b.count && b.keys[b.count-1]==alias(input.vkCode))traceConfigured=true;
@@ -702,7 +708,8 @@ static void writeActions() {
                 if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) {stop();return;}
                 continue;
             }
-            if (action==PanelClick) line="{\"type\":\"panel.click\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+"}\n";
+            if (action==LanguageProtect) line="{\"type\":\"input.language.protect\"}\n";
+            else if (action==PanelClick) line="{\"type\":\"panel.click\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+"}\n";
             else {
                 line=std::string("{\"type\":\"")+type+"\",\"action\":\""+names[action]+"\"";
                 if(action==Configured)line+=",\"configuration_sequence\":"+std::to_string(event.gapMs);
@@ -739,6 +746,11 @@ static void sampleCapsState(bool force=false) {
     } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
 }
 static int selfTest() {
+    KeyMachine languageKeys;
+    check(textLanguageIntent('T',languageKeys) && !textLanguageIntent(VK_F2,languageKeys) && !textLanguageIntent('A',languageKeys));
+    for(int modifier:{VK_CONTROL,VK_MENU,VK_CAPITAL,VK_LWIN,VK_RWIN}) {
+        languageKeys.held[modifier]=true;check(!textLanguageIntent('T',languageKeys));languageKeys.held[modifier]=false;
+    }
     ScreenSampleClicks samples;
     for(int n=0;n<1000;++n){
         check(samples.route(0,false,false)==0); // Ordinary outside click still dismisses.
