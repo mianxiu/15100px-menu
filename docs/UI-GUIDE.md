@@ -1,5 +1,7 @@
 # UI 指南
 
+248本机：修复原生长批次诊断渲染不处理窗口消息造成的可复现未响应；低CPU／正常WARP各8秒持续响应并正常关闭，566回归及冻结启动重启通过，实际入口／dist／原生组件一致。Caps改为Win11风格宽柔影＋接触影，保留布局和命中；它是透明控件组的外观近似。PS／UXP会话、配置及历史保护保持。截图进程身份未证实；正常WARP投影对照缺测、GPU实屏／实体输入及原低配待验。公开Release仍230。[原因与证据](https://github.com/mianxiu/15100px-menu/wiki/Menu-responsiveness)／[全部开销与限制](https://github.com/mianxiu/15100px-menu/wiki/Menu-shadow)。
+
 247本机：普通Caps按钮组／色板／预设／中心环及底部信息加浅柔和投影，不改变命中、位置或PS执行；565回归、冻结构建和实际入口匹配通过。GPU帧提交中位增加约0.029～0.034ms（每侧200样本），CPU回退保留49.0815ms长帧；完整中位／P95／最大、绝对／百分比及未验范围见[投影测量](https://github.com/mianxiu/15100px-menu/wiki/Menu-shadow)。PS未重启，公开Release仍230。
 
 

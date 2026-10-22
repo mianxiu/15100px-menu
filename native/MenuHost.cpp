@@ -46,7 +46,7 @@ static ID3D11Device* device;
 static ID3D11DeviceContext* context;
 static std::string renderMode="auto",activeRenderMode="",renderAdapter,benchmarkRenderMode="auto";
 static bool rendererDirty=false;
-static bool benchmarkRenderCompletion=false;
+static bool benchmarkRenderCompletion=false,benchmarkMenuOnly=false;
 static Json graphicsInfo(){return Json{{"requested",renderMode},{"active",activeRenderMode},{"adapter",renderAdapter}};}
 static IDXGISwapChain* swapChain;
 static HANDLE frameLatency=nullptr;
@@ -1709,23 +1709,46 @@ static void drawMenu() {
     if (contextMode && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) send("hide");
     ImGui::End();
 }
+// Long diagnostic loops must service the same queue as the normal renderer.
+static bool pumpMessages() {
+    MSG msg;
+    while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)) {
+        TranslateMessage(&msg);DispatchMessageW(&msg);
+        if(msg.message==WM_QUIT)running=false;
+    }
+    return running;
+}
+static bool waitMessages(DWORD milliseconds) {
+    const auto until=GetTickCount64()+milliseconds;
+    while(pumpMessages()) {
+        const auto now=GetTickCount64();if(now>=until)return true;
+        if(MsgWaitForMultipleObjectsEx(0,nullptr,DWORD(until-now),QS_ALLINPUT,MWMO_INPUTAVAILABLE)==WAIT_FAILED)
+            throw std::runtime_error("Diagnostic message wait failed");
+    }
+    return false;
+}
 static void benchmarkShapeEditor(const Json& fixture) {
     if(shapeBenchmarkOutput.empty())return;
     Json report={{"scope",benchmarkRenderCompletion?"warm CPU build/submission plus DX11 EVENT completion (includes queue/driver/query wait); no Present/vsync or physical key latency":"warm native CPU frame build + DX11 command submission; no Present/vsync, physical key latency or PS IPC"},{"graphics",graphicsInfo()},{"samples_per_case",200},{"font","large"},{"dpi_scale",scale},{"cases",Json::array()}};
     ID3D11Query* completion=nullptr;
     if(benchmarkRenderCompletion){D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};if(FAILED(device->CreateQuery(&desc,&completion)))throw std::runtime_error("Unable to create render completion query");}
+    const auto releaseQuery=[](ID3D11Query* p){if(p)p->Release();};
+    std::unique_ptr<ID3D11Query,decltype(releaseQuery)> queryOwner(completion,releaseQuery);
     auto& io=ImGui::GetIO();io.FontDefault=menuFonts[2];layerAware=true;layerKind=6;layerCount=1;layerMask=15;quickMask=127;panelKind=2;capsReady=documentSortReady=true;
     const auto actionsBefore=testedActions.size();
+    std::cout<<Json{{"type","benchmark.started"},{"hwnd",reinterpret_cast<uintptr_t>(window)}}.dump()<<std::endl;
     for(const char* themeName:{"light","light-gray","dark-gray","dark"}){
+        if(benchmarkMenuOnly && std::string(themeName)!="light-gray")continue;
         uiTheme=themeName;theme();
         for(const char* kind:{"plain","solid","gradient","pattern"}){
+            if(benchmarkMenuOnly && std::string(kind)!="plain")continue;
             shapeEditor.prepare(fixture);setHoldMode(true);shapePanelOpen=true;
             if(std::string(kind)=="plain")shapeEditor.available=false;
             else if(std::string(kind)=="gradient")shapeEditor.mode(1);
             else if(std::string(kind)=="pattern")shapeEditor.mode(2);
             std::vector<double> values,completed;int vertices=0,commands=0;
             for(int frame=0;frame<221;++frame){
-                if(frame==20)Sleep(250);
+                if(!pumpMessages() || frame==20 && !waitMessages(250))return;
                 ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();io.DeltaTime=1.f/60;
                 const auto start=std::chrono::steady_clock::now();
                 ImGui::NewFrame();drawMenu();ImGui::Render();
@@ -1737,6 +1760,7 @@ static void benchmarkShapeEditor(const Json& fixture) {
                     context->End(completion);context->Flush();HRESULT done;
                     while((done=context->GetData(completion,nullptr,0,D3D11_ASYNC_GETDATA_DONOTFLUSH))==S_FALSE){
                         if(std::chrono::steady_clock::now()-start>std::chrono::seconds(2))throw std::runtime_error("Render completion timed out");
+                        if(!pumpMessages())return;
                         SwitchToThread();
                     }
                     if(FAILED(done))throw std::runtime_error("Render device failed during completion benchmark");
@@ -1753,7 +1777,6 @@ static void benchmarkShapeEditor(const Json& fixture) {
         }
     }
     report["shadow_enabled"]=menuShadow::enabled;
-    if(completion)completion->Release();
     if(testedActions.size()!=actionsBefore)throw std::runtime_error("Rendering benchmark submitted an operation");
     std::ofstream output{std::filesystem::path(shapeBenchmarkOutput)};output<<report.dump(2);
 }
@@ -1846,6 +1869,7 @@ int main() {
         else if (i+2<argc && arg==L"--self-test-origin") {
             testOrigin.x=std::stol(argv[++i]);testOrigin.y=std::stol(argv[++i]);
         }
+        else if (arg==L"--benchmark-menu-only") benchmarkMenuOnly=true;
         else if (arg==L"--benchmark-no-menu-shadow") menuShadow::enabled=false;
         else if (arg==L"--benchmark-render-completion") benchmarkRenderCompletion=true;
         else if (i+1<argc && arg==L"--render-mode") {
@@ -2167,8 +2191,7 @@ int main() {
                 if (result==WAIT_FAILED) throw std::runtime_error("Frame wait failed");
                 frameGranted=result==WAIT_OBJECT_0;
             }
-            MSG msg;while (PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)) {TranslateMessage(&msg);DispatchMessageW(&msg);if (msg.message==WM_QUIT) running=false;}
-            if (!running) break;
+            if(!pumpMessages())break;
             if ((selfTest || previewLifecycle) && frames==14) {
                 RECT rect;GetWindowRect(window,&rect);
                 SetWindowPos(window,nullptr,0,0,rect.right-rect.left+40,rect.bottom-rect.top+40,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
@@ -3356,6 +3379,8 @@ int main() {
                 if(!recoverRenderer())throw std::runtime_error("Unable to restore requested benchmark graphics mode");
                 shapeFixture["vector"]=true;
                 benchmarkShapeEditor(shapeFixture);
+                if(!running)break;
+                if(!running)break;
                 capsReady=true;panelKind=2;layerAware=true;layerKind=2;layerMask=15;layerCount=1;layerLocked=layerBackground=layerCrossParents=false;
                 shapeEditor.prepare(Json{{"available",false}});taskBusy=busyFeedback=false;
                 setHoldMode(true);shapePanelOpen=true;holdMoved=true;numberFrame(ImGuiKey_None,false);
