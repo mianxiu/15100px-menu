@@ -1,5 +1,8 @@
 # Photoshop Menu
 
+247本机：普通Caps按钮组／色板／预设／中心环及底部信息加浅柔和投影，不改变命中、位置或PS执行；565回归、冻结构建和实际入口匹配通过。GPU帧提交中位增加约0.029～0.034ms（每侧200样本），CPU回退保留49.0815ms长帧；完整中位／P95／最大、绝对／百分比及未验范围见[投影测量](https://github.com/mianxiu/15100px-menu/wiki/Menu-shadow)。PS未重启，公开Release仍230。
+
+
 246／UXP0.3.64本机：新建／调整图层图标下移到颜色标签右边；上移／下移及拆分文字移到原右侧位置，绘制与命中同步。565回归、低CPU原生矩阵、当前主题CPU布局及实际入口匹配通过，PS无需重启；实体手感／GPU实屏仍待验。[菜单布局](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide)。公开Release仍230。
 
 

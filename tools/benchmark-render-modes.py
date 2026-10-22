@@ -24,8 +24,8 @@ def main():
             cases=[c for r in reports if r['mode']==mode for c in r['report']['cases'] if c['kind']==kind]
             aggregate.append({'kind':kind,'mode':mode,'submission_median_mean_ms':sum(c['median_ms'] for c in cases)/len(cases),
                 'completion_median_mean_ms':sum(c['completion_median_ms'] for c in cases)/len(cases),'worst_case_completion_p95_ms':max(c['completion_p95_ms'] for c in cases)})
-    output={'scope':'Same 920x560 logical native UI, large cached font, four themes; 20 warm + 200 measured frames per case. DX11 EVENT waits include queue/driver/query synchronization, exclude Present/vsync and physical key latency. No Photoshop commands. Short bounded stability test, not long-run assurance.',
-        'rendered_benchmark_frames':args.rounds*2*16*220,'native_selftests':len(reports),'summary':aggregate,'runs':reports}
+    output={'scope':'Same 920x560 logical native UI, large cached font, four themes; 20 warm + one 250ms-idle frame + 200 measured frames per case. DX11 EVENT waits include queue/driver/query synchronization, exclude Present/vsync and physical key latency. No Photoshop commands. Short bounded stability test, not long-run assurance.',
+        'rendered_benchmark_frames':args.rounds*2*16*221,'native_selftests':len(reports),'summary':aggregate,'runs':reports}
     args.output.write_text(json.dumps(output,indent=2),'utf-8')
     print(json.dumps(output['summary'],indent=2),flush=True)
 if __name__=='__main__':main()

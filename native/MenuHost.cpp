@@ -30,6 +30,7 @@
 #include "FigmaMenuIcons.h"
 #include "StyledMenuIcons.h"
 #include "MenuUiMetrics.h"
+#include "MenuShadow.h"
 #include "ActivityIndicator.h"
 
 using Json=nlohmann::json;
@@ -980,6 +981,7 @@ static void drawRecentPresets() {
     const ImVec2 a={pieCenter.x+65*scale,pieCenter.y-panelPadding-rowHeight*.5f};
     const ImVec2 b={a.x+width,a.y+height};
     recentPanelBounds={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
+    menuShadow::draw(draw,a,b,ImGui::GetStyle().FrameRounding,scale);
     draw->AddRectFilled(a,b,tint(ImGuiCol_WindowBg),ImGui::GetStyle().FrameRounding);
     draw->AddRect(a,b,tint(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
     if(!gridCount) {
@@ -1019,6 +1021,7 @@ static void drawRecentPresets() {
         bool active=item.available && canExecute() && recentReady && !pieAnimating &&
             ((!preview.empty() && previewRecentHover>=0)?previewRecentHover==int(i):PtInRect(&r,cursor));
         ImVec4 fill=ImGui::GetStyle().Colors[active?ImGuiCol_HeaderHovered:ImGuiCol_Button];
+        menuShadow::draw(draw,at,{at.x+rowWidth,at.y+rowHeight},ImGui::GetStyle().FrameRounding,scale);
         draw->AddRectFilled(at,{at.x+rowWidth,at.y+rowHeight},ImGui::ColorConvertFloat4ToU32(fill),ImGui::GetStyle().FrameRounding);
         draw->AddRect(at,{at.x+rowWidth,at.y+rowHeight},tint(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
         ImGui::SetCursorScreenPos(at);
@@ -1301,6 +1304,7 @@ static void drawFooter(const std::vector<std::string>& messages,float y,bool avo
     const ImVec2 a={roundf(x),roundf(y)},b={roundf(x+width),roundf(y+height)};
     footerBounds={a.x,a.y,b.x,b.y};
     auto bg=ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);bg.w=.92f;
+    menuShadow::draw(draw,a,b,ImGui::GetStyle().FrameRounding,scale);
     draw->AddRectFilled(a,b,ImGui::ColorConvertFloat4ToU32(bg),ImGui::GetStyle().FrameRounding);
     auto border=ImGui::GetStyleColorVec4(ImGuiCol_Border);border.w=.65f;
     draw->AddRect(a,b,ImGui::ColorConvertFloat4ToU32(border),ImGui::GetStyle().FrameRounding,0,scale);
@@ -1328,6 +1332,7 @@ static void drawQuickGroups(int selected,float fac) {
         const ImVec2 a={pieCenter.x+65*scale,pieCenter.y+quickGroupY(group)*scale};
         const ImVec2 b={a.x+count*cell,a.y+height};
         const int begin=d->VtxBuffer.Size;
+        menuShadow::draw(d,a,b,ImGui::GetStyle().FrameRounding,scale);
         d->AddRectFilled(a,b,tint(ImGuiCol_Button),ImGui::GetStyle().FrameRounding);
         for(int n=0;n<count;++n) {
             const int i=first+n;const ImVec2 cellA={a.x+n*cell,a.y},cellB={cellA.x+cell,b.y};
@@ -1358,6 +1363,7 @@ static void drawCapsBar() {
         for(int i=first;i<=last;++i){widths[i]=std::max(24.f*scale,font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]).x+18*scale);total+=widths[i];}
         if(first==0 || first==7)x=pieCenter.x-total*.5f;
         const float left=x;
+        menuShadow::draw(d,{x,y},{x+total,y+h},r,scale);
         d->AddRectFilled({x,y},{x+total,y+h},tint(ImGuiCol_Button),r);
         for(int i=first;i<=last;++i){
             const ImVec2 a={x,y},b={x+widths[i],y+h};capsRows[i]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
@@ -1397,6 +1403,7 @@ static void drawToolBar() {
     const ImVec2 a={x,y};
     toolRow={LONG(x),LONG(y),LONG(x+width),LONG(y+h)};
     const bool enabled=toolEnabled(1),hover=enabled && !pieAnimating && PtInRect(&toolRow,cursor);
+    menuShadow::draw(draw,a,{x+width,y+h},ImGui::GetStyle().FrameRounding,scale);
     draw->AddRectFilled(a,{x+width,y+h},tint(hover?ImGuiCol_HeaderHovered:ImGuiCol_Button),ImGui::GetStyle().FrameRounding);
     draw->AddText(ImGui::GetFont(),basicLabelSize(),{x+(width-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),label);
     if(pinned && !pieAnimating && enabled && !holdFinished){
@@ -1517,7 +1524,7 @@ static void drawPie() {
         draw->PathArcTo(pieCenter,15.5f*scale,ringAngle-.785398f,ringAngle+.785398f,10);
         draw->PathStroke(tint(selected>=0?ImGuiCol_CheckMark:ImGuiCol_PlotLines),0,7*scale);
     }
-    if(!editing || previewWorking){draw->AddCircle(pieCenter,12*scale,tint(ImGuiCol_Border),40,scale);
+    if(!editing || previewWorking){menuShadow::draw(draw,{pieCenter.x-19*scale,pieCenter.y-19*scale},{pieCenter.x+19*scale,pieCenter.y+19*scale},19*scale,scale);draw->AddCircle(pieCenter,12*scale,tint(ImGuiCol_Border),40,scale);
         draw->AddCircle(pieCenter,19*scale,tint(ImGuiCol_Border),40,scale);}
     for (int i=0;i<4;++i) {
         if (editing || !rowVisible(i)) continue;
@@ -1530,7 +1537,7 @@ static void drawPie() {
             if (ImGui::InvisibleButton("##pinned-action",{b.x-a.x,b.y-a.y})) {holdFinished=true;send(rowAction(i));}
             ImGui::PopID();
         }
-        if(i<2){draw->AddRectFilled(a,b,active?tint(ImGuiCol_HeaderHovered):tint(i==1?ImGuiCol_WindowBg:ImGuiCol_Button),rounding);draw->AddRect(a,b,tint(ImGuiCol_Border),rounding,0,scale);}
+        if(i<2){menuShadow::draw(draw,a,b,rounding,scale);draw->AddRectFilled(a,b,active?tint(ImGuiCol_HeaderHovered):tint(i==1?ImGuiCol_WindowBg:ImGuiCol_Button),rounding);draw->AddRect(a,b,tint(ImGuiCol_Border),rounding,0,scale);}
         else {
             draw->AddRectFilled(a,b,active?tint(ImGuiCol_HeaderHovered):tint(ImGuiCol_Button),rounding,i==2?ImDrawFlags_RoundCornersLeft:ImDrawFlags_RoundCornersRight);
             if(i==2)draw->AddLine({b.x,a.y},{b.x,b.y},tint(ImGuiCol_Border),scale);
@@ -1551,6 +1558,7 @@ static void drawPie() {
     }
     if(!editing && panelKind==2 && capsReady && layerAware && rowVisible(2)){
         auto drawSortGroup=[&](int first,int last,RECT group){
+        menuShadow::draw(draw,{float(group.left),float(group.top)},{float(group.right),float(group.bottom)},rounding,scale);
         draw->AddRectFilled({float(group.left),float(group.top)},{float(group.right),float(group.bottom)},tint(ImGuiCol_Button),rounding);
         for(int n=first;n<=last;++n){
             const int action=n<2?n+2:n+43;
@@ -1706,7 +1714,7 @@ static void benchmarkShapeEditor(const Json& fixture) {
     Json report={{"scope",benchmarkRenderCompletion?"warm CPU build/submission plus DX11 EVENT completion (includes queue/driver/query wait); no Present/vsync or physical key latency":"warm native CPU frame build + DX11 command submission; no Present/vsync, physical key latency or PS IPC"},{"graphics",graphicsInfo()},{"samples_per_case",200},{"font","large"},{"dpi_scale",scale},{"cases",Json::array()}};
     ID3D11Query* completion=nullptr;
     if(benchmarkRenderCompletion){D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};if(FAILED(device->CreateQuery(&desc,&completion)))throw std::runtime_error("Unable to create render completion query");}
-    auto& io=ImGui::GetIO();io.FontDefault=menuFonts[2];layerAware=true;layerKind=6;layerCount=1;layerMask=15;quickMask=127;panelKind=2;
+    auto& io=ImGui::GetIO();io.FontDefault=menuFonts[2];layerAware=true;layerKind=6;layerCount=1;layerMask=15;quickMask=127;panelKind=2;capsReady=documentSortReady=true;
     const auto actionsBefore=testedActions.size();
     for(const char* themeName:{"light","light-gray","dark-gray","dark"}){
         uiTheme=themeName;theme();
@@ -1715,8 +1723,9 @@ static void benchmarkShapeEditor(const Json& fixture) {
             if(std::string(kind)=="plain")shapeEditor.available=false;
             else if(std::string(kind)=="gradient")shapeEditor.mode(1);
             else if(std::string(kind)=="pattern")shapeEditor.mode(2);
-            std::vector<double> values,completed;int vertices=0;
-            for(int frame=0;frame<220;++frame){
+            std::vector<double> values,completed;int vertices=0,commands=0;
+            for(int frame=0;frame<221;++frame){
+                if(frame==20)Sleep(250);
                 ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();io.DeltaTime=1.f/60;
                 const auto start=std::chrono::steady_clock::now();
                 ImGui::NewFrame();drawMenu();ImGui::Render();
@@ -1731,16 +1740,19 @@ static void benchmarkShapeEditor(const Json& fixture) {
                         SwitchToThread();
                     }
                     if(FAILED(done))throw std::runtime_error("Render device failed during completion benchmark");
-                    if(frame>=20)completed.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
+                    if(frame>=21)completed.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
                 }
-                vertices=ImGui::GetDrawData()->TotalVtxCount;finishPlatformFrame();
-                if(frame>=20)values.push_back(elapsed);
+                vertices=ImGui::GetDrawData()->TotalVtxCount;commands=0;for(auto* list:ImGui::GetDrawData()->CmdLists)commands+=list->CmdBuffer.Size;finishPlatformFrame();
+                if(frame>=21)values.push_back(elapsed);
+                if(frame==0 || frame==20)report["render_transitions"].push_back({{"theme",themeName},{"kind",kind},{"phase",frame==0?"initial-render":"idle-250ms-render"},{"samples",Json::array({elapsed})}});
             }
+            const auto raw=values,rawCompleted=completed;
             std::sort(values.begin(),values.end());
-            report["cases"].push_back({{"theme",themeName},{"kind",kind},{"median_ms",values[100]},{"p95_ms",values[189]},{"vertices",vertices}});
-            if(completion){std::sort(completed.begin(),completed.end());report["cases"].back()["completion_median_ms"]=completed[100];report["cases"].back()["completion_p95_ms"]=completed[189];}
+            report["cases"].push_back({{"theme",themeName},{"kind",kind},{"phase","warm-render"},{"samples",raw},{"maximum_ms",values.back()},{"median_ms",values[100]},{"p95_ms",values[189]},{"vertices",vertices},{"draw_commands",commands}});
+            if(completion){std::sort(completed.begin(),completed.end());report["cases"].back()["completion_median_ms"]=completed[100];report["cases"].back()["completion_p95_ms"]=completed[189];report["cases"].back()["completion_maximum_ms"]=completed.back();report["cases"].back()["completion_samples"]=rawCompleted;}
         }
     }
+    report["shadow_enabled"]=menuShadow::enabled;
     if(completion)completion->Release();
     if(testedActions.size()!=actionsBefore)throw std::runtime_error("Rendering benchmark submitted an operation");
     std::ofstream output{std::filesystem::path(shapeBenchmarkOutput)};output<<report.dump(2);
@@ -1834,6 +1846,7 @@ int main() {
         else if (i+2<argc && arg==L"--self-test-origin") {
             testOrigin.x=std::stol(argv[++i]);testOrigin.y=std::stol(argv[++i]);
         }
+        else if (arg==L"--benchmark-no-menu-shadow") menuShadow::enabled=false;
         else if (arg==L"--benchmark-render-completion") benchmarkRenderCompletion=true;
         else if (i+1<argc && arg==L"--render-mode") {
             std::wstring value=argv[++i];std::string mode(value.begin(),value.end());
@@ -2569,6 +2582,8 @@ int main() {
                         throw std::runtime_error("Retained divider tooltip submitted a command");
                     testedActions.pop_back();holdFinished=false;pieReady=true;
                 }
+                {const auto r=quickRows[6];const POINT shadow={r.right+LONG(4*scale),(r.top+r.bottom)/2};
+                    if(holdActionAt(shadow)!=-1)throw std::runtime_error("Menu shadow acquired an action hit");}
                 // Canvas and Layers keep the confirmed near-centre column.
                 panelKind=1;numberFrame(ImGuiKey_None,false);
                 if(std::abs(quickRows[0].top-(pieCenter.y+45*scale))>scale)throw std::runtime_error("Canvas creation group must align with label colors");
