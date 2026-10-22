@@ -1,5 +1,7 @@
 # GitHub 应用更新
 
+254当前打包版本：主程序0.4.254，内置UXP0.3.65。解压主ZIP运行PhotoshopMenu.exe，安装／更新内置UXP后须正常重启PS并核对实际加载65；已加载65且文件匹配时只更新主程序。安装和打开后台不会自动启动PS。逐层／单对象按钮、F查找及Caps拆分用法见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide)。以下旧版本段落为历史记录，安装版本以本段及实际后台为准。
+
 v0.4.160／UXP 0.3.27 已切换本机实际入口；公开正式版仍为159，160尚未发布。更新插件须正常重启PS并核对加载0.3.27；画布目视待验收，参见[实时预览](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
 
 从 v0.4.120 起后台可检查本仓库 GitHub Releases；当前v0.4.159入口为主导航中的“应用更新”。
