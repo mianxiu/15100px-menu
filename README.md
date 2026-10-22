@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+254／UXP0.3.65：在“逐层智能对象”右侧增加“单层智能对象”，共用分段外框、主题、留白和投影。单选转换当前层，多选同父组图层合成一个智能对象；沿用现有转换命令，默认F5行为不变。逐层转换仍各自生成独立智能对象，跨组选择只允许逐层转换。已更新本机实际入口，公开Release仍230。 [操作与验证范围](https://github.com/mianxiu/15100px-menu/wiki/Individual-smart-objects)。
+
 253／UXP0.3.65已切换本机：查找／拆分复用Caps共享控件与主题；修正上移／下移底部多出的6单位边距，移除画布菜单遗留排序文字项及隐藏命中，启用Windows输入法定位、新汉字补字，并修复重开查找带回旧文字。后台图层搜索／文本工具页面已移除，PS内单独F查找和Caps拆分保留。投影沿用250的平滑缓存纹理，替代分层描边。570回归、43项前端测试、低CPU原生矩阵、冻结启动重启及实际入口／dist／组件核验通过；PS未重启，原稿／配置／历史未知保持。公开Release仍230。 [用法与验收限制](https://github.com/mianxiu/15100px-menu/wiki/Layer-search)／[共享UI规则](https://github.com/mianxiu/15100px-menu/wiki/Development)／[完整投影对照](https://github.com/mianxiu/15100px-menu/wiki/Menu-shadow)。
 
 249／UXP0.3.65已切换本机：Caps 新增“逐层智能对象”，每个选中层各转一个，跨组保留父组与层序、整批一次撤销；已有智能对象跳过，F5 合并行为不变。568回归、35组Node、低CPU原生矩阵、8项后台真实PS及实际服务低CPU／正常各1项通过，零像素差与精确撤销，原稿／配置／历史未知保持。投影沿用248的Win11风格近似与诊断未响应修复；实体输入／GPU实屏／原低配待验，公开Release仍230。[逐层转换用法与限制](https://github.com/mianxiu/15100px-menu/wiki/Individual-smart-objects)。
