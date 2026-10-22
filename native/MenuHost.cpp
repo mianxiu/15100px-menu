@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <imm.h>
 #ifndef WS_EX_NOREDIRECTIONBITMAP
 #define WS_EX_NOREDIRECTIONBITMAP 0x00200000L
 #endif
@@ -31,6 +32,8 @@
 #include "StyledMenuIcons.h"
 #include "MenuUiMetrics.h"
 #include "MenuShadow.h"
+static void requireText(const std::string& text);
+#include "MenuControls.h"
 #include "ActivityIndicator.h"
 
 using Json=nlohmann::json;
@@ -240,8 +243,8 @@ static bool individualSmartReady=false;
 static bool layerSearchReady=false,textSplitReady=false;
 static RECT toolRow{};
 static bool menuToolsVisible();
-static int capsCount() {return panelKind==0?5:panelKind==2?9:7;}
-static int capsBottomCount() {return panelKind==2?5:capsCount();}
+static int capsCount() {return panelKind==2?9:5;}
+static int capsBottomCount() {return 5;}
 
 static constexpr float quickGroupGap=4;
 static float quickGroupY(bool lower);
@@ -264,7 +267,7 @@ static bool capsEnabled(int i) {
     return !(i==1 || i==2 || i>=5) || (!layerLocked && !layerBackground && !layerCrossParents);
 }
 
-static bool rowEnabled(int i) {return !(panelKind==0 && i>=2) && canExecute() && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
+static bool rowEnabled(int i) {return !((panelKind==0 || panelKind==1) && i>=2) && canExecute() && (panelKind==4 || !layerAware || (layerMask & (1u<<i)));}
 static bool quickEnabled(int i) {return layerAware && panelKind!=4 && canExecute() && (quickMask & (1u<<i));}
 static std::string layerTitle() {
     const char* names[]={"图层识别待更新","背景图层","像素图层","图层组","文字图层","智能对象","形状／填充图层","调整图层","混合类型","其他图层"};
@@ -328,7 +331,7 @@ static ImVec2 bottomRow;
 static void send(const char* action) {
     if(stabilityInspection)return;
     if(std::string(action)==capsActions[9] && !capsEnabled(9))return;
-    if(panelKind==0 && (std::string(action)=="moveToTop" || std::string(action)=="moveToBottom" ||
+    if((panelKind==0 || panelKind==1) && (std::string(action)=="moveToTop" || std::string(action)=="moveToBottom" ||
                        std::string(action)=="moveUp" || std::string(action)=="moveDown" || std::string(action)=="moveDocumentTop" || std::string(action)=="moveDocumentBottom"))return;
     for(int i=0;i<7;++i)if(std::string(action)==quickActions[i] && !quickEnabled(i))return;
     if(layerAware && panelKind!=4) {
@@ -428,9 +431,12 @@ static bool createDevice(HWND hwnd) {
     if (factory) factory->Release();if (adapter) adapter->Release();if (dxgi) dxgi->Release();
     compositionOpacity=-1;
     frameGranted=false;
-    return SUCCEEDED(result) && createTarget();
+    if(FAILED(result) || !createTarget())return false;
+    if(!menuShadow::create(device))std::cerr<<"Shadow atlas unavailable; drawing menu without shadows\n";
+    return true;
 }
 static void releaseDevice() {
+    menuShadow::release();
     releaseTarget();
     if (frameLatency) {CloseHandle(frameLatency);frameLatency=nullptr;}
     frameGranted=false;
@@ -1362,21 +1368,19 @@ static void drawCapsBar() {
     if(!capsReady || panelKind==4 || !layerAware)return;
     auto* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
     auto* d=ImGui::GetWindowDrawList();
-    const float h=figmaWidgetHeight*scale,r=ImGui::GetStyle().FrameRounding;
+    const float h=figmaWidgetHeight*scale;
     POINT cursor{};GetCursorPos(&cursor);
     auto drawGroup=[&](int first,int last,float x,float y) {
         float widths[10]{},total=0;
         for(int i=first;i<=last;++i){widths[i]=std::max(24.f*scale,font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]).x+18*scale);total+=widths[i];}
         if(first==0 || first==7)x=pieCenter.x-total*.5f;
         const float left=x;
-        menuShadow::draw(d,{x,y},{x+total,y+h},r,scale);
-        d->AddRectFilled({x,y},{x+total,y+h},tint(ImGuiCol_Button),r);
+        MenuControls::surface(d,{x,y},{x+total,y+h},scale);
         for(int i=first;i<=last;++i){
             const ImVec2 a={x,y},b={x+widths[i],y+h};capsRows[i]={LONG(a.x),LONG(a.y),LONG(b.x),LONG(b.y)};
             const bool enabled=capsEnabled(i),seam=capsDividerAt(i,cursor);
             const bool hover=enabled && ((!preview.empty() && previewCapsHover>=0)?previewCapsHover==i:!seam && PtInRect(&capsRows[i],cursor));
-            if(hover)d->AddRectFilled(a,b,tint(ImGuiCol_ButtonHovered),r,i==first?ImDrawFlags_RoundCornersLeft:i==last?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone);
-            if(i>first)d->AddLine(a,{a.x,b.y},tint(ImGuiCol_Border),scale);
+            MenuControls::segment(d,a,b,i==first,i==last,hover,scale);
             const auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]);
             d->AddText(font,font->FontSize,{a.x+(widths[i]-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),capsKeys[i]);
             if(pinned && !pieAnimating && enabled && !holdFinished){
@@ -1386,7 +1390,7 @@ static void drawCapsBar() {
             }
             x=b.x;
         }
-        d->AddRect({left,y},{x,y+h},tint(ImGuiCol_Border),r,0,scale);
+        MenuControls::outline(d,{left,y},{x,y+h},scale);
     };
     drawGroup(0,capsBottomCount()-1,0,pieCenter.y+107*scale);
     if(individualSmartReady && panelKind!=3 && layerCount && layerKind)
@@ -1396,7 +1400,7 @@ static void drawCapsBar() {
         float x=pieCenter.x+65*scale;
         for(int i:{5,6}){
             const float width=ImGui::GetFont()->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,capsKeys[i]).x+basicTextOffset()+figmaBasicRightPadding*scale;
-            capsRows[i]={LONG(x),LONG(pieCenter.y-(15+figmaDisplayWidgetHeight+quickGroupGap)*scale),LONG(x+width),LONG(pieCenter.y-(15+quickGroupGap)*scale)};x+=width;
+            capsRows[i]={LONG(x),LONG(pieCenter.y-(15+menuControlHeight+quickGroupGap)*scale),LONG(x+width),LONG(pieCenter.y-(15+quickGroupGap)*scale)};x+=width;
         }
     }
 }
@@ -1411,14 +1415,14 @@ static void drawToolBar() {
     const ImVec2 a={x,y};
     toolRow={LONG(x),LONG(y),LONG(x+width),LONG(y+h)};
     const bool enabled=toolEnabled(1),hover=enabled && !pieAnimating && PtInRect(&toolRow,cursor);
-    menuShadow::draw(draw,a,{x+width,y+h},ImGui::GetStyle().FrameRounding,scale);
-    draw->AddRectFilled(a,{x+width,y+h},tint(hover?ImGuiCol_HeaderHovered:ImGuiCol_Button),ImGui::GetStyle().FrameRounding);
+    MenuControls::surface(draw,a,{x+width,y+h},scale);
+    MenuControls::segment(draw,a,{x+width,y+h},true,true,hover,scale);
     draw->AddText(ImGui::GetFont(),basicLabelSize(),{x+(width-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),label);
     if(pinned && !pieAnimating && enabled && !holdFinished){
         ImGui::SetCursorScreenPos(a);
         if(ImGui::InvisibleButton("##split-tool",{width,h}))menuTools.open("split");
     }
-    draw->AddRect(a,{x+width,y+h},tint(ImGuiCol_Border),ImGui::GetStyle().FrameRounding,0,scale);
+    MenuControls::outline(draw,a,{x+width,y+h},scale);
 }
 static void shapeEditorKeys() {
     // The hook leaves letters with the editor so focused RGB/Hex fields keep
@@ -1452,7 +1456,7 @@ static void drawPie() {
     if(menuToolsVisible()) {
         holdRows={};labelRows={};capsRows={};quickRows={};toolRow={};pieReady=false;
         menuTools.draw(scale,pieCenter,allowed && !taskBusy && !busyFeedback && !inputFocused && !maskPreviewStarted);
-        drawFooter({document,menuTools.error},pos.y+size.y-60*scale);
+        drawFooter({document,menuTools.status(),menuTools.error},pos.y+size.y-60*scale);
         return;
     }
     if(toolEnabled(0) && !shapePanelVisible() && !shapeEyedropActive && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput &&
@@ -1566,20 +1570,19 @@ static void drawPie() {
     }
     if(!editing && panelKind==2 && capsReady && layerAware && rowVisible(2)){
         auto drawSortGroup=[&](int first,int last,RECT group){
-        menuShadow::draw(draw,{float(group.left),float(group.top)},{float(group.right),float(group.bottom)},rounding,scale);
-        draw->AddRectFilled({float(group.left),float(group.top)},{float(group.right),float(group.bottom)},tint(ImGuiCol_Button),rounding);
+        MenuControls::surface(draw,{float(group.left),float(group.top)},{float(group.right),float(group.bottom)},scale);
         for(int n=first;n<=last;++n){
             const int action=n<2?n+2:n+43;
             const RECT r=n<2?holdRows[n+2]:capsRows[n+3];
             const bool enabled=n<2?rowEnabled(n+2):capsEnabled(n+3),active=enabled && selected==action;
             const ImVec2 a={float(r.left),float(r.top)},b={float(r.right),float(r.bottom)};
-            if(active)draw->AddRectFilled(a,b,tint(ImGuiCol_HeaderHovered),rounding,n==first?ImDrawFlags_RoundCornersLeft:n==last?ImDrawFlags_RoundCornersRight:ImDrawFlags_RoundCornersNone);
-            if(n>first)draw->AddLine(a,{a.x,b.y},tint(ImGuiCol_Border),scale);
+            MenuControls::segment(draw,a,b,n==first,n==last,active,scale);
             const ImU32 ink=tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled);
-            const ImVec2 at={a.x+figmaBasicLeftPadding*scale,a.y+(rowHeight-figmaBasicIconSize*scale)*.5f};
+            const float height=b.y-a.y;
+            const ImVec2 at={a.x+figmaBasicLeftPadding*scale,a.y+(height-figmaBasicIconSize*scale)*.5f};
             if(n<2)drawFigmaSortIcon(draw,n+2,at,figmaBasicIconSize*scale,ink);
             else drawStyledMenuIcon(draw,n+7,at,figmaBasicIconSize*scale,ink,tint(active?ImGuiCol_HeaderHovered:ImGuiCol_Button));
-            draw->AddText(ImGui::GetFont(),basicLabelSize(),{a.x+basicTextOffset(),roundf(a.y+(rowHeight-basicLabelSize())*.5f)},ink,n<2?rowLabel(n+2):capsKeys[n+3]);
+            draw->AddText(ImGui::GetFont(),basicLabelSize(),{a.x+basicTextOffset(),roundf(a.y+(height-basicLabelSize())*.5f)},ink,n<2?rowLabel(n+2):capsKeys[n+3]);
             if(pinned && !pieAnimating && enabled && !holdFinished){
                 ImGui::SetCursorScreenPos({a.x+(n>first?scale:0),a.y});ImGui::PushID(460+n);
                 if(ImGui::InvisibleButton("##reorder",{b.x-a.x-(n>first?scale:0)-(n<last?scale:0),b.y-a.y})){
@@ -1588,7 +1591,7 @@ static void drawPie() {
                 ImGui::PopID();
             }
         }
-        draw->AddRect({float(group.left),float(group.top)},{float(group.right),float(group.bottom)},tint(ImGuiCol_Border),rounding,0,scale);
+        MenuControls::outline(draw,{float(group.left),float(group.top)},{float(group.right),float(group.bottom)},scale);
         };
         drawSortGroup(0,1,tipGroupRect(2));
         drawSortGroup(2,3,{capsRows[5].left,capsRows[5].top,capsRows[6].right,capsRows[6].bottom});
@@ -2018,6 +2021,17 @@ int main() {
     } else {
         allowed=true;document="示例文档.psd";
         if (selfTest) {
+            if(!menuShadow::texture)throw std::runtime_error("Prewarmed shadow atlas missing");
+            for(double radius:{double(figmaCornerRadius),19.}){
+                if(menuShadow::alpha(0,0,radius) || menuShadow::alpha(0,radius+1+menuShadow::extent,radius) || !menuShadow::alpha(0,radius+2,radius))
+                    throw std::runtime_error("Shadow atlas lost transparent centre, fade or lower shadow");
+                auto previous=menuShadow::alpha(0,radius+2,radius);
+                for(double d=2.125;d<=1+menuShadow::extent;d+=.125){
+                    const auto next=menuShadow::alpha(0,radius+d,radius);
+                    if(next>previous || previous-next>2)throw std::runtime_error("Shadow profile contains contour bands");
+                    previous=next;
+                }
+            }
             DiagnosticHint::selfTest();
             for(const char* name:{"light","light-gray","dark-gray","dark"}) {
                 uiTheme=name;theme();PreviewPendingHint::selfTest(name);
@@ -2176,14 +2190,14 @@ int main() {
     if (!selfTest) {ShowWindow(window,preview.empty()?SW_SHOWNORMAL:SW_SHOWNOACTIVATE);UpdateWindow(window);}
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
-            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((!previewTool.empty()?432:previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((!previewTool.empty()?620:previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):500)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((!previewTool.empty()?432:previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((!previewTool.empty()?(previewTool=="search"?332:620):previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):500)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);shapePanelOpen=previewShape && !previewOrdinary;
             if(!previewTool.empty()) {
                 layerSearchReady=textSplitReady=true;holdFinished=false;pinned=true;capable=allowed=true;
                 menuTools.receive(Json{{"type","menu.tools.opened"},{"epoch",menuEpoch},{"mode",previewTool}});
                 if(previewTool=="split")menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.read"},{"ok",true},
                     {"result",{{"name","标题与说明"},{"text","作品标题\r第一段说明文字\r第二段说明文字"},{"revision","preview"}}}});
-                else {menuTools.submit("layers.search",Json::object());menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","layers.search"},{"ok",true},
+                else {menuTools.searchDirty=false;menuTools.submit("layers.search",Json::object());menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","layers.search"},{"ok",true},
                     {"result",{{"search_id","preview"},{"scanned",24},{"items",Json::array({Json{{"name","产品标题"},{"document_name","商品详情.psd"}},Json{{"name","产品说明"},{"document_name","商品详情.psd"}}})}}}});}
             }
             if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
@@ -2567,6 +2581,68 @@ int main() {
                     io.AddKeyEvent(key,down);
                     ImGui::NewFrame();drawMenu();ImGui::Render();finishPlatformFrame();
                 };
+                {
+                    int choice=0;char query[16]{};POINT second{},seam{};bool focusQuery=false;
+                    auto controlsFrame=[&](bool disabled){
+                        const auto padding=ImGui::GetStyle().FramePadding;
+                        const auto border=ImGui::GetStyle().FrameBorderSize;
+                        ImGui::NewFrame();ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
+                        const auto oldFont=ImGui::GetFont();
+                        const auto origin=ImGui::GetMainViewport()->Pos;
+                        ImGui::SetNextWindowPos({origin.x+16*scale,origin.y+16*scale});ImGui::SetNextWindowSize({360*scale,240*scale});
+                        ImGui::Begin("##shared-controls-test",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoSavedSettings);
+                        {
+                            MenuControls::PanelStyle controls(menuFonts[0],scale);
+                            if(focusQuery){ImGui::SetKeyboardFocusHere();focusQuery=false;}
+                            MenuControls::input("##query","搜索图层…",query,sizeof(query));
+                            const float input=ImGui::GetItemRectSize().y;
+                            MenuControls::button("定位",scale);
+                            if(std::abs(input-menuControlHeight*scale)>.1f || std::abs(ImGui::GetItemRectSize().y-input)>.1f ||
+                               ImGui::GetStyle().FrameBorderSize!=menuControlBorder*scale || ImGui::GetFont()!=menuFonts[0])
+                                throw std::runtime_error("Shared Caps/tool input and button metrics drifted");
+                            const char* names[]={"全部","文字","智能对象"};const auto at=ImGui::GetCursorScreenPos();
+                            const auto first=ImGui::CalcTextSize(names[0]).x+2*menuControlTextInset*scale;
+                            const auto next=ImGui::CalcTextSize(names[1]).x+2*menuControlTextInset*scale;
+                            second={LONG(at.x+first+next*.5f),LONG(at.y+input*.5f)};
+                            seam={LONG(at.x+first+next),second.y};
+                            ImGui::BeginDisabled(disabled);MenuControls::segments("##types",names,choice,scale);ImGui::EndDisabled();
+                        }
+                        if(ImGui::GetStyle().FramePadding.x!=padding.x || ImGui::GetStyle().FramePadding.y!=padding.y ||
+                           ImGui::GetStyle().FrameBorderSize!=border || ImGui::GetFont()!=oldFont)
+                            throw std::runtime_error("Shared panel style leaked into Caps");
+                        ImGui::End();ImGui::Render();finishPlatformFrame();
+                    };
+                    controlsFrame(false);io.AddMousePosEvent(float(second.x),float(second.y));controlsFrame(false);
+                    io.AddMouseButtonEvent(0,true);controlsFrame(false);io.AddMouseButtonEvent(0,false);controlsFrame(false);
+                    if(choice!=1)throw std::runtime_error("Shared type segment click failed");
+                    io.AddMousePosEvent(float(seam.x),float(seam.y));controlsFrame(false);
+                    io.AddMouseButtonEvent(0,true);controlsFrame(false);io.AddMouseButtonEvent(0,false);controlsFrame(false);
+                    if(choice!=1)throw std::runtime_error("Shared segment divider gained a hit");
+                    choice=0;io.AddMousePosEvent(float(second.x),float(second.y));controlsFrame(true);
+                    io.AddMouseButtonEvent(0,true);controlsFrame(true);io.AddMouseButtonEvent(0,false);controlsFrame(true);
+                    if(choice!=0)throw std::runtime_error("Disabled shared segment changed filter");
+                    focusQuery=true;controlsFrame(false);controlsFrame(false);
+                    procedure(window,WM_CHAR,0x9F97,0);controlsFrame(false);
+                    if(std::string(query)!="\xE9\xBE\x97" || !requiredGlyphs.GetBit(0x9F97) || !fontDirty)
+                        throw std::runtime_error("Chinese input did not reach shared input/font cache");
+                    ImGui_ImplDX11_InvalidateDeviceObjects();loadFont();
+                    if(!ImGui_ImplDX11_CreateDeviceObjects())throw std::runtime_error("Input glyph upload failed");
+                    controlsFrame(false);
+                    if(std::string(query)!="\xE9\xBE\x97" || !menuFonts[0]->FindGlyphNoFallback(0x9F97))
+                        throw std::runtime_error("Chinese input was lost after font update");
+                    auto* viewport=ImGui::GetMainViewport();auto himc=ImmGetContext(window);
+                    if(!himc || !ImGui::GetPlatformIO().Platform_SetImeDataFn)
+                        throw std::runtime_error("Windows IME context/handler missing");
+                    COMPOSITIONFORM previous{},position{};const bool restore=ImmGetCompositionWindow(himc,&previous)!=0;
+                    ImGuiPlatformImeData ime;ime.WantVisible=true;ime.InputPos={viewport->Pos.x+37,viewport->Pos.y+59};ime.InputLineHeight=24*scale;
+                    ImGui::GetPlatformIO().Platform_SetImeDataFn(ImGui::GetCurrentContext(),viewport,&ime);
+                    const bool positioned=ImmGetCompositionWindow(himc,&position) && position.ptCurrentPos.x==37 && position.ptCurrentPos.y==59;
+                    if(restore)ImmSetCompositionWindow(himc,&previous);ImmReleaseContext(window,himc);
+                    if(!positioned)throw std::runtime_error("IME composition did not follow input caret");
+                    io.AddMousePosEvent(-1000,-1000);ImGui::SetWindowFocus(nullptr);
+                    std::cout<<"Shared Caps/tools UI passed: input/button/font/border parity, style restoration, segment click, divider cancel and disabled protection\n";
+                    std::cout<<"Chinese input passed: own WM_CHAR to UTF-8 input, new glyph upload, preserved edit buffer and Windows IME caret position\n";
+                }
                 for (auto entry:std::array<std::pair<ImGuiKey,const char*>,3>{{
                     {ImGuiKey_4,"select"},{ImGuiKey_Keypad8,"moveToTop"},{ImGuiKey_2,"moveToBottom"}}}) {
                     holdFinished=false;auto before=testedActions.size();
@@ -3378,7 +3454,7 @@ int main() {
                 const auto previousRenderMode=renderMode;
                 for(const char* mode:{"cpu","gpu","auto"}){
                     renderMode=mode;
-                    if(!recoverRenderer() || (renderMode=="cpu" && activeRenderMode!="cpu"))
+                    if(!recoverRenderer() || !menuShadow::texture || (renderMode=="cpu" && activeRenderMode!="cpu"))
                         throw std::runtime_error("Graphics mode switch failed");
                     numberFrame(ImGuiKey_None,false);
                     if(!IsWindowVisible(window) || ImGui::GetDrawData()->TotalVtxCount<=0)
@@ -3397,7 +3473,8 @@ int main() {
                     if(r.right<=r.left || holdActionAt(centre)!=40+i || !actionTipText(40+i))throw std::runtime_error("Caps bar geometry/hit/tooltip mismatch");
                     if(i!=0 && i!=5 && holdActionAt({r.left,centre.y})!=-1)throw std::runtime_error("Caps separator gained a hit");
                 }
-                if(capsRows[5].top!=LONG(pieCenter.y-(15+figmaDisplayWidgetHeight+quickGroupGap)*scale) || capsRows[5].left!=LONG(pieCenter.x+65*scale) || capsRows[6].left!=capsRows[5].right || capsRows[4].top<=capsRows[5].bottom)
+                if(capsRows[5].top!=LONG(pieCenter.y-(15+menuControlHeight+quickGroupGap)*scale) || capsRows[5].left!=LONG(pieCenter.x+65*scale) || capsRows[6].left!=capsRows[5].right || capsRows[4].top<=capsRows[5].bottom ||
+                   std::abs((capsRows[5].bottom-capsRows[5].top)-menuControlHeight*scale)>1)
                     throw std::runtime_error("Layer step controls must replace the original right-side creation row");
                 if(tipFamily(40)==tipFamily(45) || tipGroupRect(45).top!=capsRows[5].top || tipFamily(45)==tipFamily(2) ||
                    tipGroupRect(40).right!=capsRows[4].right)
@@ -3413,12 +3490,13 @@ int main() {
                 const auto capsRect=capsRows[0];const auto count=testedActions.size();
                 renderedHit=40;holdFinished=false;finishHold({(capsRect.left+capsRect.right)/2,(capsRect.top+capsRect.bottom)/2});
                 if(testedActions.size()!=count+1 || testedActions.back()!="copyStyle")throw std::runtime_error("Caps bar did not dispatch copy once");
-                holdFinished=false;panelKind=0;numberFrame(ImGuiKey_None,false);
+                for(int scope:{0,1}){
+                holdFinished=false;panelKind=scope;numberFrame(ImGuiKey_None,false);
                 if(rowVisible(2) || rowVisible(3) || rowEnabled(2) || rowEnabled(3) || capsEnabled(5) || capsEnabled(6) ||
                    capsRows[5].right || capsRows[6].right || capsCount()!=5)
                     throw std::runtime_error("Generic menu retained layer reorder controls");
                 const auto genericCount=testedActions.size();
-                for(const char* action:{"moveToTop","moveToBottom","moveUp","moveDown"})send(action);
+                for(const char* action:{"moveToTop","moveToBottom","moveUp","moveDown","moveDocumentTop","moveDocumentBottom"})send(action);
                 numberFrame(ImGuiKey_8,true);numberFrame(ImGuiKey_8,false);
                 numberFrame(ImGuiKey_2,true);numberFrame(ImGuiKey_2,false);
                 if(testedActions.size()!=genericCount)throw std::runtime_error("Generic menu reordered layers through hidden input");
@@ -3429,6 +3507,7 @@ int main() {
                     throw std::runtime_error("Compact generic Caps tooltip group retained removed segments");
                 if(holdActionAt({lastGeneric.right-LONG(2*scale),(lastGeneric.top+lastGeneric.bottom)/2})!=44)
                     throw std::runtime_error("Compact generic Caps bar lost final segment hit");
+                }
                 panelKind=2;holdFinished=false;numberFrame(ImGuiKey_None,false);
                 if(!rowVisible(2) || !rowVisible(3) || !capsEnabled(5) || !capsEnabled(6) || !capsRows[6].right)
                     throw std::runtime_error("Layers menu lost its reorder controls after generic transition");

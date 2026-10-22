@@ -9,14 +9,14 @@ function setup(){
  const layers={};for(const id of state.order)layers[id]={id,parent:null,kind:'normal',isBackgroundLayer:false,allLocked:false,positionLocked:false,move:async(anchor,where)=>{state.writes.push('move');state.order=state.order.filter(v=>v!==id);state.order.splice(state.order.indexOf(anchor.id)+(where==='before'?0:1),0,id);}};
  const target=()=>({session:'s',document_id:10,active_layer_id:state.selected,layer_ids:[state.selected]});
  const ps={app:{activeDocument:doc},constants:{LayerKind:{GROUP:'group'},ElementPlacement:{PLACEBEFORE:'before',PLACEAFTER:'after'}},core:{executeAsModal:async(fn,options)=>{state.options=options;return fn({hostControl:{suspendHistory:async()=>{state.history.push('begin');return 4;},resumeHistory:async(_,ok)=>state.history.push(ok?'commit':'rollback')}});}},action:{batchPlay:async(ds)=>ds.map(d=>{
-  if(d._obj==='get')return {layerEffects:structuredClone(state.effects)};
+  if(d._obj==='get' || d._obj==='multiGet')return {layerID:state.selected,layerEffects:structuredClone(state.effects)};
   state.writes.push(d._obj);
   if(d._obj==='select')state.selected=d._target[0]._value==='forwardEnum'?1:3;
   if(d._obj==='set'){state.display=d;if(state.cancel)return {_obj:'error',result:-128};}
   if(d._obj==='pasteEffects' && state.failPaste)state.effects=null;
   return {};
  })}};
- const factory=vm.runInNewContext(source.slice(source.indexOf('function createCapsActions'))+'\ncreateCapsActions;');
+ const factory=vm.runInNewContext(source.slice(source.indexOf('async function readLayerEffects'))+'\ncreateCapsActions;');
  const capture=async()=>target();
  const caps=factory(ps,'s',capture,()=>({document_id:10,layer_ids:[state.selected]}),undefined,capture);
  return {state,run:command=>caps.execute({command,target:target(),expires_at_ms:Date.now()+10000}),caps};

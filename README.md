@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+253／UXP0.3.65已切换本机：查找／拆分复用Caps共享控件与主题；修正上移／下移底部多出的6单位边距，移除画布菜单遗留排序文字项及隐藏命中，启用Windows输入法定位、新汉字补字，并修复重开查找带回旧文字。后台图层搜索／文本工具页面已移除，PS内单独F查找和Caps拆分保留。投影沿用250的平滑缓存纹理，替代分层描边。570回归、43项前端测试、低CPU原生矩阵、冻结启动重启及实际入口／dist／组件核验通过；PS未重启，原稿／配置／历史未知保持。公开Release仍230。 [用法与验收限制](https://github.com/mianxiu/15100px-menu/wiki/Layer-search)／[共享UI规则](https://github.com/mianxiu/15100px-menu/wiki/Development)／[完整投影对照](https://github.com/mianxiu/15100px-menu/wiki/Menu-shadow)。
+
 249／UXP0.3.65已切换本机：Caps 新增“逐层智能对象”，每个选中层各转一个，跨组保留父组与层序、整批一次撤销；已有智能对象跳过，F5 合并行为不变。568回归、35组Node、低CPU原生矩阵、8项后台真实PS及实际服务低CPU／正常各1项通过，零像素差与精确撤销，原稿／配置／历史未知保持。投影沿用248的Win11风格近似与诊断未响应修复；实体输入／GPU实屏／原低配待验，公开Release仍230。[逐层转换用法与限制](https://github.com/mianxiu/15100px-menu/wiki/Individual-smart-objects)。
 
 248本机：修复原生长批次诊断渲染不处理窗口消息造成的可复现未响应；低CPU／正常WARP各8秒持续响应并正常关闭，566回归及冻结启动重启通过，实际入口／dist／原生组件一致。Caps改为Win11风格宽柔影＋接触影，保留布局和命中；它是透明控件组的外观近似。PS／UXP会话、配置及历史保护保持。截图进程身份未证实；正常WARP投影对照缺测、GPU实屏／实体输入及原低配待验。公开Release仍230。[原因与证据](https://github.com/mianxiu/15100px-menu/wiki/Menu-responsiveness)／[全部开销与限制](https://github.com/mianxiu/15100px-menu/wiki/Menu-shadow)。

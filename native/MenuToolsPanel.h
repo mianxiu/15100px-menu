@@ -25,6 +25,12 @@ struct MenuToolsPanel {
         pending=true;error.clear();sendMenuTool("menu.tools.request",Json{{"request",++request},{"action",action},{"args",args}});
     }
     void regroup(){split=menuSplitPreview(source,grouping);}
+    std::string status() const {
+        if(pending)return mode=="search"?"正在查找图层…":"正在处理…";
+        if(mode!="search" || results.is_null())return "";
+        return "找到图层："+std::to_string(results.at("items").size())+" · 已扫描："+std::to_string(results.value("scanned",0))+
+            (results.value("truncated",false)?" · 请缩小条件":"");
+    }
     void receive(const Json& event) {
         if(event.value("epoch",LPARAM(-1))!=menuEpoch || !IsWindowVisible(window))return;
         if(event.value("type",std::string())=="menu.tools.opened") {
@@ -50,78 +56,69 @@ struct MenuToolsPanel {
     }
     void draw(float scale,ImVec2 center,bool available) {
         const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
-        const float gap=menuControlPadding*scale,padding=menuControlPadding*scale,h=menuControlHeight*scale;
-        const float width=std::max(1.f,std::min(420*scale,size.x-gap*2));
+        MenuControls::PanelStyle controls(menuFonts[0],scale);
+        const float gap=menuControlPadding*scale,margin=menuFloatingInset*scale,h=menuControlHeight*scale;
+        const float width=std::max(1.f,std::min(420*scale,size.x-margin*2));
         const int rows=results.is_null()?0:std::min(6,int(results.at("items").size()));
-        const float contentHeight=mode=="search"?(218+46*rows)*scale:510*scale;
-        const float height=std::max(1.f,std::min(contentHeight,size.y-70*scale));
-        const ImVec2 at={pos.x+gap,pos.y+gap};
+        const float contentHeight=mode=="search"?(144+46*rows)*scale:510*scale;
+        const float height=std::max(1.f,std::min(contentHeight,size.y-60*scale-margin*2));
+        const ImVec2 at={pos.x+margin,pos.y+margin};
+        menuShadow::draw(ImGui::GetWindowDrawList(),at,{at.x+width,at.y+height},ImGui::GetStyle().FrameRounding,scale);
         ImGui::SetCursorScreenPos(at);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding,ImGui::GetStyle().FrameRounding);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{padding,padding});
         ImGui::PushStyleColor(ImGuiCol_ChildBg,ImGui::GetStyleColorVec4(ImGuiCol_PopupBg));
         ImGui::BeginChild("##caps-tools",{width,height},ImGuiChildFlags_Borders|ImGuiChildFlags_AlwaysUseWindowPadding);
-        ImGui::PopStyleColor();ImGui::PopStyleVar(2);
-        if(opening || !ready){ImGui::TextWrapped("%s",error.empty()?"正在准备输入保护…":error.c_str());if(ImGui::Button("关闭",{0,h}))send("hide");ImGui::EndChild();return;}
+        ImGui::PopStyleColor();
+        if(opening || !ready){ImGui::TextWrapped("%s",error.empty()?"正在准备输入保护…":error.c_str());if(MenuControls::button("关闭",scale))send("hide");ImGui::EndChild();return;}
         ImGui::BeginDisabled((pending && mode!="search") || !available);
         if(mode=="search") {
-            ImGui::SetNextItemWidth(-1);
             if(focus){ImGui::SetKeyboardFocusHere();focus=false;}
-            const bool enter=ImGui::InputTextWithHint("##layer","搜索图层…",name,sizeof(name),ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::PushID(int(menuEpoch));
+            const bool enter=MenuControls::input("##layer","搜索图层…",name,sizeof(name));
+            ImGui::PopID();
             if(ImGui::IsItemEdited())changeSearch(ImGui::GetTime());
             const char* kinds[]={"全部","像素","文字","组","形状","智能对象","调整","填充","其他"};
             const char* ids[]={"all","pixel","text","group","shape","smart-object","adjustment","fill","other"};
-            for(int i=0;i<IM_ARRAYSIZE(kinds);++i) {
-                const float buttonWidth=ImGui::CalcTextSize(kinds[i]).x+ImGui::GetStyle().FramePadding.x*2;
-                if(i && ImGui::GetItemRectMax().x+ImGui::GetStyle().ItemSpacing.x+buttonWidth<ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x)ImGui::SameLine();
-                ImGui::PushID(i);
-                if(ImGui::Selectable(kinds[i],kind==i,ImGuiSelectableFlags_None,{buttonWidth,h})) {
-                    kind=i;changeSearch(ImGui::GetTime()-.18);
-                }
-                ImGui::PopID();
-            }
+            if(MenuControls::segments("##types",kinds,kind,scale))changeSearch(ImGui::GetTime()-.18);
             if(enter && !pending)changeSearch(ImGui::GetTime()-.18);
             if(available && searchDue(ImGui::GetTime())) {
                 searchDirty=false;submit("layers.search",Json{{"name",name},{"type",ids[kind]}});
             }
             if(!results.is_null()) {
-                ImGui::Text("找到图层：%d · 已扫描：%d",int(results.at("items").size()),results.value("scanned",0));
-                if(results.value("truncated",false))ImGui::TextWrapped("达到搜索上限，请缩小条件");
                 const float rows=std::max(60*scale,ImGui::GetContentRegionAvail().y-h-gap);
                 ImGui::BeginChild("##results",{0,rows},ImGuiChildFlags_None);
                 int index=0;
                 for(const auto& row:results.at("items")) {
                     ImGui::PushID(index);
                     ImGui::BeginDisabled(pending);
-                    if(ImGui::Button("定位",{0,h}))submit("layers.focus",Json{{"search_id",results.at("search_id")},{"index",index}});
+                    if(MenuControls::button("定位",scale))submit("layers.focus",Json{{"search_id",results.at("search_id")},{"index",index}});
                     ImGui::EndDisabled();ImGui::SameLine();ImGui::BeginGroup();
                     ImGui::TextUnformatted(row.at("name").get_ref<const std::string&>().c_str());
                     const auto type=row.value("type",std::string("other"));int typeIndex=8;
                     for(int i=0;i<IM_ARRAYSIZE(ids);++i)if(type==ids[i])typeIndex=i;
-                    ImGui::Text("%s · %s",row.at("document_name").get_ref<const std::string&>().c_str(),kinds[typeIndex]);
+                    ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotLines),"%s · %s",row.at("document_name").get_ref<const std::string&>().c_str(),kinds[typeIndex]);
                     ImGui::EndGroup();ImGui::Separator();ImGui::PopID();++index;
                 }
                 ImGui::EndChild();
             }
         } else {
-            if(ImGui::Button("重新读取选中文字",{0,h})){source.clear();revision.clear();submit("text.read",Json::object());}
+            if(MenuControls::button("重新读取选中文字",scale)){source.clear();revision.clear();submit("text.read",Json::object());}
             if(!revision.empty()) {
                 ImGui::TextUnformatted(layerName.c_str());ImGui::TextUnformatted("原文字");
                 ImGui::BeginChild("##source",{0,88*scale},ImGuiChildFlags_Borders);ImGui::TextUnformatted(sourceDisplay.c_str());ImGui::EndChild();
-                ImGui::TextUnformatted("按行分组");ImGui::SetNextItemWidth(-1);
-                if(ImGui::InputText("##groups",grouping,sizeof(grouping)))regroup();
+                ImGui::TextUnformatted("按行分组");ImGui::PushID(int(menuEpoch));
+                MenuControls::input("##groups","",grouping,sizeof(grouping));ImGui::PopID();
+                if(ImGui::IsItemEdited())regroup();
                 ImGui::TextWrapped("例如1-3,4,5-7；按顺序覆盖所有行，最多64组");
                 ImGui::Text("独立文字层数量：%d",split.count);
                 ImGui::BeginChild("##split",{0,130*scale},ImGuiChildFlags_Borders);ImGui::TextUnformatted(split.text.c_str());ImGui::EndChild();
                 if(!split.error.empty())ImGui::TextWrapped("%s",split.error.c_str());
                 ImGui::BeginDisabled(!split.error.empty() || split.count<2);
-                if(ImGui::Button("确认拆分并替换原层",{0,h}))submit("text.split",Json{{"revision",revision},{"breaks",split.breaks}});
+                if(MenuControls::button("确认拆分并替换原层",scale))submit("text.split",Json{{"revision",revision},{"breaks",split.breaks}});
                 ImGui::EndDisabled();
             }
         }
         ImGui::EndDisabled();
-        if(pending)ImGui::TextUnformatted("正在处理…");
-        if(ImGui::Button("关闭",{0,h}))send("hide");
+        if(MenuControls::button("关闭",scale))send("hide");
         if(ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered() && !ImGui::IsAnyItemActive()) {
             dragging=true;GetCursorPos(&dragPointer);
         }

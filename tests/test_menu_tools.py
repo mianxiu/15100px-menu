@@ -140,18 +140,18 @@ class MenuToolsDesktopTests(unittest.TestCase):
         desktop.gui.GetWindowRect.return_value=(-1800,100,-100,1000)
         with patch('win32api.GetCursorPos',return_value=(-1000,500)),patch('win32api.MonitorFromWindow',return_value=1),patch('win32api.GetMonitorInfo',return_value={'Work':(-1920,0,0,1040)}):
             self.assertEqual(desktop.open_menu_tools('search',7),8)
-        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-988,512,432,300,0x4|0x10))
-        self.assertEqual(desktop.preview_hint_anchor,[-772,662])
+        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-988,512,432,240,0x4|0x10))
+        self.assertEqual(desktop.preview_hint_anchor,[-772,632])
         with patch('win32api.GetCursorPos',return_value=(2500,2000)),patch('win32api.GetMonitorInfo',return_value={'Work':(-1920,0,0,1040)}):
             desktop.open_menu_tools('search',8)
-        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-532,700,432,300,0x4|0x10))
+        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-532,760,432,240,0x4|0x10))
 
     def test_search_results_resize_within_ps_and_closed_epoch_rejects(self):
         desktop=Desktop('http://localhost',Mock());desktop.hwnd=2;desktop.target=1;desktop.gui=Mock()
         desktop.require_menu_tools=Mock();desktop.icons=Mock();desktop.icons.u.GetDpiForWindow.return_value=96
         desktop.gui.GetWindowRect.side_effect=lambda h:(1500,800,1932,1100) if h==2 else (100,100,1900,1100)
         with patch('win32api.GetMonitorInfo',return_value={'Work':(0,0,1920,1040)}):desktop.resize_menu_tools(7,10)
-        desktop.gui.SetWindowPos.assert_called_once_with(2,0,1468,464,432,576,0x4|0x10)
+        desktop.gui.SetWindowPos.assert_called_once_with(2,0,1468,524,432,516,0x4|0x10)
         desktop.require_menu_tools.side_effect=RuntimeError('closed')
         with self.assertRaisesRegex(RuntimeError,'closed'):desktop.resize_menu_tools(8,0)
         self.assertEqual(desktop.gui.SetWindowPos.call_count,1)
@@ -179,10 +179,19 @@ class NativeMenuToolsTests(unittest.TestCase):
         ready=queue.Queue()
         process=subprocess.Popen([str(ROOT/'native/MenuHost.exe')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,text=True,encoding='utf-8',creationflags=0x08000000)
-        threading.Thread(target=lambda:ready.put(process.stdout.readline()),daemon=True).start()
+        threading.Thread(target=lambda:[ready.put(json.loads(line)) for line in process.stdout],daemon=True).start()
         try:
-            hwnd=json.loads(ready.get(timeout=10))['hwnd']
+            hwnd=ready.get(timeout=10)['hwnd']
             message=lambda code,wp=0,lp=0:win32gui.SendMessageTimeout(hwnd,code,wp,lp,c.SMTO_ABORTIFHUNG,1000)[1]
+            def event(value):
+                process.stdin.write(json.dumps(value)+'\n');process.stdin.flush()
+            def request():
+                deadline=time.monotonic()+4
+                while time.monotonic()<deadline:
+                    value=ready.get(timeout=max(.01,deadline-time.monotonic()))
+                    if value.get('action')=='menu.tools.request':return value
+                self.fail('No automatic native search request')
+            event({'type':'status','data':{'photoshop':{'connected':True,'uxp_ready':True,'uxp_version':'0.3.65','busy':False},'settings':{'enabled':True,'shortcuts':{}}}})
             for epoch in range(101,104):
                 message(0x8011,16|2|64,epoch-1)
                 win32gui.SetWindowPos(hwnd,c.HWND_TOP,100,100,620,500,c.SWP_SHOWWINDOW|c.SWP_NOACTIVATE)
@@ -195,6 +204,19 @@ class NativeMenuToolsTests(unittest.TestCase):
                 while (message(0x801d)&3!=3 or message(0x8012)!=1000) and time.monotonic()<deadline:time.sleep(.01)
                 self.assertEqual(message(0x801d)&3,3)
                 self.assertEqual(message(0x8012),1000,'A ready tool must also render visible content')
+                first=request()
+                self.assertEqual(first['session'],epoch)
+                self.assertEqual(first['params']['args']['name'],'','Reopen restored a previous input buffer')
+                event({'type':'menu.tools.result','epoch':epoch,'request':first['params']['request'],'action':'layers.search','ok':True,'result':{'items':[]}})
+                query='中文'+str(epoch)
+                time.sleep(.05)
+                for char in query:message(0x286,ord(char))
+                typed=request()
+                self.assertEqual(typed['params']['args']['name'],query)
+                event({'type':'menu.tools.result','epoch':epoch,'request':typed['params']['request'],'action':'layers.search','ok':True,'result':{'items':[]}})
+                deadline=time.monotonic()+2
+                while message(0x801d)&4 and time.monotonic()<deadline:time.sleep(.01)
+                self.assertFalse(message(0x801d)&4)
                 win32gui.ShowWindow(hwnd,c.SW_HIDE)
         finally:
             process.stdin.close()

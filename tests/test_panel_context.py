@@ -249,18 +249,19 @@ class PanelContextTests(unittest.TestCase):
         from backend.desktop import Desktop
         desktop = Desktop('http://localhost', lambda action:None)
         desktop.panel_context = self.detector()
-        desktop.panel_context.current = {'kind':'generic'}
         desktop.visible = True
-        for action in ('moveToTop','moveToBottom','moveUp','moveDown'):
-            with self.assertRaisesRegex(RuntimeError, '通用操作不提供图层移动'):
-                desktop.require_move_context(action)
+        for kind in ('generic','canvas'):
+            desktop.panel_context.current = {'kind':kind}
+            for action in ('moveToTop','moveToBottom','moveUp','moveDown','moveDocumentTop','moveDocumentBottom'):
+                with self.assertRaisesRegex(RuntimeError, '通用操作不提供图层移动'):
+                    desktop.require_move_context(action)
         for action in ('select','selectAbove','selectBelow','copyStyle','pasteStyle','editStyle'):
             desktop.require_move_context(action)
         desktop.panel_context.current = {'kind':'layers'}
         desktop.require_move_context('moveUp')
         desktop.panel_context.current = {'kind':'canvas'}
-        desktop.require_move_context('moveUp')
         desktop.visible = False
+        desktop.require_move_context('moveUp')
         desktop.panel_context.current = {'kind':'generic'}
         desktop.require_move_context('moveUp')
 

@@ -599,7 +599,7 @@ class Desktop:
             rect=self.gui.GetWindowRect(self.target)
             work=win32api.GetMonitorInfo(win32api.MonitorFromWindow(self.target,2))['Work']
             dpi=self.icons.u.GetDpiForWindow(self.hwnd) or 96
-            bounds=panel_bounds(rect,work,(round(anchor[0]+12*dpi/96),round(anchor[1]+12*dpi/96)),round(432*dpi/96),round((300 if mode=='search' else 620)*dpi/96))
+            bounds=panel_bounds(rect,work,(round(anchor[0]+12*dpi/96),round(anchor[1]+12*dpi/96)),round(432*dpi/96),round((240 if mode=='search' else 620)*dpi/96))
             self.gui.SetWindowPos(self.hwnd,0,*bounds,0x4|0x10)
             scale=dpi/96
             self.preview_hint_anchor=[round(bounds[0]+bounds[2]*.5),round(bounds[1]+bounds[3]*.5)]
@@ -620,16 +620,16 @@ class Desktop:
         current=self.gui.GetWindowRect(self.hwnd);rect=self.gui.GetWindowRect(self.target)
         work=win32api.GetMonitorInfo(win32api.MonitorFromWindow(self.target,2))['Work']
         scale=(self.icons.u.GetDpiForWindow(self.hwnd) or 96)/96
-        bounds=panel_bounds(rect,work,current[:2],current[2]-current[0],round((300+46*min(6,max(0,rows)))*scale))
+        bounds=panel_bounds(rect,work,current[:2],current[2]-current[0],round((240+46*min(6,max(0,rows)))*scale))
         self.gui.SetWindowPos(self.hwnd,0,*bounds,0x4|0x10)
 
     @window_transition
     def require_move_context(self, name):
-        # The open generic menu deliberately has no reordering operations.
+        # Canvas and generic menus have no reordering operations.
         # Keep standalone PS chords unchanged; block stale menu/native-hook
         # dispatches too, rather than just hiding their buttons.
         if (name in ('moveToTop','moveToBottom','moveUp','moveDown','moveDocumentTop','moveDocumentBottom') and self.visible
-                and self.panel_context and self.panel_context.current['kind']=='generic'):
+                and self.panel_context and self.panel_context.current['kind'] in ('generic','canvas')):
             raise RuntimeError('通用操作不提供图层移动，请在图层面板重新打开菜单')
 
     @window_transition

@@ -8,10 +8,8 @@ import {applyMenuTheme} from './theme.mjs';
 import {stabilityIssue} from './stability.mjs';
 import {prefixOptions,triggerKeys,keyLabel,shortcutParts,triggerAllowed,changePrefix,changeTrigger,shortcutErrors} from './shortcuts.mjs';
 import './admin.css';
-import LayerSearch from './LayerSearch.jsx';
-import TextTools from './TextTools.jsx';
 
-const pages = [['overview','运行状态'],['layers','图层搜索'],['text','文本工具'],['settings','菜单设置'],['plugins','插件管理'],['updates','应用更新'],['tasks','最近任务'],['logs','运行日志']];
+const pages = [['overview','运行状态'],['settings','菜单设置'],['plugins','插件管理'],['updates','应用更新'],['tasks','最近任务'],['logs','运行日志']];
 const keyLabels = {toggle:'按住唤出 / 松开执行', hide:'收起菜单', select:'选择组内图层', color:'橙色图层标签', moveToTop:'移到顶部', moveToBottom:'移到底部',selectAbove:'单选上一个图层',selectBelow:'单选下一个图层',extendAbove:'向上扩展图层多选',extendBelow:'向下扩展图层多选',copyStyle:'复制图层样式',pasteStyle:'粘贴图层样式',editStyle:'打开图层样式',convertSmartObject:'转换为智能对象'};
 function App() {
   function t(text){return translate(text,state().language || 'zh-CN');}
@@ -216,11 +214,11 @@ function App() {
     link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
 
-  const [subpages,setSubpages]=createSignal({settings:'behavior',plugins:'installed',text:'replace'});
+  const [subpages,setSubpages]=createSignal({settings:'behavior',plugins:'installed'});
   const [taskId,setTaskId]=createSignal(null);
   const selectedTask=()=>state().tasks?.items?.find(task=>task.id===taskId()) || state().tasks?.items?.[0];
   const currentTab=()=>subpages()[page()];
-  const tabItems=()=>({settings:[['behavior','菜单行为'],['keys','快捷键']],plugins:[['installed','安装与状态'],['updates','离线更新包']],text:[['replace','查找替换'],['split','按行拆分']]})[page()] || [];
+  const tabItems=()=>({settings:[['behavior','菜单行为'],['keys','快捷键']],plugins:[['installed','安装与状态'],['updates','离线更新包']]})[page()] || [];
   function selectTab(id){setSubpages(previous=>({...previous,[page()]:id}));}
   function tabKeys(event){
     const ids=tabItems().map(([id])=>id),index=ids.indexOf(currentTab());
@@ -242,8 +240,6 @@ function App() {
       <Show when={tabItems().length}><div class="subtabs" role="tablist" aria-label={t("页面选项")} onKeyDown={tabKeys}><For each={tabItems()}>{([id,label])=><button id={'tab-'+page()+'-'+id} role="tab" aria-selected={currentTab()===id} aria-controls="active-panel" tabIndex={currentTab()===id?0:-1} classList={{selected:currentTab()===id}} onClick={()=>selectTab(id)}>{t(label)}</button>}</For></div></Show>
       <div id="active-panel" class="workspace" role={tabItems().length?'tabpanel':undefined} aria-labelledby={tabItems().length?'tab-'+page()+'-'+currentTab():undefined}>
 <Show when={page()==='overview'}><Overview/></Show>
-<Show when={page()==='layers'}><LayerSearch t={t} call={call} disabled={()=>disabled()||state().photoshop.busy}/></Show>
-<Show when={page()==='text'}><TextTools t={t} call={call} mode={currentTab()} disabled={()=>disabled()||state().photoshop.busy}/></Show>
 <Show when={page()==='updates'}><div class="panel-scroll"><ApplicationUpdate/></div></Show>
 <Show when={page()==='settings' && form() && currentTab()==='behavior'}><div class="panel-scroll"><section><h2>{t("菜单行为")}</h2><div class="checks"><label><input type="checkbox" checked={form().enabled} onChange={e=>edit('enabled',e.target.checked)}/>{t("启用 Photoshop 操作菜单与快捷键")}</label><label><input type="checkbox" checked={form().right_click_hide} onChange={e=>edit('right_click_hide',e.target.checked)}/>{t("在菜单内右键收起")}</label><label><input type="checkbox" checked={form().open_control_on_start} onChange={e=>edit('open_control_on_start',e.target.checked)}/>{t("启动时打开后台管理窗口")}</label></div><div class="fields"><label>{t("菜单宽度")}<input type="number" min="300" max="1200" value={form().menu_width} onInput={e=>edit('menu_width',Number(e.target.value))}/></label><label>{t("菜单高度")}<input type="number" min="240" max="1000" value={form().menu_height} onInput={e=>edit('menu_height',Number(e.target.value))}/></label></div><p>{t("尺寸按屏幕 DPI 缩放，显示位置限制在 Photoshop 窗口与屏幕工作区内。")}</p><div class="fields"><label>{t("菜单渲染")}<select value={form().render_mode || "auto"} onChange={e=>edit("render_mode",e.target.value)}><option value="auto">{t("自动选择（推荐）")}</option><option value="gpu">{t("GPU（优先硬件）")}</option><option value="cpu">{t("CPU（软件兼容）")}</option></select></label></div><p>{t("自动优先使用GPU，硬件不可用时回退CPU。保存后在菜单收起时切换，不重启PS。")}</p><p>{t("当前渲染：")}{state().menu?.graphics?.active?.toUpperCase() || "—"} {state().menu?.graphics?.adapter || ""}</p></section></div></Show>
 <Show when={page()==='settings' && form() && currentTab()==='keys'}><KeySettings/></Show>
