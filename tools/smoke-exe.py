@@ -98,6 +98,8 @@ async def exercise(executable, workspace, port, show_control=False):
                             if not message.get('ok'): raise RuntimeError(message)
                             return message.get('data')
                 assert not status['tray_error'],status['tray_error']
+                tray_check = runpy.run_path(str(Path(__file__).with_name('check-tray.py')))['check_tray']
+                tray_check(status['service']['pid'], recover=True)
                 for task_id in (history_id,'missing-task'):
                     try:await request('tasks.cancel',{'id':task_id})
                     except RuntimeError as exc:

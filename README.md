@@ -1,6 +1,6 @@
 # Photoshop Menu
 
-本机运行232／UXP0.3.61：样式快捷键只读取所需样式字段；231减少清除标签的无关组读取。低CPU／正常真实PS接口、一次撤销和实际EXE已核验；样式阶段多数耗时接近计时精度，不声称整体快捷键提速。[速度对照与未验范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。公开下载仍为已核验的230。
+本机运行233／UXP0.3.61：补齐Explorer恢复后的托盘重新注册及启动失败有限重试，实际服务低CPU／正常恢复检查通过；当前用户报告的可见性尚待核实，见[托盘说明](docs/TRAY.md)。232样式按需读取与231清除标签优化已核验，[速度与范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-performance)。公开下载仍为已核验的230。
 
 227／UXP0.3.57起：后台新增图层搜索，按打开文档文件名、图层名与类型筛选，明确点击后按ID跨文档定位并保留隐藏状态。[操作和验证范围](https://github.com/mianxiu/15100px-menu/wiki/Layer-search)。
 

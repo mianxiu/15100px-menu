@@ -1152,7 +1152,41 @@ class Tray:
         icon_added = False
         icons = WindowIcons()
         instance, name = win32api.GetModuleHandle(None), "PhotoshopMenuTray"
+        taskbar_created = g.RegisterWindowMessage("TaskbarCreated")
+        icons.u.SetTimer.argtypes, icons.u.SetTimer.restype = [W.HWND, ctypes.c_size_t, W.UINT, W.LPVOID], ctypes.c_size_t
+        icons.u.KillTimer.argtypes, icons.u.KillTimer.restype = [W.HWND, ctypes.c_size_t], W.BOOL
+        retries = 0
+        def add_icon():
+            nonlocal icon_added, retries
+            icons.u.KillTimer(self.hwnd, 1)
+            try:
+                tray_dpi = icons.u.GetDpiForWindow(g.FindWindow('Shell_TrayWnd', None)) or 96
+                tray_icon = icons.load(max(16, round(16 * tray_dpi / 96)))
+                data = (self.hwnd, 1, g.NIF_ICON | g.NIF_MESSAGE | g.NIF_TIP, c.WM_USER + 1, tray_icon, TITLE)
+                if icon_added:
+                    try:
+                        g.Shell_NotifyIcon(g.NIM_MODIFY, data)
+                    except Exception:
+                        g.Shell_NotifyIcon(g.NIM_ADD, data)
+                else:
+                    g.Shell_NotifyIcon(g.NIM_ADD, data)
+                icon_added, self.error = True, ""
+            except Exception as exc:
+                self.error = str(exc)
+                logging.exception("Tray icon registration failed")
+                if retries:
+                    retries -= 1
+                    if not icons.u.SetTimer(self.hwnd, 1, 1000, None):
+                        self.error += "; tray retry timer failed"
         def procedure(hwnd, message, wparam, lparam):
+            nonlocal retries
+            if message == taskbar_created:
+                retries = 5
+                add_icon()
+                return 0
+            if message == c.WM_TIMER and wparam == 1:
+                add_icon()
+                return 0
             if message == c.WM_USER + 1:
                 if lparam == c.WM_LBUTTONDBLCLK:
                     self.notify("control")
@@ -1182,16 +1216,16 @@ class Tray:
             wc.hIcon = icons.load(32)
             g.RegisterClass(wc)
             self.hwnd = g.CreateWindow(name, name, 0, 0, 0, 0, 0, 0, 0, instance, None)
-            tray_dpi = icons.u.GetDpiForWindow(g.FindWindow('Shell_TrayWnd', None)) or 96
-            tray_icon = icons.load(max(16, round(16 * tray_dpi / 96)))
-            g.Shell_NotifyIcon(g.NIM_ADD, (self.hwnd, 1, g.NIF_ICON | g.NIF_MESSAGE | g.NIF_TIP, c.WM_USER + 1, tray_icon, TITLE))
-            icon_added = True
+            retries = 5
+            add_icon()
             self.ready.set()
             g.PumpMessages()
         except Exception as exc:
             self.error = str(exc)
             logging.exception("Tray failed")
         finally:
+            if self.hwnd:
+                icons.u.KillTimer(self.hwnd, 1)
             if icon_added:
                 try:
                     g.Shell_NotifyIcon(g.NIM_DELETE, (self.hwnd, 1))
