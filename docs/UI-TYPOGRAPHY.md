@@ -64,4 +64,4 @@ MenuControls::PanelStyle自动使用Control，不再允许调用方传入固定�
 
 实际运行0.4.255／UXP0.3.65，EXE、dist、菜单／热键及后台资源哈希一致；配置、PS／UXP会话与195历史未知记录保持，无当前pending。证据：.runtime/tests255-delivery.log、frontend255-tests.log、native255-low.log、typography255/previews.json、smoke255.log、tray255/report.json、runtime255-verified.json。首次原生字体作用域、整数像素量化／双击夹具及完整回归的分隔缝失败记录保留。
 
-本轮真实PS实屏检查在开始前因QQ前台被host_scope拒绝，未创建测试文档、未提交PS命令；前台恢复后继续。浏览器自动化内核退出，后台只完成源码契约／构建／实际静态资源验收；尚未完成浏览器桌面及窄屏视觉、实体拼音／键鼠、其他DPI／硬件／PS版本验收。未测项目不以静态契约或离屏预览代替。本轮是文字一致性修复，没有速度提升声明。GitHub工作流已加入，远端运行结果另行核验。
+本轮真实PS实屏检查在开始前因QQ前台被host_scope拒绝，未创建测试文档、未提交PS命令；前台恢复后继续。浏览器自动化内核退出，后台只完成源码契约／构建／实际静态资源验收；尚未完成浏览器桌面及窄屏视觉、实体拼音／键鼠、其他DPI／硬件／PS版本验收。未测项目不以静态契约或离屏预览代替。本轮是文字一致性修复，没有速度提升声明。GitHub UI contract已在提交e5a07cc通过：[远端检查](https://github.com/mianxiu/15100px-menu/actions/runs/39902662542)。后续push／PR自动运行；未更改分支保护设置。

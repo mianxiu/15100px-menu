@@ -1,5 +1,7 @@
 # UI 指南
 
+GitHub UI contract已在提交e5a07cc通过：[远端检查](https://github.com/mianxiu/15100px-menu/actions/runs/39902662542)。后续push／PR自动运行；未更改分支保护设置。
+
 ## 255文字规范与运行状态
 
 255／UXP0.3.65已更新本机：统一Caps、查找／拆分、颜色数值、tip及状态文字角色，全部原生操作跟随PS字号的95%，正文跟随PS字号，辅助信息小一级；保留预设尺寸／标签专用层级。后台使用统一字号／行高／字重变量，窄窗口只调整布局。新增原生／前端／冻结打包门禁及GitHub UI contract，违规直接失败；AGENTS.md强制后续沿用。完整[文字审计与规范](https://github.com/mianxiu/15100px-menu/wiki/UI-Typography)。

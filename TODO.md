@@ -2,7 +2,7 @@
 
 - [x] 255代码／自动测试／构建／实际入口：统一原生Body／Control／Secondary及预设专用角色；后台语义字号／行高／字重，取消窄窗口缩字；AGENTS／UI规范及三条构建门禁、GitHub工作流落地。572项回归、45项前端、低CPU原生矩阵、三档字号／当前主题及冻结启动／重启通过；实际255／UXP65、dist／原生／前端哈希一致。两项未来视图违规注入均被契约拒绝。
 - [ ] 255 PS实屏：QQ前台，host_scope在任何PS命令和建文档前拒绝。切回已授权前台后继续查找／拆分读回与关闭；不以离屏预览标记实机通过。浏览器内核退出，后台桌面／窄屏视觉、实体拼音／键鼠及其他DPI／PS／硬件待验。
-- [ ] 255发布：本机入口已更新，公开Release仍254；PS实屏检查后发布／核验下载，按最新版规则清理。GitHub新增UI工作流的远端运行结果待核验。
+- [ ] 255发布：本机入口已更新，公开Release仍254；PS实屏检查后发布／核验下载，按最新版规则清理。GitHub UI contract已在提交e5a07cc通过：[远端检查](https://github.com/mianxiu/15100px-menu/actions/runs/39902662542)。后续push／PR自动运行；未更改分支保护设置。
 
 证据：.runtime/tests255-delivery.log、frontend255-tests.log、native255-low.log、typography255/previews.json／enforcement-negative.json、smoke255.log、tray255/report.json、runtime255-verified.json。完整规范docs/UI-TYPOGRAPHY.md。
 - [x] 254公开交付：源码／标签、统一ZIP／SHA256／Latest清单已推送并匿名下载核验，仅保留254 Release；旧标签／源码及诊断保留，未额外制作回退包。证据.runtime/release-0.4.254-public-verification.json、manifest254-verification.json、release254-cleanup.json。
