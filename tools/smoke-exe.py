@@ -72,6 +72,11 @@ async def exercise(executable, workspace, port, show_control=False):
                 assert health['version']==status['version']==status['service']['version']
                 assert health['ready'] is True, 'HTTP responds before desktop components are ready'
                 assert Path(status['service']['executable']).resolve()==copy.resolve()
+                for _ in range(20):
+                    if status.get('input_language',{}).get('uia_available') is True:break
+                    await asyncio.sleep(.1)
+                    status=json.loads((await client.fetch(url+'/api/status')).body)
+                assert status.get('input_language',{}).get('uia_available') is True, status.get('input_language')
                 history=json.loads((await client.fetch(url+'/api/tasks')).body)
                 assert history['persistent'] and not history['persistence_error']
                 saved={item['id']:item for item in history['items']}

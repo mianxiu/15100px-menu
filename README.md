@@ -1,5 +1,7 @@
 # Photoshop Menu
 
+256／UXP0.3.66 ENG扩展候选已完成代码、590项回归与构建：覆盖整个PS前台可确认的非输入区域，保留文字／重命名／数值／搜索输入；不再要求先点画布。当前QQ前台，PS实测及加载66尚未执行，实际仍255／UXP65、公开254。[实现及验收边界](https://github.com/mianxiu/15100px-menu/wiki/Input-language)。
+
 GitHub UI contract已在提交e5a07cc通过：[远端检查](https://github.com/mianxiu/15100px-menu/actions/runs/39902662542)。后续push／PR自动运行；未更改分支保护设置。
 
 255／UXP0.3.65已更新本机：统一Caps、查找／拆分、颜色数值、tip及状态文字角色，全部原生操作跟随PS字号的95%，正文跟随PS字号，辅助信息小一级；保留预设尺寸／标签专用层级。后台使用统一字号／行高／字重变量，窄窗口只调整布局。新增原生／前端／冻结打包门禁及GitHub UI contract，违规直接失败；AGENTS.md强制后续沿用。完整[文字审计与规范](https://github.com/mianxiu/15100px-menu/wiki/UI-Typography)。

@@ -351,6 +351,8 @@ class Desktop:
                     if self.input_language:self.input_language.click(event['hwnd'],event['root'])
                 elif event.get('type') == 'input.language.protect':
                     if self.input_language:self.input_language.protect()
+                elif event.get('type') == 'input.language.activity':
+                    if self.input_language:self.input_language.activity()
                 elif event.get("type") == "action":
                     logging.info('Native hook action: %s cursor=%s', event['action'], event.get('cursor'))
                     self.notify({'action':event['action'],'cursor':event['cursor']} if 'cursor' in event else event['action'])

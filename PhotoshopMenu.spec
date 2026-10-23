@@ -2,8 +2,10 @@
 from pathlib import Path
 import subprocess
 import sys
+from comtypes.client import GetModule
 
 root = Path(SPECPATH)
+GetModule('UIAutomationCore.dll')
 subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', str(root/'tests'),
                 '-p', 'test_menu_ui_contract.py'], cwd=root, check=True)
 a = Analysis(
@@ -20,7 +22,7 @@ a = Analysis(
                       (str(root / 'uxp/offline-probe/main.js'), 'uxp/offline-probe'),
                       (str(root / 'uxp/offline-probe/labels.js'), 'uxp/offline-probe'),
                       (str(root / 'jsx'), 'jsx')],
-    hiddenimports=['win32timezone', 'backend.overlay'],
+    hiddenimports=['win32timezone', 'backend.overlay', 'comtypes.gen.UIAutomationClient'],
     hookspath=[], runtime_hooks=[], excludes=['tkinter', 'matplotlib', 'dearpygui'], noarchive=False,
 )
 pyz = PYZ(a.pure)

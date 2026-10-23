@@ -3,6 +3,32 @@ const {app} = require('photoshop');
 const uxp = require('uxp');
 const token = require('./probe-config.js');
 const session = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+// Independent read-only mailbox; never enters modal execution or blocks commands.
+const inputTool=(()=>{
+  const core=require('photoshop').core;
+  let reading=false,lastId='';
+  return async folder=>{
+    if(reading)return;
+    reading=true;
+    try {
+      let request;
+      try {const raw=await(await folder.getEntry('input-tool-request.json')).read();if(raw.length>2048)return;request=JSON.parse(raw);}catch(_){return;}
+      const now=Date.now();
+      if(request.schema!==1 || request.token!==token || request.session!==session ||
+         typeof request.id!=='string' || !/^[0-9a-f]{32}$/.test(request.id) || request.id===lastId ||
+         !Number.isFinite(request.expires_at_ms) || request.expires_at_ms<now || request.expires_at_ms>now+2000)return;
+      lastId=request.id;
+      const response={schema:1,id:request.id,session,token};
+      try {
+        const tool=await core.getActiveTool();
+        if(typeof tool.classID!=='string' || !/^[A-Za-z_][A-Za-z0-9_]{0,79}$/.test(tool.classID) || typeof tool.isModal!=='boolean')throw Error('Tool state unavailable');
+        Object.assign(response,{phase:'completed',classID:tool.classID,isModal:tool.isModal});
+      }catch(_){response.phase='failed';}
+      response.completed_at_ms=Date.now();
+      await record(folder,'input-tool-response.json',response);
+    } finally {reading=false;}
+  };
+})();
 // PS24.0.0 shares the standalone app.refresh channel with 24.0.1.
 // A 24.1+ host still needs its actual official redraw API; no nested JSX.
 const legacyPreview=/^24\.0(?:\.\d+)*$/.test(String(uxp.host?.version || ''));
@@ -283,7 +309,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.65', session, transport: 'plugin-data-files',
+        probe_version: '0.3.66', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
@@ -358,7 +384,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.65', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.66', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -505,7 +531,10 @@ Promise.resolve().then(()=>require('photoshop').action.addNotificationListener(
     observation.notifications.state='failed';observation.notifications.error=String(error).slice(0,200);
     console.log('Selection notifications unavailable',String(error));
   });
-setInterval(() => probe('poll'), 16);
+setInterval(() => {
+  if(heartbeatFolder)inputTool(heartbeatFolder).catch(error=>console.log('Input tool observation unavailable',String(error)));
+  return probe('poll');
+}, 16);
 setInterval(executionPulse,1000);
 // A pending asynchronous Photoshop call leaves JS responsive. Renew only the
 // transport lease; metadata, selection and original execution evidence keep

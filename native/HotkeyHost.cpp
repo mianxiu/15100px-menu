@@ -14,8 +14,8 @@
 #include <vector>
 #include "ScreenSample.h"
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers, LanguageProtect };
-static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search", "input.language.protect"};
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers, LanguageProtect, LanguageActivity };
+static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search", "input.language.protect", "input.language.activity"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
 struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr; ULONGLONG sequence=0; std::array<Binding,16> bindings{}; };
 // Opt-in remote clicks qualify only on a matching release in the same verified
@@ -408,6 +408,14 @@ static bool textLanguageIntent(int key,const KeyMachine& state) {
     return key=='T' && !state.held[VK_CONTROL] && !state.held[VK_MENU] &&
         !state.held[VK_CAPITAL] && !state.held[VK_LWIN] && !state.held[VK_RWIN];
 }
+static bool languageActivityKey(int key,const KeyMachine& state) {
+    return ((key>='A' && key<='Z') || key==VK_RETURN || key==VK_ESCAPE || key==VK_TAB) &&
+        !state.held[VK_CONTROL] && !state.held[VK_MENU] && !state.held[VK_CAPITAL] &&
+        !state.held[VK_LWIN] && !state.held[VK_RWIN];
+}
+static void CALLBACK languageFocusEvent(HWINEVENTHOOK,DWORD,HWND hwnd,LONG,LONG,DWORD,DWORD) {
+    if(hwnd && photoshopProcessWindow(hwnd))emit(LanguageActivity);
+}
 static bool routeKey(KeyMachine& state,int raw,bool down,bool commandScope,bool processScope,
                      const Config& cfg,bool visible,Action& action,ULONGLONG now) {
     // Reserve only CapsLock in PS-owned non-workspace windows. Other keys keep
@@ -450,8 +458,11 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
         bool unusedPrefix=keys.pending!=-1 && !keys.used;
         bool blocked=routeKey(keys,input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
                      commandScope,processScope,localConfig,IsWindowVisible(config.overlay),action,GetTickCount64());
-        if(commandScope && !blocked && !repeat && !(input.flags&LLKHF_INJECTED) &&
-            (message==WM_KEYDOWN || message==WM_SYSKEYDOWN) && textLanguageIntent(input.vkCode,keys))emit(LanguageProtect);
+        if(processScope && !blocked && !repeat && !(input.flags&LLKHF_INJECTED) &&
+            (message==WM_KEYDOWN || message==WM_SYSKEYDOWN)) {
+            if(textLanguageIntent(input.vkCode,keys))emit(LanguageProtect);
+            else if(languageActivityKey(input.vkCode,keys))emit(LanguageActivity);
+        }
         bool traceConfigured=false;
         if(config.diagnostic && GetTickCount64()<diagnosticUntil) for(const auto& b:config.bindings)
             if(b.action==Toggle && b.count && b.keys[b.count-1]==alias(input.vkCode))traceConfigured=true;
@@ -709,6 +720,7 @@ static void writeActions() {
                 continue;
             }
             if (action==LanguageProtect) line="{\"type\":\"input.language.protect\"}\n";
+            else if (action==LanguageActivity) line="{\"type\":\"input.language.activity\"}\n";
             else if (action==PanelClick) line="{\"type\":\"panel.click\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+"}\n";
             else {
                 line=std::string("{\"type\":\"")+type+"\",\"action\":\""+names[action]+"\"";
@@ -748,8 +760,10 @@ static void sampleCapsState(bool force=false) {
 static int selfTest() {
     KeyMachine languageKeys;
     check(textLanguageIntent('T',languageKeys) && !textLanguageIntent(VK_F2,languageKeys) && !textLanguageIntent('A',languageKeys));
+    check(languageActivityKey('A',languageKeys) && languageActivityKey('V',languageKeys) && languageActivityKey(VK_ESCAPE,languageKeys) && !languageActivityKey(VK_SHIFT,languageKeys));
     for(int modifier:{VK_CONTROL,VK_MENU,VK_CAPITAL,VK_LWIN,VK_RWIN}) {
         languageKeys.held[modifier]=true;check(!textLanguageIntent('T',languageKeys));languageKeys.held[modifier]=false;
+        languageKeys.held[modifier]=true;check(!languageActivityKey('A',languageKeys));languageKeys.held[modifier]=false;
     }
     ScreenSampleClicks samples;
     for(int n=0;n<1000;++n){
@@ -1200,6 +1214,8 @@ int main(int argc,char** argv) {
         if (mouseHook) UnhookWindowsHookEx(mouseHook);
         CloseHandle(available); return 1;
     }
+    HWINEVENTHOOK languageForeground=SetWinEventHook(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,nullptr,languageFocusEvent,0,0,WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNPROCESS);
+    HWINEVENTHOOK languageFocus=SetWinEventHook(EVENT_OBJECT_FOCUS,EVENT_OBJECT_FOCUS,nullptr,languageFocusEvent,0,0,WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNPROCESS);
     std::thread(readSettings).detach();
     if (parent) std::thread([parent]{
         HANDLE process=OpenProcess(SYNCHRONIZE,FALSE,parent);
@@ -1273,6 +1289,8 @@ int main(int argc,char** argv) {
     }
     if (renewal) KillTimer(nullptr,renewal);
     if (capsTimer) KillTimer(nullptr,capsTimer);
+    if (languageForeground) UnhookWinEvent(languageForeground);
+    if (languageFocus) UnhookWinEvent(languageFocus);
     closing.store(true);processScanner.join();
     while (PeekMessageW(&message,nullptr,WM_APP+22,WM_APP+22,PM_REMOVE)) {
         std::unique_ptr<ProcessSnapshot> snapshot(reinterpret_cast<ProcessSnapshot*>(message.lParam));

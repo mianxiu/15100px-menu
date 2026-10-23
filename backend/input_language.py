@@ -4,6 +4,8 @@ from ctypes import wintypes as W
 import threading
 import time
 import math
+import os
+from .input_accessibility import control_state,CONTAINERS
 
 
 class LanguagePolicy:
@@ -25,7 +27,7 @@ class LanguagePolicy:
             if layout==request['wanted']:
                 self.owned=request if request['switch'] else None
                 if request['switch']:self.confirmed_switches+=1
-                else:self.confirmed_restores+=1
+                else:self.confirmed_restores+=1;self.attempted=None
                 self.pending=None
             elif now-request['time']>1:
                 self.state='request-not-confirmed';return None
@@ -52,26 +54,44 @@ class LanguagePolicy:
 
 
 class InputLanguage:
-    # A canvas click with a verified non-text tool is positive evidence;
-    # absence of Edit/caret alone never grants a switch.
-    TOOLS=frozenset({'moveTool','marqueeRectTool','marqueeEllipTool','lassoTool','polySelTool',
-                     'magicWandTool','quickSelectTool','paintbrushTool','pencilTool','eraserTool',
-                     'gradientTool','bucketTool','handTool','zoomTool','cropTool'})
-
     def __init__(self,desktop):
+        # Import COM libraries before starting the dedicated MTA UIA worker.
+        if os.name=='nt':
+            import pythoncom,comtypes.client
         self.desktop=desktop;self.lock=threading.Lock();self.intent=None;self.serial=0
+        self.epoch=0;self.protected=False;self.accessibility=None
         self.wake=threading.Event()
         self.policy=LanguagePolicy();self.report={'state':'unknown','switch_requests':0,'restore_requests':0}
         self.thread=threading.Thread(target=self.run,name='photoshop-input-language',daemon=True)
 
     def click(self,hwnd,root):
         with self.lock:
-            self.serial+=1;self.intent=(self.serial,hwnd,root)
+            self.serial+=1;self.epoch+=1;self.protected=False;self.intent=(self.serial,hwnd,root)
         self.wake.set()
 
     def protect(self):
-        with self.lock:self.serial+=1;self.intent=None
+        with self.lock:self.serial+=1;self.epoch+=1;self.protected=True;self.intent=None
         self.wake.set()
+
+    def activity(self):
+        with self.lock:self.serial+=1;self.protected=False
+        self.wake.set()
+
+    def snapshot(self):
+        with self.lock:return self.serial,self.epoch,self.protected,self.intent
+
+    def focus_state(self,sample,tool):
+        if sample.get('state')=='input':return 'input'
+        state=control_state(sample.get('accessibility',{}),sample.get('pid'),sample.get('workspace',False),tool)
+        if state=='unknown' and self.accessibility is None:
+            # Preserve the previously verified canvas-only path if UIA is unavailable.
+            intent=self.snapshot()[3];root=sample.get('root')
+            if (intent and root==intent[2] and sample.get('class') in ('OWL.Document','PSViewC') and
+                self.desktop.panel_context.describe(sample['focus'],root)=='canvas' and
+                self.desktop.panel_context.describe(intent[1],root)=='canvas'):
+                state=control_state({30002:sample.get('pid'),30003:50033,30008:True,30010:True,30022:False,
+                                     30033:False,30040:False,30043:False},sample.get('pid'),True,tool)
+        return state
 
     def busy(self):
         check=getattr(self.desktop,'input_language_busy',None)
@@ -80,14 +100,17 @@ class InputLanguage:
     def sample(self):
         import win32gui,win32process,win32api
         from .photoshop_windows import workspace_root
-        gui=win32gui;foreground=gui.GetForegroundWindow();root=workspace_root(gui,foreground)
-        if not foreground:return {'state':'outside'}
+        gui=win32gui;foreground=gui.GetForegroundWindow()
+        if not foreground or not gui.IsWindowVisible(foreground) or gui.IsIconic(foreground):return {'state':'outside'}
         thread,pid=win32process.GetWindowThreadProcessId(foreground)
-        restore_only=False
-        if not root or not self.desktop._is_photoshop(foreground):
-            tracked=self.policy.owned or self.policy.pending
-            if not tracked or [pid,thread]!=[tracked['identity'][1],tracked['identity'][3]]:return {'state':'outside'}
-            root=tracked['root'];restore_only=True
+        handle=win32api.OpenProcess(0x410,False,pid)
+        try:
+            if win32process.GetModuleFileNameEx(handle,0).rsplit('\\',1)[-1].casefold()!='photoshop.exe':return {'state':'outside'}
+            created=str(win32process.GetProcessTimes(handle)['CreationTime'])
+        finally:handle.Close()
+        workspace=workspace_root(gui,foreground)
+        root=workspace or gui.GetAncestor(foreground,3) or foreground
+        if win32process.GetWindowThreadProcessId(root)[1]!=pid:return {'state':'unknown'}
         class Info(ctypes.Structure):
             _fields_=[('cbSize',W.DWORD),('flags',W.DWORD),('active',W.HWND),('focus',W.HWND),
                       ('capture',W.HWND),('menu',W.HWND),('move',W.HWND),('caret',W.HWND),('rect',W.RECT)]
@@ -95,22 +118,26 @@ class InputLanguage:
         if not self.user.GetGUIThreadInfo(thread,ctypes.byref(info)):return {'state':'unknown'}
         focus=info.focus or 0;layout=self.user.GetKeyboardLayout(thread)
         if not focus or not layout:return {'state':'unknown'}
-        if restore_only:
-            if win32process.GetWindowThreadProcessId(focus)[1]!=pid:return {'state':'unknown'}
-        elif workspace_root(gui,focus)!=root:return {'state':'unknown'}
+        if win32process.GetWindowThreadProcessId(focus)!=(thread,pid) or (gui.GetAncestor(focus,3) or focus)!=root:return {'state':'unknown'}
         name=gui.GetClassName(focus) if focus and gui.IsWindow(focus) else ''
-        state='input' if restore_only or info.caret or name in ('Edit','RichEdit20W','RichEdit50W','ComboBox') else 'unknown'
-        handle=win32api.OpenProcess(0x410,False,pid)
-        try:
-            if win32process.GetModuleFileNameEx(handle,0).rsplit('\\',1)[-1].casefold()!='photoshop.exe':return {'state':'outside'}
-            created=str(win32process.GetProcessTimes(handle)['CreationTime'])
-        finally:handle.Close()
-        return {'root':root,'identity':[root,pid,created,thread],'focus':focus,'layout':layout,'state':state,'restore_only':restore_only,'blocked':bool(info.capture or info.menu or info.move or info.flags&30),'class':name}
+        state='input' if info.caret or name in ('Edit','RichEdit20W','RichEdit50W','ComboBox') else 'unknown'
+        row={}
+        if state=='unknown' and self.accessibility is not None and not self.busy() and not self.desktop.visible:
+            try:
+                row=self.accessibility.read()
+                native=row.get(30020)
+                if type(native) is int and native<0:native&=0xffffffff
+                if type(native) is not int or native and ((gui.GetAncestor(native,3) or native)!=root):row={}
+            except Exception as error:self.report['uia_error_type']=type(error).__name__
+        if gui.GetForegroundWindow()!=foreground:return {'state':'outside'}
+        return {'root':root,'identity':[root,pid,created,thread],'focus':focus,'layout':layout,'state':state,
+                'pid':pid,'workspace':bool(workspace),'accessibility':row,
+                'blocked':bool(info.capture or info.menu or info.move or info.flags&30),'class':name}
 
     def run(self):
         import pythoncom,win32com.client,json
         from .settings import atomic_json
-        pythoncom.CoInitialize()
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
         self.user=ctypes.WinDLL('user32',use_last_error=True)
         self.user.GetKeyboardLayout.argtypes=[W.DWORD];self.user.GetKeyboardLayout.restype=W.HANDLE
         self.user.GetKeyboardLayoutList.argtypes=[ctypes.c_int,ctypes.POINTER(W.HANDLE)]
@@ -139,44 +166,76 @@ class InputLanguage:
                     self.report['state']='journal-invalid';return
             persisted=None
             english=next((v for v in list(layouts)[:count] if v and (v&0xffff)==0x409),None)
-            examined=None;tool=None;stable=None
+            try:
+                from .input_accessibility import FocusAccessibility
+                self.accessibility=FocusAccessibility()
+            except Exception as error:self.report['uia_error_type']=type(error).__name__
+            self.report.update(uia_available=self.accessibility is not None,tool_reads=0,scope='photoshop-non-input')
+            examined=None;tool=None;previous_scope=None;episode=0
+            def read_tool():
+                self.report['tool_reads']+=1
+                try:
+                    reader=getattr(self.desktop,'input_language_tool',None)
+                    if reader:return reader()
+                    return str(win32com.client.GetActiveObject('Photoshop.Application').DoJavaScript('String(app.currentTool);'))
+                except Exception as error:
+                    self.report['tool_error_type']=type(error).__name__
+                    return None
             while not self.desktop.stop.is_set():
                 self.wake.wait(.05);self.wake.clear()
                 if self.desktop.stop.is_set():break
                 try:
-                    with self.lock:intent=self.intent
+                    serial,epoch,protected,clicked=self.snapshot()
                     sample=self.sample()
-                    if not sample.get('root') or sample.get('restore_only'):
-                        if intent:self.protect()
-                        intent=None;examined=None;tool=None
+                    scope=tuple(sample.get('identity',[])) if sample.get('root') else None
+                    if scope!=previous_scope:
+                        episode+=1;previous_scope=scope;examined=None;tool=None
                     mouse_down=bool(self.user.GetAsyncKeyState(1)&0x8000)
-                    if intent and intent!=examined and sample.get('root')==intent[2] and not mouse_down and not sample.get('blocked'):
-                        examined=intent;tool=None
-                        if self.desktop.settings['enabled'] and not self.desktop.visible and sample['state']=='unknown' and not self.busy() and self.desktop.panel_context.describe(intent[1],intent[2])=='canvas':
-                            tool=str(win32com.client.GetActiveObject('Photoshop.Application').DoJavaScript('String(app.currentTool);'))
+                    if (mouse_down or sample.get('blocked') or self.desktop.visible or self.busy() or
+                        not self.desktop.settings['enabled']):
+                        examined=None;tool=None
+                    row=sample.get('accessibility',{})
+                    context=(scope,sample.get('focus'),serial)
+                    needs_tool=(sample.get('workspace') and sample.get('state')=='unknown' and
+                                control_state(row,sample.get('pid'))!='input' and
+                                (row.get(30003) in CONTAINERS or protected or self.accessibility is None and clicked))
+                    if needs_tool and context!=examined and not mouse_down and not sample.get('blocked'):
+                        if self.desktop.settings['enabled'] and not self.desktop.visible and not self.busy():
+                            examined=context;tool=None
+                            tool=read_tool()
                         sample=self.sample()
-                    eligible=(self.desktop.settings['enabled'] and not self.busy() and not mouse_down and not self.desktop.visible and intent and
-                              sample.get('root')==intent[2] and sample.get('class') in ('OWL.Document','PSViewC') and
-                              self.desktop.panel_context.describe(sample['focus'],intent[2])=='canvas' and
-                              self.desktop.panel_context.describe(intent[1],intent[2])=='canvas' and
-                              tool in self.TOOLS and sample['state']=='unknown' and not sample.get('blocked'))
-                    token=(intent,sample.get('root'),sample.get('focus')) if eligible else None
-                    if eligible and token==stable:sample['state']='non-input'
-                    stable=token
-                    request=self.policy.step(sample,intent if eligible else None,english,time.monotonic())
+                    same_context=(tuple(sample.get('identity',[])),sample.get('focus'),self.snapshot()[0])==context
+                    if sample.get('root'):
+                        tool_evidence=tool if same_context and examined==context else None
+                        protected=protected and not (isinstance(tool_evidence,dict) and tool_evidence.get('isModal') is False)
+                        sample['state']='input' if protected else self.focus_state(sample,tool_evidence)
+                        if not self.desktop.settings['enabled']:sample['state']='unknown'
+                    eligible=(same_context and self.desktop.settings['enabled'] and not self.busy() and not mouse_down and
+                              not self.desktop.visible and sample['state']=='non-input' and not sample.get('blocked'))
+                    row=sample.get('accessibility',{})
+                    token=(scope,sample.get('focus'),row.get(30003),row.get(30020),
+                           tool if row.get(30003) in CONTAINERS else None,epoch,episode) if eligible else None
+                    request=self.policy.step(sample,token,english,time.monotonic())
                     if request:
-                        if request['switch'] and str(win32com.client.GetActiveObject('Photoshop.Application').DoJavaScript('String(app.currentTool);')) not in self.TOOLS:
-                            self.policy.pending=None;continue
+                        if request['switch'] and needs_tool:
+                            if self.busy() or read_tool()!=tool:
+                                self.policy.pending=None;self.policy.attempted=None;examined=None;continue
                         fresh=self.sample()
-                        with self.lock:unchanged=intent==self.intent
+                        unchanged=self.snapshot()[0]==serial
                         valid=(fresh.get('identity')==request['identity'] and fresh.get('focus')==request['focus'] and fresh.get('layout')==sample['layout'] and
-                               (not request['switch'] or unchanged and eligible and not self.busy() and not fresh.get('blocked') and fresh['state']=='unknown'))
+                               (not request['switch'] or unchanged and eligible and self.desktop.settings['enabled'] and not self.desktop.visible and
+                                not self.busy() and not self.user.GetAsyncKeyState(1)&0x8000 and not fresh.get('blocked') and
+                                self.focus_state(fresh,tool)=='non-input'))
                         if valid:
                             atomic_json(journal,{'owned':self.policy.owned,'pending':self.policy.pending})
                         if valid and self.user.PostMessageW(request['focus'],0x50,0,request['wanted']):
                             key='switch_requests' if request['switch'] else 'restore_requests';self.report[key]+=1
-                        else:self.policy.pending=None
-                    self.report.update(state=self.policy.state,pending=bool(self.policy.pending),owned=bool(self.policy.owned),english_available=bool(english),confirmed_switches=self.policy.confirmed_switches,confirmed_restores=self.policy.confirmed_restores,focus_class=sample.get('class'),tool=tool)
+                        else:
+                            self.policy.pending=None
+                            if not valid:
+                                if request['switch']:self.policy.attempted=None
+                                else:self.policy.restore_attempt=None
+                    self.report.update(state=self.policy.state,pending=bool(self.policy.pending),owned=bool(self.policy.owned),english_available=bool(english),confirmed_switches=self.policy.confirmed_switches,confirmed_restores=self.policy.confirmed_restores,focus_class=sample.get('class'),focus_control_type=row.get(30003),tool=tool.get('classID') if isinstance(tool,dict) else tool,tool_modal=tool.get('isModal') if isinstance(tool,dict) else None)
                     saved={'owned':self.policy.owned,'pending':self.policy.pending}
                     if saved!=persisted:
                         atomic_json(journal,saved);persisted=json.loads(json.dumps(saved))
@@ -198,4 +257,5 @@ class InputLanguage:
                         self.policy.step(self.sample(),None,None,time.monotonic());time.sleep(.02)
                     atomic_json(journal,{'owned':self.policy.owned,'pending':self.policy.pending})
                 except Exception:self.report['state']='shutdown-restore-unconfirmed'
+            self.accessibility=None
             pythoncom.CoUninitialize()
