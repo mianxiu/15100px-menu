@@ -36,7 +36,7 @@ class FocusAccessibility:
         U=comtypes.client.GetModule('UIAutomationCore.dll')
         self.client=comtypes.client.CreateObject(U.CUIAutomation8,interface=U.IUIAutomation2)
         self.client.AutoSetFocus=False
-        self.client.ConnectionTimeout=100;self.client.TransactionTimeout=100
+        self.client.ConnectionTimeout=500;self.client.TransactionTimeout=500
         self.cache=self.client.CreateCacheRequest()
         for prop in PROPERTIES:self.cache.AddProperty(prop)
 

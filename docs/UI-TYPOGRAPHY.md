@@ -58,10 +58,10 @@ MenuControls::PanelStyle自动使用Control，不再允许调用方传入固定�
 3. 原生构建、前端npm build和PyInstaller冻结打包均有阻断检查。GitHub的UI contract工作流在push／PR运行相同契约，覆盖未来新增原生视图及前端源码。工作流不是分支保护；仓库管理员仍可绕过本地流程或检查，未修改仓库权限设置。
 4. 自动检查不能替代视觉验收。每次文字改动至少检查当前主题下的小／中／大字号：Caps、查找有结果／空／错误、拆分、颜色数值、tip与底部信息；覆盖长中文、换行／裁切、真实命中、分隔线、输入／焦点及取消。保留预设尺寸领先标签。
 
-## 验证状态
+## 255验证记录与后续边界
 
 255已完成代码、572项Python回归、45项前端测试、Vite构建、双逻辑处理器／Below Normal原生完整矩阵、冻结EXE启动／重启及实际入口更新。当前浅灰主题的小／中／大字号分别查看Caps、查找、拆分和颜色面板；大字号另有GPU离屏导出。原生自测保留真实SHOWWINDOW可见内容、输入／焦点／取消、hover、分隔线和失鲜保护；同步修正排序分段小数宽度造成的像素缝。模拟双击固定60Hz测试时钟，避免将字体重建耗时当作每个输入帧的间隔；保留双击输入的原有断言。
 
-实际运行0.4.255／UXP0.3.65，EXE、dist、菜单／热键及后台资源哈希一致；配置、PS／UXP会话与195历史未知记录保持，无当前pending。证据：.runtime/tests255-delivery.log、frontend255-tests.log、native255-low.log、typography255/previews.json、smoke255.log、tray255/report.json、runtime255-verified.json。首次原生字体作用域、整数像素量化／双击夹具及完整回归的分隔缝失败记录保留。
+255交付时实际运行0.4.255／UXP0.3.65，EXE、dist、菜单／热键及后台资源哈希一致；配置、PS／UXP会话与195历史未知记录保持，无当前pending。证据：.runtime/tests255-delivery.log、frontend255-tests.log、native255-low.log、typography255/previews.json、smoke255.log、tray255/report.json、runtime255-verified.json。首次原生字体作用域、整数像素量化／双击夹具及完整回归的分隔缝失败记录保留。
 
-本轮真实PS实屏检查在开始前因QQ前台被host_scope拒绝，未创建测试文档、未提交PS命令；前台恢复后继续。浏览器自动化内核退出，后台只完成源码契约／构建／实际静态资源验收；尚未完成浏览器桌面及窄屏视觉、实体拼音／键鼠、其他DPI／硬件／PS版本验收。未测项目不以静态契约或离屏预览代替。本轮是文字一致性修复，没有速度提升声明。GitHub UI contract已在提交e5a07cc通过：[远端检查](https://github.com/mianxiu/15100px-menu/actions/runs/39902662542)。后续push／PR自动运行；未更改分支保护设置。
+255首次真实PS实屏检查在PS命令前因前台保护拒绝；256／257已补低CPU／正常查找实屏中文筛选、空结果、边界与关闭不改历史。259低CPU查找再次通过，正常重开因焦点／取消停止；拆分与完整三档PS面板继续待验。原稿／历史／资源保持、临时文档已收尾，失败不计通过。完整记录见docs/INPUT-LANGUAGE-ASSESSMENT.md。浏览器自动化内核退出，后台只完成源码契约／构建／实际静态资源验收；尚未完成浏览器桌面及窄屏视觉、实体拼音／键鼠、其他DPI／硬件／PS版本验收。未测项目不以静态契约或离屏预览代替。本轮是文字一致性修复，没有速度提升声明。GitHub UI contract已在提交e5a07cc通过：[远端检查](https://github.com/mianxiu/15100px-menu/actions/runs/39902662542)。后续push／PR自动运行；未更改分支保护设置。

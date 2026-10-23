@@ -88,6 +88,14 @@ class LanguagePolicyTests(unittest.TestCase):
         self.assertFalse(controller.protected);self.assertIsNone(controller.intent)
         self.assertEqual(controller.epoch,epoch);self.assertGreater(controller.serial,serial)
 
+    def test_unknown_restore_does_not_start_an_autonomous_switch_loop(self):
+        p=LanguagePolicy();p.step(self.sample(),7,0x4090409,0)
+        p.step(self.sample(layout=0x4090409),7,0x4090409,.1)
+        p.step(self.sample('unknown',0x4090409),None,0x4090409,.2)
+        p.step(self.sample(),7,0x4090409,.3)
+        for tick in (1,2,3):self.assertIsNone(p.step(self.sample(),7,0x4090409,tick))
+        self.assertIsNotNone(p.step(self.sample(),8,0x4090409,4))
+
 
 class FocusAccessibilityTests(unittest.TestCase):
     def row(self,kind=50000,**changes):
@@ -205,6 +213,21 @@ class LanguageWorkerTests(unittest.TestCase):
         before=self.controller.report['tool_reads'];busy[0]=False
         self.wait(lambda:self.controller.policy.confirmed_switches==2)
         self.assertGreater(self.controller.report['tool_reads'],before)
+
+    def test_uia_dropout_restores_once_then_requires_fresh_activity(self):
+        self.start_worker(kind=50033);self.wait(lambda:self.controller.policy.confirmed_switches==1)
+        original=self.controller.sample;unavailable=[True]
+        def sample():
+            value=original()
+            if unavailable[0]:value['accessibility']={}
+            return value
+        self.controller.sample=sample;self.controller.wake.set()
+        self.wait(lambda:self.controller.policy.confirmed_restores==1)
+        unavailable[0]=False;self.controller.wake.set();time.sleep(.25)
+        self.assertEqual(self.posts,[0x4090409,0x8040804])
+        self.controller.activity();self.wait(lambda:self.controller.policy.confirmed_switches==2)
+        self.kind=50004;self.controller.wake.set();self.wait(lambda:self.controller.policy.confirmed_restores==2)
+        self.kind=50033;self.controller.wake.set();self.wait(lambda:self.controller.policy.confirmed_switches==3)
 
 
 class LanguageSamplingTests(unittest.TestCase):

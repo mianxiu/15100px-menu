@@ -14,6 +14,7 @@ class LanguagePolicy:
         self.pending=None
         self.attempted=None
         self.restore_attempt=None
+        self.restore_input=False
         self.confirmed_switches=0;self.confirmed_restores=0
         self.state='unknown'
 
@@ -27,7 +28,9 @@ class LanguagePolicy:
             if layout==request['wanted']:
                 self.owned=request if request['switch'] else None
                 if request['switch']:self.confirmed_switches+=1
-                else:self.confirmed_restores+=1;self.attempted=None
+                else:
+                    self.confirmed_restores+=1
+                    if self.restore_input:self.attempted=None
                 self.pending=None
             elif now-request['time']>1:
                 self.state='request-not-confirmed';return None
@@ -48,6 +51,7 @@ class LanguagePolicy:
 
     def request(self,sample,wanted,switch,now):
         if switch:self.restore_attempt=None
+        else:self.restore_input=sample.get('state')=='input'
         original=sample['layout'] if switch else self.owned['original']
         self.pending={'root':sample['root'],'identity':sample.get('identity'),'focus':sample['focus'],'wanted':wanted,'original':original,'switch':switch,'time':now}
         return dict(self.pending)
@@ -215,7 +219,7 @@ class InputLanguage:
                               not self.desktop.visible and sample['state']=='non-input' and not sample.get('blocked'))
                     row=sample.get('accessibility',{})
                     token=(scope,sample.get('focus'),row.get(30003),row.get(30020),
-                           tool if row.get(30003) in CONTAINERS else None,epoch,episode) if eligible else None
+                           tool if row.get(30003) in CONTAINERS else None,epoch,episode,serial) if eligible else None
                     request=self.policy.step(sample,token,english,time.monotonic())
                     if request:
                         if request['switch'] and needs_tool:
