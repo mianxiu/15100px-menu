@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 2026-10-23 Wiki文档重组：重写项目首页、快速开始、安装、主要功能、更新与故障排查；正式版／候选集中到Versions，完整索引和分组侧栏可达全部39份页面，33个旧地址保留，228个链接目标检查通过。完整历史性能记录保留，README精简并补254原始渲染示例；docs/DOCUMENTATION.md与AGENTS约束后续写法。仅文档与图片，不改变主程序或PS状态；远端推送核验见.runtime/wiki-rewrite-public-verification.json。
+
 - [x] 256 ENG扩展候选代码／自动测试／构建：PS前台及焦点驱动，取消仅画布点击；UIA正向识别输入与非输入、UXP66官方闲置／编辑工具状态、后台检测与切换读回、仅恢复本功能更改的布局。590项低CPU回归、原生矩阵、正常29项专项、自建Windows三类控件UIA及冻结启动／重启通过。
 - [ ] 256实际入口／PS实测／Release：QQ前台，未发PS命令或创建文档；实际仍255／UXP65，公开仍254。加载66及真实中文首字／候选、重命名／Tab、数值／搜索、闲置文字工具／A快捷键、跨应用等矩阵待验，不把自动／模拟检查当作实机通过。详见docs/INPUT-LANGUAGE-ASSESSMENT.md及.runtime/eng256-state.json。
 
