@@ -31,10 +31,13 @@ async function host(){
   h.state.tool.isModal=true;h.request({id:'b'.repeat(32)});await h.poll();assert.equal(h.response().isModal,true);
   let release;h.state.wait=new Promise(resolve=>release=resolve);h.request({id:'c'.repeat(32)});await h.poll();await h.poll();assert.equal(h.state.reads,3,'Only one tool read may be in flight');
   release();await settle();assert.equal(h.response().id,'c'.repeat(32));h.state.wait=null;
-  for(const [i,tool] of [{classID:'x',isModal:0},{classID:'',isModal:false},{classID:'moveTool',isModal:null}].entries()){
+  h.state.tool={classId:'moveTool',isModal:false};h.request({id:'d'.repeat(32)});await h.poll();
+  assert.equal(h.response().phase,'completed');assert.equal(h.response().classID,'moveTool');
+  for(const [i,tool] of [{classID:'x',isModal:0},{classID:'',isModal:false},{classID:'moveTool',isModal:null},{classID:'moveTool',classId:'typeCreateOrEditTool',isModal:false}].entries()){
     h.state.tool=tool;h.request({id:String(i+4).repeat(32)});await h.poll();assert.equal(h.response().phase,'failed');
   }
   h.state.error=true;h.request({id:'f'.repeat(32)});await h.poll();assert.equal(h.response().phase,'failed');
+  assert.match(h.response().error,/unavailable/);assert.ok(h.response().error.length<=240);
   assert.equal(h.files.has('probe-request.json'),false);assert.equal(h.files.has('probe-response.json'),false);
   console.log('PASS: authenticated read-only tool state / idle Type tool / modal editing / one in flight / no replay or document mutation');
 })().catch(error=>{console.error(error);process.exitCode=1;});

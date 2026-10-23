@@ -3,10 +3,11 @@
 - [x] 2026-10-23 Wiki文档重组：重写项目首页、快速开始、安装、主要功能、更新与故障排查；正式版／候选集中到Versions，完整索引和分组侧栏可达全部39份页面，33个旧地址保留，228个链接目标检查通过。完整历史性能记录保留，README精简并补254原始渲染示例；docs/DOCUMENTATION.md与AGENTS约束后续写法。仅文档与图片，不改变主程序或PS状态；远端推送核验见.runtime/wiki-rewrite-public-verification.json。
 
 - [x] 256 ENG扩展候选代码／自动测试／构建：PS前台及焦点驱动，取消仅画布点击；UIA正向识别输入与非输入、UXP66官方闲置／编辑工具状态、后台检测与切换读回、仅恢复本功能更改的布局。590项低CPU回归、原生矩阵、正常29项专项、自建Windows三类控件UIA及冻结启动／重启通过。
-- [ ] 256实际入口／PS实测／Release：QQ前台，未发PS命令或创建文档；实际仍255／UXP65，公开仍254。加载66及真实中文首字／候选、重命名／Tab、数值／搜索、闲置文字工具／A快捷键、跨应用等矩阵待验，不把自动／模拟检查当作实机通过。详见docs/INPUT-LANGUAGE-ASSESSMENT.md及.runtime/eng256-state.json。
+- [x] 258修复／构建／实际入口：真实PS发现并修正pywin32列表与元组比较、UXP实际classId与文档classID差异；不一致双字段仍拒绝。593项低CPU回归、原生矩阵、最终30项专项／UXP协议、冻结启动重启及实际258／UXP68加载与资源匹配通过。原文件／配置／195未知保护保持，分层副本恢复核验通过；只读实际工具接口返回有效gradientTool。详见docs/INPUT-LANGUAGE-ASSESSMENT.md。
+- [ ] 258 ENG实机／Release：本轮前台切换与恢复尚未完成；Windows拒绝自动激活，等待PS前台短批次。中文首字／候选、重命名／Tab、数值／搜索、闲置文字工具／A快捷键、跨应用及其他PS／低配待验；电脑控制内核退出不以消息／模拟冒充实体输入。公开仍254，不把候选标为已发布。
 
 - [x] 255代码／自动测试／构建／实际入口：统一原生Body／Control／Secondary及预设专用角色；后台语义字号／行高／字重，取消窄窗口缩字；AGENTS／UI规范及三条构建门禁、GitHub工作流落地。572项回归、45项前端、低CPU原生矩阵、三档字号／当前主题及冻结启动／重启通过；实际255／UXP65、dist／原生／前端哈希一致。两项未来视图违规注入均被契约拒绝。
-- [ ] 255 PS实屏：QQ前台，host_scope在任何PS命令和建文档前拒绝。切回已授权前台后继续查找／拆分读回与关闭；不以离屏预览标记实机通过。浏览器内核退出，后台桌面／窄屏视觉、实体拼音／键鼠及其他DPI／PS／硬件待验。
+- [ ] 255文字规范PS实屏补验：256／257实际服务的查找低CPU／正常均通过中文筛选、空结果、边界、实屏及关闭不改历史；拆分分别因快照／前台保护拒绝，尚未完成。原稿和资源保持、临时文档已收尾；三档完整PS面板、浏览器桌面／窄屏视觉、实体拼音／键鼠及其他DPI／PS／硬件待验。证据.runtime/panel256-live、panel257-live。
 - [ ] 255发布：本机入口已更新，公开Release仍254；PS实屏检查后发布／核验下载，按最新版规则清理。GitHub UI contract已在提交e5a07cc通过：[远端检查](https://github.com/mianxiu/15100px-menu/actions/runs/39902662542)。后续push／PR自动运行；未更改分支保护设置。
 
 证据：.runtime/tests255-delivery.log、frontend255-tests.log、native255-low.log、typography255/previews.json／enforcement-negative.json、smoke255.log、tray255/report.json、runtime255-verified.json。完整规范docs/UI-TYPOGRAPHY.md。

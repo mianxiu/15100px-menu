@@ -118,7 +118,8 @@ class InputLanguage:
         if not self.user.GetGUIThreadInfo(thread,ctypes.byref(info)):return {'state':'unknown'}
         focus=info.focus or 0;layout=self.user.GetKeyboardLayout(thread)
         if not focus or not layout:return {'state':'unknown'}
-        if win32process.GetWindowThreadProcessId(focus)!=(thread,pid) or (gui.GetAncestor(focus,3) or focus)!=root:return {'state':'unknown'}
+        focus_thread,focus_pid=win32process.GetWindowThreadProcessId(focus)
+        if focus_thread!=thread or focus_pid!=pid or (gui.GetAncestor(focus,3) or focus)!=root:return {'state':'unknown'}
         name=gui.GetClassName(focus) if focus and gui.IsWindow(focus) else ''
         state='input' if info.caret or name in ('Edit','RichEdit20W','RichEdit50W','ComboBox') else 'unknown'
         row={}

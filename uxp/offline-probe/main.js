@@ -21,9 +21,13 @@ const inputTool=(()=>{
       const response={schema:1,id:request.id,session,token};
       try {
         const tool=await core.getActiveTool();
-        if(typeof tool.classID!=='string' || !/^[A-Za-z_][A-Za-z0-9_]{0,79}$/.test(tool.classID) || typeof tool.isModal!=='boolean')throw Error('Tool state unavailable');
-        Object.assign(response,{phase:'completed',classID:tool.classID,isModal:tool.isModal});
-      }catch(_){response.phase='failed';}
+        // PS24 returns classId; the reference documents classID.
+        const classID=tool?.classID ?? tool?.classId;
+        if(typeof classID!=='string' || !/^[A-Za-z_][A-Za-z0-9_]{0,79}$/.test(classID) || typeof tool.isModal!=='boolean' ||
+           tool.classID!==undefined && tool.classId!==undefined && tool.classID!==tool.classId)
+          throw Error('Unsupported tool state: '+JSON.stringify({classID:String(classID).slice(0,80),isModal:String(tool?.isModal).slice(0,20),fields:Object.keys(tool || {}).slice(0,12)}));
+        Object.assign(response,{phase:'completed',classID,isModal:tool.isModal});
+      }catch(error){response.phase='failed';response.error=String(error).slice(0,240);}
       response.completed_at_ms=Date.now();
       await record(folder,'input-tool-response.json',response);
     } finally {reading=false;}
@@ -309,7 +313,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.66', session, transport: 'plugin-data-files',
+        probe_version: '0.3.68', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
@@ -384,7 +388,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.66', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.68', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
