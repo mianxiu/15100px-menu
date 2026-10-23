@@ -14,8 +14,8 @@ inline void segment(ImDrawList* draw,ImVec2 a,ImVec2 b,bool first,bool last,bool
     if(!first)draw->AddLine(a,{a.x,b.y},ImGui::GetColorU32(ImGuiCol_Border),menuControlBorder*scale);
 }
 struct PanelStyle {
-    explicit PanelStyle(ImFont* font,float scale) {
-        ImGui::PushFont(font?font:ImGui::GetFont());
+    explicit PanelStyle(float scale) {
+        ImGui::PushFont(menuFont(MenuTextRole::Control));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,{menuControlTextInset*scale,std::max(0.f,(menuControlHeight*scale-ImGui::GetFontSize())*.5f)});
         ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,menuControlBorder*scale);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize,menuControlBorder*scale);

@@ -56,7 +56,7 @@ struct MenuToolsPanel {
     }
     void draw(float scale,ImVec2 center,bool available) {
         const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
-        MenuControls::PanelStyle controls(menuFonts[0],scale);
+        MenuControls::PanelStyle controls(scale);
         const float gap=menuControlPadding*scale,margin=menuFloatingInset*scale,h=menuControlHeight*scale;
         const float width=std::max(1.f,std::min(420*scale,size.x-margin*2));
         const int rows=results.is_null()?0:std::min(6,int(results.at("items").size()));
@@ -92,10 +92,10 @@ struct MenuToolsPanel {
                     ImGui::BeginDisabled(pending);
                     if(MenuControls::button("定位",scale))submit("layers.focus",Json{{"search_id",results.at("search_id")},{"index",index}});
                     ImGui::EndDisabled();ImGui::SameLine();ImGui::BeginGroup();
-                    ImGui::TextUnformatted(row.at("name").get_ref<const std::string&>().c_str());
+                    {MenuTextStyle text(MenuTextRole::Body);ImGui::TextUnformatted(row.at("name").get_ref<const std::string&>().c_str());}
                     const auto type=row.value("type",std::string("other"));int typeIndex=8;
                     for(int i=0;i<IM_ARRAYSIZE(ids);++i)if(type==ids[i])typeIndex=i;
-                    ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotLines),"%s · %s",row.at("document_name").get_ref<const std::string&>().c_str(),kinds[typeIndex]);
+                    {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotLines),"%s · %s",row.at("document_name").get_ref<const std::string&>().c_str(),kinds[typeIndex]);}
                     ImGui::EndGroup();ImGui::Separator();ImGui::PopID();++index;
                 }
                 ImGui::EndChild();
@@ -103,14 +103,15 @@ struct MenuToolsPanel {
         } else {
             if(MenuControls::button("重新读取选中文字",scale)){source.clear();revision.clear();submit("text.read",Json::object());}
             if(!revision.empty()) {
-                ImGui::TextUnformatted(layerName.c_str());ImGui::TextUnformatted("原文字");
-                ImGui::BeginChild("##source",{0,88*scale},ImGuiChildFlags_Borders);ImGui::TextUnformatted(sourceDisplay.c_str());ImGui::EndChild();
+                {MenuTextStyle text(MenuTextRole::Body);ImGui::TextUnformatted(layerName.c_str());}
+                ImGui::TextUnformatted("原文字");
+                {MenuTextStyle text(MenuTextRole::Body);ImGui::BeginChild("##source",{0,88*scale},ImGuiChildFlags_Borders);ImGui::TextUnformatted(sourceDisplay.c_str());ImGui::EndChild();}
                 ImGui::TextUnformatted("按行分组");ImGui::PushID(int(menuEpoch));
                 MenuControls::input("##groups","",grouping,sizeof(grouping));ImGui::PopID();
                 if(ImGui::IsItemEdited())regroup();
-                ImGui::TextWrapped("例如1-3,4,5-7；按顺序覆盖所有行，最多64组");
+                {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("例如1-3,4,5-7；按顺序覆盖所有行，最多64组");}
                 ImGui::Text("独立文字层数量：%d",split.count);
-                ImGui::BeginChild("##split",{0,130*scale},ImGuiChildFlags_Borders);ImGui::TextUnformatted(split.text.c_str());ImGui::EndChild();
+                {MenuTextStyle text(MenuTextRole::Body);ImGui::BeginChild("##split",{0,130*scale},ImGuiChildFlags_Borders);ImGui::TextUnformatted(split.text.c_str());ImGui::EndChild();}
                 if(!split.error.empty())ImGui::TextWrapped("%s",split.error.c_str());
                 ImGui::BeginDisabled(!split.error.empty() || split.count<2);
                 if(MenuControls::button("确认拆分并替换原层",scale))submit("text.split",Json{{"revision",revision},{"breaks",split.breaks}});

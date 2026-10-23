@@ -4,7 +4,7 @@ class DiagnosticHint {
     inline static HFONT font=nullptr;
     inline static Json state;
     inline static ULONGLONG deadline=0,expires=0;
-    inline static int lastSecond=-1,paintCount=0,dpi=96;
+    inline static int lastSecond=-1,paintCount=0,dpi=96,fontSize=0;
     inline static std::wstring title,detail;
     inline static HWND testTarget=nullptr;
     static std::wstring wide(const std::string& text) {
@@ -45,7 +45,8 @@ class DiagnosticHint {
         MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromWindow(fg,MONITOR_DEFAULTTONEAREST),&info);
         auto getDpi=reinterpret_cast<UINT(WINAPI*)(HWND)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"GetDpiForWindow"));
         int nextDpi=getDpi?int(getDpi(fg)):96;if(nextDpi<96)nextDpi=96;
-        if(!font || nextDpi!=dpi){dpi=nextDpi;if(font)DeleteObject(font);font=CreateFontW(-MulDiv(13,dpi,96),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Microsoft YaHei UI");}
+        int nextFont=int(menuFontEms[menuFontIndex(MenuTextRole::Secondary)]);
+        if(!font || nextDpi!=dpi || nextFont!=fontSize){dpi=nextDpi;fontSize=nextFont;if(font)DeleteObject(font);font=CreateFontW(-MulDiv(fontSize,dpi,96),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Microsoft YaHei UI");}
         const auto stage=state.value("stage",std::string());
         bool english=state.value("language",std::string())=="en";
         int seconds=now<deadline?int((deadline-now+999)/1000):0;

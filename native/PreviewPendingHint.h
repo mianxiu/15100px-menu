@@ -8,7 +8,7 @@ class PreviewPendingHint {
     inline static ULONGLONG renewed=0,changed=0,testNow=0;
     inline static bool active=false,dismissed=false;
     inline static bool testForegroundMissing=false;
-    inline static int dpi=96,fontSize=11,paints=0;
+    inline static int dpi=96,fontSize=0,paints=0;
     inline static POINT anchor{};
     inline static COLORREF background,text,border,accent;
     inline static std::string lastTrace;

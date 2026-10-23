@@ -1,14 +1,23 @@
 # UI 指南
 
+## 255文字规范与运行状态
+
+255／UXP0.3.65已更新本机：统一Caps、查找／拆分、颜色数值、tip及状态文字角色，全部原生操作跟随PS字号的95%，正文跟随PS字号，辅助信息小一级；保留预设尺寸／标签专用层级。后台使用统一字号／行高／字重变量，窄窗口只调整布局。新增原生／前端／冻结打包门禁及GitHub UI contract，违规直接失败；AGENTS.md强制后续沿用。完整[文字审计与规范](https://github.com/mianxiu/15100px-menu/wiki/UI-Typography)。
+
+572项Python回归、45项前端测试、低CPU原生完整矩阵、三档字号当前主题预览及冻结启动／重启通过；实际255、dist与嵌入菜单／热键／网页资源一致，配置／PS会话／历史未知保持。故意注入未来视图的固定字体与内联字号，两类契约均确实拒绝。未宣称性能提升。
+
+实屏检查开始前检测到QQ前台而安全暂停，未创建临时文档或提交PS命令，等待回到PS／Codex／Chrome后继续。后台浏览器自动化内核退出；浏览器桌面／窄屏视觉、实体拼音／键鼠、其他DPI／硬件／PS版本待验。公开下载仍254；255发布待本轮PS实屏核验。
+
 ## 新功能必须复用的 UI 契约
 
 本节是当前实现入口；下方带版本号的内容是历史记录。位置／交互按最新用户决定，不能从旧记录恢复已废弃布局。
 
-- 新增原生面板使用 `native/*Panel.h`，在绘制范围内使用 `MenuControls::PanelStyle`，从现有 `menuFonts[0]` 取得正文；按钮、输入和筛选分段使用 `MenuControls::button/input/segments`。不在面板里直接拼默认 ImGui Button／Selectable／InputText，不另设字体、圆角、描边或颜色值。
+- 文字层级先遵循[文字审计与强制规范](UI-TYPOGRAPHY.md)。原生唯一字号入口为 `MenuTypography.h` 的Body／Control／Secondary及已验收的预设专用角色；禁止功能视图直接选字体缓存或局部缩放。后台只使用admin.css的语义字号／行高／字重变量，窄窗口不另外缩字号。
+- 新增原生面板使用 `native/*Panel.h`，在绘制范围内使用 `MenuControls::PanelStyle(scale)` 自动取得Control字体；内容按Body／Secondary切换。按钮、输入和筛选分段使用 `MenuControls::button/input/segments`。不在面板里直接拼默认 ImGui Button／Selectable／InputText，不另设字体、圆角、描边或颜色值。此规则替代旧固定menuFonts[0]的要求。
 - Caps 与工具面板共同使用 `MenuControls::surface/outline/segment`。度量唯一入口是 `MenuUiMetrics.h`／Figma 指标，颜色来自当前 PS 主题，阴影唯一入口是 `MenuShadow.h`。当前控件高24、文字内边距9、面板及常规间距6、边框1、圆角4逻辑单位，均按 DPI 缩放。
 - 同一排筛选项用共享圆角外框和内部直线分隔；空间不足按整段换行，不恢复下拉。输入／按钮同高，键盘导航、真实命中、分隔线取消、禁用和焦点保护同步验证；视觉状态不能扩大执行范围。
 - 新控件先补到共享组件，再供功能调用；确需新视觉规则时，更新组件、此契约和测试，一起核验 Caps 与工具面板。不要在具体功能文件追加覆盖补丁。旧颜色编辑等专用几何按改动需要迁移，不借统一样式移动已验收锚点。
-- `tools/build-menu-host.ps1` 构建前运行 `tests/test_menu_ui_contract.py`，自动检查所有 `*Panel.h` 不绕过共享控件、不写本地样式／颜色；原生自测核验输入／按钮尺寸与字体、样式恢复、筛选点击、分隔线及禁用。静态契约不能代替视觉检查，当前主题同时查看 Caps、查找、有结果／空／运行／错误，改配色时补充受影响明暗主题。
+- `tools/build-menu-host.ps1`及PyInstaller冻结前运行 `tests/test_menu_ui_contract.py`；前端npm build前运行typography契约；GitHub push／PR运行UI contract。违规阻断构建，覆盖未来新增原生及前端视图。原生自测核验三档字号的层级、共用字体、输入／按钮尺寸、样式恢复、筛选点击、分隔线及禁用。静态契约不能代替视觉检查，当前主题同时查看Caps、查找、有结果／空／运行／错误、拆分及颜色输入，改配色时补充受影响明暗主题。
 - 新面板／组件交付必须包含实际入口版本及组件一致性；保留鼠标附近定位、PS边界、F／Shift+F、输入／焦点、忙碌、取消和失鲜结果保护。模拟、自测、离屏预览和真实 PS 实屏分别记录。
 
 ## 254智能对象按钮

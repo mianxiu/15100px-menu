@@ -32,6 +32,8 @@
 #include "StyledMenuIcons.h"
 #include "MenuUiMetrics.h"
 #include "MenuShadow.h"
+static std::string uiFontSize="small";
+#include "MenuTypography.h"
 static void requireText(const std::string& text);
 #include "MenuControls.h"
 #include "ActivityIndicator.h"
@@ -289,12 +291,10 @@ static bool capsDividerAt(int i,POINT point) {
 }
 
 static std::string uiTheme="dark";
-static std::string uiFontSize="small";
 static bool fontDirty=false;
 static ImFontGlyphRangesBuilder requiredGlyphs;
-static ImFont* menuFonts[8]{};
+
 static unsigned fontBuilds=0;
-static int fontIndex() {return uiFontSize=="large"?2:uiFontSize=="medium"?1:0;}
 static void requireText(const std::string& text) {
     const char* p=text.c_str();
     while (*p) {
@@ -512,7 +512,7 @@ static void accept(const Json& event) {
     std::string type=event.value("type","");
     if(type=="menu.tools.opened" || type=="menu.tools.result"){menuTools.receive(event);return;}
     if(type=="preview.pending") {
-        PreviewPendingHint::update(event,window,ImGui::GetStyle(),11+fontIndex());return;
+        PreviewPendingHint::update(event,window,ImGui::GetStyle(),int(menuFontEms[menuFontIndex(MenuTextRole::Secondary)]));return;
     }
     if(type=="preview.progress") {
         if(event.value("epoch",LPARAM(-1))!=menuEpoch)return;
@@ -855,8 +855,8 @@ static void theme() {
     style.ScaleAllSizes(scale);
 }
 
-static float basicLabelSize() {return ImGui::GetFontSize()*figmaBasicTextScale;}
-static ImVec2 basicLabelExtent(int index) {return ImGui::GetFont()->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,rowLabel(index));}
+static float basicLabelSize() {return menuFont(MenuTextRole::Control)->FontSize;}
+static ImVec2 basicLabelExtent(int index) {return menuFont(MenuTextRole::Control)->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,rowLabel(index));}
 static float basicTextOffset() {return (figmaBasicLeftPadding+figmaBasicIconSize+figmaBasicIconGap)*scale;}
 static void icon(int index,ImVec2 at,bool active=false) {
     auto* draw=ImGui::GetWindowDrawList();const ImU32 ink=tint(rowEnabled(index)?ImGuiCol_Text:ImGuiCol_TextDisabled);
@@ -947,10 +947,9 @@ static void drawRecentPresets() {
     recentPanelBounds={};
     recentTips.assign(count,"");
     auto* draw=ImGui::GetWindowDrawList();
-    ImFont* small=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
-    ImFont* dimensionFont=menuFonts[fontIndex()+3]?menuFonts[fontIndex()+3]:ImGui::GetFont();
-    ImFont* badgeFont=menuFonts[6]?menuFonts[6]:small;
-    ImFont* suffixFont=menuFonts[7]?menuFonts[7]:small;
+    ImFont* dimensionFont=menuFont(MenuTextRole::PresetDimension);
+    ImFont* badgeFont=menuFont(MenuTextRole::PresetTag);
+    ImFont* suffixFont=menuFont(MenuTextRole::PresetUnit);
     struct CardText {std::string dimensions,unit,resolution,mode;};
     auto content=[](const RecentPreset& item) {
         CardText value;
@@ -1069,7 +1068,7 @@ static void drawRecentPresets() {
                 std::max(0.f,rowWidth-textOffset-padding-suffixWidth-gap));
             text(suffixFont,{dimensionAt.x+numberWidth+gap,dimensionAt.y+dimensionFont->Ascent-suffixFont->Ascent},
                 color,suffix,suffixWidth);
-        } else text(small,dimensionAt,color,"复制图像后可用",rowWidth-textOffset-padding);
+        } else text(menuFont(MenuTextRole::Secondary),dimensionAt,color,"复制图像后可用",rowWidth-textOffset-padding);
         // Each metadata value gets a compact badge; unused row space keeps the card fill.
         const bool light=ImGui::GetStyle().Colors[ImGuiCol_WindowBg].x>.5f;
         const bool metric=unit=="mm";
@@ -1160,14 +1159,14 @@ static bool tipGapAt(int action,POINT cursor) {
 // Read-only tooltips never create an ImGui widget or a gesture hit region.
 static ImVec4 actionTipBounds(int action) {
     const char* text=actionTipText(action);if(!text)return {};
-    auto* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    auto* font=menuFont(MenuTextRole::Secondary);
     const float padding=6*scale,gap=6*scale;
     auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text);
     const float width=extent.x+2*padding,height=extent.y+2*padding;
     const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
     if(action>=200 && action<200+shapeTipCount){
         const RECT group=tipGroupRect(action),anchor=shapeTipRows[action-200];
-        const auto heading=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,panelTitle());
+        const auto heading=menuFont(MenuTextRole::Body)->CalcTextSizeA(menuFont(MenuTextRole::Body)->FontSize,FLT_MAX,0,panelTitle());
         const RECT centre={LONG(pieCenter.x-std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y-40*scale),
                            LONG(pieCenter.x+std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y+19*scale)};
         const float x=std::clamp((anchor.left+anchor.right-width)*.5f,pos.x+8*scale,std::max(pos.x+8*scale,pos.x+size.x-width-8*scale));
@@ -1224,7 +1223,7 @@ static ImVec4 actionTipBounds(int action) {
     if(tipFamily(action)==12 || tipFamily(action)==32)anchor=group;
     float basicRight=pieCenter.x+19*scale;
     for(int i:{0,2,3})if(rowVisible(i))basicRight=std::max(basicRight,float(holdRows[i].right));
-    const auto heading=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,panelTitle());
+    const auto heading=menuFont(MenuTextRole::Body)->CalcTextSizeA(menuFont(MenuTextRole::Body)->FontSize,FLT_MAX,0,panelTitle());
     const RECT centre={LONG(pieCenter.x-std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y-40*scale),LONG(pieCenter.x+std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y+19*scale)};
     auto valid=[&](ImVec4 tip) {
         for(int i=0;i<4;++i)if(rowVisible(i) && tipOverlaps(tip,holdRows[i],2*scale))return false;
@@ -1260,7 +1259,7 @@ static ImVec4 quickTipBounds(int index) {return actionTipBounds(32+index);}
 static void drawActionTip(int action) {
     const auto target=actionTipBounds(action);if(target.z<=target.x) {tipVisual.reset();return;}
     auto* draw=ImGui::GetWindowDrawList();
-    auto* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    auto* font=menuFont(MenuTextRole::Secondary);
     if(!preview.empty())tipVisual.reset(); // Static preview captures final geometry.
     tipVisual.update(actionTipText(action),target,tipFamily(action),GetTickCount64());
     const auto r=tipVisual.bounds;
@@ -1281,7 +1280,7 @@ static void drawActionTip(int action) {
 }
 static void drawFooter(const std::vector<std::string>& messages,float y,bool avoidHomeGrid=false) {
     auto* draw=ImGui::GetWindowDrawList();
-    ImFont* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    ImFont* font=menuFont(MenuTextRole::Secondary);
     const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
     const float padding=figmaPadding*scale,gap=3*scale;
     const float right=avoidHomeGrid?pieCenter.x+55*scale:pos.x+size.x-8*scale;
@@ -1365,7 +1364,7 @@ static void drawQuickGroups(int selected,float fac) {
 static void drawCapsBar() {
     capsRows={};
     if(!capsReady || panelKind==4 || !layerAware)return;
-    auto* font=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    auto* font=menuFont(MenuTextRole::Control);
     auto* d=ImGui::GetWindowDrawList();
     const float h=figmaWidgetHeight*scale;
     POINT cursor{};GetCursorPos(&cursor);
@@ -1398,7 +1397,7 @@ static void drawCapsBar() {
     if(panelKind==2 && rowVisible(3)){
         float x=pieCenter.x+65*scale;
         for(int i:{5,6}){
-            const float width=ImGui::GetFont()->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,capsKeys[i]).x+basicTextOffset()+figmaBasicRightPadding*scale;
+            const float width=menuFont(MenuTextRole::Control)->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,capsKeys[i]).x+basicTextOffset()+figmaBasicRightPadding*scale;
             capsRows[i]={LONG(x),LONG(pieCenter.y-(15+menuControlHeight+quickGroupGap)*scale),LONG(x+width),LONG(pieCenter.y-(15+quickGroupGap)*scale)};x+=width;
         }
     }
@@ -1408,7 +1407,7 @@ static void drawToolBar() {
     if(panelKind==3 || panelKind==4 || !layerAware || layerKind!=4 || layerCount!=1)return;
     const char* label="拆分文字";
     const float h=menuControlHeight*scale,y=pieCenter.y-15*scale;
-    const auto extent=ImGui::GetFont()->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,label);
+    const auto extent=menuFont(MenuTextRole::Control)->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,label);
     const float width=extent.x+2*figmaBasicLeftPadding*scale,x=pieCenter.x+65*scale;
     auto* draw=ImGui::GetWindowDrawList();POINT cursor{};GetCursorPos(&cursor);
     const ImVec2 a={x,y};
@@ -1416,7 +1415,7 @@ static void drawToolBar() {
     const bool enabled=toolEnabled(1),hover=enabled && !pieAnimating && PtInRect(&toolRow,cursor);
     MenuControls::surface(draw,a,{x+width,y+h},scale);
     MenuControls::segment(draw,a,{x+width,y+h},true,true,hover,scale);
-    draw->AddText(ImGui::GetFont(),basicLabelSize(),{x+(width-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),label);
+    draw->AddText(menuFont(MenuTextRole::Control),basicLabelSize(),{x+(width-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),label);
     if(pinned && !pieAnimating && enabled && !holdFinished){
         ImGui::SetCursorScreenPos(a);
         if(ImGui::InvisibleButton("##split-tool",{width,h}))menuTools.open("split");
@@ -1487,7 +1486,10 @@ static void drawPie() {
         offsets[i]=i==0?ImVec2(-radius-width*.5f,0):i==1?ImVec2(0,radius+height*.5f):
             ImVec2((i==2?-1.f:1.f)*width*.5f,-radius-height*.5f);
         ImVec2 a={pieCenter.x+offsets[i].x-width*.5f,pieCenter.y+offsets[i].y-height*.5f};
-        holdRows[i]={LONG(a.x),LONG(a.y),LONG(a.x+width),LONG(a.y+height)};
+        holdRows[i]={LONG(std::lround(a.x)),LONG(std::lround(a.y)),LONG(std::lround(a.x+width)),LONG(std::lround(a.y+height))};
+        // Both sort segments share one pixel seam even with fractional glyph widths.
+        if(i==2)holdRows[i].right=LONG(std::lround(pieCenter.x));
+        if(i==3)holdRows[i].left=LONG(std::lround(pieCenter.x));
     }
     if (rowVisible(1)) {
         auto r=holdRows[1];
@@ -1558,7 +1560,7 @@ static void drawPie() {
         } else {
             icon(i,{a.x+figmaBasicLeftPadding*scale,a.y+(rowHeight-figmaBasicIconSize*scale)*.5f},active);
             float textY=roundf(a.y+(rowHeight-basicLabelSize())*.5f);
-            draw->AddText(ImGui::GetFont(),basicLabelSize(),{roundf(a.x+basicTextOffset()),textY},rowEnabled(i)?tint(ImGuiCol_Text):tint(ImGuiCol_TextDisabled),rowLabel(i));
+            draw->AddText(menuFont(MenuTextRole::Control),basicLabelSize(),{roundf(a.x+basicTextOffset()),textY},rowEnabled(i)?tint(ImGuiCol_Text):tint(ImGuiCol_TextDisabled),rowLabel(i));
         }
         // Keep hit regions at their final positions so fast gestures don't
         // accidentally select a different card while visual cards overlap.
@@ -1581,7 +1583,7 @@ static void drawPie() {
             const ImVec2 at={a.x+figmaBasicLeftPadding*scale,a.y+(height-figmaBasicIconSize*scale)*.5f};
             if(n<2)drawFigmaSortIcon(draw,n+2,at,figmaBasicIconSize*scale,ink);
             else drawStyledMenuIcon(draw,n+7,at,figmaBasicIconSize*scale,ink,tint(active?ImGuiCol_HeaderHovered:ImGuiCol_Button));
-            draw->AddText(ImGui::GetFont(),basicLabelSize(),{a.x+basicTextOffset(),roundf(a.y+(height-basicLabelSize())*.5f)},ink,n<2?rowLabel(n+2):capsKeys[n+3]);
+            draw->AddText(menuFont(MenuTextRole::Control),basicLabelSize(),{a.x+basicTextOffset(),roundf(a.y+(height-basicLabelSize())*.5f)},ink,n<2?rowLabel(n+2):capsKeys[n+3]);
             if(pinned && !pieAnimating && enabled && !holdFinished){
                 ImGui::SetCursorScreenPos({a.x+(n>first?scale:0),a.y});ImGui::PushID(460+n);
                 if(ImGui::InvisibleButton("##reorder",{b.x-a.x-(n>first?scale:0)-(n<last?scale:0),b.y-a.y})){
@@ -1662,6 +1664,7 @@ static void drawMenu() {
     ImGui::PopStyleVar();
     if (feedback) {drawBusyFeedback();ImGui::End();return;}
     if (holdMode) {drawPie();ImGui::End();return;}
+    {MenuTextStyle text(MenuTextRole::Control);
     ImGui::TextWrapped("%s",taskStatus().c_str());
     if (contextMode) {
         contextItems();
@@ -1701,7 +1704,7 @@ static void drawMenu() {
             if (i==3) bottomRow={pos.x+70*scale,pos.y+13*scale};
             if (!holdMode && ImGui::IsItemHovered() && (ImGui::GetIO().MouseDelta.x!=0 || ImGui::GetIO().MouseDelta.y!=0)) selection=r;
             icon(i,{pos.x+figmaBasicLeftPadding*scale,pos.y+(27-figmaBasicIconSize)*scale*.5f},highlighted);auto* draw=ImGui::GetWindowDrawList();
-            draw->AddText(ImGui::GetFont(),basicLabelSize(),{pos.x+basicTextOffset(),pos.y+(27*scale-basicLabelSize())*.5f},tint(rowEnabled(i)?ImGuiCol_Text:ImGuiCol_TextDisabled),rowLabel(i));
+            draw->AddText(menuFont(MenuTextRole::Control),basicLabelSize(),{pos.x+basicTextOffset(),pos.y+(27*scale-basicLabelSize())*.5f},tint(rowEnabled(i)?ImGuiCol_Text:ImGuiCol_TextDisabled),rowLabel(i));
             ImGui::EndDisabled();ImGui::PopID();
         }
         ImGui::EndDisabled();
@@ -1717,6 +1720,7 @@ static void drawMenu() {
         if (ImGui::BeginPopup("context")) {contextItems();ImGui::EndPopup();}
     }
     if (contextMode && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) send("hide");
+    }
     ImGui::End();
 }
 // Long diagnostic loops must service the same queue as the normal renderer.
@@ -1744,7 +1748,7 @@ static void benchmarkShapeEditor(const Json& fixture) {
     if(benchmarkRenderCompletion){D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};if(FAILED(device->CreateQuery(&desc,&completion)))throw std::runtime_error("Unable to create render completion query");}
     const auto releaseQuery=[](ID3D11Query* p){if(p)p->Release();};
     std::unique_ptr<ID3D11Query,decltype(releaseQuery)> queryOwner(completion,releaseQuery);
-    auto& io=ImGui::GetIO();io.FontDefault=menuFonts[2];layerAware=true;layerKind=6;layerCount=1;layerMask=15;quickMask=127;panelKind=2;capsReady=documentSortReady=true;
+    auto& io=ImGui::GetIO();uiFontSize="large";io.FontDefault=menuFont(MenuTextRole::Body);layerAware=true;layerKind=6;layerCount=1;layerMask=15;quickMask=127;panelKind=2;capsReady=documentSortReady=true;
     const auto actionsBefore=testedActions.size();
     std::cout<<Json{{"type","benchmark.started"},{"hwnd",reinterpret_cast<uintptr_t>(window)}}.dump()<<std::endl;
     for(const char* themeName:{"light","light-gray","dark-gray","dark"}){
@@ -1982,9 +1986,8 @@ int main() {
         io.Fonts->Clear();
         glyphs.clear();requiredGlyphs.BuildRanges(&glyphs);
         auto inter=utf8(fontFolder/L"Inter.ttf"),cjk=utf8(fontFolder/L"NotoSansCJK.otf");
-        constexpr float cachedFontEms[]={11.f,12.f,13.f,10.f,10.75f,11.5f,8.5f,8.5f};
-        for (int index=0;index<int(std::size(cachedFontEms));++index) {
-        const float em=cachedFontEms[index];
+        for (int index=0;index<int(std::size(menuFontEms));++index) {
+        const float em=menuFontEms[index];
         if (std::filesystem::exists(fontFolder/L"Inter.ttf") && std::filesystem::exists(fontFolder/L"NotoSansCJK.otf")) {
             // stb_truetype sizes by ascent-descent; Blender/FreeType sizes by
             // em. Convert hhea metrics; apply monitor DPI exactly once.
@@ -2002,8 +2005,8 @@ int main() {
         if (!io.Fonts->Build() || !io.Fonts->IsBuilt())
             throw std::runtime_error("Unable to build menu font atlas");
         fontDirty=false;
-        ++fontBuilds;io.FontDefault=menuFonts[fontIndex()];
-        std::cerr<<"Font atlas prepared: eight cached sizes, "<<(GetTickCount64()-fontStart)<<" ms, "
+        ++fontBuilds;io.FontDefault=menuFont(MenuTextRole::Body);
+        std::cerr<<"Font atlas prepared: semantic cached sizes, "<<(GetTickCount64()-fontStart)<<" ms, "
                  <<io.Fonts->TexWidth<<"x"<<io.Fonts->TexHeight<<", builds="<<fontBuilds<<"\n";
     };
     loadFont();
@@ -2234,8 +2237,8 @@ int main() {
                 if (!uploaded && !recoverRenderer())
                     throw std::runtime_error("Unable to restore renderer after font update");
             }
-            if (io.FontDefault!=menuFonts[fontIndex()]) {
-                io.FontDefault=menuFonts[fontIndex()];
+            if (io.FontDefault!=menuFont(MenuTextRole::Body)) {
+                io.FontDefault=menuFont(MenuTextRole::Body);
                 std::cerr<<"Font selection ready: "<<uiFontSize<<", cached\n";
             }
             if (selfTest && frames>=1 && frames<=3) {
@@ -2432,7 +2435,7 @@ int main() {
                     throw std::runtime_error("Preset columns / clipboard did not fit their own content");
                 if(recentPanelBounds.bottom-recentPanelBounds.top>=224*scale)
                     throw std::runtime_error("Preset panel retained the old title / excess row spacing");
-                if(menuFonts[fontIndex()+3]->FontSize<=menuFonts[6]->FontSize)
+                if(menuFont(MenuTextRole::PresetDimension)->FontSize<=menuFont(MenuTextRole::PresetTag)->FontSize)
                     throw std::runtime_error("Preset dimensions must lead the metadata badges");
                 for(int action=12;action<21;++action) {
                     const auto tip=actionTipBounds(action);
@@ -2577,6 +2580,9 @@ int main() {
                 }
                 setHoldMode(true);panelKind=2;allowed=true;
                 auto numberFrame=[&](ImGuiKey key,bool down) {
+                    // Synthetic input frames need a fixed cadence, not the last
+                    // platform delta (which can include atlas rebuilds).
+                    io.DeltaTime=1.f/60.f;
                     io.AddKeyEvent(key,down);
                     ImGui::NewFrame();drawMenu();ImGui::Render();finishPlatformFrame();
                 };
@@ -2591,13 +2597,13 @@ int main() {
                         ImGui::SetNextWindowPos({origin.x+16*scale,origin.y+16*scale});ImGui::SetNextWindowSize({360*scale,240*scale});
                         ImGui::Begin("##shared-controls-test",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoSavedSettings);
                         {
-                            MenuControls::PanelStyle controls(menuFonts[0],scale);
+                            MenuControls::PanelStyle controls(scale);
                             if(focusQuery){ImGui::SetKeyboardFocusHere();focusQuery=false;}
                             MenuControls::input("##query","搜索图层…",query,sizeof(query));
                             const float input=ImGui::GetItemRectSize().y;
                             MenuControls::button("定位",scale);
                             if(std::abs(input-menuControlHeight*scale)>.1f || std::abs(ImGui::GetItemRectSize().y-input)>.1f ||
-                               ImGui::GetStyle().FrameBorderSize!=menuControlBorder*scale || ImGui::GetFont()!=menuFonts[0])
+                               ImGui::GetStyle().FrameBorderSize!=menuControlBorder*scale || ImGui::GetFont()!=menuFont(MenuTextRole::Control))
                                 throw std::runtime_error("Shared Caps/tool input and button metrics drifted");
                             const char* names[]={"全部","文字","智能对象"};const auto at=ImGui::GetCursorScreenPos();
                             const auto first=ImGui::CalcTextSize(names[0]).x+2*menuControlTextInset*scale;
@@ -2611,6 +2617,19 @@ int main() {
                             throw std::runtime_error("Shared panel style leaked into Caps");
                         ImGui::End();ImGui::Render();finishPlatformFrame();
                     };
+                    const auto previousTextSize=uiFontSize;
+                    float previousBody=0,previousControl=0,previousSecondary=0;
+                    for(const char* size:{"small","medium","large"}) {
+                        uiFontSize=size;io.FontDefault=menuFont(MenuTextRole::Body);
+                        const auto body=menuFont(MenuTextRole::Body)->FontSize,control=menuFont(MenuTextRole::Control)->FontSize,secondary=menuFont(MenuTextRole::Secondary)->FontSize;
+                        if(!(body>control && control>=secondary && body>previousBody && control>previousControl && secondary>previousSecondary))
+                            throw std::runtime_error("Semantic typography lost hierarchy / PS size scaling");
+                        // ImGui truncates atlas sizes to whole pixels.
+                        if(std::abs(control-body*figmaBasicTextScale)>1.f || basicLabelSize()!=control || control>=menuControlHeight*scale)
+                            throw std::runtime_error("Caps and panel control typography drifted / overflowed");
+                        controlsFrame(false);previousBody=body;previousControl=control;previousSecondary=secondary;
+                    }
+                    uiFontSize=previousTextSize;io.FontDefault=menuFont(MenuTextRole::Body);
                     controlsFrame(false);io.AddMousePosEvent(float(second.x),float(second.y));controlsFrame(false);
                     io.AddMouseButtonEvent(0,true);controlsFrame(false);io.AddMouseButtonEvent(0,false);controlsFrame(false);
                     if(choice!=1)throw std::runtime_error("Shared type segment click failed");
@@ -2627,7 +2646,7 @@ int main() {
                     ImGui_ImplDX11_InvalidateDeviceObjects();loadFont();
                     if(!ImGui_ImplDX11_CreateDeviceObjects())throw std::runtime_error("Input glyph upload failed");
                     controlsFrame(false);
-                    if(std::string(query)!="\xE9\xBE\x97" || !menuFonts[0]->FindGlyphNoFallback(0x9F97))
+                    if(std::string(query)!="\xE9\xBE\x97" || !menuFont(MenuTextRole::Control)->FindGlyphNoFallback(0x9F97))
                         throw std::runtime_error("Chinese input was lost after font update");
                     auto* viewport=ImGui::GetMainViewport();auto himc=ImmGetContext(window);
                     if(!himc || !ImGui::GetPlatformIO().Platform_SetImeDataFn)
@@ -2697,7 +2716,7 @@ int main() {
                 for(int i=0;i<7;++i) {
                     auto tip=quickTipBounds(i);
                     if(tip.z<=tip.x)throw std::runtime_error("Canvas icon tooltip missing");
-                    auto* tipFont=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+                    auto* tipFont=menuFont(MenuTextRole::Secondary);
                     const float labelWidth=tipFont->CalcTextSizeA(tipFont->FontSize,FLT_MAX,0,quickLabels[i]).x;
                     if(std::abs(tip.z-tip.x-labelWidth-12*scale)>scale)
                         throw std::runtime_error("Tooltip padding contains reserved sibling text width");
@@ -3117,7 +3136,12 @@ int main() {
                 auto valueMouse=[&](const RECT& r,bool down){io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);
                     io.AddMousePosEvent((r.left+r.right)*.5f,(r.top+r.bottom)*.5f);io.AddMouseButtonEvent(ImGuiMouseButton_Left,down);numberFrame(ImGuiKey_None,false);};
                 GImGui->Time+=io.MouseDoubleClickTime+.1f;valueMouse(redRect,false);valueMouse(redRect,true);valueMouse(redRect,false);valueMouse(redRect,true);
-                if(!ImGui::TempInputIsActive(shapeEditor.rgbInputIDs[0]))throw std::runtime_error("RGB scalar did not enter numeric input");
+                if(!ImGui::TempInputIsActive(shapeEditor.rgbInputIDs[0]))throw std::runtime_error("RGB scalar did not enter numeric input: "+Json{
+                    {"rect",{redRect.left,redRect.top,redRect.right,redRect.bottom}},
+                    {"mouse",{io.MousePos.x,io.MousePos.y}},{"clicks",io.MouseClickedCount[0]},
+                    {"active",ImGui::GetActiveID()},{"expected",shapeEditor.rgbInputIDs[0]},
+                    {"hovered",GImGui->HoveredWindow?GImGui->HoveredWindow->Name:"none"},
+                    {"font",uiFontSize},{"scale",scale},{"panel",{shapeEditor.bounds.left,shapeEditor.bounds.top,shapeEditor.bounds.right,shapeEditor.bounds.bottom}}}.dump());
                 io.AddInputCharactersUTF8("73");numberFrame(ImGuiKey_None,false);numberFrame(ImGuiKey_Enter,true);numberFrame(ImGuiKey_Enter,false);valueMouse(redRect,false);
                 if(shapeEditor.current()["rgb"]!=Json({73,34,56}) || testedActions.size()!=shapeCount)
                     throw std::runtime_error("RGB numeric entry changed other channels or submitted an action");
@@ -3182,7 +3206,7 @@ int main() {
                     throw std::runtime_error("Owning live preview recognized hover but suppressed its visible tooltip");
                 const auto tipTestTheme=uiTheme,tipTestFont=uiFontSize;auto* tipTestDefault=io.FontDefault;
                 for(const char* themeName:{"light","light-gray","dark-gray","dark"})for(const char* fontName:{"small","large"})for(float panelHeight:{500.f,620.f}){
-                    uiTheme=themeName;theme();uiFontSize=fontName;io.FontDefault=menuFonts[fontIndex()];
+                    uiTheme=themeName;theme();uiFontSize=fontName;io.FontDefault=menuFont(MenuTextRole::Body);
                     SetWindowPos(window,nullptr,0,0,int(920*scale),int(panelHeight*scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
                     ImGui_ImplWin32_NewFrame();numberFrame(ImGuiKey_None,false);
                     for(int i=0;i<perceptual::wheelCount;++i){

@@ -230,7 +230,7 @@ function App() {
   onMount(()=>client.connect());onCleanup(()=>client.close());
   return <div class="shell">
     <aside><div class="brand"><img src="/icon.png?v=ps-menu-hand-3" alt=""/><div><strong>Photoshop Menu</strong><small>{t("后台管理")}</small></div></div>
-      <label class="language-switch">{t("语言 / Language")}<select aria-label="语言 / Language" value={state().language || 'zh-CN'} disabled={disabled()} onChange={e=>perform('language.set',{language:e.target.value})}><option value="zh-CN">{t("简体中文")}</option><option value="en">English</option></select></label>
+      <label class="language-switch"><span>{t("语言 / Language")}</span><select aria-label="语言 / Language" value={state().language || 'zh-CN'} disabled={disabled()} onChange={e=>perform('language.set',{language:e.target.value})}><option value="zh-CN">{t("简体中文")}</option><option value="en">English</option></select></label>
       <nav aria-label={t("主导航")}><For each={pages}>{([name,label])=><button aria-current={page()===name?'page':undefined} classList={{selected:page()===name}} onClick={()=>choose(name)}>{t(label)}</button>}</For></nav>
       <div class="aside-note">{t("仅在 Photoshop 内唤出")}</div><div class="version">{state().version ? `${t('应用 v'+state().version)}${connection()==='connected'?'':t("（上次连接）")}` : t("应用版本待确认")}</div>
     </aside>

@@ -42,6 +42,7 @@ with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as bundle:
     bundle.write(ROOT/'docs/CAPS-EXECUTION.md','docs/CAPS-EXECUTION.md')
     bundle.write(ROOT/'docs/DIVERSE-LAYERS.md','docs/DIVERSE-LAYERS.md')
     bundle.write(ROOT/'docs/UI-GUIDE.md','docs/UI-GUIDE.md')
+    bundle.write(ROOT/'docs/UI-TYPOGRAPHY.md','docs/UI-TYPOGRAPHY.md')
     bundle.write(ROOT/'docs/MENU-RECOVERY.md','docs/MENU-RECOVERY.md')
     bundle.write(ROOT/'docs/SHORTCUTS.md','docs/SHORTCUTS.md')
     bundle.write(ROOT/'docs/MASK-PREVIEW.md','docs/MASK-PREVIEW.md')

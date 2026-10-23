@@ -1,0 +1,11 @@
+name: UI contract
+on: [push, pull_request]
+jobs:
+  typography-and-controls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native and web UI contract
+        run: python3 -m unittest discover -s tests -p test_menu_ui_contract.py
+      - name: Web text hierarchy
+        run: node --test frontend/tests/typography.test.mjs

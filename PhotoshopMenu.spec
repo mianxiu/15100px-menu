@@ -1,7 +1,11 @@
 # Build one windowed executable, including its native-menu worker mode.
 from pathlib import Path
+import subprocess
+import sys
 
 root = Path(SPECPATH)
+subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', str(root/'tests'),
+                '-p', 'test_menu_ui_contract.py'], cwd=root, check=True)
 a = Analysis(
     [str(root / 'main.py')], pathex=[str(root)], binaries=[],
     datas=[(str(root / 'tools/inspect-panels.ps1'), 'tools'),(str(root / 'tools/inspect-uxp.ps1'), 'tools'),(str(root / 'frontend/dist'), 'frontend/dist'),

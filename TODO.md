@@ -1,5 +1,10 @@
 # Photoshop Menu TODO
 
+- [x] 255代码／自动测试／构建／实际入口：统一原生Body／Control／Secondary及预设专用角色；后台语义字号／行高／字重，取消窄窗口缩字；AGENTS／UI规范及三条构建门禁、GitHub工作流落地。572项回归、45项前端、低CPU原生矩阵、三档字号／当前主题及冻结启动／重启通过；实际255／UXP65、dist／原生／前端哈希一致。两项未来视图违规注入均被契约拒绝。
+- [ ] 255 PS实屏：QQ前台，host_scope在任何PS命令和建文档前拒绝。切回已授权前台后继续查找／拆分读回与关闭；不以离屏预览标记实机通过。浏览器内核退出，后台桌面／窄屏视觉、实体拼音／键鼠及其他DPI／PS／硬件待验。
+- [ ] 255发布：本机入口已更新，公开Release仍254；PS实屏检查后发布／核验下载，按最新版规则清理。GitHub新增UI工作流的远端运行结果待核验。
+
+证据：.runtime/tests255-delivery.log、frontend255-tests.log、native255-low.log、typography255/previews.json／enforcement-negative.json、smoke255.log、tray255/report.json、runtime255-verified.json。完整规范docs/UI-TYPOGRAPHY.md。
 - [x] 254公开交付：源码／标签、统一ZIP／SHA256／Latest清单已推送并匿名下载核验，仅保留254 Release；旧标签／源码及诊断保留，未额外制作回退包。证据.runtime/release-0.4.254-public-verification.json、manifest254-verification.json、release254-cleanup.json。
 
 - [x] 254“单层智能对象”按钮代码／构建／实际入口：与逐层按钮组成分段组，沿用F5原命令；570项Python回归、低CPU原生完整矩阵、当前浅灰大字号CPU／GPU预览、冻结EXE启动／重启及实际入口／dist／菜单／热键资源一致通过。新增检查包含点击／长按松键只提交一次、共同tooltip组、分隔线取消、跨组／锁定／输入／首页／旧UXP禁用；画布／图层／通用分流、取消和未知保护保持。tools/test-smart-object.cjs原执行端回归通过，涵盖单层／多层／整组／组内层、已有智能对象不新增历史、失鲜、失败回滚与恢复未知。 PS24.0.1实际254服务低CPU／正常各1次，通过原生新按钮的窗口客户区鼠标消息触发生产转换：两层合成一个智能对象、未选图层顺序保留、零RGB像素差、单历史及一次撤销精确恢复。此为实际PS＋模拟窗口输入，不冒充实体鼠标／Caps手感验收。临时文档已关闭，原稿／选择、配置、PS／UXP会话、CPU与195历史未知记录保持，无当前pending。

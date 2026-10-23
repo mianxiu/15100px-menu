@@ -389,7 +389,7 @@ static const char* shapeModeLabel(bool expanded) {
 static void drawShapeModeSwitch() {
     shapeModeBounds={};shapeModeRows={};
     if(!shapeEditor.ready())return;
-    auto* font=menuFonts[fontIndex()]?menuFonts[fontIndex()]:ImGui::GetFont();const float textSize=font->FontSize*figmaBasicTextScale;
+    auto* font=menuFont(MenuTextRole::Control);const float textSize=font->FontSize;
     const float labelWidth=std::max(font->CalcTextSizeA(textSize,FLT_MAX,0,shapeModeLabel(false)).x,font->CalcTextSizeA(textSize,FLT_MAX,0,shapeModeLabel(true)).x);
     const auto row=holdRows[0];const float width=std::ceil(labelWidth+basicTextOffset()+figmaBasicRightPadding*scale),height=menuControlHeight*scale;
     const float x=std::round((row.left+row.right-width)*.5f),y=row.top-menuPanelGap*scale-height;
@@ -437,7 +437,7 @@ static void drawShapeEditor() {
     const auto windowPos=ImGui::GetWindowPos(),windowSize=ImGui::GetWindowSize();
     const float available=shapeModeBounds.left-windowPos.x-(menuPanelGap+16)*scale;
     if(available<140*scale)return;
-    auto* panelFont=menuFonts[0]?menuFonts[0]:ImGui::GetFont();
+    auto* panelFont=menuFont(MenuTextRole::Control);
     const float gap=menuPanelGap*scale;
     auto textWidth=[&](const char* value){return panelFont->CalcTextSizeA(panelFont->FontSize,FLT_MAX,0,value).x;};
     const float rgbMinimum=std::max({textWidth("R:255"),textWidth("G:255"),textWidth("B:255")})+2*menuControlPadding*scale;
