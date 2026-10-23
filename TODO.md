@@ -5,11 +5,12 @@
 - [x] 256 ENG扩展候选代码／自动测试／构建：PS前台及焦点驱动，取消仅画布点击；UIA正向识别输入与非输入、UXP66官方闲置／编辑工具状态、后台检测与切换读回、仅恢复本功能更改的布局。590项低CPU回归、原生矩阵、正常29项专项、自建Windows三类控件UIA及冻结启动／重启通过。
 - [x] 258修复／构建／实际入口：真实PS发现并修正pywin32列表与元组比较、UXP实际classId与文档classID差异；不一致双字段仍拒绝。593项低CPU回归、原生矩阵、最终30项专项／UXP协议、冻结启动重启及实际258／UXP68加载与资源匹配通过。原文件／配置／195未知保护保持，分层副本恢复核验通过；只读实际工具接口返回有效gradientTool。详见docs/INPUT-LANGUAGE-ASSESSMENT.md。
 - [x] 259实际PS／入口：258真实切换发现UIA超时后自主往返，259增加未知恢复不自循环、新活动重验及500ms有界查询；明确输入结束的返回ENG保持。595项低CPU回归、原生矩阵、正常34项专项、冻结启动重启通过。PS24.0.1低CPU／正常各4次确认切换与恢复、闲置文字工具、原稿／历史／布局／资源和临时文档收尾通过；实际259／UXP68组件一致且低CPU静置16轮无抖动，不冒充实体A验收。证据见docs/INPUT-LANGUAGE-ASSESSMENT.md。
-- [ ] 259发布核验：源码／标签、统一ZIP／SHA256和Latest更新清单公开后核验下载，再按规则仅保留新版；实体中文首字／候选、重命名／Tab、数值／搜索、A快捷键、跨应用及其他PS／低配矩阵继续待验。
+- [x] 259已公开：源码／v0.4.259标签、统一ZIP／SHA256及Latest更新清单已推送并匿名下载核验，核验后删除254 Release及附件，仅保留259；旧标签／源码历史和诊断保留。实际入口259／UXP68匹配，Wiki使用说明已同步。证据.runtime/release-0.4.259-public-verification.json、manifest259-verification.json、release259-cleanup.json。
+- [ ] ENG完整实体矩阵：中文首字／候选、快速编辑／重命名／Tab、数值／搜索、A快捷键、跨应用及其他PS／原低配继续待验；已通过的接口切换和静置不替代这些项目。
 
 - [x] 255代码／自动测试／构建／实际入口：统一原生Body／Control／Secondary及预设专用角色；后台语义字号／行高／字重，取消窄窗口缩字；AGENTS／UI规范及三条构建门禁、GitHub工作流落地。572项回归、45项前端、低CPU原生矩阵、三档字号／当前主题及冻结启动／重启通过；实际255／UXP65、dist／原生／前端哈希一致。两项未来视图违规注入均被契约拒绝。
 - [ ] 255文字规范PS实屏补验：256／257实际服务的查找低CPU／正常均通过中文筛选、空结果、边界、实屏及关闭不改历史；拆分分别因快照／前台保护拒绝，尚未完成。原稿和资源保持、临时文档已收尾；三档完整PS面板、浏览器桌面／窄屏视觉、实体拼音／键鼠及其他DPI／PS／硬件待验。证据.runtime/panel256-live、panel257-live。
-- [ ] 255发布：本机入口已更新，公开Release仍254；PS实屏检查后发布／核验下载，按最新版规则清理。GitHub UI contract已在提交e5a07cc通过：[远端检查](https://github.com/mianxiu/15100px-menu/actions/runs/39902662542)。后续push／PR自动运行；未更改分支保护设置。
+- [x] 255文字规范随259合并公开：统一包与实际入口已核验，完整PS三档／实体输入边界仍按上项保持待验。GitHub UI contract已在提交e5a07cc通过：[远端检查](https://github.com/mianxiu/15100px-menu/actions/runs/39902662542)。后续push／PR自动运行；未更改分支保护设置。
 
 证据：.runtime/tests255-delivery.log、frontend255-tests.log、native255-low.log、typography255/previews.json／enforcement-negative.json、smoke255.log、tray255/report.json、runtime255-verified.json。完整规范docs/UI-TYPOGRAPHY.md。
 - [x] 254公开交付：源码／标签、统一ZIP／SHA256／Latest清单已推送并匿名下载核验，仅保留254 Release；旧标签／源码及诊断保留，未额外制作回退包。证据.runtime/release-0.4.254-public-verification.json、manifest254-verification.json、release254-cleanup.json。
