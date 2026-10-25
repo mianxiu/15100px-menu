@@ -1,9 +1,11 @@
 # Photoshop Menu TODO
 
+- [x] 264已公开交付：实际入口264／UXP71与统一ZIP／原生组件一致；源码d7610d3、v0.4.264标签、ZIP／SHA及Latest清单已推送并匿名下载核验。核验后删除261 Release及附件，dist仅保留264发行文件；旧标签、源码、配置与诊断保持。Wiki fae2918已同步，39页／234链接和9个主要远端页面通过，源码／标签两次GitHub UI contract成功。证据.runtime/runtime264-verified.json、release-0.4.264-public-verification.json、manifest264-verification.json、release264-cleanup.json、dist264-cleanup.json、wiki264-public-verification.json。实体输入及现代宿主限制继续保留待验，不以公开发布冒充全硬件验收。
+
 - [x] 263紧凑搜索代码／测试／实际入口：同家族类型图标、24逻辑单位结果行、整行定位、小预览图标被动悬停；独立有界128px像素读取、失鲜结果丢弃和资源回收。PS24低CPU／正常中文筛选、文字类型、空结果、定位及窗口可见／边界、原稿历史保持通过，三档字号预览已核对。证据.runtime/search263-live.json及search263-final。最终纳入264，不独立公开263。
 - [ ] 263搜索实体输入与现代PS像素预览：本机PS24无imaging.getPixels，明确显示不支持，不以模拟预览冒充实机；实体F／中文候选、hover和其他DPI／硬件仍待验。
 - [x] 264文本工具代码／测试／构建／实际入口：四个页签、可编辑草稿、折行预览、普通／正则替换、整理及分隔符／正则拆分、两种排列；独立Job计算进程2秒有界，映射样式、一次确认和原目标新鲜校验保留。实际最终264／UXP71低CPU／正常12项PS编辑／替换／整理／两种拆分均通过零预览写入、单历史和一次回退精确恢复；两种拆分零BMP像素差。同一批次12次任务／面板关闭后无需键盘活动即重新禁用IME。证据.runtime/text264-live/report.json（R1保留before-publisher-fix.json）、text264-frozen.json和text264-preview。
-- [x] 264临时禁用IME代码／测试／实际入口：PS线程内解除IMM关联及当前TSF禁用，保留中文HKL；输入／点击／离开及租约过期恢复。最终实际入口低CPU／正常各一次35→21读回及中文HKL不变，DLL与最终发行资源相同；原稿／资源保持。修复工具观察发布前文件占用留下幽灵pending、原结果只读核对及菜单／忙碌结束重新启用。最终650项低CPU完整回归、正常专项、原生矩阵／DLL真实IMM与TSF夹具及冻结启动通过，实际入口最终SHA见.runtime/recovery264foreground/installed.json，PS不为最终更新重启。证据.runtime/recovery264publish/installed.json、tests264-low.log、native264-low.log、eng264-live-before-publication-fix.json。
+- [x] 264临时禁用IME代码／测试／实际入口：PS线程内解除IMM关联及当前TSF禁用，保留中文HKL；输入／点击／离开及租约过期恢复。最终实际入口低CPU／正常各一次35→21读回及中文HKL不变，DLL与最终发行资源相同；原稿／资源保持。修复工具观察发布前文件占用留下幽灵pending、原结果只读核对及菜单／忙碌结束重新启用。最终650项低CPU完整回归、正常专项、原生矩阵／DLL真实IMM与TSF夹具及冻结启动通过，实际入口最终SHA见.runtime/recovery264foreground/installed.json，PS不为最终更新重启。证据.runtime/recovery264foreground/installed.json、tests264-low.log、native264-low.log、eng264-final-live.json。
 - [x] 任意前台PS接口测试全局授权已落地：C:/Users/mianx/.codex/AGENTS.md；共享host_scope改为校验唯一PS进程及创建时间，17项范围／稳定性专项通过，不改产品快捷键／IME前台限制。
 - [x] 只读观察全局授权已落地：C:/Users/mianx/.codex/AGENTS.md；已确认只读且不修改业务数据的未知观察可自动完整归档、保留未知后释放读取槽位，独立新读。ee6afd89811aa2016080c084905ae00f已按此处理，历史未知／原稿／配置保持，不扩展到未知修改或强制终止。
 - [ ] 264实机剩余：普通Caps关闭的真实重新禁用、实体A／B与中文候选／快速编辑／全PS区域、现代PS／其他输入法／原低配待验。普通Caps验收被真实鼠标范围保护拒绝，早期最终ENG批次前台变化停止的记录保留；最终两配置ENG及文本任务结束重新禁用已通过，不冒充完整实体通过。没有可比实体延迟基线，不声明提速。
