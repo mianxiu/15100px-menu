@@ -1,6 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 261临时IME代码／测试／构建／实际入口：生产入口保持中文HKL，PS非输入区域临时关闭IME，输入／未知／离开／暂停恢复原上下文；不再新发英文布局切换。旧布局已恢复及临时文档收尾，未知不重发。621项低CPU回归、60项正常专项、原生矩阵和冻结检查通过；实际PS24.0.1低CPU／正常各一次关闭／恢复，查找面板可见、历史不变；附着菜单焦点读回缺陷实测修复，原恢复pending只读结清。实际261／dist／组件匹配，配置及195历史未知保持。技术证据见docs/INPUT-LANGUAGE-ASSESSMENT.md。
+- [x] 261已公开：源码／v0.4.261标签、统一ZIP及SHA已推送且匿名下载核验。Latest清单已匿名下载核验；仅保留261 Release和dist发行物，旧标签／历史保留；Wiki已推送，39页／231链接及6份主要远端页面核验通过。GitHub UI contract通过。证据.runtime/release-0.4.261-public-verification.json、manifest261-verification.json、release261-cleanup.json及wiki261-public-verification.json；完整实体输入仍按下一项待验。
 - [ ] 261实体输入与兼容：实体A／拼音首字／候选、快速文字编辑／重命名／数值、完整PS范围、原低配／其他IME与PS尚未通过；Computer Use因浏览器URL无法可靠确认而安全停止，未继续发送桌面输入。不得将open状态和HKL读回冒充此矩阵。
 
 - [x] 260 ENG重启边界代码／归档入口：原PS已退出但259仍持有已确认切换记录，会阻塞新PS。260以原PID创建时间／退出状态核验，先归档再释放已确认记录；任何pending、无权限或退出无法确认均保留。归档／写盘失败及损坏记录不触发旧布局恢复。真实短命Windows进程自然退出、604项完整回归／正常43项专项、原生矩阵和冻结构建通过；实际入口已更新并归档本机旧ownership，配置／历史未知保持。
