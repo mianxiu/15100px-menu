@@ -1,5 +1,6 @@
 # Photoshop Menu TODO
 
+- [x] 265已公开：源码ed9d043、v0.4.265标签、ZIP／SHA和Latest清单已推送并匿名下载核验，仅保留265 Release和dist发行文件；旧标签／历史／配置／诊断保留。Wiki efd4ae9同步，39页／234链接及9个主要远端页面通过，源码和标签GitHub UI contract成功。证据.runtime/release-0.4.265-public-verification.json、manifest265-verification.json、release265-cleanup.json、dist265-cleanup.json和wiki265-public-verification.json。
 - [x] 265文字筛选代码／测试／实际入口：F查找顶部改为共享文字分段，结果行类型图标保留。三档字号按真实宽度换行并同步外层窗口预留；24项专项、双逻辑处理器Below Normal原生完整矩阵、冻结启动／重启与实际265／UXP71组件核验通过。PS24.0.1低CPU／正常各一次中文／文字类型／空结果／定位／可见内容／PS边界、原稿历史和资源恢复通过。首轮较大字号裁切图与两处旧几何夹具失败保留，修正后复验。证据.runtime/search265-live.json、search265-preview及search265-preview-cpu、tests265-low.log、native265-low.log、recovery265textfilters和runtime265-verified.json。
 - [ ] 265实体标签点击／中文候选与其他DPI／硬件仍待验。GPU离屏大字号既有图标缺失观察保留；CPU三档及标签几何通过，不替代PS实屏验收。
 
