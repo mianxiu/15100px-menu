@@ -1,5 +1,19 @@
 # 自动 ENG：当前实现、验证范围及历史评估
 
+## 260候选：PS重启后的旧ENG记录（2026-10-25）
+
+259已实现并公开自动ENG，但本轮继续TODO时发现一个真实重启边界：PS及服务均已退出，input-language-owned.json仍有10804旧进程的已确认英文切换记录、pending=null。旧策略遇到新进程身份时始终返回，因而新PS不能继续自动切换。保留原始记录并用259策略复现拒绝，没有向PS或系统布局发消息。
+
+260只处理已确认的ownership：读取原PID的进程创建时间／退出状态，缺失PID还需特定错误及进程枚举共同证明；访问拒绝、查询失败、仍在运行或任何pending都不释放。先持久归档原记录和“不发送旧布局恢复”的原因，再清空当前已确认ownership；新PS仍需原有新鲜焦点／输入／工具校验。PID重用通过创建时间区分；不是把新窗口当成旧窗口恢复。
+
+依据[Windows进程句柄与标识](https://learn.microsoft.com/en-us/windows/win32/procthread/process-handles-and-identifiers)、[GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)及[GetExitCodeProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getexitcodeprocess)。完整未知请求继续保留、不重发；本轮不清UXP pending或195历史记录。归档或当前记录写入失败时保留内存ownership；不合法记录在进入关闭恢复逻辑前拒绝。
+
+604项完整回归（低CPU58.611s）、正常43项专项、原生矩阵及冻结启动／重启通过。新增回归覆盖运行中／已退出／PID重用、查询拒绝／失败、归档写入失败、原请求未知、新工作线程启动及损坏记录不触发关闭恢复；自建短命Python进程自然退出的真实Windows核验通过，没有强制结束进程。此为重启功能修复，没有可比成功完成时间，不计算提速率。
+
+实际入口260的首次启动已将原已确认记录完整归档，当前owned／pending为空，switch_requests／restore_requests为0；UXP文件仍68，配置和历史未知保持。当前没有运行中的PS；新PS启动及切换／恢复实测因Steam前台暂停，尚未发布260。公开下载仍259；不把归档检查标为新PS实机通过。
+
+证据：.runtime/eng260-restart/before.json、configuration-before/input-language-owned.json、install.json、tests260-low.log、eng260-normal.log、caps260-candidate.json与smoke260.log。归档文件在实际用户数据目录，路径见install.json。先前split260-baseline只完成三组读取／预览零写入，后续按钮测试中断前未执行，继续保留待验。
+
 ## 259：实际切换／恢复与超时抖动修复
 
 259／UXP0.3.68已构建并更新实际入口，PS无需为本轮259再次重启；正式下载状态集中见Wiki Versions。范围为整个PS前台可确认的非输入区域，不要求先点击画布。文字编辑、重命名、数值、搜索及未知状态继续保护；没有已安装美式英文时不切换。它不是系统全局默认输入法设置，也不保证焦点变化后第一枚实体字母已切换。

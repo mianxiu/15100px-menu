@@ -8,6 +8,20 @@ import os
 from .input_accessibility import control_state,CONTAINERS
 
 
+def process_exited(identity):
+    import win32api,win32process,win32con
+    try:handle=win32api.OpenProcess(0x1000,False,identity[1])
+    except Exception as error:
+        if getattr(error,'winerror',None)!=87:return False
+        try:return identity[1] not in win32process.EnumProcesses()
+        except Exception:return False
+    try:
+        return (str(win32process.GetProcessTimes(handle)['CreationTime'])!=identity[2] or
+                win32process.GetExitCodeProcess(handle)!=win32con.STILL_ACTIVE)
+    except Exception:return False
+    finally:handle.Close()
+
+
 class LanguagePolicy:
     def __init__(self):
         self.owned=None
@@ -101,6 +115,19 @@ class InputLanguage:
         check=getattr(self.desktop,'input_language_busy',None)
         return bool(check and check())
 
+    def retire_exited_owner(self):
+        import hashlib,json
+        from .settings import atomic_json
+        owned=self.policy.owned
+        if not owned or self.policy.pending or not process_exited(owned['identity']):return
+        # Archive confirmed ownership before releasing it; unknown requests stay pinned.
+        key=hashlib.sha256(json.dumps(owned,sort_keys=True).encode()).hexdigest()
+        atomic_json(self.desktop.runtime/('input-language-retired-'+key+'.json'),
+                    {'owned':owned,'reason':'original-process-exited','restore_sent':False})
+        atomic_json(self.desktop.runtime/'input-language-owned.json',{'owned':None,'pending':None})
+        self.policy.owned=None;self.policy.attempted=None;self.policy.restore_attempt=None
+        self.report['retired_exited_owners']=self.report.get('retired_exited_owners',0)+1
+
     def sample(self):
         import win32gui,win32process,win32api
         from .photoshop_windows import workspace_root
@@ -163,12 +190,17 @@ class InputLanguage:
                             row['wanted'] not in installed or row['original'] not in installed or type(row['switch']) is not bool or
                             not isinstance(row['time'],(int,float)) or not math.isfinite(row['time']) or
                             not isinstance(row['identity'],list) or len(row['identity'])!=4 or row['identity'][0]!=row['root'] or
-                            any(type(row['identity'][i]) is not int for i in [0,1,3]) or not isinstance(row['identity'][2],str)):
+                            any(type(row['identity'][i]) is not int or row['identity'][i]<=0 for i in [0,1,3]) or
+                            not isinstance(row['identity'][2],str) or not row['identity'][2]):
                             raise ValueError('record')
+                    if saved['owned'] and not saved['owned']['switch']:raise ValueError('unconfirmed ownership')
                     self.policy.owned=saved['owned'];self.policy.pending=saved['pending']
                     if self.policy.pending:self.policy.pending['time']=time.monotonic()-2
                 except Exception:
                     self.report['state']='journal-invalid';return
+            try:self.retire_exited_owner()
+            except Exception as error:
+                self.report.update(state='owner-retirement-unconfirmed',error_type=type(error).__name__);return
             persisted=None
             english=next((v for v in list(layouts)[:count] if v and (v&0xffff)==0x409),None)
             try:
@@ -192,6 +224,8 @@ class InputLanguage:
                 try:
                     serial,epoch,protected,clicked=self.snapshot()
                     sample=self.sample()
+                    if sample.get('root') and self.policy.owned and sample.get('identity')!=self.policy.owned['identity']:
+                        self.retire_exited_owner()
                     scope=tuple(sample.get('identity',[])) if sample.get('root') else None
                     if scope!=previous_scope:
                         episode+=1;previous_scope=scope;examined=None;tool=None

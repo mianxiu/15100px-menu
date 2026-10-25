@@ -1,5 +1,5 @@
 import unittest
-from backend.input_language import LanguagePolicy,InputLanguage
+from backend.input_language import LanguagePolicy,InputLanguage,process_exited
 from types import SimpleNamespace
 from backend.input_accessibility import control_state
 import tempfile
@@ -8,6 +8,83 @@ import time
 from pathlib import Path
 from unittest.mock import Mock,patch
 from contextlib import ExitStack
+import json
+
+
+class ExitedLanguageOwnerTests(unittest.TestCase):
+    def owner(self):
+        return {'root':1,'identity':[1,2,'original-process',3],'focus':10,
+                'wanted':0x4090409,'original':0x8040804,'switch':True,'time':0}
+
+    def controller(self,folder):
+        controller=InputLanguage(SimpleNamespace(runtime=Path(folder)))
+        controller.policy.owned=self.owner();controller.policy.attempted='old-intent'
+        path=Path(folder)/'input-language-owned.json'
+        path.write_text(json.dumps({'owned':self.owner(),'pending':None}),'utf-8')
+        return controller,path
+
+    def test_missing_pid_requires_both_specific_error_and_successful_absence_check(self):
+        import pywintypes
+        for code,pids,expected in ((87,[],True),(87,[2],False),(5,[],False)):
+            with patch('win32api.OpenProcess',side_effect=pywintypes.error(code,'OpenProcess','test')),patch('win32process.EnumProcesses',return_value=pids):
+                self.assertEqual(process_exited(self.owner()['identity']),expected)
+        with patch('win32api.OpenProcess',side_effect=pywintypes.error(87,'OpenProcess','test')),patch('win32process.EnumProcesses',side_effect=OSError('unknown')):
+            self.assertFalse(process_exited(self.owner()['identity']))
+
+    def test_creation_identity_and_exit_code_distinguish_running_reused_and_exited_process(self):
+        for created,exit_code,expected in (('original-process',259,False),('reused-pid',259,True),('original-process',0,True)):
+            handle=Mock()
+            with patch('win32api.OpenProcess',return_value=handle),patch('win32process.GetProcessTimes',return_value={'CreationTime':created}),patch('win32process.GetExitCodeProcess',return_value=exit_code):
+                self.assertEqual(process_exited(self.owner()['identity']),expected)
+            handle.Close.assert_called_once()
+        handle=Mock()
+        with patch('win32api.OpenProcess',return_value=handle),patch('win32process.GetProcessTimes',side_effect=OSError('unknown')):
+            self.assertFalse(process_exited(self.owner()['identity']))
+        handle.Close.assert_called_once()
+
+    def test_confirmed_owner_archives_before_new_identity_can_switch_without_old_restore(self):
+        with tempfile.TemporaryDirectory() as folder:
+            controller,path=self.controller(folder)
+            with patch('backend.input_language.process_exited',return_value=True):controller.retire_exited_owner()
+            self.assertEqual(json.loads(path.read_text()),{'owned':None,'pending':None})
+            archive=list(Path(folder).glob('input-language-retired-*.json'));self.assertEqual(len(archive),1)
+            self.assertEqual(json.loads(archive[0].read_text()),{'owned':self.owner(),'reason':'original-process-exited','restore_sent':False})
+            sample={'root':4,'identity':[4,5,'new-process',6],'focus':11,'layout':0x8040804,'state':'non-input'}
+            request=controller.policy.step(sample,1,0x4090409,1)
+            self.assertTrue(request['switch']);self.assertEqual(request['identity'],sample['identity'])
+            self.assertEqual(controller.report['retired_exited_owners'],1)
+
+    def test_unknown_pending_and_unproven_exit_never_release_records(self):
+        for pending,exited in ((self.owner(),True),(None,False)):
+            with tempfile.TemporaryDirectory() as folder:
+                controller,path=self.controller(folder);controller.policy.pending=pending;before=path.read_bytes()
+                with patch('backend.input_language.process_exited',return_value=exited) as probe:controller.retire_exited_owner()
+                if pending:probe.assert_not_called()
+                self.assertEqual(controller.policy.owned,self.owner());self.assertEqual(controller.policy.pending,pending)
+                self.assertEqual(path.read_bytes(),before);self.assertEqual(list(Path(folder).glob('input-language-retired-*.json')),[])
+
+    def test_archive_or_active_journal_failure_cannot_release_in_memory_ownership(self):
+        from backend.settings import atomic_json
+        for fail_at in (1,2):
+            with tempfile.TemporaryDirectory() as folder:
+                controller,path=self.controller(folder);before=path.read_bytes();writes=[]
+                def write(target,value):
+                    writes.append(target)
+                    if len(writes)==fail_at:raise OSError('disk unavailable')
+                    atomic_json(target,value)
+                with patch('backend.input_language.process_exited',return_value=True),patch('backend.settings.atomic_json',side_effect=write):
+                    with self.assertRaises(OSError):controller.retire_exited_owner()
+                self.assertEqual(controller.policy.owned,self.owner());self.assertEqual(path.read_bytes(),before)
+
+    def test_actual_child_process_lifetime_is_observed_without_termination(self):
+        import subprocess,sys,win32api,win32process
+        with subprocess.Popen([sys.executable,'-c','import time; time.sleep(1)'],creationflags=0x08000000) as process:
+            handle=win32api.OpenProcess(0x1000,False,process.pid)
+            try:created=str(win32process.GetProcessTimes(handle)['CreationTime'])
+            finally:handle.Close()
+            identity=[1,process.pid,created,2]
+            self.assertFalse(process_exited(identity));self.assertEqual(process.wait(timeout=5),0)
+            self.assertTrue(process_exited(identity))
 
 
 class LanguagePolicyTests(unittest.TestCase):
@@ -138,10 +215,11 @@ class FocusAccessibilityTests(unittest.TestCase):
 
 
 class LanguageWorkerTests(unittest.TestCase):
-    def start_worker(self,*,acknowledge=True,kind=50000):
+    def start_worker(self,*,acknowledge=True,kind=50000,saved=None):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         self.desktop=SimpleNamespace(runtime=Path(temp.name),settings={'enabled':True},visible=False,
                                      stop=threading.Event(),input_language_busy=lambda:False)
+        if saved is not None:(self.desktop.runtime/'input-language-owned.json').write_text(json.dumps(saved),'utf-8')
         self.controller=InputLanguage(self.desktop);self.layout=0x8040804;self.kind=kind;self.modal=False;self.posts=[]
         def sample():
             return {'root':1,'identity':[1,2,'test-process',3],'focus':10,'layout':self.layout,'pid':2,
@@ -181,6 +259,34 @@ class LanguageWorkerTests(unittest.TestCase):
         self.desktop.stop.set();self.controller.wake.set();self.controller.thread.join(2)
         self.assertEqual(self.posts,[0x4090409,0x8040804,0x4090409,0x8040804])
         self.assertEqual(self.controller.policy.confirmed_restores,2)
+
+    def test_worker_startup_archives_old_confirmed_owner_before_new_ps_switch(self):
+        owner=ExitedLanguageOwnerTests().owner()
+        with patch('backend.input_language.process_exited',return_value=True):
+            self.start_worker(saved={'owned':owner,'pending':None})
+            self.wait(lambda:self.controller.policy.confirmed_switches==1)
+        self.assertEqual(self.posts,[0x4090409])
+        self.assertEqual(self.user.PostMessageW.call_args.args[0],10)
+        archive=list(self.desktop.runtime.glob('input-language-retired-*.json'))
+        self.assertEqual(json.loads(archive[0].read_text())['owned'],owner)
+
+    def test_worker_restart_keeps_unknown_request_and_sends_nothing_to_new_ps(self):
+        owner=ExitedLanguageOwnerTests().owner();pending={**owner,'switch':False}
+        with patch('backend.input_language.process_exited',return_value=True) as probe:
+            self.start_worker(saved={'owned':owner,'pending':pending})
+            self.wait(lambda:self.controller.report.get('pending'))
+            self.desktop.stop.set();self.controller.wake.set();self.controller.thread.join(2)
+            probe.assert_not_called()
+        self.assertEqual(self.posts,[]);self.assertEqual(self.controller.policy.pending['identity'],pending['identity'])
+        self.assertEqual(list(self.desktop.runtime.glob('input-language-retired-*.json')),[])
+
+    def test_invalid_saved_ownership_cannot_reach_shutdown_restore(self):
+        owner=ExitedLanguageOwnerTests().owner();owner['switch']=False
+        self.start_worker(saved={'owned':owner,'pending':None})
+        self.wait(lambda:not self.controller.thread.is_alive())
+        self.assertEqual(self.controller.report['state'],'journal-invalid')
+        self.assertIsNone(self.controller.policy.owned);self.assertEqual(self.posts,[])
+        self.assertEqual(list(self.desktop.runtime.glob('input-language-retired-*.json')),[])
 
     def test_idle_type_tool_allowed_then_modal_editing_restores_without_sending_keys(self):
         self.start_worker(kind=50033);self.wait(lambda:self.controller.policy.confirmed_switches==1)
