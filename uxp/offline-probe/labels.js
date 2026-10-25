@@ -7,7 +7,7 @@ module.exports = function createLabels(ps, session, options={}) {
   // current identity/count/locks; this never supplies target capabilities.
   const nativePlan={total:null,single:true};
   const caps=createCapsActions(ps,session,capture,selectionContext,capsTree,captureSelection,nativeSelection);
-  const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray']);
+  const colors = new Set(['none','red','orange','yellowColor','grain','blue','violet','gray','seafoam','indigo','magenta','fuchsia']);
   const shapePaint=createShapePaint(ps,session,capture,selectionContext,options.legacyPreview===true);
   const paintClipboard=createPaintClipboard(ps,session,captureSelection,selectionContext,creationTree);
   const stability=createStabilityFixture(ps,session,capture,documentTarget);
@@ -364,6 +364,7 @@ module.exports = function createLabels(ps, session, options={}) {
     const quickIndex=quickCommands.indexOf(command);
     if (!['label','select','moveToTop','moveToBottom'].includes(command) && quickIndex<0) throw Error('Unknown command');
     if (command === 'label' && !colors.has(request.color)) throw Error('Unknown label color');
+    if(command==='label' && ['seafoam','indigo','magenta','fuchsia'].includes(request.color) && !(parseInt(ps.app.version,10)>=25))throw Error('此标签颜色需要Photoshop2024或更新版本');
     const expected = request.target;
     if (!expected || expected.session !== session) throw Error('Plugin session changed');
     const started=Date.now(),timings={};
@@ -768,7 +769,7 @@ module.exports = function createLabels(ps, session, options={}) {
     return {samples,equivalent:Object.values(samples).every(sample=>signature(sample.value)===signature(samples.dom.value)),
       constant_contract:{layer_kinds:Object.fromEntries(Object.entries(ps.constants.LayerKind))}};
   }
-  return {readText:textTools.read,searchLayers:layerSearch.search,styleReadComparison,labelInheritanceComparison,feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
+  return {readText:textTools.read,searchLayers:layerSearch.search,previewLayer:layerSearch.preview,styleReadComparison,labelInheritanceComparison,feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
     if(!nativeSelection)return shapePaint.observe(...args);
     // Only explicit optional editor reads enter a short read-only modal scope.
     // Idle selection polling uses batchPlay and never occupies modal execution.
@@ -2140,7 +2141,33 @@ function createLayerSearch(ps,session,capture) {
     },{commandName:'定位图层',timeOut:0});}
     catch(error){if(uncertain){const unknown=Error('定位恢复结果待核对');unknown.resultUnknown=true;throw unknown;}throw error;}
   }
-  return {search,focus};
+  async function preview(row,checkpoint) {
+    if(!row||!Number.isSafeInteger(row.document_id)||row.document_id<=0||!Number.isSafeInteger(row.layer_id)||row.layer_id<=0||typeof row.name!=='string'||row.name.length>2000||typeof row.document_name!=='string'||row.document_name.length>2000||!types.includes(row.type)||!Number.isSafeInteger(row.parent_id)||!Number.isInteger(row.layer_kind))throw Error('预览目标无效，请重新搜索');
+    if(typeof ps.imaging?.getPixels!=='function')return {available:false,reason:'当前PS不支持图层像素预览'};
+    async function verify() {
+      const doc=await header(docRef(row.document_id),checkpoint);
+      const [actual]=await batch([{_obj:'multiGet',_target:{_ref:[{_ref:'layer',_id:row.layer_id},...docRef(row.document_id)]},extendedReference:[fields],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}],checkpoint);
+      if(doc.title!==row.document_name||!validRow(actual)||actual.layerID!==row.layer_id||actual.name!==row.name||actual.layerKind!==row.layer_kind||actual.parentLayerID!==row.parent_id||type(actual)!==row.type)throw Error('预览目标已改变，请重新搜索');
+    }
+    let image;
+    try {
+      await verify();
+      const [mode]=await batch([property('mode',docRef(row.document_id))],checkpoint);
+      if(mode.mode?._value!=='RGBColor')return {available:false,reason:'当前仅支持RGB图层预览'};
+      image=await ps.imaging.getPixels({documentID:row.document_id,layerID:row.layer_id,targetSize:{width:128,height:128},componentSize:8,colorSpace:'RGB',applyAlpha:false});
+      if(checkpoint)await checkpoint();
+      const data=image?.imageData,width=data?.width,height=data?.height,components=data?.components;
+      if(!data||width===0||height===0)return {available:false,reason:'图层没有可显示的像素'};
+      if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||width>128||height<1||height>128||![3,4].includes(components)||data.componentSize!==8)throw Error('预览像素格式不支持');
+      const raw=await data.getData({chunky:true});
+      if(raw.length!==width*height*components)throw Error('预览像素不完整');
+      const pixels=[];
+      for(let i=0;i<raw.length;i+=components)pixels.push(raw[i],raw[i+1],raw[i+2],components===4?raw[i+3]:255);
+      await verify();
+      return {available:true,width,height,pixels};
+    } finally {image?.imageData?.dispose();}
+  }
+  return {search,focus,preview};
 }
 function createTextTools(ps,session,capture,readTree) {
   let snapshot=null,serial=0;
@@ -2185,6 +2212,13 @@ function createTextTools(ps,session,capture,readTree) {
     return normalized;
   }
   function plan(raw,params) {
+    if(params&&Object.prototype.hasOwnProperty.call(params,'value')) {
+      const value=params.value,origins=params.origins;
+      if(typeof value!=='string'||!value.length||value.length>20000||/[\n\0]/.test(value)||!Number.isInteger(params.count)||params.count<0||params.count>40001||
+          !Array.isArray(origins)||origins.length!==value.length+1||origins.some((origin,index)=>!Number.isInteger(origin)||origin<0||origin>raw.textKey.length||index>0&&origin<origins[index-1]))throw Error('文字预览计划无效');
+      for(const char of value)if(char.length===1&&char.charCodeAt(0)>=0xd800&&char.charCodeAt(0)<=0xdfff)throw Error('文字包含不完整的Unicode字符');
+      return {value:mappedText(raw,value,origins),count:params.count};
+    }
     if(!params||typeof params.find!=='string'||!params.find||params.find.length>200||typeof params.replacement!=='string'||params.replacement.length>500)throw Error('查找内容不能为空，查找／替换内容超出上限');
     const find=params.find.replace(/\r\n|\n/g,'\r'),replacement=params.replacement.replace(/\r\n|\n/g,'\r');
     for(const char of find+replacement)if(char.length===1&&char.charCodeAt(0)>=0xd800&&char.charCodeAt(0)<=0xdfff)throw Error('文字包含不完整的Unicode字符');
@@ -2253,7 +2287,7 @@ function createTextTools(ps,session,capture,readTree) {
     return value=>{
       const to={...value};
       // Rewriting identical inherited paragraphs materializes PS defaults and changes their representation.
-      if(uniform)delete to.paragraphStyleRange;
+      if(uniform&&value.paragraphStyleRange?.every(range=>same(styleSignature(range.paragraphStyle),styleSignature(ranges[0].paragraphStyle))))delete to.paragraphStyleRange;
       return batch([{_obj:'set',_target:[{_ref:'textLayer',_enum:'ordinal',_value:'targetEnum'}],to,_options:{dialogOptions:'silent'}}]);
     };
   }
@@ -2271,15 +2305,15 @@ function createTextTools(ps,session,capture,readTree) {
   }
   async function replace(request) {
     const saved=snapshot,params=request.text;
-    if(!saved||params?.revision!==saved.revision||!sameTarget(saved.target,request.target)||Date.now()-saved.time>60000)throw Error('文本预览已过期，请重新读取');
+    if(!saved||params?.revision!==saved.revision||!sameTarget(saved.target,request.target)||Date.now()-saved.time>(Object.prototype.hasOwnProperty.call(params || {},'value')?1800000:60000))throw Error('文本预览已过期，请重新读取');
     const wanted=plan(saved.row.textKey,params);
-    if(!wanted.count||wanted.value.textKey===saved.row.textKey.textKey)return {verified:true,count:0};
+    if(wanted.value.textKey===saved.row.textKey.textKey)return {verified:true,count:0};
     let uncertain=false;
     try {return await ps.core.executeAsModal(async context=>{
       if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
       const before=await descriptor(request.target);
       if(!same(before,saved.row))throw Error('文字内容或样式已改变，请重新读取');
-      const history=await context.hostControl.suspendHistory({documentID:request.target.document_id,name:'文本查找替换'});
+      const history=await context.hostControl.suspendHistory({documentID:request.target.document_id,name:'处理文字'});
       try {
         if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
         // PS24.0 rejects a document-qualified textLayer identifier. The modal
@@ -2296,13 +2330,16 @@ function createTextTools(ps,session,capture,readTree) {
         } catch(_) {uncertain=true;}
         throw error;
       }
-    },{commandName:'文本查找替换',timeOut:0});}
+    },{commandName:'处理文字',timeOut:0});}
     catch(error){if(uncertain){const unknown=Error('文字恢复结果待核对');unknown.resultUnknown=true;throw unknown;}throw error;}
   }
   async function split(request) {
-    const saved=snapshot,params=request.text,ends=params?.breaks,raw=saved?.row.textKey;
-    if(!saved||params?.revision!==saved.revision||!sameTarget(saved.target,request.target)||Date.now()-saved.time>60000)throw Error('文本预览已过期，请重新读取');
-    if(!Array.isArray(ends)||ends.length<2||ends.length>64||ends[ends.length-1]!==raw.textKey.length||ends.some((end,index)=>!Number.isInteger(end)||end<1||end>raw.textKey.length||(index>0&&end<=ends[index-1])||(end<raw.textKey.length&&raw.textKey[end-1]!=='\r')))throw Error('分组必须按原行顺序完整覆盖文字，最多64组');
+    const saved=snapshot,params=request.text,ends=params?.breaks;let raw=saved?.row.textKey;
+    if(!saved||params?.revision!==saved.revision||!sameTarget(saved.target,request.target)||Date.now()-saved.time>(Object.prototype.hasOwnProperty.call(params || {},'value')?1800000:60000))throw Error('文本预览已过期，请重新读取');
+    const prepared=params&&Object.prototype.hasOwnProperty.call(params,'value')?plan(raw,params).value:null;
+    if(prepared)raw={...raw,...prepared};
+    if(prepared&&!['original','lines'].includes(params.layout))throw Error('文字拆分布局无效');
+    if(!Array.isArray(ends)||ends.length<2||ends.length>64||ends[ends.length-1]!==raw.textKey.length||ends.some((end,index)=>!Number.isInteger(end)||end<1||end>raw.textKey.length||(index>0&&end<=ends[index-1])||(end<raw.textKey.length&&raw.textKey[end-1]!=='\r')))throw Error('分组必须按预览行顺序完整覆盖文字，最多64组');
     let from=0;const groups=[];
     for(const end of ends) {
       const to=raw.textKey[end-1]==='\r'?end-1:end,text=raw.textKey.slice(from,to);
@@ -2333,8 +2370,14 @@ function createTextTools(ps,session,capture,readTree) {
         if(values.some(value=>!Number.isFinite(value))||values[2]<=values[0]||values[3]<=values[1])throw Error('无法读取独立文字字形');
         return values;
       }
-      const write=textWriter(raw);
+      let write=textWriter(raw),preparedOriginal=before;
       try {
+        if(prepared&&prepared.textKey!==before.textKey.textKey) {
+          await textWriter(before.textKey)(prepared);
+          preparedOriginal=await descriptor(request.target);
+          if(preparedOriginal.textKey.textKey!==prepared.textKey||!stylesMatch(preparedOriginal.textKey,prepared)||!same(layout(preparedOriginal.textKey),layout(before.textKey)))throw Error('拆分前的文字或样式读回不一致');
+          raw=preparedOriginal.textKey;write=textWriter(raw);
+        }
         for(const group of groups) {
           if(context.isCancelled)throw Error('文本操作已取消');
           await batch([{_obj:'duplicate',_target:ref(request.target),_options:{dialogOptions:'silent'}}]);
@@ -2385,7 +2428,7 @@ function createTextTools(ps,session,capture,readTree) {
           positions.push({layer_id:target.active_layer_id,dx,dy});
         }
         await batch([{_obj:'select',_target:[{_ref:'layer',_id:original}],makeVisible:false,_options:{dialogOptions:'silent'}}]);
-        if(!same(await descriptor(request.target),before))throw Error('原文字已改变，已取消拆分');
+        if(!same(await descriptor(request.target),preparedOriginal))throw Error('原文字已改变，已取消拆分');
         await batch([{_obj:'hide',_target:[{_ref:'layer',_id:original}],_options:{dialogOptions:'silent'}},
           ...(flags.visible?created.map(id=>({_obj:'show',_target:[{_ref:'layer',_id:id}],_options:{dialogOptions:'silent'}})):[]),
           {_obj:'delete',_target:ref(request.target),_options:{dialogOptions:'silent'}},

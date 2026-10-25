@@ -53,5 +53,8 @@ async function request(breaks=[3,6,8]){const read=await tools.read();return {tar
  result=await tools.split(await request([5,8,10]));assert.deepEqual(Array.from(result.positions,r=>r.dy),[0,20,30]);assert.ok(layers.slice(1,-1).every(l=>l.textKey.textStyleRange.every(r=>!r.textStyle.baselineShift)));wrapWidth=0;
  reset();wrapWidth=6;Object.assign(layers[1].textKey,{...clone(raw),boundingBox:{...clone(raw.boundingBox),bottom:{_unit:'pixelsUnit',_value:25}}});const overflow=clone(layers[1]);
  await assert.rejects(tools.split(await request([5,10])),/溢出文本框/);assert.deepEqual(layers[1],overflow);assert.deepEqual(layers.map(l=>l.layerID),[10,11,12]);wrapWidth=0;
+ reset();layers[1].textKey.textKey='AA,BB';layers[1].textKey.textStyleRange[0].to=6;layers[1].textKey.paragraphStyleRange[0].to=6;layers[1].textKey.boundingBox=ink('AA,BB');
+ let prepared=await request([4,6]);prepared.text={...prepared.text,value:'AA,\rBB',origins:[0,1,2,3,3,4,4],count:2,layout:'lines'};const preparedHistory=history;result=await tools.split(prepared);assert.equal(history,preparedHistory+1);assert.deepEqual(layers.slice(1,-1).map(l=>l.textKey.textKey),['AA,','BB']);
+ reset();prepared=await request();prepared.text={...prepared.text,value:'AX\rBY\rCZ',origins:[0,1,2,3,4,5,6,7,7],count:3,layout:'lines'};failSet=true;const sourceBefore=clone(layers);await assert.rejects(tools.split(prepared),/写入失败/);assert.deepEqual(layers,sourceBefore);
  console.log('Text split: order/parent/style/position, grouping, hidden state, bounds, rollback and unknown passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

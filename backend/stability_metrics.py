@@ -25,34 +25,27 @@ def machine_info():
 
 
 def host_scope():
-    """Pin the existing PS process; permit only the authorized foreground apps."""
-    import win32api,win32gui,win32process
+    """Pin the PS process; tests may run under any foreground app (user authorization)."""
+    import win32api,win32process
+    def identity(pid):
+        handle=win32api.OpenProcess(0x410,False,pid)
+        try:
+            return (os.path.basename(win32process.GetModuleFileNameEx(handle,0)).lower(),
+                    win32process.GetProcessTimes(handle)['CreationTime'])
+        finally:handle.Close()
     hosts=[]
     for pid in win32process.EnumProcesses():
         try:
-            h=win32api.OpenProcess(0x410,False,pid)
-            try:name=os.path.basename(win32process.GetModuleFileNameEx(h,0)).lower()
-            finally:h.Close()
-            if name=='photoshop.exe':hosts.append(pid)
+            value=identity(pid)
+            if value[0]=='photoshop.exe':hosts.append((pid,value))
         except Exception:pass
     if len(hosts)!=1:raise RuntimeError('测试需要一个已运行的 Photoshop 实例')
-    hwnd=win32gui.GetForegroundWindow()
-    front=win32process.GetWindowThreadProcessId(hwnd)[1] if hwnd else None
-    def permitted(pid):
-        if pid in (hosts[0],os.getpid()):return True
-        if not pid:return False
-        try:
-            h=win32api.OpenProcess(0x410,False,pid)
-            try:name=os.path.basename(win32process.GetModuleFileNameEx(h,0)).lower()
-            finally:h.Close()
-            return name in ('chrome.exe','msedge.exe','codex.exe','chatgpt.exe','deepseek harness.exe')
-        except Exception:return False
-    if not permitted(front):raise RuntimeError('请在 Photoshop 或已授权的后台窗口开始测试')
+    pid,original=hosts[0]
     def check():
-        hwnd=win32gui.GetForegroundWindow()
-        if not hwnd or not permitted(win32process.GetWindowThreadProcessId(hwnd)[1]):
-            raise RuntimeError('前台应用已变化，测试停止；未提交下一步')
-    return hosts[0],check
+        try:current=identity(pid)
+        except Exception:raise RuntimeError('原 Photoshop 进程无法确认，测试停止；未提交下一步') from None
+        if current!=original:raise RuntimeError('Photoshop 进程身份已变化，测试停止；未提交下一步')
+    return pid,check
 
 
 class CounterValue(ctypes.Structure):

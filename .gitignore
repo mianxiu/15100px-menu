@@ -172,6 +172,7 @@ frontend/dist/
 native/HotkeyHost.exe
 
 /native/MenuHost.exe
+/native/InputContext.dll
 uxp/offline-probe/probe-config.js
 
 # Local design exports and experiment documents

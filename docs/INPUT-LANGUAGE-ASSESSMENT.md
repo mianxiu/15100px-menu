@@ -1,5 +1,38 @@
 # PS 临时 IME：当前实现、验证范围及历史评估
 
+## 264：PS线程内禁用输入上下文
+
+用户再次提供了快捷键触发中文候选栏的截图。261只有默认IME窗口的开关控制；264改为当前PS线程内的原生辅助组件，临时解除窗口IMM关联，并对当前TSF编辑上下文设置KEYBOARD_DISABLED。原键盘布局、输入法配置和转换模式不切换。组件只在经过进程、线程、焦点、UIA和工具状态核验后启用，不在低级键盘钩子里做PS查询。
+
+原上下文／TSF原值保留在PS线程内。点击、焦点变化、编辑意图、离开PS或1.5秒续约失效时恢复；后台仅能续约自己持有且身份／布局／焦点未变的关联。没有活跃服务时，看门狗恢复并撤销控制窗口。只有同一PS进程和正确nonce的控制应答才能结清记录；明确拒绝单独归档，超时不冒充拒绝或成功。旧布局和旧开关记录只作恢复兼容；旧unknown仍保护，不能用重启清除。DLL在PS进程退出前保持有效，必要的版本缓存位于应用数据input-context目录；更换DLL实现需正常重启PS。
+
+### 实测和限制
+
+最终实际入口0.4.264／UXP0.3.71、PS24.0.1：低CPU和正常各一次，原生状态35（自有租约、IMM解除、TSF已禁用）到21（原上下文恢复），HKL始终0x08040804。查找输入窗口可见，历史／原稿／选择不变；实际PS加载DLL的SHA与发行资源一致。首轮200ms只读查询超时已保留，新的独立批次以1000ms只读等待上限完成；没有重发未知修改。独立原生夹具另覆盖错误nonce、真实TSF原值读回、鼠标／焦点恢复与租约过期。
+
+Computer Use在PS重启后仍报相同窗口所有者校验错误，未发送实体键盘。上述是PS接口及原生读回，不能证明实体A／B、拼音首字、候选点击、快速重命名／数值、全部面板、其他输入法和原低配均已通过。本轮是功能修复，没有可比实体按键延迟基线，不声明提速。
+
+文本实际入口另完成两配置12项操作及面板关闭后自动重新禁用，无键盘活动。普通Caps仍因真实鼠标范围保护未通过，不把文本工具面板结果冒充普通Caps验收。最终ENG证据.runtime/eng264-final-live.json；文本记录.runtime/text264-live/report.json。原陈旧前台采样失败保留，独立最终批次使用新鲜实际PS焦点。
+
+### 菜单与忙碌结束的恢复
+
+旧策略在非激活Caps菜单关闭或任务忙碌结束后，焦点和按键序号可能完全未变；此前同一意图已使用，因而即使新鲜工具状态再次就绪也不重新启用保护。修复仅在真实阻塞状态切换时轮换观察回合，并完整重验输入／工具状态；UIA失联本身不会轮换或自主往返。隔离生产策略复现旧菜单关闭失败，新回归覆盖菜单关闭和已知忙碌结束、零按键自动恢复；实际PS复核单独记录。
+
+### 读取发布边界
+
+真实事务后发现新input-tool-pending身份已保存，而input-tool-request.json仍是上一条，固定.tmp仍含新身份。原atomic_json对UXP文件占用没有发布重试，失败会留下等待不存在宿主结果的读取槽位。修复复用已有250ms有界原子发布重试，同一次发布保持ID／期限／字节不变；新本地记录区分prepared与published，线上协议仍为schema1。只有明确的发布前异常且失败归档成功后，才释放该未发布身份；发布成功后本地状态落盘失败、进程崩溃、旧格式或缺少可信结果时继续保留未知，不重新发布。
+
+迟到结果仅只读核对原ID／会话／token／终态；已知失鲜／失败结清后，可以独立观察当前状态，无需先牺牲一次快捷键。用户已明确要求将这类只读观察的完整归档和槽位释放写入全局，C:/Users/mianx/.codex/AGENTS.md已落地。真实原未知ee6afd89811aa2016080c084905ae00f已在旧生产者正常退出后，完整归档并逐文件核验，再释放读取槽位，仍为未知、未重发，不改成成功；此前8282413f记录继续保持。原195及263归档记录不变。
+
+Windows实际共享占用测试（低CPU／正常）均通过：持续无删除共享句柄使发布明确失败并完成未发布归档，当前读取槽位未残留；120ms占用分别经历22／23次相同字节的原子重命名尝试后发布成功，实际PS返回工具状态。测试没有重启PS或修改文档，资源及服务正常恢复。证据.runtime/tool264-publication-live/report.json。
+
+用户进一步授权任意应用前台均可通过接口测试隔离PS文档，已写入全局；共享host_scope改为核验唯一PS的进程创建身份，退出／PID重用仍停止。产品快捷键与IME的PS前台限制保持。
+
+构建：先运行tools/build-input-context.ps1，再运行tools/test-input-context.ps1和菜单构建；PyInstaller／发行打包同时校验InputContext.dll。API依据：[TF_GetThreadMgr](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-tf_getthreadmgr)、[Activate的配对要求](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfthreadmgr-activate)、[Compartment原值](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfcompartment-setvalue)、[输入上下文关联](https://learn.microsoft.com/en-us/windows/win32/api/imm/nf-imm-immassociatecontext)。
+
+证据：.runtime/eng264-live-before-publication-fix.json、eng264-live-first-read-timeout.json、tool264-state.json、text264-live/report.json、recovery264reload及对应构建／回归日志。以下261记录为历史，不作为264实体键盘验收。
+
+
 ## 261：保持中文输入法的临时 IME 关闭／恢复（2026-10-25）
 
 261 将生产入口改为 InputMethod：保持当前中文输入法及 HKL，仅关闭已确认 PS 非输入区域所属 IME 的 open 状态；明确输入、未知状态、菜单输入、产品暂停或离开 PS 时，只恢复本功能关闭过的原上下文。没有新增布局切换请求、US 布局依赖、全局设置或第三方依赖。旧 InputLanguage 仅供旧记录恢复兼容，不再由 Desktop 启动其切换工作线程。

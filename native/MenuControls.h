@@ -32,6 +32,91 @@ inline bool input(const char* id,const char* hint,char* value,size_t capacity) {
     requireText(value);
     return enter;
 }
+inline bool multiline(const char* id,char* value,size_t capacity,float height) {
+    MenuTextStyle text(MenuTextRole::Body);
+    const bool changed=ImGui::InputTextMultiline(id,value,capacity,{-1,height},ImGuiInputTextFlags_AllowTabInput);
+    requireText(value);return changed;
+}
+inline void textPreview(const char* id,const char* value,float height) {
+    MenuTextStyle text(MenuTextRole::Body);
+    ImGui::BeginChild(id,{0,height},ImGuiChildFlags_Borders|ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::PushTextWrapPos(0);ImGui::TextUnformatted(value);ImGui::PopTextWrapPos();ImGui::EndChild();
+}
+struct TipStyle {
+    explicit TipStyle(float scale) {
+        ImGui::PushFont(menuFont(MenuTextRole::Secondary));
+        ImGui::PushStyleColor(ImGuiCol_PopupBg,ImGui::ColorConvertU32ToFloat4(menuTipBackground));
+        ImGui::PushStyleColor(ImGuiCol_Border,ImGui::ColorConvertU32ToFloat4(menuTipBorder));
+        ImGui::PushStyleColor(ImGuiCol_Text,ImGui::ColorConvertU32ToFloat4(menuTipText));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{menuControlPadding*scale,menuControlPadding*scale});
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding,ImGui::GetStyle().FrameRounding);
+    }
+    ~TipStyle(){ImGui::PopStyleVar(2);ImGui::PopStyleColor(3);ImGui::PopFont();}
+};
+inline void tip(const char* text,float scale) {
+    TipStyle style(scale);ImGui::BeginTooltip();ImGui::TextUnformatted(text);ImGui::EndTooltip();
+}
+template<size_t N> bool iconSegments(const char* id,const char* const (&names)[N],const int (&icons)[N],int& selected,float scale) {
+    const auto origin=ImGui::GetCursorScreenPos();
+    const float width=ImGui::GetContentRegionAvail().x,w=figmaDisplayIconWidth*scale,h=figmaDisplayWidgetHeight*scale,gap=menuPanelGap*scale;
+    const int columns=std::max(1,std::min(int(N),int(width/w)));
+    auto* draw=ImGui::GetWindowDrawList();bool changed=false;ImGui::PushID(id);
+    for(size_t first=0;first<N;first+=columns) {
+        const int count=std::min(columns,int(N-first));const float y=origin.y+(first/columns)*(h+gap);
+        surface(draw,{origin.x,y},{origin.x+w*count,y+h},scale,false);
+        for(int n=0;n<count;++n) {
+            const int i=int(first)+n;const ImVec2 at={origin.x+n*w,y};ImGui::PushID(i);ImGui::SetCursorScreenPos(at);
+            const bool clicked=ImGui::InvisibleButton(names[i],{w,h},ImGuiButtonFlags_EnableNav);
+            const bool disabled=(ImGui::GetItemFlags()&ImGuiItemFlags_Disabled)!=0;
+            const float mouse=ImGui::GetIO().MousePos.x;
+            const bool seam=(n && mouse<at.x+scale) || (n<count-1 && mouse>=at.x+w-scale);
+            segment(draw,at,{at.x+w,at.y+h},n==0,n==count-1,!disabled && ((!seam && ImGui::IsItemHovered()) || selected==i),scale);
+            const float icon=figmaDisplayIconSize*scale;
+            drawStyledMenuIcon(draw,icons[i],{at.x+(w-icon)*.5f,at.y+(h-icon)*.5f},icon,ImGui::GetColorU32(disabled?ImGuiCol_TextDisabled:ImGuiCol_Text),ImGui::GetColorU32(ImGuiCol_Button));
+            ImGui::RenderNavCursor(ImRect(at,{at.x+w,at.y+h}),ImGui::GetItemID());
+            if(!seam && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))tip(names[i],scale);
+            if(clicked && !disabled && (!seam || !ImGui::IsMouseReleased(ImGuiMouseButton_Left))){selected=i;changed=true;}
+            ImGui::PopID();
+        }
+        outline(draw,{origin.x,y},{origin.x+w*count,y+h},scale);
+    }
+    ImGui::PopID();ImGui::SetCursorScreenPos(origin);ImGui::Dummy({width,((N+columns-1)/columns)*(h+gap)-gap});return changed;
+}
+inline bool resultRow(const char* id,int icon,const char* title,const char* detail,float scale,bool& previewHover,ImVec2& previewAnchor) {
+    const auto at=ImGui::GetCursorScreenPos();const float width=ImGui::GetContentRegionAvail().x,h=menuSearchRowHeight*scale,pad=menuControlPadding*scale;
+    const float actionWidth=std::max(1.f,width-h);auto* draw=ImGui::GetWindowDrawList();
+    const bool clicked=ImGui::InvisibleButton(id,{actionWidth,h},ImGuiButtonFlags_EnableNav);
+    const bool disabled=(ImGui::GetItemFlags()&ImGuiItemFlags_Disabled)!=0;
+    if(!disabled && ImGui::IsItemHovered())draw->AddRectFilled(at,{at.x+actionWidth,at.y+h},ImGui::GetColorU32(ImGuiCol_ButtonHovered),ImGui::GetStyle().FrameRounding);
+    const auto ink=ImGui::GetColorU32(disabled?ImGuiCol_TextDisabled:ImGuiCol_Text),surface=ImGui::GetColorU32(ImGuiCol_Button);
+    const float glyph=figmaBasicIconSize*scale;
+    drawStyledMenuIcon(draw,icon,{at.x+pad,at.y+(h-glyph)*.5f},glyph,ink,surface);
+    auto* secondary=menuFont(MenuTextRole::Secondary);auto* body=menuFont(MenuTextRole::Body);
+    const float meta=std::min(secondary->CalcTextSizeA(secondary->FontSize,FLT_MAX,0,detail).x,actionWidth*.3f),end=at.x+actionWidth-pad-meta;
+    const ImVec4 clip={at.x+pad+glyph+pad,at.y,std::max(at.x+pad+glyph+pad,end-pad),at.y+h};
+    draw->AddText(body,body->FontSize,{clip.x,at.y+(h-body->FontSize)*.5f},ink,title,nullptr,0,&clip);
+    const ImVec4 metaClip={end,at.y,at.x+actionWidth-pad,at.y+h};
+    draw->AddText(secondary,secondary->FontSize,{end,at.y+(h-secondary->FontSize)*.5f},ImGui::GetColorU32(disabled?ImGuiCol_TextDisabled:ImGuiCol_PlotLines),detail,nullptr,0,&metaClip);
+    ImGui::RenderNavCursor(ImRect(at,{at.x+actionWidth,at.y+h}),ImGui::GetItemID());
+    if(ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))tip((std::string(title)+"\n"+detail).c_str(),scale);
+    previewAnchor={at.x+actionWidth,at.y};
+    drawStyledMenuIcon(draw,39,{previewAnchor.x+(h-glyph)*.5f,at.y+(h-glyph)*.5f},glyph,ink,surface);
+    previewHover=!disabled && ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(previewAnchor,{at.x+width,at.y+h});
+    ImGui::SetCursorScreenPos(at);ImGui::Dummy({width,h});return clicked && !disabled;
+}
+inline void previewTile(ID3D11ShaderResourceView* image,ImVec2 imageSize,const char* message,ImVec2 anchor,ImVec4 limit,float scale) {
+    const float padding=menuControlPadding*scale,side=std::max(1.f,std::min(menuLayerPreviewSize*scale,std::min(limit.z-limit.x,limit.w-limit.y)-2*padding));
+    const ImVec2 size={side+2*padding,side+2*padding};
+    ImGui::SetNextWindowPos({std::clamp(anchor.x-size.x-padding,limit.x,std::max(limit.x,limit.z-size.x)),std::clamp(anchor.y,limit.y,std::max(limit.y,limit.w-size.y))});
+    ImGui::SetNextWindowSize(size);TipStyle style(scale);ImGui::BeginTooltip();
+    if(image) {
+        const float factor=side/std::max(imageSize.x,imageSize.y);const ImVec2 extent={imageSize.x*factor,imageSize.y*factor};
+        const auto at=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos({at.x+(side-extent.x)*.5f,at.y+(side-extent.y)*.5f});
+        ImGui::Image((ImTextureID)(intptr_t)image,extent);
+    } else ImGui::TextWrapped("%s",message);
+    ImGui::EndTooltip();
+}
+
 template<size_t N> bool segments(const char* id,const char* const (&names)[N],int& selected,float scale) {
     const auto origin=ImGui::GetCursorScreenPos();const float width=ImGui::GetContentRegionAvail().x,h=menuControlHeight*scale;
     if(width<=0){ImGui::Dummy({0,h});return false;}

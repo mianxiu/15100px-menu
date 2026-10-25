@@ -1,7 +1,7 @@
 """Native Photoshop label enums, separate from editable JSX script packages."""
 import json
 
-# Photoshop 24.x labels; spellings are Action Manager enums, not UI names.
+# Spellings are Action Manager enums, not UI names; the last four need PS25+.
 LABEL_COLORS = [
     {"id": "none", "label": "无颜色", "rgb": [105, 109, 117]},
     {"id": "red", "label": "红色", "rgb": [224, 91, 88]},
@@ -11,6 +11,10 @@ LABEL_COLORS = [
     {"id": "blue", "label": "蓝色", "rgb": [88, 144, 213]},
     {"id": "violet", "label": "紫色", "rgb": [169, 125, 207]},
     {"id": "gray", "label": "灰色", "rgb": [169, 172, 180]},
+    {"id": "seafoam", "label": "海沫色", "rgb": [93, 171, 164]},
+    {"id": "indigo", "label": "靛蓝", "rgb": [112, 111, 188]},
+    {"id": "magenta", "label": "洋红", "rgb": [189, 91, 157]},
+    {"id": "fuchsia", "label": "紫红", "rgb": [211, 120, 184]},
 ]
 LABEL_ACTIONS = {"label." + item["id"]: {"label": item["label"] + "图层标签"} for item in LABEL_COLORS}
 
@@ -23,6 +27,7 @@ def label_script(action):
         if (!app.documents.length) throw new Error('请先打开文档');
         var s = stringIDToTypeID;
         var color = %s;
+        if (/^(seafoam|indigo|magenta|fuchsia)$/.test(color) && parseInt(app.version,10)<25) throw new Error('此标签颜色需要Photoshop2024或更新版本');
         var selected = [], wanted = {}, inherited = 0;
         var selection = new ActionReference();
         selection.putProperty(s('property'), s('targetLayersIDs'));

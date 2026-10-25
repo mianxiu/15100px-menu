@@ -6,20 +6,22 @@ const session = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
 // Independent read-only mailbox; never enters modal execution or blocks commands.
 const inputTool=(()=>{
   const core=require('photoshop').core;
-  let reading=false,lastId='';
+  let reading=false,lastId='',pendingReceipt=null;
   return async folder=>{
     if(reading)return;
     reading=true;
     try {
+      if(pendingReceipt){await record(folder,'input-tool-response.json',pendingReceipt);pendingReceipt=null;}
       let request;
       try {const raw=await(await folder.getEntry('input-tool-request.json')).read();if(raw.length>2048)return;request=JSON.parse(raw);}catch(_){return;}
       const now=Date.now();
-      if(request.schema!==1 || request.token!==token || request.session!==session ||
+      if(!request || typeof request!=='object' || Array.isArray(request) || request.schema!==1 || request.token!==token || request.session!==session ||
          typeof request.id!=='string' || !/^[0-9a-f]{32}$/.test(request.id) || request.id===lastId ||
-         !Number.isFinite(request.expires_at_ms) || request.expires_at_ms<now || request.expires_at_ms>now+2000)return;
+         !Number.isFinite(request.expires_at_ms) || request.expires_at_ms>now+2000)return;
       lastId=request.id;
       const response={schema:1,id:request.id,session,token};
       try {
+        if(request.expires_at_ms<now)throw Error('expired-before-read');
         const tool=await core.getActiveTool();
         // PS24 returns classId; the reference documents classID.
         const classID=tool?.classID ?? tool?.classId;
@@ -29,7 +31,8 @@ const inputTool=(()=>{
         Object.assign(response,{phase:'completed',classID,isModal:tool.isModal});
       }catch(error){response.phase='failed';response.error=String(error).slice(0,240);}
       response.completed_at_ms=Date.now();
-      await record(folder,'input-tool-response.json',response);
+      pendingReceipt=response;
+      await record(folder,'input-tool-response.json',pendingReceipt);pendingReceipt=null;
     } finally {reading=false;}
   };
 })();
@@ -188,7 +191,7 @@ async function refreshLayerSearch(folder,now,priorityCheckpoint) {
     if(current?.id!==request.id||current?.token!==token||current?.session!==session||Date.now()>request.expires_at_ms)throw Error('搜索已取消或超时，请重新搜索');
   }
   const result={schema:1,id:request.id,session};
-  try {result.result=await labels.searchLayers(request.query,checkpoint);await checkpoint();}
+  try {result.result=request.preview?await labels.previewLayer(request.preview,checkpoint):await labels.searchLayers(request.query,checkpoint);await checkpoint();}
   catch(error){result.error=error.menuReadInterrupted?'菜单或操作已优先执行，请重新搜索':error.message||String(error);}
   await record(folder,'layer-search-result.json',result);
   return true;
@@ -266,6 +269,7 @@ async function publishHeartbeat(folder,reason,interval=5000,extra={}) {
   try {
     await record(folder,'probe-last.json',{...heartbeatValue,...extra,reason,
       sequence:++sequence,plugin_time_ms:now,layer_observation:observation,
+      layer_preview_available:typeof require('photoshop').imaging?.getPixels==='function',
       shape_clipboard_available:labels.paintClipboardAvailable?.()===true});
     lastHeartbeat=now;
   } finally {heartbeatWriting=false;}
@@ -313,7 +317,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.68', session, transport: 'plugin-data-files',
+        probe_version: '0.3.71', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
@@ -388,7 +392,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.68', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.71', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

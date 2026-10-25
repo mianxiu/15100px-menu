@@ -5,7 +5,7 @@ const settle=async()=>{for(let i=0;i<30;i++)await new Promise(resolve=>setImmedi
 async function host(){
   const files=new Map(),timers=new Map(),state={reads:0,tool:{classID:'typeCreateOrEditTool',isModal:false}};
   const folder={getEntry:async name=>{if(!files.has(name))throw Error('missing');return {read:async()=>files.get(name)};},
-    createFile:async name=>({write:async text=>files.set(name,text)})};
+    createFile:async name=>({write:async text=>{if(name==='input-tool-response.json' && state.failReceipt){state.failReceipt=false;throw Error('temporary receipt write failure');}files.set(name,text);}})};
   const ps={app:{documents:[]},core:{getActiveTool:async()=>{state.reads++;if(state.wait)await state.wait;if(state.error)throw Error('unavailable');return state.tool;}},
     action:{addNotificationListener(){}}};
   const sandbox={module:{exports:{}},console,Date,setTimeout,clearTimeout,setInterval(fn,ms){timers.set(ms,fn);},
@@ -22,9 +22,13 @@ async function host(){
     response:()=>JSON.parse(files.get('input-tool-response.json'))};
 }
 (async()=>{
-  for(const change of [{schema:2},{token:'other'},{session:'other'},{id:'invalid'},{expires_at_ms:Date.now()-1000},{expires_at_ms:Date.now()+90000}]){
+  for(const change of [{schema:2},{token:'other'},{session:'other'},{id:'invalid'},{expires_at_ms:Date.now()+90000}]){
     const h=await host();h.request(change);await h.poll();assert.equal(h.state.reads,0);assert.equal(h.files.has('input-tool-response.json'),false);
   }
+  const expired=await host();const old=expired.request({expires_at_ms:Date.now()-1000});await expired.poll();
+  assert.equal(expired.state.reads,0);assert.equal(expired.response().id,old.id);assert.equal(expired.response().phase,'failed');assert.match(expired.response().error,/expired-before-read/);
+  const failedWrite=await host();failedWrite.state.failReceipt=true;const held=failedWrite.request();await failedWrite.poll();await failedWrite.poll();
+  assert.equal(failedWrite.state.reads,1,'Retry only the receipt, never the host read');assert.equal(failedWrite.response().id,held.id);
   const h=await host();const request=h.request();await h.poll();
   assert.equal(h.state.reads,1);assert.deepEqual(h.response(),{schema:1,id:request.id,session:request.session,token:request.token,phase:'completed',classID:'typeCreateOrEditTool',isModal:false,completed_at_ms:h.response().completed_at_ms});
   await h.poll();assert.equal(h.state.reads,1,'Do not re-run the consumed observation');

@@ -324,10 +324,10 @@ class Application(web.Application):
             raise RuntimeError('服务正在退出，本次操作未接受')
         if getattr(self,'updating',False) is True and action not in ('status','tasks.list','tasks.get','logs.read','application.update.status'):
             raise RuntimeError('应用正在更新，本次操作未接受')
-        if action in ('menu.tools.open','menu.tools.request'):
+        if action in ('menu.tools.open','menu.tools.request','menu.tools.preview'):
             from .menu_tools import MenuTools
             if not getattr(self,'menu_tools',None):self.menu_tools=MenuTools(self)
-            return await getattr(self.menu_tools,'open' if action.endswith('open') else 'request')(args)
+            return await getattr(self.menu_tools,action.rsplit('.',1)[1])(args)
         if action in ('layers.search','layers.focus'):
             from .layer_search import LayerSearch
             if not getattr(self,'layer_search',None):self.layer_search=LayerSearch(self)
@@ -704,7 +704,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             mapping = {"toggle": "panel.toggle", "context": "panel.context", "open": "panel.open", "hide": "panel.hide", "dismiss": "panel.dismiss", "hold_begin": "panel.hold_begin", "hold_release": "panel.hold_release", "hold_cancel": "panel.hold_cancel", "control": "control.open", "quit": "service.quit"}
             mapping['hold_pin'] = 'panel.hold_pin'
             mapping['tools.search']='menu.tools.open'
-            mapping.update({name:name for name in ('menu.tools.open','menu.tools.request')})
+            mapping.update({name:name for name in ('menu.tools.open','menu.tools.request','menu.tools.preview')})
             mapping['document.new'] = 'document.new'
             mapping.update({name:name for name in ('mask.preview.update','mask.preview.commit')})
             if action.startswith('document.recent.'):
@@ -746,7 +746,9 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
                 app.desktop.layer_context_provider=app.bridge.read_layer_context
                 app.desktop.input_language_busy=lambda:app.bridge.busy or app.operation_lock.locked()
                 from .input_tool import ToolObservation
-                app.desktop.input_language_tool=ToolObservation(app.bridge.transport).read
+                tool_observer=ToolObservation(app.bridge.transport)
+                app.desktop.input_language_tool=tool_observer.read
+                app.desktop.input_language_reconcile=tool_observer.reconcile
                 app.desktop.menu_context_requester=app.bridge.request_menu_context
                 app.desktop.menu_context_canceller=app.bridge.cancel_menu_context
             await asyncio.to_thread(app.desktop.start)

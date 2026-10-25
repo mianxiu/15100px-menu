@@ -50,5 +50,9 @@ async function request(find,replacement){const read=await tools.read();return {t
  row=clone(original);row.textKey.kerningRange=[{from:0,to:1}];await assert.rejects(tools.read(),/手动字距/);
  row=clone(original);row.textKey.textStyleRange[1].from=3;await assert.rejects(tools.read(),/样式范围/);
  row=clone(original);req=await request('猫','x');req.expires_at_ms=0;await assert.rejects(tools.replace(req),/已取消/);
+ row=clone(original);let read=await tools.read();
+ let mapped={target:read.target,text:{revision:read.revision,value:'X猫😀\rBC猫',origins:[0,1,2,3,4,5,6,7,8],count:1},expires_at_ms:Date.now()+5000};
+ await tools.replace(mapped);assert.equal(row.textKey.textKey,'X猫😀\rBC猫');assert.equal(row.textKey.textStyleRange[1].textStyle.fontPostScriptName,'Beta');
+ row=clone(original);read=await tools.read();mapped.text.revision=read.revision;mapped.text.origins=[1,0,2,3,4,5,6,7,8];const pre=writes;await assert.rejects(tools.replace(mapped),/计划无效/);assert.equal(writes,pre);
  console.log('Text tools: mixed styles, UTF-16, paragraph ranges, no-op, stale target, missing fonts, rollback and unknown passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

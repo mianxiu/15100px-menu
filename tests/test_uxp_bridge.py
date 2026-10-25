@@ -289,6 +289,16 @@ class UxpDiscoveryTests(unittest.TestCase):
                 self.transport.call('set_label',command=command,target={'session':'s'},paint={'mask_batch':True})
         self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
 
+    def test_mapped_text_plan_rejects_old_executor_before_publication(self):
+        folder=self.heartbeat(24)
+        heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.70',session='s')
+        (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+        self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        for command in ('text.replace','text.split'):
+            with self.assertRaisesRegex(RuntimeError,'0.3.71'):
+                self.transport.call('set_label',command=command,target={'session':'s'},text={'value':'x'})
+        self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
+
     def test_smart_conversion_rejects_old_plugin_before_publication(self):
         folder=self.heartbeat(24)
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.17',session='s')

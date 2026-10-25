@@ -28,6 +28,10 @@ async function main() {
   doc.activeLayers=[{id:30,kind:'pixel'},{id:31,kind:'pixel'}];
   assert.equal((await api.setLabel(request)).count,2);
   assert.equal((await api.setLabel({...request,color:'none'})).color,'none');
+  ps.app.version='24.0.1';
+  for(const color of ['seafoam','indigo','magenta','fuchsia'])await assert.rejects(api.setLabel({...request,command:'label',color}),/2024/);
+  ps.app.version='25.0';
+  for(const color of ['seafoam','indigo','magenta','fuchsia'])assert.equal((await api.setLabel({...request,command:'label',color})).color,color);
   mismatch=true; await assert.rejects(api.setLabel(request)); assert.equal(rollback,1);
   ps.core.executeAsModal=async fn=>fn({hostControl:{suspendHistory:async()=>1,resumeHistory:async(id,commit)=>{if(!commit)throw Error('rollback failed');}}});
   await assert.rejects(api.setLabel(request),error=>error.resultUnknown===true);

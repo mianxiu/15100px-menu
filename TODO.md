@@ -1,5 +1,17 @@
 # Photoshop Menu TODO
 
+- [x] 263紧凑搜索代码／测试／实际入口：同家族类型图标、24逻辑单位结果行、整行定位、小预览图标被动悬停；独立有界128px像素读取、失鲜结果丢弃和资源回收。PS24低CPU／正常中文筛选、文字类型、空结果、定位及窗口可见／边界、原稿历史保持通过，三档字号预览已核对。证据.runtime/search263-live.json及search263-final。最终纳入264，不独立公开263。
+- [ ] 263搜索实体输入与现代PS像素预览：本机PS24无imaging.getPixels，明确显示不支持，不以模拟预览冒充实机；实体F／中文候选、hover和其他DPI／硬件仍待验。
+- [x] 264文本工具代码／测试／构建／实际入口：四个页签、可编辑草稿、折行预览、普通／正则替换、整理及分隔符／正则拆分、两种排列；独立Job计算进程2秒有界，映射样式、一次确认和原目标新鲜校验保留。实际最终264／UXP71低CPU／正常12项PS编辑／替换／整理／两种拆分均通过零预览写入、单历史和一次回退精确恢复；两种拆分零BMP像素差。同一批次12次任务／面板关闭后无需键盘活动即重新禁用IME。证据.runtime/text264-live/report.json（R1保留before-publisher-fix.json）、text264-frozen.json和text264-preview。
+- [x] 264临时禁用IME代码／测试／实际入口：PS线程内解除IMM关联及当前TSF禁用，保留中文HKL；输入／点击／离开及租约过期恢复。最终实际入口低CPU／正常各一次35→21读回及中文HKL不变，DLL与最终发行资源相同；原稿／资源保持。修复工具观察发布前文件占用留下幽灵pending、原结果只读核对及菜单／忙碌结束重新启用。最终650项低CPU完整回归、正常专项、原生矩阵／DLL真实IMM与TSF夹具及冻结启动通过，实际入口最终SHA见.runtime/recovery264foreground/installed.json，PS不为最终更新重启。证据.runtime/recovery264publish/installed.json、tests264-low.log、native264-low.log、eng264-live-before-publication-fix.json。
+- [x] 任意前台PS接口测试全局授权已落地：C:/Users/mianx/.codex/AGENTS.md；共享host_scope改为校验唯一PS进程及创建时间，17项范围／稳定性专项通过，不改产品快捷键／IME前台限制。
+- [x] 只读观察全局授权已落地：C:/Users/mianx/.codex/AGENTS.md；已确认只读且不修改业务数据的未知观察可自动完整归档、保留未知后释放读取槽位，独立新读。ee6afd89811aa2016080c084905ae00f已按此处理，历史未知／原稿／配置保持，不扩展到未知修改或强制终止。
+- [ ] 264实机剩余：普通Caps关闭的真实重新禁用、实体A／B与中文候选／快速编辑／全PS区域、现代PS／其他输入法／原低配待验。普通Caps验收被真实鼠标范围保护拒绝，早期最终ENG批次前台变化停止的记录保留；最终两配置ENG及文本任务结束重新禁用已通过，不冒充完整实体通过。没有可比实体延迟基线，不声明提速。
+
+- [x] 262标签扩展代码／测试／实际入口：现代PS增加海沫／靛蓝／洋红／紫红，共12项含清除；PS24及旧UXP保留8项，执行端对旧PS拒绝新增枚举。预设内部ID与标签分离，8／12色板的命中、单次提交和旧预设tooltip矩阵通过。621项低CPU回归、60项正常专项、原生矩阵和冻结启动通过；实际262／UXP69资源匹配。原稿分层副本／工具／图层选择已恢复，实际PS24低CPU红色／正常灰色写入读回和一次撤销通过，原稿／CPU和历史未知保持。证据.runtime/recovery262reload、labels262-live.json、tests262-low.log和native262-low.log。
+- [ ] 262现代PS四枚新增标签及实体色板点击：本机PS24.0.1只支持8项，25+的12项已跑原生和执行端模拟，真实现代PS／其他硬件待验，不宣称已实机支持验证。
+
+
 - [x] 261临时IME代码／测试／构建／实际入口：生产入口保持中文HKL，PS非输入区域临时关闭IME，输入／未知／离开／暂停恢复原上下文；不再新发英文布局切换。旧布局已恢复及临时文档收尾，未知不重发。621项低CPU回归、60项正常专项、原生矩阵和冻结检查通过；实际PS24.0.1低CPU／正常各一次关闭／恢复，查找面板可见、历史不变；附着菜单焦点读回缺陷实测修复，原恢复pending只读结清。实际261／dist／组件匹配，配置及195历史未知保持。技术证据见docs/INPUT-LANGUAGE-ASSESSMENT.md。
 - [x] 261已公开：源码／v0.4.261标签、统一ZIP及SHA已推送且匿名下载核验。Latest清单已匿名下载核验；仅保留261 Release和dist发行物，旧标签／历史保留；Wiki已推送，39页／231链接及6份主要远端页面核验通过。GitHub UI contract通过。证据.runtime/release-0.4.261-public-verification.json、manifest261-verification.json、release261-cleanup.json及wiki261-public-verification.json；完整实体输入仍按下一项待验。
 - [ ] 261实体输入与兼容：实体A／拼音首字／候选、快速文字编辑／重命名／数值、完整PS范围、原低配／其他IME与PS尚未通过；Computer Use因浏览器URL无法可靠确认而安全停止，未继续发送桌面输入。不得将open状态和HKL读回冒充此矩阵。

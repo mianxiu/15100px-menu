@@ -26,6 +26,7 @@ archive=CArchiveReader(str(exe));names={n.replace(chr(92),'/'):n for n in archiv
 resources={n for n in names if n.startswith('uxp/offline-probe/')}
 assert resources=={'uxp/offline-probe/'+n for n in ('manifest.json','main.js','labels.js')},resources
 for n in resources:assert archive.extract(names[n])==(ROOT/n).read_bytes()
+for n in ('native/MenuHost.exe','native/HotkeyHost.exe','native/InputContext.dll'):assert archive.extract(names[n])==(ROOT/n).read_bytes(),n
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 exe_checksum=output_dir/'PhotoshopMenu.exe.sha256'
 exe_checksum.write_text(sha(exe)+'  PhotoshopMenu.exe\n','ascii')

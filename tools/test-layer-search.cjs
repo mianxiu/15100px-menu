@@ -9,7 +9,7 @@ const ps={core:{executeAsModal:async fn=>fn({isCancelled:false})},action:{batchP
   if(c._obj==='get'){
     assert.equal(c._options.dialogOptions,'silent');
     if(!doc)return {_obj:'error'};
-    return {[ref[0]._property]:({documentID:doc.id,title:doc.title,numberOfLayers:doc.rows.length,hasBackgroundLayer:false})[ref[0]._property]};
+    return {[ref[0]._property]:({documentID:doc.id,title:doc.title,numberOfLayers:doc.rows.length,hasBackgroundLayer:false,mode:{_value:'RGBColor'}})[ref[0]._property]};
   }
   if(c._obj==='multiGet'){
     assert.equal(c._options.dialogOptions,'silent');
@@ -34,6 +34,15 @@ const search=context.search,query={name:'重名',document:'',type:'all'};
   const result=await search.search(query,async()=>checks++);
   assert.equal(result.items.length,3);assert.equal(checks,12);assert.equal(writes,0);
   assert.deepEqual(Array.from(result.items,r=>r.type),['pixel','text','shape']);
+  let disposed=0;const original=JSON.stringify(await capture());
+  const tile={width:2,height:1,components:4,componentSize:8,getData:async()=>new Uint8Array([255,0,0,255,0,255,0,128]),dispose:()=>disposed++};
+  assert.equal((await search.preview(result.items[0])).available,false);
+  ps.imaging={getPixels:async options=>{assert.equal(options.layerID,11);assert.equal(options.targetSize.width,128);return {imageData:tile};}};
+  const image=await search.preview(result.items[0]);assert.deepEqual(Array.from(image.pixels),[255,0,0,255,0,255,0,128]);assert.equal(disposed,1);
+  assert.equal(JSON.stringify(await capture()),original);assert.equal(writes,0);
+  tile.getData=async()=>{throw Error('pixels failed');};await assert.rejects(search.preview(result.items[0]),/pixels failed/);assert.equal(disposed,2);
+  tile.getData=async()=>new Uint8Array(8);ps.imaging.getPixels=async()=>{docs[0].rows[0].name='changed';return {imageData:tile};};
+  await assert.rejects(search.preview(result.items[0]),/已改变/);assert.equal(disposed,3);docs[0].rows[0].name='重名';
   assert.equal((await search.search({...query,document:'目标',type:'shape'})).items[0].layer_id,21);
   assert.equal((await search.search({...query,name:'',type:'fill'})).items[0].layer_id,22);
   await assert.rejects(search.search({...query,type:'bad'}),/无效/);

@@ -8,10 +8,11 @@ import time
 from .input_language import InputLanguage,process_exited,read_layout_journal
 from .input_accessibility import FocusAccessibility,control_state,CONTAINERS
 from .settings import atomic_json
+from .input_context import NativeImeContext
 
 
 def ime_target(value):
-    return value.get('identity'),value.get('ime'),value.get('layout')
+    return value.get('identity'),value.get('ime'),value.get('layout'),value.get('context_nonce')
 
 
 class ImePolicy:
@@ -39,6 +40,11 @@ class ImePolicy:
             if ime_target(sample)!=ime_target(self.owned):return
             if sample['ime_open']!=0:
                 self.owned=None
+                if sample.get('native_restored'):
+                    self.confirmed_restores+=1;self.manual=None;self.attempted=None
+                    if self.state=='non-input' and intent is not None:
+                        self.attempted=intent;return self.request(sample,True,now)
+                    return
                 if self.state!='input':self.manual=ime_target(sample);self.state='manual-change'
                 return
             if self.state!='non-input':return self.request(sample,False,now)
@@ -49,6 +55,7 @@ class ImePolicy:
 
     def request(self,sample,disable,now):
         self.pending={k:sample[k] for k in ('root','identity','focus','layout','ime')}
+        if sample.get('context_nonce') is not None:self.pending['context_nonce']=sample['context_nonce']
         self.pending.update(wanted=0 if disable else 1,original=1,disable=disable,
                             input_restore=not disable and sample['state']=='input',time=now)
         return dict(self.pending)
@@ -101,20 +108,24 @@ class InputMethod(InputLanguage):
     def __init__(self,desktop):
         super().__init__(desktop)
         self.policy=ImePolicy();self.legacy=None;self.legacy_saved=None;self.ime=None
+        self.context_schema=1
         self.report={'state':'unknown','scope':'photoshop-temporary-ime','layout_requests':0,
                      'disable_requests':0,'restore_requests':0}
 
-    def saved(self):return {'schema':1,'owned':self.policy.owned,'pending':self.policy.pending}
+    def saved(self):return {'schema':self.context_schema,'owned':self.policy.owned,'pending':self.policy.pending}
 
     def load(self,path):
         if not path.exists():return
         if path.stat().st_size>16384:raise ValueError('IME journal size')
         value=json.loads(path.read_text('utf-8'))
-        if not isinstance(value,dict) or set(value)!={'schema','owned','pending'} or type(value['schema']) is not int or value['schema']!=1:raise ValueError('IME journal schema')
+        if not isinstance(value,dict) or set(value)!={'schema','owned','pending'} or type(value['schema']) is not int or value['schema'] not in (1,2):raise ValueError('IME journal schema')
+        self.context_schema=value['schema']
         fields={'root','identity','focus','layout','ime','wanted','original','disable','input_restore','time'}
+        if self.context_schema==2:fields.add('context_nonce')
         for row in (value['owned'],value['pending']):
             if row is None:continue
             if (not isinstance(row,dict) or set(row)!=fields or
+                self.context_schema==2 and (type(row['context_nonce']) is not int or not 1<=row['context_nonce']<=0x7fffffff) or
                 any(type(row[k]) is not int or row[k]<=0 for k in ('root','focus','layout','ime')) or
                 not isinstance(row['identity'],list) or len(row['identity'])!=4 or row['identity'][0]!=row['root'] or
                 any(type(row['identity'][i]) is not int or row['identity'][i]<=0 for i in (0,1,3)) or
@@ -132,7 +143,7 @@ class InputMethod(InputLanguage):
         if not owned or self.policy.pending:return
         key=hashlib.sha256(json.dumps(owned,sort_keys=True).encode()).hexdigest()
         atomic_json(path.parent/('input-method-retired-'+key+'.json'),{'owned':owned,'reason':reason,'restore_sent':False})
-        atomic_json(path,{'schema':1,'owned':None,'pending':None})
+        atomic_json(path,{'schema':self.context_schema,'owned':None,'pending':None})
         self.policy.owned=None;self.policy.attempted=None
 
     def legacy_step(self,sample):
@@ -183,7 +194,10 @@ class InputMethod(InputLanguage):
             try:self.accessibility=FocusAccessibility()
             except Exception as error:self.report['uia_error_type']=type(error).__name__
             self.report.update(uia_available=self.accessibility is not None,tool_reads=0)
-            examined=None;tool=None;scope_before=None;episode=0
+            old_context=self.context_schema==1 and bool(self.policy.owned or self.policy.pending)
+            if not old_context:self.ime=NativeImeContext(self.user);self.context_schema=2
+            self.report['mechanism']='open-close-recovery' if old_context else 'ps-thread-context-association'
+            examined=None;tool=None;scope_before=None;episode=0;blocked_before=False
             while not self.desktop.stop.is_set():
                 self.wake.wait(.05);self.wake.clear()
                 if self.desktop.stop.is_set():break
@@ -194,11 +208,14 @@ class InputMethod(InputLanguage):
                     scope=tuple(sample.get('identity',[]))
                     if scope!=scope_before:episode+=1;scope_before=scope;examined=None;tool=None
                     mouse=bool(self.user.GetAsyncKeyState(1)&0x8000)
-                    blocked=mouse or sample.get('blocked') or self.desktop.visible or self.busy() or not self.desktop.settings['enabled']
+                    blocked=mouse or sample.get('blocked') or self.desktop.visible or self.busy() or not self.desktop.settings['enabled'] or old_context
+                    if bool(blocked)!=blocked_before:episode+=1;blocked_before=bool(blocked)
                     if blocked:examined=None;tool=None
                     row=sample.get('accessibility',{});context=(scope,sample.get('focus'),serial)
                     needs_tool=(sample.get('workspace') and sample.get('state')=='unknown' and control_state(row,sample.get('pid'))!='input' and
                                 (row.get(30003) in CONTAINERS or protected or self.accessibility is None))
+                    reconcile=getattr(self.desktop,'input_language_reconcile',None)
+                    if needs_tool and context==examined and tool is None and not blocked and reconcile and reconcile():examined=None
                     if needs_tool and context!=examined and not blocked:
                         examined=context;tool=self.read_tool();sample=self.sample()
                     same=(tuple(sample.get('identity',[])),sample.get('focus'),self.snapshot()[0])==context
@@ -217,6 +234,8 @@ class InputMethod(InputLanguage):
                     eligible=same and not blocked and sample.get('state')=='non-input' and sample.get('ime') is not None
                     token=(scope,sample.get('focus'),row.get(30003),epoch,episode,serial) if eligible else None
                     request=self.policy.step(sample,token,time.monotonic())
+                    if self.policy.owned and not self.policy.pending and not blocked and callable(getattr(self.ime,'renew',None)):
+                        self.ime.renew(self.policy.owned,sample)
                     if request:
                         if request['disable'] and needs_tool and self.read_tool()!=tool:
                             self.policy.pending=None;self.policy.attempted=None;examined=None;continue
@@ -227,7 +246,15 @@ class InputMethod(InputLanguage):
                                        not fresh.get('blocked') and self.focus_state(fresh,tool)=='non-input' and
                                        not any(self.user.GetAsyncKeyState(k)&0x8000 for k in range(1,256)))
                         if valid:
-                            atomic_json(path,self.saved());self.ime.send(request)
+                            atomic_json(path,self.saved());acknowledged=self.ime.send(request)
+                            if self.context_schema==2 and acknowledged:
+                                if acknowledged.get('rejected'):
+                                    key=hashlib.sha256(json.dumps(request,sort_keys=True).encode()).hexdigest()
+                                    atomic_json(path.parent/('input-method-rejected-'+key+'.json'),{'request':request,'native_reply':'not-armed','marked_success':False})
+                                    self.policy.pending=None;self.policy.state='request-rejected'
+                                else:
+                                    self.policy.step(acknowledged,token,time.monotonic())
+                                    sample.update(ime_open=acknowledged['ime_open'],tsf_disabled=acknowledged['tsf_disabled'])
                             key='disable_requests' if request['disable'] else 'restore_requests';self.report[key]+=1
                         else:
                             self.policy.pending=None
@@ -235,9 +262,13 @@ class InputMethod(InputLanguage):
                     self.report.update(state=self.policy.state,pending=bool(self.policy.pending),owned=bool(self.policy.owned),
                         confirmed_disables=self.policy.confirmed_disables,confirmed_restores=self.policy.confirmed_restores,
                         ime_open=sample.get('ime_open'),keyboard_layout=sample.get('layout'),focus_class=sample.get('class'),
+                        tsf_disabled=sample.get('tsf_disabled'),
                         tool=tool.get('classID') if isinstance(tool,dict) else None)
                     saved=self.saved()
                     if saved!=persisted:atomic_json(path,saved);persisted=json.loads(json.dumps(saved))
+                    if old_context and not self.policy.owned and not self.policy.pending:
+                        self.ime=NativeImeContext(self.user);self.context_schema=2;old_context=False;examined=None
+                        self.report['mechanism']='ps-thread-context-association'
                 except Exception as error:self.report.update(state='unknown',error_type=type(error).__name__)
         finally:
             if self.ime and (self.policy.owned or self.policy.pending):
@@ -247,10 +278,12 @@ class InputMethod(InputLanguage):
                     if request and not request['disable']:
                         fresh=self.ime.observe_owned(request)
                         if ime_target(fresh)==ime_target(request) and fresh.get('ime_open')==sample.get('ime_open'):
-                            atomic_json(path,self.saved());self.ime.send(request)
+                            atomic_json(path,self.saved());acknowledged=self.ime.send(request)
+                            if self.context_schema==2 and acknowledged:self.policy.step(acknowledged,None,time.monotonic())
                     until=time.monotonic()+.6
                     while self.policy.pending and time.monotonic()<until:
                         self.policy.step(self.ime.observe_owned(self.policy.pending),None,time.monotonic());time.sleep(.02)
                     atomic_json(path,self.saved())
                 except Exception:self.report['state']='shutdown-restore-unconfirmed'
+            if self.ime and callable(getattr(self.ime,'close',None)):self.ime.close()
             self.accessibility=None;pythoncom.CoUninitialize()

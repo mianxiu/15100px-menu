@@ -59,8 +59,23 @@ class ImePolicyTests(unittest.TestCase):
         self.assertIsNone(p.step(sample('input'),None,.2));self.assertIsNone(p.owned)
         self.assertIsNotNone(p.step(sample(),7,.3))
 
+    def test_native_input_restore_does_not_permanently_disable_eng_as_manual_change(self):
+        p=ImePolicy();p.step(sample(),7,0);p.step(sample(opened=0),7,.1)
+        request=p.step({**sample(),'native_restored':True},8,.2)
+        self.assertEqual(request['wanted'],0);self.assertIsNone(p.manual)
+        self.assertEqual(p.confirmed_restores,1)
+
 
 class ImeJournalTests(unittest.TestCase):
+    def test_native_journal_binds_the_control_nonce_and_preserves_unknown(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'input-method-owned.json';c=InputMethod(SimpleNamespace());c.context_schema=2
+            c.policy.step({**sample(),'context_nonce':123},7,0);path.write_text(json.dumps(c.saved()),'utf-8')
+            other=InputMethod(SimpleNamespace());other.load(path)
+            self.assertEqual(other.context_schema,2);self.assertIsNotNone(other.policy.pending)
+            self.assertIsNone(other.policy.step({**sample(opened=0),'context_nonce':456},8,3))
+            self.assertIsNotNone(other.policy.pending)
+
     def test_unknown_journal_roundtrip_and_wrong_namespace_rejection(self):
         with tempfile.TemporaryDirectory() as folder:
             p=Path(folder)/'input-method-owned.json';c=InputMethod(SimpleNamespace(runtime=Path(folder)))
@@ -123,9 +138,11 @@ class ImeTransportTests(unittest.TestCase):
 
 
 class ImeWorkerTests(unittest.TestCase):
-    def start(self,acknowledge=True,legacy=None):
+    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         self.desktop=SimpleNamespace(runtime=Path(temp.name),visible=False,settings={'enabled':True},stop=threading.Event(),input_language_busy=lambda:False,input_language_tool=lambda:{'classID':'moveTool','isModal':False})
+        if tool is not None:self.desktop.input_language_tool=tool
+        if reconcile is not None:self.desktop.input_language_reconcile=reconcile
         self.c=InputMethod(self.desktop);self.opened=1;self.kind=50033;self.outside=False;self.posts=[]
         if legacy is not None:(self.desktop.runtime/'input-language-owned.json').write_text(json.dumps(legacy),'utf-8')
         def observe():
@@ -138,7 +155,7 @@ class ImeWorkerTests(unittest.TestCase):
             if acknowledge:self.opened=value['wanted']
         def layouts(count,values):values[0]=0x8040804;values[1]=0x4090409;return 2
         self.user=SimpleNamespace(GetKeyboardLayout=Mock(return_value=0x8040804),GetKeyboardLayoutList=Mock(side_effect=layouts),PostMessageW=Mock(),GetAsyncKeyState=Mock(return_value=0))
-        for p in (patch('backend.input_method.ctypes.WinDLL',return_value=self.user),patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=lambda _:read({**sample('outside'),'ime_open':self.opened}))),patch('backend.input_method.FocusAccessibility',return_value=object()),patch('backend.input_method.process_exited',return_value=False)):
+        for p in (patch('backend.input_method.ctypes.WinDLL',return_value=self.user),patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=lambda _:read({**sample('outside'),'ime_open':self.opened}))),patch('backend.input_method.NativeImeContext',return_value=SimpleNamespace(read=lambda value:{**read(value),'context_nonce':123},send=send,observe_owned=lambda _:{**read({**sample('outside'),'ime_open':self.opened}),'context_nonce':123})),patch('backend.input_method.FocusAccessibility',return_value=object()),patch('backend.input_method.process_exited',return_value=False)):
             p.start();self.addCleanup(p.stop)
         self.c.thread.start()
         def stop():self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2);self.assertFalse(self.c.thread.is_alive())
@@ -178,3 +195,23 @@ class ImeWorkerTests(unittest.TestCase):
         self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2)
         saved=json.loads((self.desktop.runtime/'input-language-owned.json').read_text())
         self.assertEqual(saved['pending']['identity'],owner['identity']);self.assertEqual(self.posts,[])
+
+    def test_known_read_settlement_can_reobserve_without_a_first_keystroke(self):
+        value={'classID':'moveTool','isModal':False};provider=Mock(side_effect=[None,value,value])
+        self.start(tool=provider,reconcile=lambda:True)
+        self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.assertEqual(provider.call_count,3);self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0])
+
+    def test_unknown_read_never_starts_another_host_observation(self):
+        provider=Mock(side_effect=RuntimeError('original unknown'))
+        self.start(tool=provider,reconcile=lambda:False)
+        self.wait(lambda:provider.call_count==1);time.sleep(.12)
+        self.assertEqual(provider.call_count,1);self.assertEqual(self.posts,[])
+
+    def test_nonactivating_caps_close_and_known_busy_end_rearm_without_a_keystroke(self):
+        self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.desktop.visible=True;self.wait(lambda:self.c.policy.confirmed_restores==1)
+        self.desktop.visible=False;self.wait(lambda:self.c.policy.confirmed_disables==2)
+        self.desktop.input_language_busy=lambda:True;self.wait(lambda:self.c.policy.confirmed_restores==2)
+        self.desktop.input_language_busy=lambda:False;self.wait(lambda:self.c.policy.confirmed_disables==3)
+        self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0,1,0,1,0])

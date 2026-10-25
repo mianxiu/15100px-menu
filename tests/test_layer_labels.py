@@ -32,7 +32,7 @@ class LabelTests(unittest.IsolatedAsyncioTestCase):
                 result = await bridge.execute(name)
                 self.assertIn('无颜色' if color['id']=='none' else color['label'], result['message'])
                 app.DoJavaScript.assert_called_with(guarded_script(label_script(name),target))
-            self.assertEqual(app.DoJavaScript.call_count, 16)
+            self.assertEqual(app.DoJavaScript.call_count, 2*len(LABEL_COLORS))
         finally:
             await bridge.close()
 
@@ -57,7 +57,7 @@ class LabelTests(unittest.IsolatedAsyncioTestCase):
             await bridge.close()
 
     def test_only_known_enum_values_can_be_inserted_into_jsx(self):
-        self.assertEqual(len(LABEL_ACTIONS), 8)
+        self.assertEqual(len(LABEL_ACTIONS), 12)
         for invalid in ('label', 'label.green', 'label.red);alert(1)', None):
             with self.assertRaises(ValueError):
                 label_script(invalid)

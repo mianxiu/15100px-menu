@@ -14,6 +14,7 @@ a = Analysis(
                       (str(root / 'frontend/public/icon.ico'), 'frontend/public'),
                       (str(root / 'native/HotkeyHost.exe'), 'native'),
                       (str(root / 'native/MenuHost.exe'), 'native'),
+                      (str(root / 'native/InputContext.dll'), 'native'),
                       (str(root / 'native/fonts'), 'native/fonts'),
                       (str(root / 'native/vendor/imgui/LICENSE.txt'), 'native/licenses/imgui'),
                       (str(root / 'native/vendor/json/LICENSE.MIT'), 'native/licenses/json'),

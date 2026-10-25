@@ -207,12 +207,23 @@ static float pieAnimation(float elapsedMs,bool reduced=false) {
     return reduced?1.f:std::clamp(elapsedMs/60.f,0.f,1.f);
 }
 struct LabelColor {const char* id;const char* name;ImU32 color;};
-static const std::array<LabelColor,8> labelColors={{{"none","无颜色 / 清除标签",IM_COL32(105,109,117,255)},
+static const std::array<LabelColor,12> labelColors={{{"none","无颜色 / 清除标签",IM_COL32(105,109,117,255)},
     {"red","红色",IM_COL32(224,91,88,255)},{"orange","橙色",IM_COL32(229,151,63,255)},
     {"yellowColor","黄色",IM_COL32(226,201,83,255)},{"grain","绿色",IM_COL32(110,176,99,255)},
     {"blue","蓝色",IM_COL32(88,144,213,255)},{"violet","紫色",IM_COL32(169,125,207,255)},
-    {"gray","灰色",IM_COL32(169,172,180,255)}}};
-static std::array<RECT,8> labelRows{};
+    {"gray","灰色",IM_COL32(169,172,180,255)},
+    {"seafoam","海沫色",IM_COL32(93,171,164,255)},{"indigo","靛蓝",IM_COL32(112,111,188,255)},
+    {"magenta","洋红",IM_COL32(189,91,157,255)},{"fuchsia","紫红",IM_COL32(211,120,184,255)}}};
+static std::array<RECT,12> labelRows{};
+static int labelCount=8;
+static int labelColumns(){return labelCount/2;}
+static int supportedLabelCount(const Json& ps) {
+    int host=0,major=0,minor=0,patch=0;
+    std::sscanf(ps.value("photoshop_version",std::string()).c_str(),"%d",&host);
+    std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);
+    return host>=25 && ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=69)?12:8;
+}
+static constexpr int recentActionBase=16;
 struct RecentPreset {std::string id,name,size,detail;bool available=true;};
 static std::vector<RecentPreset> recentPresets,shownPresets;
 static std::vector<RECT> recentRows;
@@ -242,7 +253,7 @@ static const char* capsLabels[]={"复制图层样式","粘贴图层样式","打�
 static bool capsReady=false;
 static bool documentSortReady=false;
 static bool individualSmartReady=false;
-static bool layerSearchReady=false,textSplitReady=false;
+static bool layerSearchReady=false,textSplitReady=false,layerPreviewReady=false;
 static RECT toolRow{};
 static bool menuToolsVisible();
 static int capsCount() {return panelKind==2?9:5;}
@@ -321,6 +332,7 @@ static bool previewLifecycle=false;
 static bool previewLive=false;
 static bool previewShape=false;
 static std::string previewTool;
+static int previewTextTab=0;
 static std::string previewProgressStage;
 static std::wstring shapeBenchmarkOutput;
 static bool selfTest=false;
@@ -445,6 +457,7 @@ static void releaseDevice() {
     if (composition) {composition->Release();composition=nullptr;}
     if (swapChain) {swapChain->Release();swapChain=nullptr;}
     if (context) {context->Release();context=nullptr;}
+    menuTools.clearPreview();
     if (device) {device->Release();device=nullptr;}
 }
 static bool recoverRenderer() {
@@ -510,7 +523,7 @@ static std::string shortcut(const std::string& raw) {
 }
 static void accept(const Json& event) {
     std::string type=event.value("type","");
-    if(type=="menu.tools.opened" || type=="menu.tools.result"){menuTools.receive(event);return;}
+    if(type=="menu.tools.opened" || type=="menu.tools.result" || type=="menu.tools.preview.result"){menuTools.receive(event);return;}
     if(type=="preview.pending") {
         PreviewPendingHint::update(event,window,ImGui::GetStyle(),int(menuFontEms[menuFontIndex(MenuTextRole::Secondary)]));return;
     }
@@ -530,11 +543,13 @@ static void accept(const Json& event) {
         if (event.contains("name") && event["name"].is_string()) document=event["name"].get<std::string>();
     } else if (type=="status") {
         const auto& data=event.at("data"); const auto& ps=data.at("photoshop");
+        labelCount=supportedLabelCount(ps);
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);documentSortReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=64);individualSmartReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=65);capsReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=16);}
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);layerSearchReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=57);textSplitReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=59);}
         recentReady=ps.value("uxp_ready",false) && ps.value("uxp_version",std::string())!="0.3.1";
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);shapeClipboardReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=41);}
         shapeClipboardAvailable=ps.value("shape_clipboard_available",false);
+        layerPreviewReady=ps.value("layer_preview_available",false);
         if (data.contains("recent_documents")) {
             recentPresets.clear();const auto& recent=data["recent_documents"];
             recentMessage=recent.value("message","");
@@ -616,9 +631,9 @@ static int holdActionAt(POINT point) {
         if(quickDividerAt(i,point))return -1;
         return 32+i;
     }
-    for (int i=0;i<8;++i) if (!pieAnimating && rowVisible(1) && rowEnabled(1) && PtInRect(&labelRows[i],point)) return 4+i;
+    for (int i=0;i<labelCount;++i) if (!pieAnimating && rowVisible(1) && rowEnabled(1) && PtInRect(&labelRows[i],point)) return 4+i;
     if (panelKind==4 && recentReady && !pieAnimating) for (size_t i=0;i<recentRows.size();++i)
-        if(shownPresets[i].available && PtInRect(&recentRows[i],point))return 12+static_cast<int>(i);
+        if(shownPresets[i].available && PtInRect(&recentRows[i],point))return recentActionBase+static_cast<int>(i);
     for (int i=0;i<4;++i) if (rowVisible(i) && rowEnabled(i) && PtInRect(&holdRows[i],point)) {
         if(i>=2 && (std::abs(point.x-pieCenter.x)<scale))return -1;
         return i==1?-1:i;
@@ -663,7 +678,7 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     setOpacity(0.f);
     if(chosen>=40 && chosen<40+int(capsRows.size()))send(capsActions[chosen-40]);
     else if (chosen>=32 && chosen<39)send(quickActions[chosen-32]);
-    else if (chosen>=12) send((std::string("document.recent.")+shownPresets.at(chosen-12).id).c_str());
+    else if (chosen>=recentActionBase) send((std::string("document.recent.")+shownPresets.at(chosen-recentActionBase).id).c_str());
     else if (chosen>=4) send((std::string("label.")+labelColors[chosen-4].id).c_str());
     else send(chosen<0?"hide":rowAction(chosen));
 }
@@ -869,14 +884,14 @@ static void icon(int index,ImVec2 at,bool active=false) {
     else drawStyledMenuIcon(draw,1,at,size,ink,surface);
 }
 static void layoutLabels(ImVec2 pos) {
-    for (int i=0;i<8;++i) {
-        float x=pos.x+(i%4)*36*scale,y=pos.y+(i/4)*36*scale;
+    for (int i=0;i<labelCount;++i) {
+        float x=pos.x+(i%labelColumns())*36*scale,y=pos.y+(i/labelColumns())*36*scale;
         labelRows[i]={static_cast<LONG>(x),static_cast<LONG>(y),
-            static_cast<LONG>(pos.x+(i%4+1)*36*scale),static_cast<LONG>(pos.y+(i/4+1)*36*scale)};
+            static_cast<LONG>(pos.x+(i%labelColumns()+1)*36*scale),static_cast<LONG>(pos.y+(i/labelColumns()+1)*36*scale)};
     }
 }
 static void commitLabel(int index) {
-    if (!rowEnabled(1) || (holdMode && holdFinished)) return;
+    if (index<0 || index>=labelCount || !rowEnabled(1) || (holdMode && holdFinished)) return;
     if (holdMode) {holdFinished=true;pieReady=false;}
     send((std::string("label.")+labelColors[index].id).c_str());
 }
@@ -885,7 +900,7 @@ static void drawLabels() {
     ImVec2 saved=ImGui::GetCursorScreenPos();
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav,true);
     ImGui::BeginDisabled(!rowEnabled(1) || (holdMode && (holdFinished || pieAnimating)));
-    for (int i=0;i<8;++i) {
+    for (int i=0;i<labelCount;++i) {
         auto r=labelRows[i];ImVec2 a={static_cast<float>(r.left),static_cast<float>(r.top)},b={static_cast<float>(r.right),static_cast<float>(r.bottom)};
         ImGui::PushID(100+i);ImGui::SetCursorScreenPos(a);
         bool active=rowEnabled(1) && (holdMode?holdActionAt(cursor)==4+i:PtInRect(&r,cursor));
@@ -904,7 +919,7 @@ static void drawLabels() {
     ImGui::EndDisabled();ImGui::PopItemFlag();ImGui::SetCursorScreenPos(saved);
 }
 static void colorGrid() {
-    layoutLabels(ImGui::GetCursorScreenPos());drawLabels();ImGui::Dummy({144*scale,72*scale});
+    layoutLabels(ImGui::GetCursorScreenPos());drawLabels();ImGui::Dummy({float(labelColumns()*36)*scale,72*scale});
 }
 static void contextItems() {
     ImGui::TextDisabled("%s",panelTitle());ImGui::Separator();
@@ -1105,10 +1120,10 @@ static const char* actionTipText(int action) {
     if(action==205)return shapeEditor.channel?"无描边":"无填充";
     if(action==222){const auto method=shapeEditor.current().value("method",std::string("classic"));return method=="perceptual"?"感知渐变；点击切换线性":method=="linear"?"线性渐变；点击切换经典":"经典渐变；点击切换感知";}
     if(action>=200 && action<200+shapeTipCount)return action==207 && shapeEditor.copiedAt && GetTickCount64()-shapeEditor.copiedAt<900?"已复制Hex颜色":shapeTipNames[action-200];
-    if(action>=12 && action<12+int(recentTips.size()) && panelKind==4)return recentTips[action-12].c_str();
+    if(action>=recentActionBase && action<recentActionBase+int(recentTips.size()) && panelKind==4)return recentTips[action-recentActionBase].c_str();
     if(action>=40 && action<40+int(capsRows.size()))return capsLabels[action-40];
     if(action>=32 && action<39)return quickLabels[action-32];
-    if(action>=4 && action<12)return labelColors[action-4].name;
+    if(action>=4 && action<4+labelCount)return labelColors[action-4].name;
     if(action==0)return panelKind==4?"打开新建文档窗口":layerAware && layerKind!=3?"选择同一父组中的相邻图层":"选择当前组内的图层";
     if(action==2)return "将所选图层移到顶部";
     if(action==3)return "将所选图层移到底部";
@@ -1125,7 +1140,7 @@ static int tipFamily(int action) {
     if(panelKind==2 && (action==2 || action==3))return 2;
     if(action>=40 && action<49)return 40;
     if(action>=32)return 32;
-    if(action>=12 && action<12+int(shownPresets.size()))return shownPresets[action-12].name=="剪贴板"?80+action:12;
+    if(action>=recentActionBase && action<recentActionBase+int(shownPresets.size()))return shownPresets[action-recentActionBase].name=="剪贴板"?80+action:12;
     return action;
 }
 static RECT tipGroupRect(int action) {
@@ -1141,7 +1156,7 @@ static RECT tipGroupRect(int action) {
     }
     if(action>=32)return {quickRows[0].left,quickRows[0].top,quickRows[6].right,quickRows[6].bottom};
     if(tipFamily(action)==12)return recentPanelBounds;
-    if(action>=12)return recentRows[action-12];
+    if(action>=recentActionBase)return recentRows[action-recentActionBase];
     if(action>=4)return holdRows[1];
     return holdRows[action];
 }
@@ -1213,12 +1228,12 @@ static ImVec4 actionTipBounds(int action) {
         }
         return best;
     }
-    RECT anchor=action>=40?capsRows[action-40]:action>=32?quickRows[action-32]:action>=12?recentRows[action-12]:action>=4?labelRows[action-4]:holdRows[action];
+    RECT anchor=action>=40?capsRows[action-40]:action>=32?quickRows[action-32]:action>=recentActionBase?recentRows[action-recentActionBase]:action>=4?labelRows[action-4]:holdRows[action];
     RECT group=anchor;
     if(action>=40)group=tipGroupRect(action);
     else if(action>=32)group={quickRows[0].left,quickRows[0].top,quickRows[6].right,quickRows[6].bottom};
-    if(action>=4 && action<12)group=holdRows[1];
-    if(action>=12 && action<32 && shownPresets[action-12].name!="剪贴板")group=recentPanelBounds;
+    if(action>=4 && action<4+labelCount)group=holdRows[1];
+    if(action>=recentActionBase && action<32 && shownPresets[action-recentActionBase].name!="剪贴板")group=recentPanelBounds;
     if(tipFamily(action)==2){group=tipGroupRect(action);anchor=group;}
     if(tipFamily(action)==12 || tipFamily(action)==32)anchor=group;
     float basicRight=pieCenter.x+19*scale;
@@ -1263,8 +1278,8 @@ static void drawActionTip(int action) {
     if(!preview.empty())tipVisual.reset(); // Static preview captures final geometry.
     tipVisual.update(actionTipText(action),target,tipFamily(action),GetTickCount64());
     const auto r=tipVisual.bounds;
-    draw->AddRectFilled({r.x,r.y},{r.z,r.w},IM_COL32(0,0,0,218),ImGui::GetStyle().FrameRounding);
-    draw->AddRect({r.x,r.y},{r.z,r.w},IM_COL32(255,255,255,32),ImGui::GetStyle().FrameRounding,0,scale);
+    draw->AddRectFilled({r.x,r.y},{r.z,r.w},menuTipBackground,ImGui::GetStyle().FrameRounding);
+    draw->AddRect({r.x,r.y},{r.z,r.w},menuTipBorder,ImGui::GetStyle().FrameRounding,0,scale);
     // Equal padding at rest; clip only the visual transition, never hit tests.
     const float padding=6*scale;
     draw->PushClipRect({r.x+padding,r.y+padding},{r.z-padding,r.w-padding},true);
@@ -1405,7 +1420,7 @@ static void drawCapsBar() {
 static void drawToolBar() {
     toolRow={};
     if(panelKind==3 || panelKind==4 || !layerAware || layerKind!=4 || layerCount!=1)return;
-    const char* label="拆分文字";
+    const char* label="文本工具";
     const float h=menuControlHeight*scale,y=pieCenter.y-15*scale;
     const auto extent=menuFont(MenuTextRole::Control)->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,label);
     const float width=extent.x+2*figmaBasicLeftPadding*scale,x=pieCenter.x+65*scale;
@@ -1477,7 +1492,7 @@ static void drawPie() {
     holdRows={};labelRows={};quickRows={};
     for (int i=0;i<4;++i) {
         if (!rowVisible(i)) continue;
-        float width=i==1?98*scale:basicLabelExtent(i).x+basicTextOffset()+figmaBasicRightPadding*scale;
+        float width=i==1?(14+labelColumns()*21)*scale:basicLabelExtent(i).x+basicTextOffset()+figmaBasicRightPadding*scale;
         float height=i==1?56*scale:rowHeight;
         // Palette below the centre; both sort buttons form one row above it.
         // A closer palette leaves space for the read-only footer underneath.
@@ -1493,8 +1508,8 @@ static void drawPie() {
     }
     if (rowVisible(1)) {
         auto r=holdRows[1];
-        for (int i=0;i<8;++i) labelRows[i]={LONG(r.left+(7+(i%4)*21)*scale),LONG(r.top+(7+(i/4)*21)*scale),
-            LONG(r.left+(7+(i%4+1)*21)*scale),LONG(r.top+(7+(i/4+1)*21)*scale)};
+        for (int i=0;i<labelCount;++i) labelRows[i]={LONG(r.left+(7+(i%labelColumns())*21)*scale),LONG(r.top+(7+(i/labelColumns())*21)*scale),
+            LONG(r.left+(7+(i%labelColumns()+1)*21)*scale),LONG(r.top+(7+(i/labelColumns()+1)*21)*scale)};
     }
     pieReady=!holdFinished;
     drawShapeEditor();
@@ -1510,7 +1525,7 @@ static void drawPie() {
     POINT cursor{};GetCursorPos(&cursor);int selected=holdActionAt(cursor);
     if(!preview.empty() && previewCapsHover>=0 && previewCapsHover<int(capsRows.size()) && capsEnabled(previewCapsHover))selected=40+previewCapsHover;
     if(!preview.empty() && previewQuickHover>=0 && previewQuickHover<7 && quickEnabled(previewQuickHover))selected=32+previewQuickHover;
-    if(!preview.empty() && previewRecentHover>=0 && previewRecentHover<int(recentRows.size()) && shownPresets[previewRecentHover].available)selected=12+previewRecentHover;
+    if(!preview.empty() && previewRecentHover>=0 && previewRecentHover<int(recentRows.size()) && shownPresets[previewRecentHover].available)selected=recentActionBase+previewRecentHover;
     if(!preview.empty() && previewActionHover>=0 && previewActionHover<4 && rowVisible(previewActionHover) && rowEnabled(previewActionHover))selected=previewActionHover;
     pendingHit=selected;
     auto captionX=[&](float textWidth) {
@@ -1544,7 +1559,7 @@ static void drawPie() {
         if(i>=2 && panelKind==2 && capsReady && layerAware)continue;
         int vertexStart=draw->VtxBuffer.Size;
         ImVec2 a={float(holdRows[i].left),float(holdRows[i].top)},b={float(holdRows[i].right),float(holdRows[i].bottom)};
-        bool active=i==selected || (i==1 && selected>=4 && selected<12);
+        bool active=i==selected || (i==1 && selected>=4 && selected<4+labelCount);
         if (pinned && i!=1 && !pieAnimating && rowEnabled(i) && !holdFinished) {
             ImGui::SetCursorScreenPos(a);ImGui::PushID(200+i);
             if (ImGui::InvisibleButton("##pinned-action",{b.x-a.x,b.y-a.y})) {holdFinished=true;send(rowAction(i));}
@@ -1895,6 +1910,7 @@ int main() {
         else if (i+1<argc && arg==L"--preview-kind") {
             std::wstring kind=argv[++i];previewKind=kind==L"context"?"context":kind==L"hold"?"hold":kind==L"busy"?"busy":"menu";
         }
+        else if(i+1<argc && arg==L"--preview-text-tab") {std::wstring value=argv[++i];previewTextTab=value==L"replace"?1:value==L"tidy"?2:value==L"split"?3:0;}
         else if(i+1<argc && arg==L"--preview-tool") {std::wstring value=argv[++i];if(value==L"search" || value==L"split")previewTool=std::string(value.begin(),value.end());}
         else if (i+1<argc && arg==L"--preview-theme") {
             std::wstring value=argv[++i];std::string name(value.begin(),value.end());
@@ -2192,15 +2208,16 @@ int main() {
     if (!selfTest) {ShowWindow(window,preview.empty()?SW_SHOWNORMAL:SW_SHOWNOACTIVATE);UpdateWindow(window);}
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
-            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((!previewTool.empty()?432:previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((!previewTool.empty()?(previewTool=="search"?332:620):previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):500)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((!previewTool.empty()?(previewTool=="search"?432:632):previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((!previewTool.empty()?(previewTool=="search"?274:780):previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):500)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);shapePanelOpen=previewShape && !previewOrdinary;
             if(!previewTool.empty()) {
                 layerSearchReady=textSplitReady=true;holdFinished=false;pinned=true;capable=allowed=true;
                 menuTools.receive(Json{{"type","menu.tools.opened"},{"epoch",menuEpoch},{"mode",previewTool}});
                 if(previewTool=="split")menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.read"},{"ok",true},
-                    {"result",{{"name","标题与说明"},{"text","作品标题\r第一段说明文字\r第二段说明文字"},{"revision","preview"}}}});
+                    {"result",{{"name","标题与说明"},{"text","作品标题\r第一段说明文字。这是一段用于核对自动折行与中文显示的长文字，不需要先手动换行，也可以在编辑区修改，然后计算预览。Lorem ipsum dolor sit amet, consectetur adipiscing elit.\r第二段说明文字"},{"revision","preview"}}}});
+                if(previewTool=="split"){menuTools.textTab=previewTextTab;std::snprintf(menuTools.find,sizeof(menuTools.find),"文字");std::snprintf(menuTools.replacement,sizeof(menuTools.replacement),"内容");}
                 else {menuTools.searchDirty=false;menuTools.submit("layers.search",Json::object());menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","layers.search"},{"ok",true},
-                    {"result",{{"search_id","preview"},{"scanned",24},{"items",Json::array({Json{{"name","产品标题"},{"document_name","商品详情.psd"}},Json{{"name","产品说明"},{"document_name","商品详情.psd"}}})}}}});}
+                    {"result",{{"search_id","preview"},{"scanned",24},{"items",Json::array({Json{{"name","产品标题"},{"type","text"},{"document_name","商品详情.psd"}},Json{{"name","产品说明"},{"type","smart-object"},{"document_name","商品详情.psd"}}})}}}});}
             }
             if (previewKind=="busy") accept({{"type","operation"},{"busy",true},{"action","select"}});
             if(!previewProgressStage.empty())accept({{"type","preview.progress"},{"epoch",menuEpoch},{"phase","preview"},{"stage",previewProgressStage},{"done",12},{"total",previewProgressStage=="redraw"?0:32},{"frame",2}});
@@ -2390,7 +2407,7 @@ int main() {
                 if(timed.update(32,32,2151,false,true)!=-1 || timed.update(32,32,2301,false,true)!=32 ||
                     timed.update(32,32,2302,false,false)!=-1)
                     throw std::runtime_error("Tooltip crossed groups or survived input/task disable");
-                if(tipFamily(12)==tipFamily(13))throw std::runtime_error("Clipboard tooltip shares the preset family");
+                if(tipFamily(recentActionBase)==tipFamily(recentActionBase+1))throw std::runtime_error("Clipboard tooltip shares the preset family");
                 TipVisual morph;
                 const ImVec4 shortBox={100,100,200,130},longBox={0,100,300,130};
                 morph.update("short",shortBox,32,3000);
@@ -2407,8 +2424,8 @@ int main() {
                 morph.sample(3190);
                 if(morph.bounds.x!=shortBox.x || morph.bounds.z!=shortBox.z || !morph.previous.empty())
                     throw std::runtime_error("Tooltip did not settle to exact padded width");
-                const auto stableTip=actionTipBounds(13);
-                for(int action=14;action<21;++action) {
+                const auto stableTip=actionTipBounds(recentActionBase+1);
+                for(int action=recentActionBase+2;action<recentActionBase+9;++action) {
                     const auto bounds=actionTipBounds(action);
                     if(std::abs((bounds.x+bounds.z)-(stableTip.x+stableTip.z))>scale || bounds.y!=stableTip.y)
                         throw std::runtime_error("Sibling preset tooltip anchor changed");
@@ -2423,7 +2440,7 @@ int main() {
                     const auto r=recentRows[i];POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
                     if(r.right<=r.left || r.bottom<=r.top || r.left<gridWindow->Pos.x || r.top<gridWindow->Pos.y ||
                        r.right>gridWindow->Pos.x+gridWindow->Size.x || r.bottom>gridWindow->Pos.y+gridWindow->Size.y ||
-                       holdActionAt(middle)!=12+int(i))throw std::runtime_error("Recent grid button clipped or unreachable");
+                       holdActionAt(middle)!=recentActionBase+int(i))throw std::runtime_error("Recent grid button clipped or unreachable");
                     if(i>1 && (i-1)%2 && (r.top!=recentRows[i-1].top || r.left<=recentRows[i-1].right))
                         throw std::runtime_error("Recent grid column order failed");
                     if(i>=3 && r.top<=recentRows[i-2].bottom)throw std::runtime_error("Recent grid row order failed");
@@ -2437,12 +2454,12 @@ int main() {
                     throw std::runtime_error("Preset panel retained the old title / excess row spacing");
                 if(menuFont(MenuTextRole::PresetDimension)->FontSize<=menuFont(MenuTextRole::PresetTag)->FontSize)
                     throw std::runtime_error("Preset dimensions must lead the metadata badges");
-                for(int action=12;action<21;++action) {
+                for(int action=recentActionBase;action<recentActionBase+9;++action) {
                     const auto tip=actionTipBounds(action);
                     if(tip.z<=tip.x || holdActionAt({LONG((tip.x+tip.z)*.5f),LONG((tip.y+tip.w)*.5f)})!=-1)
                         throw std::runtime_error("Preset tooltip missing or has a gesture hit");
                     for(auto r:recentRows)if(tipOverlaps(tip,r))throw std::runtime_error("Preset tooltip overlaps a card");
-                    if(action>12 && tip.w>recentPanelBounds.top)throw std::runtime_error("Preset tooltip must prefer above the grid");
+                    if(action>recentActionBase && tip.w>recentPanelBounds.top)throw std::runtime_error("Preset tooltip must prefer above the grid");
                 }
                 auto recentRect=recentRows[0];POINT recentPoint={(recentRect.left+recentRect.right)/2,(recentRect.top+recentRect.bottom)/2};
                 shownPresets[0].available=false;
@@ -2456,14 +2473,14 @@ int main() {
                     throw std::runtime_error("Unavailable clipboard still drawn or selectable");
                 for(size_t i=1;i<recentRows.size();++i) {
                     const auto r=recentRows[i];POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
-                    if(holdActionAt(middle)!=12+int(i))throw std::runtime_error("Clipboard visibility moved recent actions");
+                    if(holdActionAt(middle)!=recentActionBase+int(i))throw std::runtime_error("Clipboard visibility moved recent actions");
                 }
                 shownPresets[0].available=true;redrawPresets();
                 POINT neutral={LONG(pieCenter.x),LONG(pieCenter.y)};
-                holdFinished=false;pieReady=true;renderedHit=12;
+                holdFinished=false;pieReady=true;renderedHit=recentActionBase;
                 finishHold(recentPoint,true,&neutral);
                 if(testedActions.back()!="hide")throw std::runtime_error("Recent preset exit committed");
-                testedActions.pop_back();holdFinished=false;pieReady=true;renderedHit=12;
+                testedActions.pop_back();holdFinished=false;pieReady=true;renderedHit=recentActionBase;
                 finishHold(recentPoint,true,&recentPoint);
                 if(testedActions.back()!="document.recent.test-preset")throw std::runtime_error("Recent preset stable release failed");
                 auto submitted=testedActions.size();finishHold(recentPoint,true,&recentPoint);
@@ -2474,6 +2491,21 @@ int main() {
                 SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>(620*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
                 holdFinished=false;pieReady=true;renderedHit=-1;
                 panelKind=2;
+                if(supportedLabelCount(Json{{"photoshop_version","24.0.1"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=8 ||
+                   supportedLabelCount(Json{{"photoshop_version","25.0"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=12 ||
+                   supportedLabelCount(Json{{"photoshop_version","25.0"},{"uxp_version","0.3.68"},{"uxp_ready",true}})!=8)
+                    throw std::runtime_error("Host label palette capability mismatch");
+                labelCount=12;redrawPresets();pinned=true;
+                for(int i=0;i<labelCount;++i) {
+                    holdFinished=false;pieReady=true;
+                    const auto r=labelRows[i];POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
+                    if(holdActionAt(middle)!=4+i || r.right<=r.left || r.bottom<=r.top || r.left<holdRows[1].left || r.right>holdRows[1].right || r.bottom>holdRows[1].bottom)
+                        throw std::runtime_error("Modern label swatch not visible/hittable inside palette: index="+std::to_string(i)+", hit="+std::to_string(holdActionAt(middle)));
+                    holdFinished=false;pieReady=true;commitLabel(i);
+                    if(testedActions.back()!=std::string("label.")+labelColors[i].id)throw std::runtime_error("Modern label enum dispatch mismatch");
+                    testedActions.pop_back();
+                }
+                labelCount=8;holdFinished=false;pinned=false;redrawPresets();
                 for (int i=0;i<8;++i) {
                     auto r=labelRows[i];POINT middle={(r.left+r.right)/2,(r.top+r.bottom)/2};
                     if (holdActionAt(middle)!=4+i) throw std::runtime_error("Label swatch hit test failed");
@@ -2587,7 +2619,7 @@ int main() {
                     ImGui::NewFrame();drawMenu();ImGui::Render();finishPlatformFrame();
                 };
                 {
-                    int choice=0;char query[16]{};POINT second{},seam{};bool focusQuery=false;
+                    int choice=0,iconChoice=0,rowClicks=0;char query[16]{};POINT second{},seam{},iconSecond{},iconSeam{},rowMain{},rowPreview{};bool focusQuery=false,rowPreviewHovered=false;
                     auto controlsFrame=[&](bool disabled){
                         const auto padding=ImGui::GetStyle().FramePadding;
                         const auto border=ImGui::GetStyle().FrameBorderSize;
@@ -2611,6 +2643,16 @@ int main() {
                             second={LONG(at.x+first+next*.5f),LONG(at.y+input*.5f)};
                             seam={LONG(at.x+first+next),second.y};
                             ImGui::BeginDisabled(disabled);MenuControls::segments("##types",names,choice,scale);ImGui::EndDisabled();
+                            const int iconIds[]={7,36,38};const auto bar=ImGui::GetCursorScreenPos();
+                            iconSecond={LONG(bar.x+figmaDisplayIconWidth*scale*1.5f),LONG(bar.y+figmaDisplayWidgetHeight*scale*.5f)};
+                            iconSeam={LONG(bar.x+figmaDisplayIconWidth*scale*2),iconSecond.y};
+                            ImGui::BeginDisabled(disabled);MenuControls::iconSegments("##kind-icons",names,iconIds,iconChoice,scale);
+                            const auto row=ImGui::GetCursorScreenPos();const float rowWidth=ImGui::GetContentRegionAvail().x;ImVec2 anchor{};
+                            rowMain={LONG(row.x+12*scale),LONG(row.y+menuSearchRowHeight*scale*.5f)};
+                            rowPreview={LONG(row.x+rowWidth-menuSearchRowHeight*scale*.5f),rowMain.y};
+                            if(MenuControls::resultRow("##compact-result",36,"文字图层长名称","示例.psd",scale,rowPreviewHovered,anchor))rowClicks++;
+                            if(std::abs(ImGui::GetItemRectSize().y-menuSearchRowHeight*scale)>.1f)throw std::runtime_error("Compact result height drifted");
+                            ImGui::EndDisabled();
                         }
                         if(ImGui::GetStyle().FramePadding.x!=padding.x || ImGui::GetStyle().FramePadding.y!=padding.y ||
                            ImGui::GetStyle().FrameBorderSize!=border || ImGui::GetFont()!=oldFont)
@@ -2657,6 +2699,18 @@ int main() {
                     const bool positioned=ImmGetCompositionWindow(himc,&position) && position.ptCurrentPos.x==37 && position.ptCurrentPos.y==59;
                     if(restore)ImmSetCompositionWindow(himc,&previous);ImmReleaseContext(window,himc);
                     if(!positioned)throw std::runtime_error("IME composition did not follow input caret");
+                    io.AddMousePosEvent(float(iconSecond.x),float(iconSecond.y));controlsFrame(false);
+                    io.AddMouseButtonEvent(0,true);controlsFrame(false);io.AddMouseButtonEvent(0,false);controlsFrame(false);
+                    if(iconChoice!=1)throw std::runtime_error("Layer type icon click failed");
+                    io.AddMousePosEvent(float(iconSeam.x),float(iconSeam.y));controlsFrame(false);
+                    io.AddMouseButtonEvent(0,true);controlsFrame(false);io.AddMouseButtonEvent(0,false);controlsFrame(false);
+                    if(iconChoice!=1)throw std::runtime_error("Layer icon divider gained a hit");
+                    io.AddMousePosEvent(float(rowMain.x),float(rowMain.y));controlsFrame(false);
+                    io.AddMouseButtonEvent(0,true);controlsFrame(false);io.AddMouseButtonEvent(0,false);controlsFrame(false);
+                    if(rowClicks!=1)throw std::runtime_error("Compact row did not locate exactly once");
+                    io.AddMousePosEvent(float(rowPreview.x),float(rowPreview.y));controlsFrame(false);
+                    io.AddMouseButtonEvent(0,true);controlsFrame(false);io.AddMouseButtonEvent(0,false);controlsFrame(false);
+                    if(rowClicks!=1 || !rowPreviewHovered)throw std::runtime_error("Preview hover gained a locate action");
                     io.AddMousePosEvent(-1000,-1000);ImGui::SetWindowFocus(nullptr);
                     std::cout<<"Shared Caps/tools UI passed: input/button/font/border parity, style restoration, segment click, divider cancel and disabled protection\n";
                     std::cout<<"Chinese input passed: own WM_CHAR to UTF-8 input, new glyph upload, preserved edit buffer and Windows IME caret position\n";
@@ -3644,6 +3698,15 @@ int main() {
                     menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",request},{"action","text.read"},{"ok",true},
                         {"result",{{"text","a\rb"},{"name","source"},{"revision","r"}}}});
                     if(menuTools.pending || menuTools.split.breaks!=Json({2,3}) || canExecute())throw std::runtime_error("Caps text preview is not isolated");
+                    menuTools.textTab=1;std::snprintf(menuTools.find,sizeof(menuTools.find),"a");std::snprintf(menuTools.replacement,sizeof(menuTools.replacement),"猫");
+                    if(menuTools.textParams().at("operation")!="replace" || menuTools.textParams().at("draft")!="a\nb")throw std::runtime_error("Text editor parameters lost source or operation");
+                    menuTools.submit("text.preview",menuTools.textParams());const auto previewRequest=menuTools.request;menuTools.changedText();
+                    menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",previewRequest},{"action","text.preview"},{"ok",true},{"result",Json::object()}});
+                    if(menuTools.pending || !menuTools.planId.empty())throw std::runtime_error("Late text plan accepted after an edit");
+                    menuTools.submit("text.preview",menuTools.textParams());
+                    menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.preview"},{"ok",true},{"result",{{"plan_id","bounded"},{"value","猫\rb"},{"preview","猫\nb"},{"kind","replace"},{"count",1}}}});
+                    if(menuTools.planId!="bounded" || menuTools.resultValue!="猫\nb")throw std::runtime_error("Text plan preview was not usable");
+                    menuTools.changedText();menuTools.textTab=0;
                     numberFrame(ImGuiKey_None,false);
                     if(pieReady || holdRows[0].right || capsRows[0].right || quickRows[0].right || holdActionAt(POINT{LONG(pieCenter.x),LONG(pieCenter.y)})!=-1)
                         throw std::runtime_error("Tool editor retained radial command hits");
@@ -3657,6 +3720,16 @@ int main() {
                     if(menuTools.searchDue(3))throw std::runtime_error("Search overlapped a pending read");
                     menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","layers.search"},{"ok",true},{"result",{{"items",Json::array()}}}});
                     if(menuTools.pending || !menuTools.results.is_null() || !menuTools.searchDue(3))throw std::runtime_error("Stale search became selectable or latest query lost");
+                    menuTools.results=Json{{"search_id","current"},{"items",Json::array()}};
+                    menuTools.previewPending=true;menuTools.previewQuery="current";menuTools.previewHovered=menuTools.previewTarget=0;menuTools.previewRequest=1;
+                    const Json tile={{"available",true},{"width",2},{"height",1},{"pixels",Json({255,0,0,255,0,255,0,128})}};
+                    menuTools.receive(Json{{"type","menu.tools.preview.result"},{"epoch",menuEpoch-1},{"request",1},{"ok",true},{"result",tile}});
+                    if(!menuTools.previewPending || menuTools.thumbnail)throw std::runtime_error("Stale image crossed menu epoch");
+                    menuTools.receive(Json{{"type","menu.tools.preview.result"},{"epoch",menuEpoch},{"request",1},{"ok",true},{"result",tile}});
+                    if(menuTools.previewPending || !menuTools.thumbnail || menuTools.thumbnailSize.x!=2)throw std::runtime_error("Image result did not create a bounded texture");
+                    menuTools.changeSearch(4);
+                    if(menuTools.thumbnail || menuTools.previewTarget!=-1)throw std::runtime_error("Old search retained its image");
+                    if(menuTools.loadPreview(Json{{"available",true},{"width",129},{"height",1},{"pixels",Json::array()}}))throw std::runtime_error("Unbounded thumbnail accepted");
                     menuTools.reset();testedActions.resize(before);layerSearchReady=textSplitReady=false;
                 }
                 std::cout<<"Blank right-click client cancellation passed: canvas/layers/home/general, late Caps release, dirty draft, sampler pair and busy protection\n";

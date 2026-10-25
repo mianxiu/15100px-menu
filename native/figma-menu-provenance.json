@@ -381,11 +381,53 @@
       "asset": "native/figma-inspired-assets/shape-screenEyedropper.svg",
       "sha256": "c9e8cea0d11de491f405ee4fee3303ad5a523b621156c27205542afec17d66f1",
       "adaptation": "Project-authored eyedropper; nine-unit grid and one-unit strokes. Samples displayed RGB, not document color-managed source values."
+    },
+    {
+      "operation": "layers.pixel",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layers-pixel.svg",
+      "sha256": "bc20dfe3e6f3e5d81f7c6b45caef979c4f30e489c363ce38459ce8e703b30351",
+      "adaptation": "Photoshop layer-kind photo symbol, authored on the shared Figma grid."
+    },
+    {
+      "operation": "layers.text",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layers-text.svg",
+      "sha256": "db251e4a305c2d2ade0cbd1d3997ed3e94129d5a7777aba84213658b6a4c52e9",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "layers.shape",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layers-shape.svg",
+      "sha256": "5a74998c66c277d43f1a135f5a439a37ec0095216867d620809143985b647d23",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "layers.smartObject",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layers-smartObject.svg",
+      "sha256": "f7650f916ba6d5722d180fb18978141c1e06f3130b98d0a2b1bfc8871fafa238",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "layers.preview",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layers-preview.svg",
+      "sha256": "58fffaf267c843deab1d5c35cd4db97c8396f1ea3829b47f2167ca7f941856e3",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
+    },
+    {
+      "operation": "layers.other",
+      "authorship": "Figma-style extension, not an original component",
+      "asset": "native/figma-inspired-assets/layers-other.svg",
+      "sha256": "57f9850cb422fb629474285b5275200846f7ddd492e9bc3c5e5f3b2dc1fb3ddd",
+      "adaptation": "Nine-unit grid, one-unit linework and original monochrome tones"
     }
   ],
   "extension_source": {
     "file": "native/figma-inspired-icons.json",
-    "sha256": "ca52c3de441e425572c3887fadb666592864bcbb1affd844d0188221c75fb655",
+    "sha256": "0bfe141a3f577e2e52a43f84587e9b7f2c5f3b7cadb78b934e5602953d68ae2b",
     "reference_nodes": [
       "809:619",
       "346:6",

@@ -36,14 +36,60 @@ class ToolObservationTests(unittest.TestCase):
 
     def test_new_request_is_authenticated_and_identity_is_saved_before_publication(self):
         from backend.input_tool import atomic_json as write
+        from backend.input_tool import publish_request as rename
         rows=[]
-        def publish(path,value):
-            rows.append(Path(path).name);write(path,value)
-            if path.name=='input-tool-request.json':
-                self.assertTrue(self.reader.path.exists());self.assertNotIn('token',json.loads(self.reader.path.read_text()))
-                self.assertEqual(value['token'],'private-test-token');self.reply(value)
-        with patch('backend.input_tool.atomic_json',side_effect=publish):self.reader.read()
-        self.assertEqual(rows,['input-tool-pending.json','input-tool-request.json'])
+        def save(path,value):rows.append(value.get('publication'));write(path,value)
+        def publish(temporary,destination):
+            value=json.loads(temporary.read_text('utf-8'));rows.append('request')
+            pending=json.loads(self.reader.path.read_text());self.assertEqual(pending['publication'],'prepared');self.assertNotIn('token',pending)
+            self.assertEqual(value['token'],'private-test-token');self.assertEqual(value['schema'],1)
+            rename(temporary,destination);self.reply(value)
+        with patch('backend.input_tool.atomic_json',side_effect=save),patch('backend.input_tool.publish_request',side_effect=publish):self.reader.read()
+        self.assertEqual(rows,['prepared','request','published'])
+
+    def test_failed_publication_archives_before_release_and_never_waits_for_host(self):
+        error=PermissionError('sharing');error.winerror=32
+        with patch('backend.input_tool.publish_request',side_effect=error):
+            with self.assertRaisesRegex(RuntimeError,'未发布'):self.reader.read()
+        self.assertFalse(self.reader.path.exists());self.assertFalse((self.folder/'input-tool-request.json').exists())
+        archive=list(self.root.glob('input-tool-unpublished-*.json'));self.assertEqual(len(archive),1)
+        record=json.loads(archive[0].read_text());self.assertFalse(record['host_request_published']);self.assertEqual(record['request']['publication'],'prepared')
+        self.assertIsNotNone(self.reader.retry_after)
+
+    def test_sharing_retry_keeps_one_identity_and_one_envelope(self):
+        import os
+        real=os.replace;attempts=[]
+        error=PermissionError('sharing');error.winerror=32
+        def replace(source,destination):
+            if Path(destination).name=='input-tool-request.json':
+                value=json.loads(Path(source).read_text('utf-8'));attempts.append(value)
+                if len(attempts)<3:raise error
+                result=real(source,destination);self.reply(value);return result
+            return real(source,destination)
+        with patch('backend.uxp_bridge.os.replace',side_effect=replace):self.reader.read()
+        self.assertEqual(len(attempts),3);self.assertTrue(all(row==attempts[0] for row in attempts))
+        self.assertFalse(self.reader.path.exists());self.assertFalse(list(self.root.glob('input-tool-unpublished-*.json')))
+
+    def test_archive_failure_keeps_unpublished_identity_and_does_not_claim_exit(self):
+        from backend.input_tool import atomic_json as write
+        def save(path,value):
+            if 'unpublished-' in path.name:raise OSError('archive failed')
+            write(path,value)
+        with patch('backend.input_tool.atomic_json',side_effect=save),patch('backend.input_tool.publish_request',side_effect=PermissionError('sharing')):
+            with self.assertRaises(OSError):self.reader.read()
+        self.assertEqual(json.loads(self.reader.path.read_text())['publication'],'prepared')
+
+    def test_readonly_reconcile_consumes_only_matching_terminal_and_never_publishes(self):
+        original=self.pending();self.reply(original,id='b'*32)
+        with patch('backend.input_tool.publish_request') as publish:
+            self.assertFalse(self.reader.reconcile());publish.assert_not_called();self.assertTrue(self.reader.path.exists())
+            self.reply(original,completed_at_ms=time.time()*1000-2000)
+            self.assertTrue(self.reader.reconcile());publish.assert_not_called();self.assertFalse(self.reader.path.exists())
+
+    def test_prepared_after_publication_crash_is_not_republished(self):
+        original=self.pending(schema=2,publication='prepared');self.reply(original)
+        with patch('backend.input_tool.publish_request') as publish:
+            self.assertEqual(self.reader.read()['classID'],'typeCreateOrEditTool');publish.assert_not_called()
 
     def test_unknown_wrong_id_token_and_session_are_never_republished(self):
         for changes in ({'id':'b'*32},{'token':'other'},{'session':'other'}):

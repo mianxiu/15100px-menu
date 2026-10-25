@@ -58,6 +58,28 @@ class MenuToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.tools.text.snapshot)
         self.assertIn('目标已改变',self.app.desktop.event.call_args.args[0]['error'])
 
+    async def test_preview_does_not_take_the_write_slot_and_drops_old_epoch(self):
+        entered=asyncio.Event();release=asyncio.Event()
+        async def read(args):entered.set();await release.wait();return {'available':False,'reason':'empty'}
+        self.tools.search.preview=AsyncMock(side_effect=read)
+        args={'menu_epoch':7,'params':{'request':1,'search_id':'q','index':0}}
+        task=asyncio.create_task(self.tools.preview(args));await entered.wait()
+        self.assertFalse(self.tools.pending)
+        await self.tools.preview(args)
+        self.assertEqual(self.tools.search.preview.await_count,1)
+        self.assertEqual(self.tools.preview_request,(7,1))
+        self.app.desktop.event.assert_not_called()
+        self.tools.epoch=8;self.app.desktop.event.reset_mock();release.set();await task
+        self.app.desktop.event.assert_not_called();self.assertIsNone(self.tools.preview_request)
+
+    async def test_preview_checks_closed_and_busy_menu_before_host(self):
+        self.tools.search.preview=AsyncMock()
+        args={'menu_epoch':7,'params':{'request':1,'search_id':'q','index':0}}
+        self.tools.pending=True;await self.tools.preview(args)
+        self.tools.search.preview.assert_not_called();self.tools.pending=False
+        self.app.desktop.require_menu_tools.side_effect=RuntimeError('closed');await self.tools.preview(args)
+        self.tools.search.preview.assert_not_called()
+
     async def test_write_rechecks_menu_after_durable_capture(self):
         async def split(args,menu_guard):
             self.tools.epoch=8
@@ -83,6 +105,11 @@ class MenuToolsTests(unittest.IsolatedAsyncioTestCase):
         await self.tools.request(self.request())
         self.tools.search.search.assert_not_called()
         self.assertTrue(self.tools.pending)
+
+    async def test_duplicate_in_flight_cannot_finish_the_original_ui_request(self):
+        self.tools.pending=True;self.tools.last_request=1
+        await self.tools.request(self.request())
+        self.app.desktop.event.assert_not_called();self.assertTrue(self.tools.pending)
 
     async def test_split_and_focus_keep_native_feedback_and_forward_guard(self):
         app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
@@ -133,25 +160,25 @@ class MenuToolsDesktopTests(unittest.TestCase):
             self.assertEqual(desktop.open_menu_tools('split',6),7)
         self.assertTrue(desktop.menu_tools_active);self.assertFalse(desktop.hold_active)
         self.assertEqual(desktop.gui.SendMessage.call_args_list[0].args,(2,0x800d,1,7))
-        desktop.gui.SetWindowPos.assert_called_once_with(2,0,1112,420,432,620,0x4|0x10)
+        desktop.gui.SetWindowPos.assert_called_once_with(2,0,1112,260,632,780,0x4|0x10)
         self.assertTrue(all(type(v) is int for v in desktop.gui.SetWindowPos.call_args.args[2:6]))
-        self.assertEqual(desktop.preview_hint_anchor,[1328,730])
+        self.assertEqual(desktop.preview_hint_anchor,[1428,650])
         with self.assertRaisesRegex(RuntimeError,'重新打开'):desktop.require_menu_tools(6)
         desktop.gui.GetWindowRect.return_value=(-1800,100,-100,1000)
         with patch('win32api.GetCursorPos',return_value=(-1000,500)),patch('win32api.MonitorFromWindow',return_value=1),patch('win32api.GetMonitorInfo',return_value={'Work':(-1920,0,0,1040)}):
             self.assertEqual(desktop.open_menu_tools('search',7),8)
-        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-988,512,432,240,0x4|0x10))
-        self.assertEqual(desktop.preview_hint_anchor,[-772,632])
+        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-988,512,432,244,0x4|0x10))
+        self.assertEqual(desktop.preview_hint_anchor,[-772,634])
         with patch('win32api.GetCursorPos',return_value=(2500,2000)),patch('win32api.GetMonitorInfo',return_value={'Work':(-1920,0,0,1040)}):
             desktop.open_menu_tools('search',8)
-        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-532,760,432,240,0x4|0x10))
+        self.assertEqual(desktop.gui.SetWindowPos.call_args.args,(2,0,-532,756,432,244,0x4|0x10))
 
     def test_search_results_resize_within_ps_and_closed_epoch_rejects(self):
         desktop=Desktop('http://localhost',Mock());desktop.hwnd=2;desktop.target=1;desktop.gui=Mock()
         desktop.require_menu_tools=Mock();desktop.icons=Mock();desktop.icons.u.GetDpiForWindow.return_value=96
         desktop.gui.GetWindowRect.side_effect=lambda h:(1500,800,1932,1100) if h==2 else (100,100,1900,1100)
         with patch('win32api.GetMonitorInfo',return_value={'Work':(0,0,1920,1040)}):desktop.resize_menu_tools(7,10)
-        desktop.gui.SetWindowPos.assert_called_once_with(2,0,1468,524,432,516,0x4|0x10)
+        desktop.gui.SetWindowPos.assert_called_once_with(2,0,1468,586,432,454,0x4|0x10)
         desktop.require_menu_tools.side_effect=RuntimeError('closed')
         with self.assertRaisesRegex(RuntimeError,'closed'):desktop.resize_menu_tools(8,0)
         self.assertEqual(desktop.gui.SetWindowPos.call_count,1)

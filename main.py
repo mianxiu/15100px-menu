@@ -8,6 +8,9 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "--ps-launch-worker":
         sys.argv.pop(1)
         from backend.photoshop_launch import cli
+    elif len(sys.argv) > 1 and sys.argv[1] == "--text-plan-worker":
+        sys.argv.pop(1)
+        from backend.text_plan import cli
     elif len(sys.argv) > 1 and sys.argv[1] == "--overlay":
         sys.argv.pop(1)
         from backend.overlay import cli

@@ -1,22 +1,30 @@
-import os
 import types
 import unittest
-from unittest.mock import Mock,patch
+from unittest.mock import patch
 from backend.stability_metrics import host_scope
 
 
 class ScopeTests(unittest.TestCase):
-    def test_authorized_app_switches_allowed_foreign_or_missing_process_stops(self):
-        front=[2]
-        names={1:'Photoshop.exe',2:'chrome.exe',3:'DeepSeek Harness.exe',4:'QQ.exe'}
-        api=types.SimpleNamespace(OpenProcess=lambda _,__,pid:types.SimpleNamespace(pid=pid,Close=lambda:None))
-        gui=types.SimpleNamespace(GetForegroundWindow=lambda:front[0])
-        process=types.SimpleNamespace(EnumProcesses=lambda:[1,2,3,4],
-            GetModuleFileNameEx=lambda handle,_:names[handle.pid],GetWindowThreadProcessId=lambda hwnd:(1,hwnd))
-        with patch.dict('sys.modules',win32api=api,win32gui=gui,win32process=process):
-            pid,check=host_scope();self.assertEqual(pid,1)
-            for allowed in (2,3,1,os.getpid()):front[0]=allowed;check()
-            for denied in (4,0,999):
-                front[0]=denied
-                with self.assertRaises(RuntimeError):check()
+    def test_any_foreground_allowed_but_original_process_required(self):
+        names={1:'Photoshop.exe',2:'QQ.exe'};created={1:10,2:20}
+        class Handle:
+            def __init__(self,pid):self.pid=pid
+            def Close(self):pass
+        def open_process(_,__,pid):
+            if pid not in names:raise OSError('gone')
+            return Handle(pid)
+        api=types.SimpleNamespace(OpenProcess=open_process)
+        process=types.SimpleNamespace(EnumProcesses=lambda:list(names),
+            GetModuleFileNameEx=lambda handle,_:names[handle.pid],
+            GetProcessTimes=lambda handle:{'CreationTime':created[handle.pid]})
+        with patch.dict('sys.modules',win32api=api,win32process=process):
+            pid,check=host_scope();self.assertEqual(pid,1);check()
+            created[1]=11
+            with self.assertRaises(RuntimeError):check()
+            created[1]=10;names[1]='other.exe'
+            with self.assertRaises(RuntimeError):check()
+            del names[1]
+            with self.assertRaises(RuntimeError):check()
+            with self.assertRaises(RuntimeError):host_scope()
+            names.update({1:'Photoshop.exe',3:'Photoshop.exe'});created[3]=30
             with self.assertRaises(RuntimeError):host_scope()

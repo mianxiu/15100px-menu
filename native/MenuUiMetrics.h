@@ -16,6 +16,11 @@ static constexpr float menuGradientHandleSize=menuCheckSize;
 static constexpr float menuGradientEditorHeight=menuGradientBarHeight+menuCompactGap+menuGradientHandleSize;
 
 static constexpr float menuShapeWindowHeight=620.f;
+static constexpr float menuSearchRowHeight=menuControlHeight;
+static constexpr float menuLayerPreviewSize=128.f;
+static constexpr ImU32 menuTipBackground=IM_COL32(0,0,0,218);
+static constexpr ImU32 menuTipBorder=IM_COL32(255,255,255,32);
+static constexpr ImU32 menuTipText=IM_COL32(245,245,245,255);
 
 static constexpr float menuHueBarWidth=14.f;
 static constexpr float menuHarmonyLaneWidth=24.f;

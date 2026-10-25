@@ -67,8 +67,9 @@ def publish_request(temporary, destination):
                 if getattr(error,'winerror',None) not in (5,32) or time.monotonic()>=deadline:raise
                 # UXP may still hold a read handle without Windows delete-share.
                 time.sleep(.004)
-    finally:
+    except OSError:
         if temporary.exists():temporary.unlink()
+        raise
 
 class UxpTransport:
     def __init__(self, config):
@@ -141,6 +142,8 @@ class UxpTransport:
                     raise RuntimeError('文本工具需要正常重启PS加载UXP0.3.58')
                 if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,59):
                     raise RuntimeError('文字拆分需要正常重启PS加载UXP0.3.59')
+                if payload.get('command') in ('text.replace','text.split') and 'value' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,71):
+                    raise RuntimeError('文字处理计划需要正常重启PS加载UXP0.3.71；未提交修改')
                 if payload.get('command')=='layer.focus' and (version(heartbeat.get('probe_version'))<(0,3,57) or payload.get('target',{}).get('session')!=heartbeat.get('session')):
                     raise RuntimeError('搜索会话或UXP版本已改变，请重新搜索')
                 if payload.get('stability_run') and version(heartbeat.get('probe_version'))<(0,3,47):
@@ -426,6 +429,7 @@ class UxpBridge(PhotoshopBridge):
             _,heartbeat=self._observe_transport()
             value['uxp_ready']=compatible(heartbeat.get('probe_version')) and time.time()*1000-heartbeat.get('plugin_time_ms',0)<15000
             value['uxp_version']=heartbeat.get('probe_version')
+            value['layer_preview_available']=heartbeat.get('layer_preview_available') is True
             value['photoshop_version']=heartbeat.get('photoshop_version')
             capability=heartbeat.get('document_redraw_available')
             value['document_redraw_available']=capability if type(capability) is bool else None
