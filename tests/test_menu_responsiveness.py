@@ -35,7 +35,7 @@ class BenchmarkResponsivenessTests(unittest.TestCase):
                     finally:h.Close()
                     event=events.get(timeout=30)
                     if event is None:
-                        error.flush();error.seek(0);self.fail(error.read())
+                        error.flush();error.seek(0);self.fail('Menu exited before benchmark readiness: '+str(p.poll())+'\n'+error.read())
                     hwnd=event['hwnd'];self.assertEqual(win32process.GetWindowThreadProcessId(hwnd)[1],p.pid)
                     deadline=time.monotonic()+6.5;samples=0
                     while time.monotonic()<deadline:

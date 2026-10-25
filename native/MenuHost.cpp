@@ -460,19 +460,52 @@ static void releaseDevice() {
     menuTools.clearPreview();
     if (device) {device->Release();device=nullptr;}
 }
+static bool prepareRendererResources() {
+    if(!ImGui_ImplDX11_CreateDeviceObjects())return false;
+    // Register early uploads so backend shutdown releases them before device changes.
+    auto* atlas=ImGui::GetIO().Fonts;
+    auto& textures=ImGui::GetPlatformIO().Textures;
+    for(auto* texture:atlas->TexList) {
+        texture->RefCount=static_cast<unsigned short>(atlas->RefCount);
+        if(!textures.contains(texture))textures.push_back(texture);
+        if(texture->Status==ImTextureStatus_Destroyed && texture->Pixels && !texture->WantDestroyNextFrame)
+            texture->SetStatus(ImTextureStatus_WantCreate);
+        if(texture->Status==ImTextureStatus_WantCreate || texture->Status==ImTextureStatus_WantUpdates) {
+            ImGui_ImplDX11_UpdateTexture(texture);
+            if(texture->Status!=ImTextureStatus_OK)return false;
+        }
+    }
+    return true;
+}
 static bool recoverRenderer() {
     // A Photoshop/GPU restart can invalidate this process's D3D device too.
     // Keep the CPU font atlas and rebuild the renderer on a fresh device.
+    auto& platform=ImGui::GetPlatformIO();
+    const auto clipboardGet=platform.Platform_GetClipboardTextFn;
+    const auto clipboardSet=platform.Platform_SetClipboardTextFn;
+    const auto clipboardData=platform.Platform_ClipboardUserData;
+    const auto ime=platform.Platform_SetImeDataFn;
+    const auto imeData=platform.Platform_ImeUserData;
+    const auto shell=platform.Platform_OpenInShellFn;
+    const auto shellData=platform.Platform_OpenInShellUserData;
     ImGui_ImplDX11_Shutdown();
     // DX11 shutdown destroys platform data for ALL viewports, including the
     // main one. Reinitialize Win32 too, while retaining our owned HWND.
     ImGui_ImplWin32_Shutdown();releaseDevice();
     if (!createDevice(window)) return false;
     if (!ImGui_ImplWin32_Init(window)) return false;
+    // Backend shutdown also clears core-owned OS callbacks in ImGui 1.92.
+    platform.Platform_GetClipboardTextFn=clipboardGet;
+    platform.Platform_SetClipboardTextFn=clipboardSet;
+    platform.Platform_ClipboardUserData=clipboardData;
+    platform.Platform_SetImeDataFn=ime;
+    platform.Platform_ImeUserData=imeData;
+    platform.Platform_OpenInShellFn=shell;
+    platform.Platform_OpenInShellUserData=shellData;
     platformShowWindow=ImGui::GetPlatformIO().Platform_ShowWindow;
     ImGui::GetPlatformIO().Platform_ShowWindow=showPopupWindow;
     if (!ImGui_ImplDX11_Init(device,context)) return false;
-    return ImGui_ImplDX11_CreateDeviceObjects();
+    return prepareRendererResources();
 }
 static void resetMenu() {
     hoverTip.reset();tipVisual.reset();
@@ -504,6 +537,8 @@ static void finishPlatformFrame() {
     // This is mandatory for EVERY ended frame, even if ShowWindow hid the
     // main HWND during Present. Skipping it asserts on the next NewFrame.
     ImGui::UpdatePlatformWindows();
+    // Keep the preheated PS sizes alive under the upstream baked-font cache.
+    for(auto* cached:menuFonts)if(cached)cached->GetFontBaked(cached->LegacySize);
     if (IsWindowVisible(window)) ImGui::RenderPlatformWindowsDefault();
     if (!IsWindowVisible(window)) closePopups();
 }
@@ -870,7 +905,7 @@ static void theme() {
     style.ScaleAllSizes(scale);
 }
 
-static float basicLabelSize() {return menuFont(MenuTextRole::Control)->FontSize;}
+static float basicLabelSize() {return menuFont(MenuTextRole::Control)->LegacySize;}
 static ImVec2 basicLabelExtent(int index) {return menuFont(MenuTextRole::Control)->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,rowLabel(index));}
 static float basicTextOffset() {return (figmaBasicLeftPadding+figmaBasicIconSize+figmaBasicIconGap)*scale;}
 static void icon(int index,ImVec2 at,bool active=false) {
@@ -980,10 +1015,10 @@ static void drawRecentPresets() {
         value.mode=separator==std::string::npos?"":detail.substr(separator+4);
         return value;
     };
-    auto measured=[](ImFont* font,const std::string& text) {return font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text.c_str()).x;};
+    auto measured=[](ImFont* font,const std::string& text) {return font->CalcTextSizeA(font->LegacySize,FLT_MAX,0,text.c_str()).x;};
     const float padding=7*scale,textOffset=34*scale,columnGap=4*scale,panelPadding=8*scale;
-    const float lineGap=3*scale,badgeHeight=badgeFont->FontSize+2*scale;
-    const float rowHeight=std::ceil(std::max(36*scale,10*scale+dimensionFont->FontSize+lineGap+badgeHeight));
+    const float lineGap=3*scale,badgeHeight=badgeFont->LegacySize+2*scale;
+    const float rowHeight=std::ceil(std::max(36*scale,10*scale+dimensionFont->LegacySize+lineGap+badgeHeight));
     auto naturalWidth=[&](const RecentPreset& item) {
         const auto value=content(item);
         const auto suffix=value.unit+(value.resolution.empty()?"":" @ "+value.resolution);
@@ -1014,7 +1049,7 @@ static void drawRecentPresets() {
     }
     POINT cursor{};GetCursorPos(&cursor);
     auto text=[&](ImFont* font,ImVec2 at,ImU32 color,std::string value,float maxWidth) {
-        auto extent=[&](const std::string& s){return font->CalcTextSizeA(font->FontSize,FLT_MAX,0,s.c_str()).x;};
+        auto extent=[&](const std::string& s){return font->CalcTextSizeA(font->LegacySize,FLT_MAX,0,s.c_str()).x;};
         if(extent(value)>maxWidth) {
             do {
                 size_t last=value.size()-1;
@@ -1023,7 +1058,7 @@ static void drawRecentPresets() {
             } while(!value.empty() && extent(value+"…")>maxWidth);
             value+="…";
         }
-        draw->AddText(font,font->FontSize,{roundf(at.x),roundf(at.y)},color,value.c_str());
+        draw->AddText(font,font->LegacySize,{roundf(at.x),roundf(at.y)},color,value.c_str());
         return extent(value);
     };
     size_t gridIndex=0;
@@ -1072,16 +1107,16 @@ static void drawRecentPresets() {
         } catch(...) {}
         const ImVec2 iconAt={roundf(at.x+5*scale+(22*scale-iconWidth)*.5f),roundf(at.y+(rowHeight-iconHeight)*.5f)};
         drawStyledPresetIcon(draw,iconAt,iconWidth,iconHeight,color,ImGui::ColorConvertFloat4ToU32(fill),clipboard);
-        const float textTop=at.y+(rowHeight-dimensionFont->FontSize-lineGap-badgeHeight)*.5f;
+        const float textTop=at.y+(rowHeight-dimensionFont->LegacySize-lineGap-badgeHeight)*.5f;
         const ImVec2 dimensionAt={at.x+textOffset,textTop};
         if(item.available) {
             // Dimension numbers lead; suffix and individual metadata badges are smaller.
             const std::string suffix=unit+(resolution.empty()?"":" @ "+resolution);
-            const float suffixWidth=suffixFont->CalcTextSizeA(suffixFont->FontSize,FLT_MAX,0,suffix.c_str()).x;
+            const float suffixWidth=suffixFont->CalcTextSizeA(suffixFont->LegacySize,FLT_MAX,0,suffix.c_str()).x;
             const float gap=3*scale;
             const float numberWidth=text(dimensionFont,dimensionAt,color,dimensions,
                 std::max(0.f,rowWidth-textOffset-padding-suffixWidth-gap));
-            text(suffixFont,{dimensionAt.x+numberWidth+gap,dimensionAt.y+dimensionFont->Ascent-suffixFont->Ascent},
+            text(suffixFont,{dimensionAt.x+numberWidth+gap,dimensionAt.y+dimensionFont->GetFontBaked(dimensionFont->LegacySize)->Ascent-suffixFont->GetFontBaked(suffixFont->LegacySize)->Ascent},
                 color,suffix,suffixWidth);
         } else text(menuFont(MenuTextRole::Secondary),dimensionAt,color,"复制图像后可用",rowWidth-textOffset-padding);
         // Each metadata value gets a compact badge; unused row space keeps the card fill.
@@ -1090,18 +1125,18 @@ static void drawRecentPresets() {
         const ImVec4 badge=light?(metric?ImVec4(.68f,.82f,.61f,1):ImVec4(.66f,.75f,.90f,1)):
             (metric?ImVec4(.18f,.29f,.16f,1):ImVec4(.19f,.25f,.37f,1));
         const ImVec4 ink=light?ImVec4(.10f,.13f,.16f,1):ImVec4(.94f,.96f,.99f,1);
-        const ImVec2 infoAt={roundf(at.x+textOffset),roundf(textTop+dimensionFont->FontSize+lineGap)};
+        const ImVec2 infoAt={roundf(at.x+textOffset),roundf(textTop+dimensionFont->LegacySize+lineGap)};
         ImFont* titleFont=badgeFont;
         const float padding=3*scale,gap=4*scale;
-        const float modeWidth=mode.empty()?0:titleFont->CalcTextSizeA(titleFont->FontSize,FLT_MAX,0,mode.c_str()).x+2*padding;
+        const float modeWidth=mode.empty()?0:titleFont->CalcTextSizeA(titleFont->LegacySize,FLT_MAX,0,mode.c_str()).x+2*padding;
         const float availableWidth=rowWidth-textOffset-padding;
         // Reserve space for the mode badge before truncating a long preset name.
         const float nameLimit=std::max(0.f,availableWidth-modeWidth-(mode.empty()?0:gap)-2*padding);
         auto badgeAt=infoAt;
         auto drawBadge=[&](const std::string& value,float maxTextWidth) {
-            const float measured=titleFont->CalcTextSizeA(titleFont->FontSize,FLT_MAX,0,value.c_str()).x;
+            const float measured=titleFont->CalcTextSizeA(titleFont->LegacySize,FLT_MAX,0,value.c_str()).x;
             const float width=std::min(measured,maxTextWidth)+2*padding;
-            draw->AddRectFilled(badgeAt,{badgeAt.x+width,badgeAt.y+titleFont->FontSize+2*scale},
+            draw->AddRectFilled(badgeAt,{badgeAt.x+width,badgeAt.y+titleFont->LegacySize+2*scale},
                 ImGui::ColorConvertFloat4ToU32(badge),ImGui::GetStyle().FrameRounding);
             text(titleFont,{badgeAt.x+padding,badgeAt.y+scale},ImGui::ColorConvertFloat4ToU32(ink),value,maxTextWidth);
             badgeAt.x+=width+gap;
@@ -1176,12 +1211,12 @@ static ImVec4 actionTipBounds(int action) {
     const char* text=actionTipText(action);if(!text)return {};
     auto* font=menuFont(MenuTextRole::Secondary);
     const float padding=6*scale,gap=6*scale;
-    auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,text);
+    auto extent=font->CalcTextSizeA(font->LegacySize,FLT_MAX,0,text);
     const float width=extent.x+2*padding,height=extent.y+2*padding;
     const auto pos=ImGui::GetMainViewport()->Pos,size=ImGui::GetMainViewport()->Size;
     if(action>=200 && action<200+shapeTipCount){
         const RECT group=tipGroupRect(action),anchor=shapeTipRows[action-200];
-        const auto heading=menuFont(MenuTextRole::Body)->CalcTextSizeA(menuFont(MenuTextRole::Body)->FontSize,FLT_MAX,0,panelTitle());
+        const auto heading=menuFont(MenuTextRole::Body)->CalcTextSizeA(menuFont(MenuTextRole::Body)->LegacySize,FLT_MAX,0,panelTitle());
         const RECT centre={LONG(pieCenter.x-std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y-40*scale),
                            LONG(pieCenter.x+std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y+19*scale)};
         const float x=std::clamp((anchor.left+anchor.right-width)*.5f,pos.x+8*scale,std::max(pos.x+8*scale,pos.x+size.x-width-8*scale));
@@ -1238,7 +1273,7 @@ static ImVec4 actionTipBounds(int action) {
     if(tipFamily(action)==12 || tipFamily(action)==32)anchor=group;
     float basicRight=pieCenter.x+19*scale;
     for(int i:{0,2,3})if(rowVisible(i))basicRight=std::max(basicRight,float(holdRows[i].right));
-    const auto heading=menuFont(MenuTextRole::Body)->CalcTextSizeA(menuFont(MenuTextRole::Body)->FontSize,FLT_MAX,0,panelTitle());
+    const auto heading=menuFont(MenuTextRole::Body)->CalcTextSizeA(menuFont(MenuTextRole::Body)->LegacySize,FLT_MAX,0,panelTitle());
     const RECT centre={LONG(pieCenter.x-std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y-40*scale),LONG(pieCenter.x+std::max(19*scale,heading.x*.5f)),LONG(pieCenter.y+19*scale)};
     auto valid=[&](ImVec4 tip) {
         for(int i=0;i<4;++i)if(rowVisible(i) && tipOverlaps(tip,holdRows[i],2*scale))return false;
@@ -1285,8 +1320,8 @@ static void drawActionTip(int action) {
     draw->PushClipRect({r.x+padding,r.y+padding},{r.z-padding,r.w-padding},true);
     auto label=[&](const std::string& value,float alpha) {
         if(value.empty() || alpha<=0)return;
-        const auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,value.c_str());
-        draw->AddText(font,font->FontSize,{roundf((r.x+r.z-extent.x)*.5f),roundf((r.y+r.w-extent.y)*.5f)},
+        const auto extent=font->CalcTextSizeA(font->LegacySize,FLT_MAX,0,value.c_str());
+        draw->AddText(font,font->LegacySize,{roundf((r.x+r.z-extent.x)*.5f),roundf((r.y+r.w-extent.y)*.5f)},
             IM_COL32(245,245,245,int(255*alpha)),value.c_str());
     };
     label(tipVisual.previous,1-tipVisual.blend);
@@ -1308,10 +1343,10 @@ static void drawFooter(const std::vector<std::string>& messages,float y,bool avo
         // Metadata stays on one line; task/result may use two. This reserves
         // the space below the bottom action even for long backend diagnostics.
         std::string text=message;
-        auto measure=[&](const std::string& value){return font->CalcTextSizeA(font->FontSize,FLT_MAX,maxWidth,value.c_str());};
+        auto measure=[&](const std::string& value){return font->CalcTextSizeA(font->LegacySize,FLT_MAX,maxWidth,value.c_str());};
         const float maxLines=index+1==messages.size()?2.f:1.f;
         bool trimmed=false;
-        while(!text.empty() && measure(text+(trimmed?"…":"")).y>maxLines*font->FontSize+.5f) {
+        while(!text.empty() && measure(text+(trimmed?"…":"")).y>maxLines*font->LegacySize+.5f) {
             size_t last=text.size()-1;
             while(last && (static_cast<unsigned char>(text[last])&0xc0)==0x80)--last;
             text.resize(last);trimmed=true;
@@ -1335,8 +1370,8 @@ static void drawFooter(const std::vector<std::string>& messages,float y,bool avo
     draw->AddRect(a,b,ImGui::ColorConvertFloat4ToU32(border),ImGui::GetStyle().FrameRounding,0,scale);
     float textY=a.y+padding;
     for(const auto& line:lines) {
-        draw->AddText(font,font->FontSize,{a.x+padding,roundf(textY)},tint(ImGuiCol_Text),line.c_str(),nullptr,maxWidth);
-        textY+=font->CalcTextSizeA(font->FontSize,FLT_MAX,maxWidth,line.c_str()).y+gap;
+        draw->AddText(font,font->LegacySize,{a.x+padding,roundf(textY)},tint(ImGuiCol_Text),line.c_str(),nullptr,maxWidth);
+        textY+=font->CalcTextSizeA(font->LegacySize,FLT_MAX,maxWidth,line.c_str()).y+gap;
     }
 
 }
@@ -1385,7 +1420,7 @@ static void drawCapsBar() {
     POINT cursor{};GetCursorPos(&cursor);
     auto drawGroup=[&](int first,int last,float x,float y) {
         std::array<float,11> widths{};float total=0;
-        for(int i=first;i<=last;++i){widths[i]=std::max(24.f*scale,font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]).x+18*scale);total+=widths[i];}
+        for(int i=first;i<=last;++i){widths[i]=std::max(24.f*scale,font->CalcTextSizeA(font->LegacySize,FLT_MAX,0,capsKeys[i]).x+18*scale);total+=widths[i];}
         if(first==0 || first==7)x=pieCenter.x-total*.5f;
         const float left=x;
         MenuControls::surface(d,{x,y},{x+total,y+h},scale);
@@ -1394,8 +1429,8 @@ static void drawCapsBar() {
             const bool enabled=capsEnabled(i),seam=capsDividerAt(i,cursor);
             const bool hover=enabled && ((!preview.empty() && previewCapsHover>=0)?previewCapsHover==i:!seam && PtInRect(&capsRows[i],cursor));
             MenuControls::segment(d,a,b,i==first,i==last,hover,scale);
-            const auto extent=font->CalcTextSizeA(font->FontSize,FLT_MAX,0,capsKeys[i]);
-            d->AddText(font,font->FontSize,{a.x+(widths[i]-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),capsKeys[i]);
+            const auto extent=font->CalcTextSizeA(font->LegacySize,FLT_MAX,0,capsKeys[i]);
+            d->AddText(font,font->LegacySize,{a.x+(widths[i]-extent.x)*.5f,y+(h-extent.y)*.5f},tint(enabled?ImGuiCol_Text:ImGuiCol_TextDisabled),capsKeys[i]);
             if(pinned && !pieAnimating && enabled && !holdFinished){
                 ImGui::SetCursorScreenPos({a.x+(i>first?scale:0),y});ImGui::PushID(450+i);
                 if(ImGui::InvisibleButton("##caps",{widths[i]-(i>first?scale:0)-(i<last?scale:0),h})){holdFinished=true;send(capsActions[i]);}
@@ -1780,7 +1815,9 @@ static void benchmarkShapeEditor(const Json& fixture) {
                 if(!pumpMessages() || frame==20 && !waitMessages(250))return;
                 ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();io.DeltaTime=1.f/60;
                 const auto start=std::chrono::steady_clock::now();
-                ImGui::NewFrame();drawMenu();ImGui::Render();
+                ImGui::NewFrame();
+            if (!io.Fonts->IsBuilt()) throw std::runtime_error("Font atlas unavailable after core NewFrame");
+            drawMenu();ImGui::Render();
             lastVisibleVertices=ImGui::GetDrawData()->TotalVtxCount;
                 context->OMSetRenderTargets(1,&target,nullptr);const float clear[]={0,0,0,0};context->ClearRenderTargetView(target,clear);
                 ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -2007,13 +2044,19 @@ int main() {
         if (std::filesystem::exists(fontFolder/L"Inter.ttf") && std::filesystem::exists(fontFolder/L"NotoSansCJK.otf")) {
             // stb_truetype sizes by ascent-descent; Blender/FreeType sizes by
             // em. Convert hhea metrics; apply monitor DPI exactly once.
-            menuFonts[index]=io.Fonts->AddFontFromFileTTF(inter.c_str(),em*scale*(2478.f/2048.f));
+            menuFonts[index]=io.Fonts->AddFontFromFileTTF(inter.c_str(),std::floor(em*scale*(2478.f/2048.f)));
             ImFontConfig merge;merge.MergeMode=true;
-            io.Fonts->AddFontFromFileTTF(cjk.c_str(),em*scale*1.448f,&merge,glyphs.Data);
+            io.Fonts->AddFontFromFileTTF(cjk.c_str(),std::floor(em*scale*1.448f),&merge,glyphs.Data);
         } else {
-            menuFonts[index]=io.Fonts->AddFontFromFileTTF(font.c_str(),em*scale,nullptr,glyphs.Data);
+            menuFonts[index]=io.Fonts->AddFontFromFileTTF(font.c_str(),std::floor(em*scale),nullptr,glyphs.Data);
             if (!menuFonts[index]) menuFonts[index]=io.Fonts->AddFontDefault();
         }
+        }
+        // Preload the same bounded glyph set before opening, including all PS sizes.
+        for(auto* cached:menuFonts) {
+            auto* baked=cached->GetFontBaked(cached->LegacySize);
+            for(const ImWchar* range=glyphs.Data;range[0];range+=2)
+                for(unsigned c=range[0];c<=range[1];++c)baked->FindGlyph(static_cast<ImWchar>(c));
         }
         // Build CPU glyph data explicitly. GPU creation can fail before its
         // implicit font build (e.g. a removed device); NewFrame must never
@@ -2023,13 +2066,13 @@ int main() {
         fontDirty=false;
         ++fontBuilds;io.FontDefault=menuFont(MenuTextRole::Body);
         std::cerr<<"Font atlas prepared: semantic cached sizes, "<<(GetTickCount64()-fontStart)<<" ms, "
-                 <<io.Fonts->TexWidth<<"x"<<io.Fonts->TexHeight<<", builds="<<fontBuilds<<"\n";
+                 <<io.Fonts->TexData->Width<<"x"<<io.Fonts->TexData->Height<<", builds="<<fontBuilds<<"\n";
     };
-    loadFont();
     ImGui_ImplWin32_Init(window);ImGui_ImplDX11_Init(device,context);
+    loadFont();
     platformShowWindow=ImGui::GetPlatformIO().Platform_ShowWindow;
     ImGui::GetPlatformIO().Platform_ShowWindow=showPopupWindow;
-    if (!ImGui_ImplDX11_CreateDeviceObjects()) {
+    if (!prepareRendererResources()) {
         std::cerr<<"Unable to initialize menu renderer resources\n";return 1;
     }
     if (preview.empty() && !selfTest) {
@@ -2250,7 +2293,7 @@ int main() {
             if (fabsf(dpi-scale)>.01f || fontDirty) {
                 ImGui_ImplDX11_InvalidateDeviceObjects();scale=dpi;theme();loadFont();
                 // Inject an early GPU creation failure into the native test.
-                bool uploaded=!(selfTest && frames==2) && ImGui_ImplDX11_CreateDeviceObjects();
+                bool uploaded=!(selfTest && frames==2) && prepareRendererResources();
                 if (!uploaded && !recoverRenderer())
                     throw std::runtime_error("Unable to restore renderer after font update");
             }
@@ -2262,7 +2305,7 @@ int main() {
                 if (fontBuilds!=(frames==1?1u:2u))
                     throw std::runtime_error("Cached size switch unexpectedly rebuilt fonts");
                 if (frames>=2) for (auto* cached:menuFonts)
-                    if (!cached->FindGlyphNoFallback(0x9F98))
+                    if (!cached->GetFontBaked(cached->LegacySize)->IsGlyphLoaded(0x9F98))
                         throw std::runtime_error("Dynamic Chinese glyph missing from a cached size");
             }
             // Prepare pending fonts while hidden, on receipt of PS status.
@@ -2282,7 +2325,8 @@ int main() {
             if (!selfTest && frameLatency && !frameGranted) continue;
             frameGranted=false;
             ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();
-            if (!io.Fonts->IsBuilt()) throw std::runtime_error("Font atlas unavailable after renderer NewFrame");
+            if (io.Fonts->Fonts.empty() || !io.Fonts->TexData || io.Fonts->TexData->Width<=0)
+                throw std::runtime_error("Prepared CPU font data unavailable");
             if (selfTest) {
                 io.AddFocusEvent(true);
                 if (frames==4 || frames==5) io.AddKeyEvent(ImGuiKey_DownArrow,frames==4);
@@ -2452,7 +2496,7 @@ int main() {
                     throw std::runtime_error("Preset columns / clipboard did not fit their own content");
                 if(recentPanelBounds.bottom-recentPanelBounds.top>=224*scale)
                     throw std::runtime_error("Preset panel retained the old title / excess row spacing");
-                if(menuFont(MenuTextRole::PresetDimension)->FontSize<=menuFont(MenuTextRole::PresetTag)->FontSize)
+                if(menuFont(MenuTextRole::PresetDimension)->LegacySize<=menuFont(MenuTextRole::PresetTag)->LegacySize)
                     throw std::runtime_error("Preset dimensions must lead the metadata badges");
                 for(int action=recentActionBase;action<recentActionBase+9;++action) {
                     const auto tip=actionTipBounds(action);
@@ -2619,6 +2663,47 @@ int main() {
                     ImGui::NewFrame();drawMenu();ImGui::Render();finishPlatformFrame();
                 };
                 {
+                    {
+                        char value[4096]="Long editable paragraph with words and 中文内容, automatic visual wrapping keeps original text intact. Long editable paragraph with words and 中文内容, automatic visual wrapping keeps original text intact.";
+                        const std::string original=value;bool focus=true;ImGuiID editorId=0;
+                        auto wrapFrame=[&](float width){
+                            ImGui::NewFrame();const auto origin=ImGui::GetMainViewport()->Pos;
+                            ImGui::SetNextWindowPos({origin.x+16*scale,origin.y+16*scale});ImGui::SetNextWindowSize({width*scale,220*scale});
+                            ImGui::Begin("##wrap-test",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoSavedSettings);
+                            {MenuControls::PanelStyle panel(scale);if(focus){ImGui::SetKeyboardFocusHere();focus=false;}
+                             editorId=ImGui::GetID("##wrap");MenuControls::multiline("##wrap",value,sizeof(value),150*scale);}
+                            ImGui::End();ImGui::Render();finishPlatformFrame();
+                        };
+                        auto key=[&](ImGuiKey code){io.AddKeyEvent(code,true);wrapFrame(220);io.AddKeyEvent(code,false);wrapFrame(220);};
+                        auto chord=[&](ImGuiKey code){io.AddKeyEvent(ImGuiMod_Ctrl,true);key(code);io.AddKeyEvent(ImGuiMod_Ctrl,false);wrapFrame(220);};
+                        wrapFrame(500);wrapFrame(500);wrapFrame(220);wrapFrame(220);
+                        auto* edit=ImGui::GetInputTextState(editorId);
+                        if(!edit || edit->WrapWidth<=0 || edit->LineCount<2 || edit->Scroll.x!=0 || std::string(value)!=original)
+                            throw std::runtime_error("Soft wrapping failed or changed underlying text");
+                        chord(ImGuiKey_Home);key(ImGuiKey_DownArrow);edit=ImGui::GetInputTextState(editorId);
+                        if(edit->GetCursorPos()<=0 || edit->GetCursorPos()>=edit->TextLen || (static_cast<unsigned char>(value[edit->GetCursorPos()])&0xC0)==0x80)
+                            throw std::runtime_error("Wrapped cursor navigation lost UTF-8 boundary");
+                        auto& platform=ImGui::GetPlatformIO();const auto oldGet=platform.Platform_GetClipboardTextFn;const auto oldSet=platform.Platform_SetClipboardTextFn;const auto oldData=platform.Platform_ClipboardUserData;
+                        std::string clipboard;platform.Platform_ClipboardUserData=&clipboard;
+                        platform.Platform_GetClipboardTextFn=[](ImGuiContext* ctx){return static_cast<std::string*>(ctx->PlatformIO.Platform_ClipboardUserData)->c_str();};
+                        platform.Platform_SetClipboardTextFn=[](ImGuiContext* ctx,const char* text){*static_cast<std::string*>(ctx->PlatformIO.Platform_ClipboardUserData)=text;};
+                        chord(ImGuiKey_A);chord(ImGuiKey_C);
+                        if(clipboard!=original)throw std::runtime_error("Wrapped copy inserted display line breaks");
+                        const int selected=ImGui::GetInputTextState(editorId)->GetSelectionEnd();wrapFrame(400);wrapFrame(220);
+                        if(ImGui::GetInputTextState(editorId)->GetSelectionEnd()!=selected || std::string(value)!=original)
+                            throw std::runtime_error("Resizing wrapped editor changed selection or text");
+                        io.AddInputCharactersUTF8("修改中文");wrapFrame(220);
+                        if(std::string(value)!="修改中文")throw std::runtime_error("Wrapped UTF-8 replacement failed");
+                        // Selection deletion and four typed code points have separate undo entries.
+                        for(int i=0;i<5;++i)chord(ImGuiKey_Z);
+                        if(std::string(value)!=original)throw std::runtime_error("Wrapped edit undo failed");
+                        clipboard="第一段 Chinese and English words that wrap naturally across the editor width.\n第二段 keeps one real newline.";
+                        chord(ImGuiKey_A);chord(ImGuiKey_V);
+                        if(std::string(value)!=clipboard || std::count(clipboard.begin(),clipboard.end(),'\n')!=1)
+                            throw std::runtime_error("Wrapped paste changed real line breaks");
+                        platform.Platform_GetClipboardTextFn=oldGet;platform.Platform_SetClipboardTextFn=oldSet;platform.Platform_ClipboardUserData=oldData;
+                        std::cout<<"Soft-wrap editor passed: resize, UTF-8 cursor, exact copy/paste, Chinese edit, undo, no synthetic newlines or horizontal scroll\n";
+                    }
                     int choice=0,iconChoice=0,rowClicks=0;char query[16]{};POINT second{},seam{},iconSecond{},iconSeam{},rowMain{},rowPreview{};bool focusQuery=false,rowPreviewHovered=false;
                     auto controlsFrame=[&](bool disabled){
                         const auto padding=ImGui::GetStyle().FramePadding;
@@ -2665,7 +2750,7 @@ int main() {
                     float previousBody=0,previousControl=0,previousSecondary=0;
                     for(const char* size:{"small","medium","large"}) {
                         uiFontSize=size;io.FontDefault=menuFont(MenuTextRole::Body);
-                        const auto body=menuFont(MenuTextRole::Body)->FontSize,control=menuFont(MenuTextRole::Control)->FontSize,secondary=menuFont(MenuTextRole::Secondary)->FontSize;
+                        const auto body=menuFont(MenuTextRole::Body)->LegacySize,control=menuFont(MenuTextRole::Control)->LegacySize,secondary=menuFont(MenuTextRole::Secondary)->LegacySize;
                         if(!(body>control && control>=secondary && body>previousBody && control>previousControl && secondary>previousSecondary))
                             throw std::runtime_error("Semantic typography lost hierarchy / PS size scaling");
                         // ImGui truncates atlas sizes to whole pixels.
@@ -2688,9 +2773,9 @@ int main() {
                     if(std::string(query)!="\xE9\xBE\x97" || !requiredGlyphs.GetBit(0x9F97) || !fontDirty)
                         throw std::runtime_error("Chinese input did not reach shared input/font cache");
                     ImGui_ImplDX11_InvalidateDeviceObjects();loadFont();
-                    if(!ImGui_ImplDX11_CreateDeviceObjects())throw std::runtime_error("Input glyph upload failed");
+                    if(!prepareRendererResources())throw std::runtime_error("Input glyph upload failed");
                     controlsFrame(false);
-                    if(std::string(query)!="\xE9\xBE\x97" || !menuFont(MenuTextRole::Control)->FindGlyphNoFallback(0x9F97))
+                    if(std::string(query)!="\xE9\xBE\x97" || !menuFont(MenuTextRole::Control)->GetFontBaked(menuFont(MenuTextRole::Control)->LegacySize)->IsGlyphLoaded(0x9F97))
                         throw std::runtime_error("Chinese input was lost after font update");
                     auto* viewport=ImGui::GetMainViewport();auto himc=ImmGetContext(window);
                     if(!himc || !ImGui::GetPlatformIO().Platform_SetImeDataFn)
@@ -2773,7 +2858,7 @@ int main() {
                     auto tip=quickTipBounds(i);
                     if(tip.z<=tip.x)throw std::runtime_error("Canvas icon tooltip missing");
                     auto* tipFont=menuFont(MenuTextRole::Secondary);
-                    const float labelWidth=tipFont->CalcTextSizeA(tipFont->FontSize,FLT_MAX,0,quickLabels[i]).x;
+                    const float labelWidth=tipFont->CalcTextSizeA(tipFont->LegacySize,FLT_MAX,0,quickLabels[i]).x;
                     if(std::abs(tip.z-tip.x-labelWidth-12*scale)>scale)
                         throw std::runtime_error("Tooltip padding contains reserved sibling text width");
 
@@ -3203,7 +3288,7 @@ int main() {
                     throw std::runtime_error("RGB numeric entry changed other channels or submitted an action");
                 auto enterHex=[&](const char* text){auto r=shapeEditor.hexBounds;r.right-=LONG(figmaDisplayIconWidth*scale);
                     GImGui->Time+=io.MouseDoubleClickTime+.1f;valueMouse(r,false);valueMouse(r,true);valueMouse(r,false);
-                    io.AddKeyEvent(ImGuiKey_ModCtrl,true);numberFrame(ImGuiKey_A,true);numberFrame(ImGuiKey_A,false);io.AddKeyEvent(ImGuiKey_ModCtrl,false);
+                    io.AddKeyEvent(ImGuiMod_Ctrl,true);numberFrame(ImGuiKey_A,true);numberFrame(ImGuiKey_A,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);
                     io.AddInputCharactersUTF8(text);numberFrame(ImGuiKey_None,false);numberFrame(ImGuiKey_Enter,true);numberFrame(ImGuiKey_Enter,false);};
                 enterHex("#30d86f");
                 if(shapeEditor.current()["rgb"]!=Json({48,216,111}) || std::string(shapeEditor.hexInput)!="30D86F")
@@ -3361,7 +3446,7 @@ int main() {
                 for(const char* name:{"light","light-gray","dark-gray","dark"}) {
                     uiTheme=name;theme();shapeEditor.prepare(batchFixture);setHoldMode(true);shapePanelOpen=true;layerCount=2;layerKind=8;numberFrame(ImGuiKey_None,false);holdMoved=true;
                     if(!shapeEditor.ready() || shapeEditor.bounds.right || shapeEditor.maskBounds.right<=shapeEditor.maskBounds.left || shapeEditor.dirty)
-                        throw std::runtime_error("Batch mask panel must show only sliders with untouched mixed values");
+                        throw std::runtime_error("Batch mask panel must show only sliders with untouched mixed values: "+Json{{"ready",shapeEditor.ready()},{"color_right",shapeEditor.bounds.right},{"mask_left",shapeEditor.maskBounds.left},{"mask_right",shapeEditor.maskBounds.right},{"dirty",shapeEditor.dirty},{"draft",shapeEditor.draft},{"want_input",ImGui::GetIO().WantTextInput},{"input_guard",inputFocused}}.dump());
                     const auto batchFeather=shapeEditor.featherBounds;
                     maskMouse(batchFeather,.5f,false);maskMouse(batchFeather,.5f,true);maskMouse(batchFeather,.7f,true);maskMouse(batchFeather,.7f,false);
                     if(!shapeEditor.dirty || !shapeEditor.draft["mask"].contains("feather") || shapeEditor.draft["mask"].contains("density") || shapeEditor.draft.contains("fill"))

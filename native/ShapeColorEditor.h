@@ -20,6 +20,13 @@ struct ShapeColorEditor {
     std::array<RECT,3> rgbBounds{};
     float gradientDragOffset=0;
     void prepare(const Json& data) {
+        if(ImGui::GetCurrentContext()) {
+            const auto active=ImGui::GetActiveID();
+            // A fresh target must not inherit an old numeric edit buffer.
+            if(active && (std::find(maskInputIDs.begin(),maskInputIDs.end(),active)!=maskInputIDs.end() ||
+                          std::find(rgbInputIDs.begin(),rgbInputIDs.end(),active)!=rgbInputIDs.end()))
+                ImGui::ClearActiveID();
+        }
         maskPreviewStarted=false;shapeDraftOnly=false;livePreview=false;batchMask=false;batchCount=0;maskValues=maskMixed=Json::object();
         lastPreview=Json();maskInputIDs={};rgbInputIDs={};rgbBounds={};methodExplicit={};
         available=false;dirty=false;bounds=maskBounds=copyBounds=gradientBounds=featherBounds=densityBounds=hexBounds={};gradientDragging=false;gradientDragOffset=0;channel=stop=0;modes={};hexInput[0]=0;hexKey.clear();copiedAt=0;copyFailed=false;
@@ -389,7 +396,7 @@ static const char* shapeModeLabel(bool expanded) {
 static void drawShapeModeSwitch() {
     shapeModeBounds={};shapeModeRows={};
     if(!shapeEditor.ready())return;
-    auto* font=menuFont(MenuTextRole::Control);const float textSize=font->FontSize;
+    auto* font=menuFont(MenuTextRole::Control);const float textSize=font->LegacySize;
     const float labelWidth=std::max(font->CalcTextSizeA(textSize,FLT_MAX,0,shapeModeLabel(false)).x,font->CalcTextSizeA(textSize,FLT_MAX,0,shapeModeLabel(true)).x);
     const auto row=holdRows[0];const float width=std::ceil(labelWidth+basicTextOffset()+figmaBasicRightPadding*scale),height=menuControlHeight*scale;
     const float x=std::round((row.left+row.right-width)*.5f),y=row.top-menuPanelGap*scale-height;
@@ -425,6 +432,7 @@ static void drawShapeModeSwitch() {
     draw->AddText(font,textSize,{x+basicTextOffset(),std::round(y+(height-textSize)*.5f)},tint(ImGuiCol_Text),shapeModeLabel(shapePanelOpen));
     shapeTipRows[shapeModeTipBase]=shapeModeBounds;
     if(hovered && canSwitch)shapeTipCandidate=200+shapeModeTipBase;
+    ImGui::Dummy({0,0});
     ImGui::EndChild();ImGui::PopFont();ImGui::SetCursorScreenPos(saved);
 }
 static void drawShapeEditor() {
@@ -439,7 +447,7 @@ static void drawShapeEditor() {
     if(available<140*scale)return;
     auto* panelFont=menuFont(MenuTextRole::Control);
     const float gap=menuPanelGap*scale;
-    auto textWidth=[&](const char* value){return panelFont->CalcTextSizeA(panelFont->FontSize,FLT_MAX,0,value).x;};
+    auto textWidth=[&](const char* value){return panelFont->CalcTextSizeA(panelFont->LegacySize,FLT_MAX,0,value).x;};
     const float rgbMinimum=std::max({textWidth("R:255"),textWidth("G:255"),textWidth("B:255")})+2*menuControlPadding*scale;
     float hexGlyph=0;for(char ch:std::string("0123456789ABCDEF")){char text[]={ch,0};hexGlyph=std::max(hexGlyph,textWidth(text));}
     const float hexMinimum=textWidth("#")+6*hexGlyph+(2*menuControlPadding+figmaDisplayIconWidth+2)*scale;
@@ -478,7 +486,7 @@ static void drawShapeEditor() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{menuControlPadding*scale,menuControlPadding*scale});
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,{gap,gap});
     ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing,{gap,gap});
-    const float controlTextSize=panelFont->FontSize;
+    const float controlTextSize=panelFont->LegacySize;
     ImGui::PushFont(panelFont);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,{menuControlTextInset*scale,std::max(0.f,(menuControlHeight*scale-controlTextSize)*.5f)});
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,scale);
@@ -565,6 +573,7 @@ static void drawShapeEditor() {
     }
     if(shapeEditor.vector){ImGui::SetCursorScreenPos({actionsAt.x+inner-2*cell,actionsAt.y+(wrapActions?iconRow:0)});shapePaintToolbar(inner);}
     ImGui::SetCursorScreenPos({actionsAt.x,actionsAt.y+iconRow*(wrapActions?2:1)});
+    ImGui::Dummy({0,0});
     ImGui::EndDisabled();ImGui::EndChild();
     }
     if(shapeEditor.hasMask()) {

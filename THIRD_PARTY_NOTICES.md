@@ -4,7 +4,7 @@
 
 | 组件 | 许可与保留文件 | 来源 |
 | --- | --- | --- |
-| Dear ImGui 1.91.9b-docking | MIT；native/vendor/imgui/LICENSE.txt | https://github.com/ocornut/imgui |
+| Dear ImGui 1.92.7-docking | MIT；native/vendor/imgui/LICENSE.txt | https://github.com/ocornut/imgui |
 | nlohmann/json 3.12.0 | MIT；native/vendor/json/LICENSE.MIT | https://github.com/nlohmann/json |
 | Inter / Noto Sans CJK | SIL OFL 1.1；native/fonts/OFL-1.1.txt、COPYRIGHT.txt | native/fonts/README.md 中记录字体转换来源 |
 | SolidJS | MIT；licenses/solid-js.txt | https://github.com/solidjs/solid |

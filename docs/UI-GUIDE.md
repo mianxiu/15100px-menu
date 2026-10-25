@@ -329,4 +329,4 @@ F5默认转换当前选中图层为智能对象，不显示额外常驻快捷键
 
 265起，查找顶部类型筛选使用 MenuControls::segments文字标签，结果行仍保留同家族类型图标。分段按Control真实测量宽度换行，segmentsHeight与绘制高度一致；外层窗口预留换行空间，仍限制在PS和屏幕可用区域内。查找结果使用 MenuControls::resultRow／previewTile；图层名为 Body，文档名／悬停说明为 Secondary。结果行24逻辑单位、常规行间隔6；预览眼睛只负责悬停，不扩大定位命中。类型图标沿用同一 Figma 风格源，编译时生成。
 
-文本工具使用同一 PanelStyle／button／input／segments；正文多行编辑必须使用 MenuControls::multiline（Body），只读折行区域使用 textPreview（Body），帮助和结果状态为 Secondary。不允许另设字号、窄屏缩字、局部边框或默认控件。窗口限界后表单内部滚动，关闭按钮和底部状态保持独立空间。局部预览计算期间可继续编辑；编辑使旧计划失效，真实写入期间禁用提交。
+文本工具使用同一 PanelStyle／button／input／segments；正文多行编辑必须使用 MenuControls::multiline（Body，开启官方WordWrap软换行，不向缓冲区插入显示用换行），只读折行区域使用 textPreview（Body），帮助和结果状态为 Secondary。不允许另设字号、窄屏缩字、局部边框或默认控件。窗口限界后表单内部滚动，关闭按钮和底部状态保持独立空间。局部预览计算期间可继续编辑；编辑使旧计划失效，真实写入期间禁用提交。

@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 266编辑区软换行代码／测试／构建／实际入口：共享multiline启用官方WordWrap，显示换行不写入原文；保留中文编辑、UTF-8光标、选区、复制粘贴和撤销。固定升级官方ImGui1.92.7，完整来源与SHA保留；字体校准／隐藏预热／平台回调及跨CPU／GPU纹理生命周期已适配。650项低CPU完整回归、优化原生矩阵、三档字号当前主题预览、冻结启动／重启通过。实际266／UXP71在PS24.0.1低CPU／正常共12项文本事务和2组查找通过；一次打开被焦点保护拒绝，已归档并在新文档补齐，未重发未知。原稿／配置／会话／历史未知／资源保持。证据.runtime/tests266-low.log、native266-low.log、text266-preview、text266-live/report.json及foreground-refusal-report.json、search266-live.json、recovery266softwrap、runtime266-verified.json。
+- [ ] 266实体键盘与PS实屏、其他DPI／硬件仍待验；WM_CHAR／原生自测、接口与渲染不代替实体输入。本轮未声明性能提升。
+
 - [x] 265已公开：源码ed9d043、v0.4.265标签、ZIP／SHA和Latest清单已推送并匿名下载核验，仅保留265 Release和dist发行文件；旧标签／历史／配置／诊断保留。Wiki efd4ae9同步，39页／234链接及9个主要远端页面通过，源码和标签GitHub UI contract成功。证据.runtime/release-0.4.265-public-verification.json、manifest265-verification.json、release265-cleanup.json、dist265-cleanup.json和wiki265-public-verification.json。
 - [x] 265文字筛选代码／测试／实际入口：F查找顶部改为共享文字分段，结果行类型图标保留。三档字号按真实宽度换行并同步外层窗口预留；24项专项、双逻辑处理器Below Normal原生完整矩阵、冻结启动／重启与实际265／UXP71组件核验通过。PS24.0.1低CPU／正常各一次中文／文字类型／空结果／定位／可见内容／PS边界、原稿历史和资源恢复通过。首轮较大字号裁切图与两处旧几何夹具失败保留，修正后复验。证据.runtime/search265-live.json、search265-preview及search265-preview-cpu、tests265-low.log、native265-low.log、recovery265textfilters和runtime265-verified.json。
 - [ ] 265实体标签点击／中文候选与其他DPI／硬件仍待验。GPU离屏大字号既有图标缺失观察保留；CPU三档及标签几何通过，不替代PS实屏验收。

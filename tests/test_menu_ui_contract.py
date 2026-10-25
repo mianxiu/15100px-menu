@@ -14,7 +14,7 @@ class MenuUiContractTests(unittest.TestCase):
             source=path.read_text('utf-8')
             with self.subTest(view=path.name):
                 self.assertNotRegex(source,r'menuFonts\[(?:\d|fontIndex)')
-                self.assertNotRegex(source,r'(?:GetFontSize\(\)|FontSize)\s*\*\s*[.\d]')
+                self.assertNotRegex(source,r'(?:GetFontSize\(\)|FontSize|LegacySize)\s*\*\s*[.\d]')
                 self.assertNotRegex(source,r'SetWindowFontScale\((?!1\.f\))')
                 self.assertNotRegex(source,r'CreateFontW\(-MulDiv\(\d')
                 if path.name!='MenuHost.cpp':

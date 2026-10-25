@@ -34,7 +34,7 @@ inline bool input(const char* id,const char* hint,char* value,size_t capacity) {
 }
 inline bool multiline(const char* id,char* value,size_t capacity,float height) {
     MenuTextStyle text(MenuTextRole::Body);
-    const bool changed=ImGui::InputTextMultiline(id,value,capacity,{-1,height},ImGuiInputTextFlags_AllowTabInput);
+    const bool changed=ImGui::InputTextMultiline(id,value,capacity,{-1,height},ImGuiInputTextFlags_AllowTabInput|ImGuiInputTextFlags_WordWrap);
     requireText(value);return changed;
 }
 inline void textPreview(const char* id,const char* value,float height) {
@@ -92,11 +92,11 @@ inline bool resultRow(const char* id,int icon,const char* title,const char* deta
     const float glyph=figmaBasicIconSize*scale;
     drawStyledMenuIcon(draw,icon,{at.x+pad,at.y+(h-glyph)*.5f},glyph,ink,surface);
     auto* secondary=menuFont(MenuTextRole::Secondary);auto* body=menuFont(MenuTextRole::Body);
-    const float meta=std::min(secondary->CalcTextSizeA(secondary->FontSize,FLT_MAX,0,detail).x,actionWidth*.3f),end=at.x+actionWidth-pad-meta;
+    const float meta=std::min(secondary->CalcTextSizeA(secondary->LegacySize,FLT_MAX,0,detail).x,actionWidth*.3f),end=at.x+actionWidth-pad-meta;
     const ImVec4 clip={at.x+pad+glyph+pad,at.y,std::max(at.x+pad+glyph+pad,end-pad),at.y+h};
-    draw->AddText(body,body->FontSize,{clip.x,at.y+(h-body->FontSize)*.5f},ink,title,nullptr,0,&clip);
+    draw->AddText(body,body->LegacySize,{clip.x,at.y+(h-body->LegacySize)*.5f},ink,title,nullptr,0,&clip);
     const ImVec4 metaClip={end,at.y,at.x+actionWidth-pad,at.y+h};
-    draw->AddText(secondary,secondary->FontSize,{end,at.y+(h-secondary->FontSize)*.5f},ImGui::GetColorU32(disabled?ImGuiCol_TextDisabled:ImGuiCol_PlotLines),detail,nullptr,0,&metaClip);
+    draw->AddText(secondary,secondary->LegacySize,{end,at.y+(h-secondary->LegacySize)*.5f},ImGui::GetColorU32(disabled?ImGuiCol_TextDisabled:ImGuiCol_PlotLines),detail,nullptr,0,&metaClip);
     ImGui::RenderNavCursor(ImRect(at,{at.x+actionWidth,at.y+h}),ImGui::GetItemID());
     if(ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))tip((std::string(title)+"\n"+detail).c_str(),scale);
     previewAnchor={at.x+actionWidth,at.y};

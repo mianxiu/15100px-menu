@@ -1,27 +1,32 @@
 {
-  "imgui": "v1.91.9b-docking",
+  "imgui": "v1.92.7-docking",
   "json": "v3.12.0",
   "sources": [
     "https://github.com/ocornut/imgui",
     "https://github.com/nlohmann/json"
   ],
   "sha256": {
-    "imgui/imconfig.h": "0884061cc43e27e1d346fe18dcd1425792eb2532d3d16610a82eb5ac751f7594",
-    "imgui/imgui.cpp": "2faf54df0db896fcb30b8e528e064f2c3227f2f695fe1c8fe62aa8b71f228084",
-    "imgui/imgui.h": "ea876e477f06f9619206284551638171c7ba4ed4dbc6ba67002e8f2e4ad7d3c7",
-    "imgui/imgui_draw.cpp": "8823f49f5c7a5181c0435a5fa01a03c3ff5bece283482b81001e71a66993f997",
-    "imgui/imgui_internal.h": "b6a9b40031c95c83d27595ce0b71f7e102d705ccac6bee6d03ff931fdd370569",
-    "imgui/imgui_tables.cpp": "4ea380fa9d49cac6cbfbc8b969969f9b0705518ec9ca340681d8c70e3eefbc28",
-    "imgui/imgui_widgets.cpp": "215eae588d52b455344ab5bd9847ab133d8bafff70841f992f7701b9fbda4dbc",
-    "imgui/imstb_rectpack.h": "2efa3d5f7d003c19743b15155dad9f46d9f9fc783a18893d703b431d3c990972",
-    "imgui/imstb_textedit.h": "77010e494caf72c178b573569612aec409d24380409676325a31d02de0ec64b7",
-    "imgui/imstb_truetype.h": "87f08919ae8e7223451d0e9d06b62829075d3e920c9e6ad436db9d7e7427ffce",
-    "imgui/LICENSE.txt": "c80c5789748d955c4a650562baa0d750494e2c7128c2ca66aaebe2e3c4e198bf",
-    "imgui/backends/imgui_impl_dx11.cpp": "0e979ada341e809f2ab3423aca20fb30c65cc3e8eb4ead6095e2d7ed305026be",
-    "imgui/backends/imgui_impl_dx11.h": "e1fc506f6eb2d93230d95651f78e205be80aede764cb4ef60a1e726d6eb03f66",
-    "imgui/backends/imgui_impl_win32.cpp": "ed5f00e3a675324487ecdde14833968a3387855f953d6e18a157de6a2958ee05",
-    "imgui/backends/imgui_impl_win32.h": "10450c3ceee5cbae2a0dfe545c5f3a5026ff1e42999b097910f101f5400009b2",
+    "imgui/imconfig.h": "1353bfa59da16eec481723fd4e5d910356f0406b79e3c4142e0c9867bafffab5",
+    "imgui/imgui.cpp": "36154b4900013222bbc504f2f614345c4c5586f84d97e55b0ed954b0e77a62da",
+    "imgui/imgui.h": "fa17ec4535996829433a8124d257979b70cdf27ff4b3d89a1c66228646e2a694",
+    "imgui/imgui_draw.cpp": "e8a0b998a4c05f9ab237f45f9bd0cb7e28213c3c6ee9f083fee54839e7e60166",
+    "imgui/imgui_internal.h": "e8f11f33c3c9aba1a7a56b2580f34916c9f615ef009eb16a987221802f04942c",
+    "imgui/imgui_tables.cpp": "ab5b4e7f2299679da0ab5b4b0424b283c273ffce08f40cf1613ba1ad8a26bc7c",
+    "imgui/imgui_widgets.cpp": "355cccd5274889e984b07bece3006e736e11ace2956b84bce3cb211b96774544",
+    "imgui/imstb_rectpack.h": "889b396795202d1457560a797a7242e96f6f132d4b88ca2d69be58bf05e1771f",
+    "imgui/imstb_textedit.h": "a985f5fa0ed97353d493b497961e9eef52082edcd045cf6954b69990ec9d0741",
+    "imgui/imstb_truetype.h": "c51a0f7e7ea760f2366bd3752635ec58e21fccfec4a832501639990ba6ce0528",
+    "imgui/LICENSE.txt": "173506a2d6f7fb67990d257fb2507f188690eca39060c39469ae7bef43aae2a3",
+    "imgui/backends/imgui_impl_dx11.cpp": "c8080cd4c248f09d1a0deec329cbcd5f9ab8baac34340f8fd12a883420fe2de7",
+    "imgui/backends/imgui_impl_dx11.h": "9048a73a894538aa1f86b2b074b73e15f0cd5e6a08c2b4972c45e190949a2e1d",
+    "imgui/backends/imgui_impl_win32.cpp": "67d71ecbc87c4ade0a1300a4309e615c467d65a073a02bc9c01085593adab713",
+    "imgui/backends/imgui_impl_win32.h": "2aaac5531d6b24e2408689203f2eb4a03fcf9f2094bc00794b31e17ce7ca0ad0",
     "json/json.hpp": "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63",
     "json/LICENSE.MIT": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603"
+  },
+  "imgui_source": {
+    "source": "https://codeload.github.com/ocornut/imgui/zip/refs/tags/v1.92.7-docking",
+    "tag": "v1.92.7-docking",
+    "archive_sha256": "59a30664ea9dd80803f936ba9726c9ddbee431dfe1708e217da86bb069f251a8"
   }
 }

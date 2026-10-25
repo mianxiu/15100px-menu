@@ -1,0 +1,2 @@
+# Keep upstream bytes stable for the pinned vendor SHA256 manifest.
+native/vendor/imgui/** -text
