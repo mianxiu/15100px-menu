@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 267标签主题代码／测试／构建／实际入口：按实际PS的UIColors色表提供四主题正常／禁用颜色，清除斜线随主题；按会话缓存并安全回退。UXP73使用本地CSS媒体状态补齐本机PS24缺失的主题通知，不新增PS偏好查询或定时器。658项低CPU完整回归、原生矩阵、8份四主题预览、最终冻结启动／重启及资源一致性通过。实际267／UXP73低CPU／正常各8次标签写入与一次撤销、各4次主题切换通过；原稿／主题／资源／配置和旧未知保持。原生IME未知按新全局授权归档，原PS正常退出后才释放活动槽位，不重发、不记成功。失败版72、版本报告失配与两次独立启动证据保留。证据.runtime/runtime267-verified.json、labels267-live/report.json、label267-preview、recovery267css及tests267-low.log。
+- [ ] 267实屏／实体点击及现代PS新增四色仍待验；附加F定位因真实焦点切离而保护拒绝，未当作正向通过。公开发布与Wiki推送按独立记录核验。
+
 - [x] 266已公开交付：源码10c4c38、v0.4.266标签、统一ZIP／SHA及Latest清单已推送并匿名下载核验；GitHub和dist仅保留266发行物，旧标签／历史／配置／诊断保留。Wiki82bde89同步，39页／234链接和9个主要远端页面通过；源码／标签两次GitHub UI contract成功。证据.runtime/release-0.4.266-public-verification.json、manifest266-verification.json、release266-cleanup.json、dist266-cleanup.json和wiki266-public-verification.json。
 
 - [x] 266编辑区软换行代码／测试／构建／实际入口：共享multiline启用官方WordWrap，显示换行不写入原文；保留中文编辑、UTF-8光标、选区、复制粘贴和撤销。固定升级官方ImGui1.92.7，完整来源与SHA保留；字体校准／隐藏预热／平台回调及跨CPU／GPU纹理生命周期已适配。650项低CPU完整回归、优化原生矩阵、三档字号当前主题预览、冻结启动／重启通过。实际266／UXP71在PS24.0.1低CPU／正常共12项文本事务和2组查找通过；一次打开被焦点保护拒绝，已归档并在新文档补齐，未重发未知。原稿／配置／会话／历史未知／资源保持。证据.runtime/tests266-low.log、native266-low.log、text266-preview、text266-live/report.json及foreground-refusal-report.json、search266-live.json、recovery266softwrap、runtime266-verified.json。

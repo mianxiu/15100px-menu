@@ -59,6 +59,32 @@ let searchRefreshId='';
 let heartbeatValue=null;
 let heartbeatFolder=null,heartbeatWriting=false,metadataReadAt=0;
 let interfacePreferencesValue=null;
+let interfaceTheme=null;
+let interfaceThemeProbe=null;
+function localInterfaceTheme() {
+  try {
+    if(typeof document==='undefined' || typeof getComputedStyle!=='function') {
+      observation.interface_theme={source:'css-media',available:false,reason:'no-dom'};return;
+    }
+    if(!interfaceThemeProbe) {
+      const root=document.head||document.body;if(!root || !document.body)return;
+      const style=document.createElement('style'),probe=document.createElement('div');
+      probe.id='photoshop-menu-theme-probe';probe.style.display='none';
+      style.textContent=['lightest','light','dark','darkest'].map((name,i)=>
+        '@media (prefers-color-scheme: '+name+') { #photoshop-menu-theme-probe { width: '+(i+1)+'px; } }').join('\n');
+      root.appendChild(style);document.body.appendChild(probe);interfaceThemeProbe=probe;
+    }
+    const width=getComputedStyle(interfaceThemeProbe).width;
+    const theme=['light','light-gray','dark-gray','dark'][parseFloat(width)-1];
+    observation.interface_theme={source:'css-media',width:String(width).slice(0,20),available:!!theme};
+    if(theme && theme!==interfaceTheme) {
+      interfaceTheme=theme;
+      if(interfacePreferencesValue)interfacePreferencesValue={...interfacePreferencesValue,ui_theme:theme};
+      if(heartbeatValue)heartbeatValue={...heartbeatValue,ui_theme:theme};
+      lastHeartbeat=0;
+    }
+  } catch(error) {observation.interface_theme={source:'css-media',available:false,error:String(error).slice(0,200)};}
+}
 let activeExecution=null,executionPulseRunning=false;
 // This pulse performs only local file I/O. A pending Photoshop await must not
 // hide which original operation owns the host, or masquerade as fresh layer data.
@@ -259,6 +285,8 @@ async function readHeartbeat(folder) {
   return publishHeartbeat(folder,'read-progress',5000,{read_only_work:true});
 }
 async function publishHeartbeat(folder,reason,interval=5000,extra={}) {
+  // A local CSS media value covers hosts which omit preference notifications.
+  if(reason==='js-alive' || !interfaceThemeProbe)localInterfaceTheme();
   const now=Date.now();
   if(!heartbeatValue || heartbeatWriting || now-lastHeartbeat<interval)return;
   // Only a live JS checkpoint can renew transport liveness. No host getters,
@@ -282,10 +310,10 @@ async function refreshMetadata(folder,checkpoint) {
   metadataReadAt=started;
   try {
     await checkpoint();
-    // Theme/font belong to this PS/UXP startup session. Document metadata may
-    // change independently; a successful preference read is never polled again.
+    // Startup reads stay cached; theme changes arrive in the existing set event.
     if(!interfacePreferencesValue?.ui_preferences_complete)
       interfacePreferencesValue=await labels.interfacePreferences(checkpoint,true);
+    if(interfaceTheme)interfacePreferencesValue={...interfacePreferencesValue,ui_theme:interfaceTheme};
     await checkpoint();
     const documents=app.documents;
     await checkpoint();
@@ -317,7 +345,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.71', session, transport: 'plugin-data-files',
+        probe_version: '0.3.73', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
@@ -392,7 +420,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.71', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.73', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -531,7 +559,18 @@ probe('startup');
 // the bounded DOM poll also covers changes made by external COM scripts.
 observation.notifications={state:'pending',received:0};
 Promise.resolve().then(()=>require('photoshop').action.addNotificationListener(
-  ['select','make','delete','set','undo','redo','open','close'],event=>{
+  ['select','make','delete','set','undo','redo','open','close'],(event,descriptor)=>{
+    if(event==='set') {
+      const raw=descriptor?.to?.kuiBrightnessLevel;
+      const theme={kPanelBrightnessOriginal:'light',kPanelBrightnessLightGray:'light-gray',
+        kPanelBrightnessMediumGray:'dark-gray',kPanelBrightnessDarkGray:'dark'}[typeof raw==='string'?raw:raw?._value];
+      if(typeof theme==='string') {
+        interfaceTheme=theme;
+        if(interfacePreferencesValue)interfacePreferencesValue={...interfacePreferencesValue,ui_theme:theme};
+        if(heartbeatValue)heartbeatValue={...heartbeatValue,ui_theme:theme};
+        lastHeartbeat=0;
+      }
+    }
     contextGeneration++;contextReadAt=0;
     observation.notifications={...observation.notifications,received:observation.notifications.received+1,
       last_event:event,last_event_at_ms:Date.now()};

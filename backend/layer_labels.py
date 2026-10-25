@@ -1,5 +1,8 @@
 """Native Photoshop label enums, separate from editable JSX script packages."""
 import json
+from pathlib import Path
+import re
+import threading
 
 # Spellings are Action Manager enums, not UI names; the last four need PS25+.
 LABEL_COLORS = [
@@ -17,6 +20,77 @@ LABEL_COLORS = [
     {"id": "fuchsia", "label": "紫红", "rgb": [211, 120, 184]},
 ]
 LABEL_ACTIONS = {"label." + item["id"]: {"label": item["label"] + "图层标签"} for item in LABEL_COLORS}
+
+THEME_NAMES = ('light', 'light-gray', 'dark-gray', 'dark')
+SLOT_NAMES = ('None', 'Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Violet', 'Gray',
+              'Seafoam', 'Indigo', 'Magenta', 'Fuchsia')
+
+
+def read_label_palette(text):
+    """Read only named label entries; UIColors.txt is data, never executable code."""
+    colors = {}
+    for item, name in zip(LABEL_COLORS, SLOT_NAMES):
+        for suffix, field in (('', 'rgb'), ('Disabled', 'disabled_rgb')):
+            match = re.search(r'\bSlotColor'+name+suffix+r':\s*(\[\s*(?:\[[^\[\]]+\]\s*,?\s*){4}\])', text, re.I)
+            if not match:continue
+            values = json.loads(match[1])
+            if (len(values)!=4 or any(len(row)!=4 or
+                    any(type(v) is not int or not 0<=v<=255 for v in row[:3]) or
+                    type(row[3]) not in (int,float) or row[3]!=1 for row in values)):
+                raise ValueError('无效的Photoshop标签色表')
+            colors.setdefault(item['id'], {})[field] = [row[:3] for row in values]
+    if any(item['id'] not in colors or 'rgb' not in colors[item['id']] for item in LABEL_COLORS[:8]):
+        raise ValueError('Photoshop标签色表不完整')
+    return colors
+
+
+def running_label_file(host_version):
+    import win32api, win32gui, win32process
+    from .photoshop_version import exe_version, version_tuple
+    try:
+        roots=[]
+        win32gui.EnumWindows(lambda hwnd,_:roots.append(hwnd) if win32gui.GetClassName(hwnd)=='Photoshop' else None,None)
+        if len(roots)!=1:raise OSError('无法确认唯一Photoshop工作区')
+        pid=win32process.GetWindowThreadProcessId(roots[0])[1]
+        handle=win32api.OpenProcess(0x410,False,pid)
+        try:path=Path(win32process.GetModuleFileNameEx(handle,0))
+        finally:handle.Close()
+        if path.name.lower()!='photoshop.exe' or version_tuple(exe_version(path))!=version_tuple(host_version):
+            raise OSError('Photoshop进程与当前执行插件不匹配')
+    except win32api.error as error:raise OSError('Photoshop原生标签色表暂不可读') from error
+    return path.parent/'Required'/'UIColors.txt'
+
+
+class LabelPalette:
+    def __init__(self, locate=None):
+        self.locate=locate or running_label_file
+        self._lock=threading.Lock()
+        self.identity=None
+        self.colors={}
+        self.source='fallback'
+
+    def refresh(self, status):
+        host=status.get('photoshop_version')
+        session=status.get('layer_context',{}).get('session')
+        with self._lock:
+            if status.get('connected') and isinstance(host,str) and isinstance(session,str):
+                identity=(host,session)
+                if identity!=self.identity:
+                    self.identity=identity;self.colors={};self.source='fallback'
+                    try:
+                        with self.locate(host).open('rb') as stream:data=stream.read(1024*1024+1)
+                        if len(data)>1024*1024:raise ValueError('Photoshop标签色表过大')
+                        self.colors=read_label_palette(data.decode('utf-8-sig'))
+                        self.source='host-ui-colors'
+                    except (OSError,ValueError,TypeError,KeyError):pass
+            colors=self.colors
+        index=THEME_NAMES.index(status.get('ui_theme')) if status.get('ui_theme') in THEME_NAMES else 3
+        result=[]
+        for item in LABEL_COLORS:
+            color=colors.get(item['id'],{})
+            result.append({**item,'rgb':list(color.get('rgb',[item['rgb']]*4)[index]),
+                           **({'disabled_rgb':list(color['disabled_rgb'][index])} if 'disabled_rgb' in color else {})})
+        return result
 
 
 def label_script(action):

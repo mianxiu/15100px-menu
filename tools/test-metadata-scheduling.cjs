@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync('uxp/offline-probe/main.js','utf8');
 const settle=async()=>{for(let n=0;n<30;n++)await new Promise(resolve=>setImmediate(resolve));};
-async function host(initialCommand=false,registration='ready'){
+async function host(initialCommand=false,registration='ready',cssWidth=null){
   const files=new Map(),c={now:100000,captures:0,preferences:0,documents:0,selection:0};
   const timers=new Map();let release;
   const folder={async getEntry(name){if(!files.has(name))throw Error('missing');return {read:async()=>files.get(name)};},
@@ -14,7 +14,10 @@ async function host(initialCommand=false,registration='ready'){
   const app={get documents(){c.documents++;if(c.onDocuments)c.onDocuments();return [{title:'original'}];},activeDocument:{title:'original'}};
   function command(id){files.set('probe-request.json',JSON.stringify({token:'token',id,operation:'capture',expires_at_ms:c.now+9000}));}
   if(initialCommand)command('initial');
+  c.cssWidth=cssWidth;c.cssNodes=[];
   const sandbox={console,Date:class extends Date{static now(){return c.now;}},module:{exports:{}},
+    ...(cssWidth===null?{}:{document:{createElement:()=>({style:{}}),head:{appendChild:v=>c.cssNodes.push(v)},body:{appendChild:v=>c.cssNodes.push(v)}},
+      getComputedStyle:()=>({width:String(c.cssWidth)+'px'})}),
     setInterval(fn,ms){timers.set(ms,fn);},setTimeout,clearTimeout,
     require(name){
       if(name==='photoshop')return {app,action:{addNotificationListener(events,listener){
@@ -43,6 +46,25 @@ async function host(initialCommand=false,registration='ready'){
   assert.equal(h.c.preferences,1,'Successful startup preferences must not be polled');
   assert.equal(h.heartbeat().ui_preferences_time_ms,preferencesAt);
   assert.equal(h.c.documents,13,'Document metadata still changes independently');
+  // Theme notifications carry the new value: no preference getter or modal.
+  for(const [raw,theme] of [['kPanelBrightnessOriginal','light'],['kPanelBrightnessLightGray','light-gray'],
+      ['kPanelBrightnessMediumGray','dark-gray'],['kPanelBrightnessDarkGray','dark']]) {
+    h.c.notify('set',{to:{kuiBrightnessLevel:{_enum:'uiBrightnessLevelEnumType',_value:raw}}});
+    await h.pulse();await settle();assert.equal(h.heartbeat().ui_theme,theme);assert.equal(h.c.preferences,1);
+  }
+  h.c.notify('set',{to:{kuiBrightnessLevel:{_value:'unknown'}}});await h.pulse();await settle();assert.equal(h.heartbeat().ui_theme,'dark');
+  h.c.now+=6000;await h.poll();assert.equal(h.heartbeat().ui_theme,'dark');assert.equal(h.c.preferences,1);
+  h=await host(true);h.c.notify('set',{to:{kuiBrightnessLevel:{_value:'kPanelBrightnessOriginal'}}});
+  h.c.now+=100;await h.poll();assert.equal(h.heartbeat().ui_theme,'light','Startup read overwrote a newer theme event');
+  assert.equal(h.c.preferences,1);
+  h=await host(false,'ready',1);
+  assert.equal(h.heartbeat().ui_theme,'light');assert.equal(h.c.cssNodes.length,2);
+  for(const [width,theme] of [[2,'light-gray'],[3,'dark-gray'],[4,'dark']]) {
+    h.c.cssWidth=width;h.c.now+=1600;await h.pulse();await settle();
+    assert.equal(h.heartbeat().ui_theme,theme);assert.equal(h.c.preferences,1);
+  }
+  assert.equal(h.c.cssNodes.length,2,'Theme observer recreated hidden DOM nodes');
+  h.c.cssWidth='invalid';h.c.now+=6000;await h.pulse();await settle();assert.equal(h.heartbeat().ui_theme,'dark');
   // A due metadata refresh must not precede either command or basic menu read.
   for(const kind of ['command','menu']){
     h=await host();h.c.now+=6000;const before={...h.c};

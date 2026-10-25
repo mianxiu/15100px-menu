@@ -14,7 +14,7 @@ from tornado import web, websocket
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 from .photoshop_bridge import ACTIONS, COMMANDS, PhotoshopBridge, load_scripts
 from .uxp_bridge import UxpBridge
-from .layer_labels import LABEL_COLORS
+from .layer_labels import LabelPalette
 from .commands import command_contracts, validate_command
 from .desktop import Desktop, Tray
 from .control_window import ControlWindow
@@ -203,6 +203,7 @@ class Application(web.Application):
         self.operation_lock = asyncio.Lock()
         self._dialog_tasks=set()
         self.recent_documents = RecentDocuments()
+        self.label_palette = LabelPalette()
         self.application_updates = ApplicationUpdates(self.runtime)
         self.uxp_auto=UxpAutoUpdate(self.runtime)
         self.diagnostics=Diagnostics(self.runtime,ROOT/"tools/inspect-panels.ps1",port)
@@ -433,13 +434,14 @@ class Application(web.Application):
             status = await self.bridge.status(force=True) if args.get('refresh') and isinstance(self.bridge,PhotoshopBridge) else await self.bridge.status()
             uxp=await asyncio.to_thread(self.uxp.status)
             recent=await asyncio.to_thread(self.recent_documents.refresh,status.get('photoshop_version'))
+            label_colors=await asyncio.to_thread(self.label_palette.refresh,status)
             if isinstance(self.bridge,UxpBridge) and not uxp['enabled']:
                 status={**status,'uxp_ready':False,'message':'UXP 执行已禁用'}
             value = {"photoshop": status, "actions": ACTIONS, 'recent_documents':recent,
                     "commands": Application.execution_contracts(self),
                     'tasks':self.tasks.snapshot(), 'photoshop_start':self.photoshop_launcher.snapshot(),
                     'language':read_language(self.runtime),
-                    "label_colors": LABEL_COLORS,
+                    "label_colors": label_colors, 'label_colors_source':self.label_palette.source,
                     "version": APP_VERSION, "settings": self.preferences.get(), "plugin": self.plugins.status(), 'uxp':uxp,
                     "data_dir": str(self.runtime),
                     "service": service_identity(),

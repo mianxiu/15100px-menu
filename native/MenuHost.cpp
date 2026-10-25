@@ -206,14 +206,33 @@ static float previewAnimationMs=-1;
 static float pieAnimation(float elapsedMs,bool reduced=false) {
     return reduced?1.f:std::clamp(elapsedMs/60.f,0.f,1.f);
 }
-struct LabelColor {const char* id;const char* name;ImU32 color;};
-static const std::array<LabelColor,12> labelColors={{{"none","无颜色 / 清除标签",IM_COL32(105,109,117,255)},
+struct LabelColor {const char* id;const char* name;ImU32 color;ImU32 disabled=0;};
+static const std::array<LabelColor,12> defaultLabelColors={{{"none","无颜色 / 清除标签",IM_COL32(105,109,117,255)},
     {"red","红色",IM_COL32(224,91,88,255)},{"orange","橙色",IM_COL32(229,151,63,255)},
     {"yellowColor","黄色",IM_COL32(226,201,83,255)},{"grain","绿色",IM_COL32(110,176,99,255)},
     {"blue","蓝色",IM_COL32(88,144,213,255)},{"violet","紫色",IM_COL32(169,125,207,255)},
     {"gray","灰色",IM_COL32(169,172,180,255)},
     {"seafoam","海沫色",IM_COL32(93,171,164,255)},{"indigo","靛蓝",IM_COL32(112,111,188,255)},
     {"magenta","洋红",IM_COL32(189,91,157,255)},{"fuchsia","紫红",IM_COL32(211,120,184,255)}}};
+static auto labelColors=defaultLabelColors;
+static bool applyLabelColors(const Json& values) {
+    labelColors=defaultLabelColors;
+    if(!values.is_array() || (values.size()!=8 && values.size()!=12))return false;
+    auto next=defaultLabelColors;
+    for(size_t i=0;i<values.size();++i) {
+        const auto& value=values[i];
+        if(!value.is_object() || !value.contains("id") || !value["id"].is_string() || value["id"]!=next[i].id)return false;
+        for(const char* field:{"rgb","disabled_rgb"}) {
+            if(!value.contains(field)){if(std::string(field)=="disabled_rgb")continue;return false;}
+            const auto& rgb=value[field];
+            if(!rgb.is_array() || rgb.size()!=3)return false;
+            for(const auto& channel:rgb)if(!channel.is_number_integer() || channel.get<int64_t>()<0 || channel.get<int64_t>()>255)return false;
+            auto color=IM_COL32(rgb[0].get<int>(),rgb[1].get<int>(),rgb[2].get<int>(),255);
+            if(std::string(field)=="rgb")next[i].color=color;else next[i].disabled=color;
+        }
+    }
+    labelColors=next;return true;
+}
 static std::array<RECT,12> labelRows{};
 static int labelCount=8;
 static int labelColumns(){return labelCount/2;}
@@ -579,6 +598,7 @@ static void accept(const Json& event) {
     } else if (type=="status") {
         const auto& data=event.at("data"); const auto& ps=data.at("photoshop");
         labelCount=supportedLabelCount(ps);
+        applyLabelColors(data.value("label_colors",Json()));
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);documentSortReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=64);individualSmartReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=65);capsReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=16);}
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);layerSearchReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=57);textSplitReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=59);}
         recentReady=ps.value("uxp_ready",false) && ps.value("uxp_version",std::string())!="0.3.1";
@@ -872,7 +892,7 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
 }
 static void theme() {
     // Photoshop's four brightness presets, lightest to darkest. Widget tones
-    // match the shipped UIColors.txt; label swatch hues are semantic and fixed.
+    // match the shipped UIColors.txt; label colors arrive through cached status.
     int i=uiTheme=="light"?0:uiTheme=="light-gray"?1:uiTheme=="dark-gray"?2:3;
     auto& style=ImGui::GetStyle();style=ImGuiStyle();
     if (i<2) ImGui::StyleColorsLight();else ImGui::StyleColorsDark();
@@ -941,12 +961,12 @@ static void drawLabels() {
         bool active=rowEnabled(1) && (holdMode?holdActionAt(cursor)==4+i:PtInRect(&r,cursor));
         if (ImGui::InvisibleButton("##label",{b.x-a.x,b.y-a.y})) commitLabel(i);
         ImU32 color=labelColors[i].color;
-        if (!rowEnabled(1)) color=(color&0x00ffffff)|0x66000000;
+        if (!rowEnabled(1)) color=labelColors[i].disabled?labelColors[i].disabled:(color&0x00ffffff)|0x66000000;
         draw->AddRectFilled(a,b,color);
         if (active) draw->AddRect({a.x+scale,a.y+scale},{b.x-scale,b.y-scale},tint(ImGuiCol_CheckMark),0,0,2*scale);
         if (i==0) {
             float inset=(b.x-a.x)*.2f;
-            draw->AddLine({a.x+inset,b.y-inset},{b.x-inset,a.y+inset},IM_COL32(237,237,241,255),1.5f*scale);
+            draw->AddLine({a.x+inset,b.y-inset},{b.x-inset,a.y+inset},tint(rowEnabled(1)?ImGuiCol_Text:ImGuiCol_TextDisabled),1.5f*scale);
         }
         // Swatches are icon-only, including hover; no detached color tooltip.
         ImGui::PopID();
@@ -1972,6 +1992,7 @@ int main() {
         }
         else if (i+1<argc && arg==L"--preview-layer-context") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
+            if(data.contains("label_colors"))applyLabelColors(data["label_colors"]);
             capsReady=data.value("caps_ready",false);
             individualSmartReady=data.value("individual_smart_ready",false);
             layerSearchReady=textSplitReady=data.value("tools_ready",false);
@@ -2094,6 +2115,22 @@ int main() {
                 }
             }
             DiagnosticHint::selfTest();
+            for(int themeIndex=0;themeIndex<4;++themeIndex) {
+                Json palette=Json::array();
+                for(const auto& color:defaultLabelColors)
+                    palette.push_back({{"id",color.id},{"rgb",{11+themeIndex,31+themeIndex,51}},
+                                       {"disabled_rgb",{41+themeIndex,61+themeIndex,81}}});
+                if(!applyLabelColors(palette) || labelColors[1].color!=IM_COL32(11+themeIndex,31+themeIndex,51,255) ||
+                   labelColors[1].disabled!=IM_COL32(41+themeIndex,61+themeIndex,81,255))
+                    throw std::runtime_error("Host theme label colors lost normal/disabled state");
+                palette[1]["rgb"][0]=256;
+                if(applyLabelColors(palette) || labelColors[0].color!=defaultLabelColors[0].color)
+                    throw std::runtime_error("Invalid host label colors partly applied");
+                palette[1]["id"]=1;
+                if(applyLabelColors(palette))throw std::runtime_error("Invalid label identity accepted");
+            }
+            applyLabelColors(Json());
+            std::cout<<"Host label palette passed: four themes, normal/disabled, enum order and atomic invalid fallback\n";
             for(const char* name:{"light","light-gray","dark-gray","dark"}) {
                 uiTheme=name;theme();PreviewPendingHint::selfTest(name);
             }
