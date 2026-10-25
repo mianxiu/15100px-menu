@@ -1,7 +1,9 @@
 # Photoshop Menu TODO
 
+- [x] 267已公开交付：源码6672f87与v0.4.267标签已推送；统一ZIP／SHA和Latest清单匿名下载校验通过，GitHub与dist仅保留267发行物，旧标签／源码／配置／诊断保持。Wiki ca8d482已同步，39页／235链接及9个主要远端页面、图片和README核验通过；源码／标签GitHub UI contract两次成功。证据.runtime/release-0.4.267-public-verification.json、manifest267-verification.json、release267-cleanup.json、dist267-cleanup.json与wiki267-public-verification.json。
+
 - [x] 267标签主题代码／测试／构建／实际入口：按实际PS的UIColors色表提供四主题正常／禁用颜色，清除斜线随主题；按会话缓存并安全回退。UXP73使用本地CSS媒体状态补齐本机PS24缺失的主题通知，不新增PS偏好查询或定时器。658项低CPU完整回归、原生矩阵、8份四主题预览、最终冻结启动／重启及资源一致性通过。实际267／UXP73低CPU／正常各8次标签写入与一次撤销、各4次主题切换通过；原稿／主题／资源／配置和旧未知保持。原生IME未知按新全局授权归档，原PS正常退出后才释放活动槽位，不重发、不记成功。失败版72、版本报告失配与两次独立启动证据保留。证据.runtime/runtime267-verified.json、labels267-live/report.json、label267-preview、recovery267css及tests267-low.log。
-- [ ] 267实屏／实体点击及现代PS新增四色仍待验；附加F定位因真实焦点切离而保护拒绝，未当作正向通过。公开发布与Wiki推送按独立记录核验。
+- [ ] 267实屏／实体点击及现代PS新增四色仍待验；附加F定位因真实焦点切离而保护拒绝，未当作正向通过。公开发布与Wiki推送见下方独立核验。
 
 - [x] 266已公开交付：源码10c4c38、v0.4.266标签、统一ZIP／SHA及Latest清单已推送并匿名下载核验；GitHub和dist仅保留266发行物，旧标签／历史／配置／诊断保留。Wiki82bde89同步，39页／234链接和9个主要远端页面通过；源码／标签两次GitHub UI contract成功。证据.runtime/release-0.4.266-public-verification.json、manifest266-verification.json、release266-cleanup.json、dist266-cleanup.json和wiki266-public-verification.json。
 
