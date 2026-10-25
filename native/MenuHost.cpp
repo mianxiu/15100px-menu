@@ -2208,7 +2208,7 @@ int main() {
     if (!selfTest) {ShowWindow(window,preview.empty()?SW_SHOWNORMAL:SW_SHOWNOACTIVATE);UpdateWindow(window);}
         resetMenu();
         if (previewKind=="hold" || previewKind=="busy") {
-            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((!previewTool.empty()?(previewTool=="search"?432:632):previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((!previewTool.empty()?(previewTool=="search"?274:780):previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):500)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>((!previewTool.empty()?(previewTool=="search"?432:632):previewShape?920:panelKind==4?820:620)*scale),static_cast<int>((!previewTool.empty()?(previewTool=="search"?304:780):previewShape?(previewShapeHeight>0?previewShapeHeight:menuShapeWindowHeight):500)*scale),SWP_NOZORDER|SWP_NOACTIVATE);
             setHoldMode(true);shapePanelOpen=previewShape && !previewOrdinary;
             if(!previewTool.empty()) {
                 layerSearchReady=textSplitReady=true;holdFinished=false;pinned=true;capable=allowed=true;
@@ -2637,16 +2637,18 @@ int main() {
                             if(std::abs(input-menuControlHeight*scale)>.1f || std::abs(ImGui::GetItemRectSize().y-input)>.1f ||
                                ImGui::GetStyle().FrameBorderSize!=menuControlBorder*scale || ImGui::GetFont()!=menuFont(MenuTextRole::Control))
                                 throw std::runtime_error("Shared Caps/tool input and button metrics drifted");
-                            const char* names[]={"全部","文字","智能对象"};const auto at=ImGui::GetCursorScreenPos();
+                            const char* names[]={"全部","像素","文字","组","形状","智能对象","调整","填充","其他"};const auto at=ImGui::GetCursorScreenPos();
                             const auto first=ImGui::CalcTextSize(names[0]).x+2*menuControlTextInset*scale;
                             const auto next=ImGui::CalcTextSize(names[1]).x+2*menuControlTextInset*scale;
                             second={LONG(at.x+first+next*.5f),LONG(at.y+input*.5f)};
                             seam={LONG(at.x+first+next),second.y};
+                            const auto expectedHeight=MenuControls::segmentsHeight(names,ImGui::GetContentRegionAvail().x,scale);
                             ImGui::BeginDisabled(disabled);MenuControls::segments("##types",names,choice,scale);ImGui::EndDisabled();
-                            const int iconIds[]={7,36,38};const auto bar=ImGui::GetCursorScreenPos();
+                            if(std::abs(ImGui::GetItemRectSize().y-expectedHeight)>.1f)throw std::runtime_error("Wrapped text filters lost measured height");
+                            const char* iconNames[]={"全部","文字","智能对象"};const int iconIds[]={7,36,38};const auto bar=ImGui::GetCursorScreenPos();
                             iconSecond={LONG(bar.x+figmaDisplayIconWidth*scale*1.5f),LONG(bar.y+figmaDisplayWidgetHeight*scale*.5f)};
                             iconSeam={LONG(bar.x+figmaDisplayIconWidth*scale*2),iconSecond.y};
-                            ImGui::BeginDisabled(disabled);MenuControls::iconSegments("##kind-icons",names,iconIds,iconChoice,scale);
+                            ImGui::BeginDisabled(disabled);MenuControls::iconSegments("##kind-icons",iconNames,iconIds,iconChoice,scale);
                             const auto row=ImGui::GetCursorScreenPos();const float rowWidth=ImGui::GetContentRegionAvail().x;ImVec2 anchor{};
                             rowMain={LONG(row.x+12*scale),LONG(row.y+menuSearchRowHeight*scale*.5f)};
                             rowPreview={LONG(row.x+rowWidth-menuSearchRowHeight*scale*.5f),rowMain.y};

@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 265文字筛选代码／测试／实际入口：F查找顶部改为共享文字分段，结果行类型图标保留。三档字号按真实宽度换行并同步外层窗口预留；24项专项、双逻辑处理器Below Normal原生完整矩阵、冻结启动／重启与实际265／UXP71组件核验通过。PS24.0.1低CPU／正常各一次中文／文字类型／空结果／定位／可见内容／PS边界、原稿历史和资源恢复通过。首轮较大字号裁切图与两处旧几何夹具失败保留，修正后复验。证据.runtime/search265-live.json、search265-preview及search265-preview-cpu、tests265-low.log、native265-low.log、recovery265textfilters和runtime265-verified.json。
+- [ ] 265实体标签点击／中文候选与其他DPI／硬件仍待验。GPU离屏大字号既有图标缺失观察保留；CPU三档及标签几何通过，不替代PS实屏验收。
+
 - [x] 264已公开交付：实际入口264／UXP71与统一ZIP／原生组件一致；源码d7610d3、v0.4.264标签、ZIP／SHA及Latest清单已推送并匿名下载核验。核验后删除261 Release及附件，dist仅保留264发行文件；旧标签、源码、配置与诊断保持。Wiki fae2918已同步，39页／234链接和9个主要远端页面通过，源码／标签两次GitHub UI contract成功。证据.runtime/runtime264-verified.json、release-0.4.264-public-verification.json、manifest264-verification.json、release264-cleanup.json、dist264-cleanup.json、wiki264-public-verification.json。实体输入及现代宿主限制继续保留待验，不以公开发布冒充全硬件验收。
 
 - [x] 263紧凑搜索代码／测试／实际入口：同家族类型图标、24逻辑单位结果行、整行定位、小预览图标被动悬停；独立有界128px像素读取、失鲜结果丢弃和资源回收。PS24低CPU／正常中文筛选、文字类型、空结果、定位及窗口可见／边界、原稿历史保持通过，三档字号预览已核对。证据.runtime/search263-live.json及search263-final。最终纳入264，不独立公开263。

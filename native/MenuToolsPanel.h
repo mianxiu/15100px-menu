@@ -144,8 +144,10 @@ struct MenuToolsPanel {
         MenuControls::PanelStyle controls(scale);
         const float gap=menuControlPadding*scale,margin=menuFloatingInset*scale,h=menuControlHeight*scale;
         const float width=std::max(1.f,std::min((mode=="search"?420:620)*scale,size.x-margin*2));
+        const char* kinds[]={"全部","像素","文字","组","形状","智能对象","调整","填充","其他"};
+        const float filters=MenuControls::segmentsHeight(kinds,width-2*ImGui::GetStyle().WindowPadding.x,scale);
         const int rows=results.is_null()?0:std::min(8,int(results.at("items").size()));
-        const float contentHeight=mode=="search"?(140+30*std::max(0,rows-1))*scale:size.y-margin*2;
+        const float contentHeight=mode=="search"?(140+30*std::max(0,rows-1))*scale+filters-figmaDisplayWidgetHeight*scale:size.y-margin*2;
         const float height=std::max(1.f,std::min(contentHeight,size.y-60*scale-margin*2));
         const ImVec2 at={pos.x+margin,pos.y+margin};
         menuShadow::draw(ImGui::GetWindowDrawList(),at,{at.x+width,at.y+height},ImGui::GetStyle().FrameRounding,scale);
@@ -161,10 +163,9 @@ struct MenuToolsPanel {
             const bool enter=MenuControls::input("##layer","搜索图层…",name,sizeof(name));
             ImGui::PopID();
             if(ImGui::IsItemEdited())changeSearch(ImGui::GetTime());
-            const char* kinds[]={"全部","像素","文字","组","形状","智能对象","调整","填充","其他"};
-            const char* ids[]={"all","pixel","text","group","shape","smart-object","adjustment","fill","other"};
+                const char* ids[]={"all","pixel","text","group","shape","smart-object","adjustment","fill","other"};
             const int icons[]={7,35,36,2,37,38,6,1,40};
-            if(MenuControls::iconSegments("##types",kinds,icons,kind,scale))changeSearch(ImGui::GetTime()-.18);
+            if(MenuControls::segments("##types",kinds,kind,scale))changeSearch(ImGui::GetTime()-.18);
             if(enter && !pending)changeSearch(ImGui::GetTime()-.18);
             if(available && searchDue(ImGui::GetTime())) {
                 searchDirty=false;submit("layers.search",Json{{"name",name},{"type",ids[kind]}});

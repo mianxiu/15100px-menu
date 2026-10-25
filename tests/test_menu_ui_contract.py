@@ -59,7 +59,7 @@ class MenuUiContractTests(unittest.TestCase):
                 self.assertNotRegex(source,r'ImGui::PushStyleVar|IM_COL32\(|ImVec4\(')
                 self.assertIn('MenuControls::PanelStyle',source)
         source=(ROOT/'native/MenuToolsPanel.h').read_text('utf-8')
-        for shared in ('PanelStyle','button','input','iconSegments','resultRow','previewTile','multiline','textPreview','segments'):
+        for shared in ('PanelStyle','button','input','resultRow','previewTile','multiline','textPreview','segments'):
             self.assertIn('MenuControls::'+shared,source)
         caps=(ROOT/'native/MenuHost.cpp').read_text('utf-8')
         for shared in ('surface','outline','segment'):

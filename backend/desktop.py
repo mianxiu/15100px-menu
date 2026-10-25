@@ -601,7 +601,7 @@ class Desktop:
             rect=self.gui.GetWindowRect(self.target)
             work=win32api.GetMonitorInfo(win32api.MonitorFromWindow(self.target,2))['Work']
             dpi=self.icons.u.GetDpiForWindow(self.hwnd) or 96
-            bounds=panel_bounds(rect,work,(round(anchor[0]+12*dpi/96),round(anchor[1]+12*dpi/96)),round((432 if mode=='search' else 632)*dpi/96),round((244 if mode=='search' else 780)*dpi/96))
+            bounds=panel_bounds(rect,work,(round(anchor[0]+12*dpi/96),round(anchor[1]+12*dpi/96)),round((432 if mode=='search' else 632)*dpi/96),round((274 if mode=='search' else 780)*dpi/96))
             self.gui.SetWindowPos(self.hwnd,0,*bounds,0x4|0x10)
             scale=dpi/96
             self.preview_hint_anchor=[round(bounds[0]+bounds[2]*.5),round(bounds[1]+bounds[3]*.5)]
@@ -622,7 +622,7 @@ class Desktop:
         current=self.gui.GetWindowRect(self.hwnd);rect=self.gui.GetWindowRect(self.target)
         work=win32api.GetMonitorInfo(win32api.MonitorFromWindow(self.target,2))['Work']
         scale=(self.icons.u.GetDpiForWindow(self.hwnd) or 96)/96
-        bounds=panel_bounds(rect,work,current[:2],current[2]-current[0],round((244+30*max(0,min(8,rows)-1))*scale))
+        bounds=panel_bounds(rect,work,current[:2],current[2]-current[0],round((274+30*max(0,min(8,rows)-1))*scale))
         self.gui.SetWindowPos(self.hwnd,0,*bounds,0x4|0x10)
 
     @window_transition

@@ -117,6 +117,16 @@ inline void previewTile(ID3D11ShaderResourceView* image,ImVec2 imageSize,const c
     ImGui::EndTooltip();
 }
 
+template<size_t N> float segmentsHeight(const char* const (&names)[N],float width,float scale) {
+    width=std::max(1.f,width);float used=0;int rows=1;
+    for(const auto* name:names){
+        const float item=std::min(width,ImGui::CalcTextSize(name).x+2*menuControlTextInset*scale);
+        if(used>0 && used+item>width){++rows;used=0;}
+        used+=item;
+    }
+    return rows*menuControlHeight*scale+(rows-1)*menuPanelGap*scale;
+}
+
 template<size_t N> bool segments(const char* id,const char* const (&names)[N],int& selected,float scale) {
     const auto origin=ImGui::GetCursorScreenPos();const float width=ImGui::GetContentRegionAvail().x,h=menuControlHeight*scale;
     if(width<=0){ImGui::Dummy({0,h});return false;}
