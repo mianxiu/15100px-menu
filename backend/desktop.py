@@ -200,8 +200,8 @@ class Desktop:
         import win32gui
         self.gui = win32gui
         self.panel_context = PanelContext(win32gui)
-        from .input_language import InputLanguage
-        self.input_language=InputLanguage(self)
+        from .input_method import InputMethod
+        self.input_language=InputMethod(self)
         self.input_language.thread.start()
         self.icons = WindowIcons()
         self.ready = threading.Event()

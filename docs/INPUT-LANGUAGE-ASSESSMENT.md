@@ -1,6 +1,26 @@
-# 自动 ENG：当前实现、验证范围及历史评估
+# PS 临时 IME：当前实现、验证范围及历史评估
 
-## 用户目标修正（2026-10-25）
+## 261：保持中文输入法的临时 IME 关闭／恢复（2026-10-25）
+
+261 将生产入口改为 InputMethod：保持当前中文输入法及 HKL，仅关闭已确认 PS 非输入区域所属 IME 的 open 状态；明确输入、未知状态、菜单输入、产品暂停或离开 PS 时，只恢复本功能关闭过的原上下文。没有新增布局切换请求、US 布局依赖、全局设置或第三方依赖。旧 InputLanguage 仅供旧记录恢复兼容，不再由 Desktop 启动其切换工作线程。
+
+沿用焦点、UIA 正向分类、独立工具读取、忙碌及键鼠保护，钩子不做宿主查询或 IME 调用。发送前再次校验进程创建时间、线程、焦点、原布局、IME 窗口及 open 状态；请求先落盘，读回后才确认。新的 input-method-owned.json 与旧布局记录隔离；未知不重发，手动选择不覆盖，已退出进程的确认记录先归档。关闭时只恢复本功能的已确认修改，不补发未知请求。
+
+机制使用 [ImmGetDefaultIMEWnd](https://learn.microsoft.com/en-us/windows/win32/api/imm/nf-imm-immgetdefaultimewnd) 所属默认 IME 窗口及同步 WM_IME_CONTROL 的 open 状态控制；实际 PS 验证 PostMessage 未改变状态，保留该失败探测，改用有界 SendMessageTimeout。它是临时关闭输入状态，不是卸载或切换输入法。没有向其他应用发送 IME 控制。
+
+真实查找面板发现：附着输入队列会让 PS 的 GUIThreadInfo.focus 返回 MenuHost 的 HWND。旧读回因此误认为没有 PS 上下文，恢复已执行但不能确认。修复后仅回到同一原 PS 线程的已验证窗口读取原 IME；不会读取或修改菜单／其他应用的上下文。原恢复 pending 在更新后依据同一请求及真实 open=1 结清，restore_requests=0，没有重发。第一轮暂停、第二轮失败和原收据均保留。
+
+最终 621 项低 CPU 回归（64.194s）、60 项正常专项（6.190s）、原生完整矩阵、冻结启动／重启及嵌入资源一致性通过。PS24.0.1 实际261入口低 CPU／正常各完成一次 open 1→0→1，HKL 始终为中文 0x08040804；原生查找面板可见且输入标志有效，关闭不改测试文档内容／历史。另一次离开 PS 后恢复读回通过，Chrome 的中文 HKL 与 open 状态前后相同；计算机控制随后因无法可靠确认浏览器 URL 安全停止，不再发送桌面输入。这不是完整跨应用实体输入验收。
+
+初始旧260确认记录已恢复中文布局，两处旧布局记录均无 owned／pending。原 ENG260 隔离文档已收尾；261 自建文档 ID67 关闭、原 gradientTool 和原文档数量0恢复，CPU资源恢复。实际运行 EXE、dist、原生菜单／热键、UXP68与源资源一致，配置与195历史未知记录保持；当前无 pending。
+
+这是功能路线修正，无可比成功完成时间，不宣称性能提升。观察到实际入口关闭确认耗时低 CPU 337.879ms、正常202.882ms，各1次；仅是 COM 激活至状态读回的阶段样本，不是实体键到屏幕延迟，不计算提升比例。首次失败尝试观察337.462ms和489.594ms，分别因面板焦点变化和上述读回缺陷停止，保留而不混入最终成功样本。未覆盖冷启动／长时间闲置／持续操作性能。
+
+尚未验收：实体 A、拼音首字／候选、快速文字编辑／重命名／数值、所有 PS 面板与第三方输入法、Win10／原低配及其他 PS。此前 PS 窗口绑定失败及这轮 Computer Use 安全停止，均不能以窗口消息或状态读回替代实体输入。未知区域保持输入保护，因此不能承诺每个首键都及时避开 IME。
+
+证据：.runtime/ime261/{initial,installed,open-close-send-probe,live-first-stopped,pre-focus-fix-journal,live,chrome-before,cross-app-disable}.json、legacy-ime-layout-cleanup.json、runtime261-verified.json、tests261-low.log、ime261-normal.log、native261-low.log、build261.log、smoke261.log及caps261-candidate.json。未公开260保持历史候选，不把原失败批次改为通过。
+
+## 用户目标修正（历史记录，2026-10-25）
 
 用户明确说明：要求保留当前中文输入法，PS非输入区域临时禁用IME，进入输入场景恢复；不是切换英文键盘布局。下文259／260的切HKL路线及读回记录只是旧实现历史，不能作为临时禁用已交付的证据。已正常退出旧服务，停止追加旧路线测试，原确认ownership／未恢复布局及失败批次保持记录；没有清除未知或把未恢复改为成功。
 

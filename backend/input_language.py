@@ -22,6 +22,25 @@ def process_exited(identity):
     finally:handle.Close()
 
 
+def read_layout_journal(journal,installed):
+    import json
+    if not journal.exists():return {'owned':None,'pending':None}
+    if journal.stat().st_size>16384:raise ValueError('size')
+    saved=json.loads(journal.read_text('utf-8'))
+    if set(saved)!={'owned','pending'}:raise ValueError('fields')
+    for row in saved.values():
+        if row is None:continue
+        if (set(row)!={'root','identity','focus','wanted','original','switch','time'} or
+            any(type(row[k]) is not int or row[k]<=0 for k in ['root','focus','wanted','original']) or
+            row['wanted'] not in installed or row['original'] not in installed or type(row['switch']) is not bool or
+            not isinstance(row['time'],(int,float)) or not math.isfinite(row['time']) or
+            not isinstance(row['identity'],list) or len(row['identity'])!=4 or row['identity'][0]!=row['root'] or
+            any(type(row['identity'][i]) is not int or row['identity'][i]<=0 for i in [0,1,3]) or
+            not isinstance(row['identity'][2],str) or not row['identity'][2]):raise ValueError('record')
+    if saved['owned'] and not saved['owned']['switch']:raise ValueError('unconfirmed ownership')
+    return saved
+
+
 class LanguagePolicy:
     def __init__(self):
         self.owned=None
@@ -180,20 +199,7 @@ class InputLanguage:
             installed=list(layouts)[:count]
             if journal.exists():
                 try:
-                    if journal.stat().st_size>16384:raise ValueError('size')
-                    saved=json.loads(journal.read_text('utf-8'))
-                    if set(saved)!={'owned','pending'}:raise ValueError('fields')
-                    for row in saved.values():
-                        if row is None:continue
-                        if (set(row)!={'root','identity','focus','wanted','original','switch','time'} or
-                            any(type(row[k]) is not int or row[k]<=0 for k in ['root','focus','wanted','original']) or
-                            row['wanted'] not in installed or row['original'] not in installed or type(row['switch']) is not bool or
-                            not isinstance(row['time'],(int,float)) or not math.isfinite(row['time']) or
-                            not isinstance(row['identity'],list) or len(row['identity'])!=4 or row['identity'][0]!=row['root'] or
-                            any(type(row['identity'][i]) is not int or row['identity'][i]<=0 for i in [0,1,3]) or
-                            not isinstance(row['identity'][2],str) or not row['identity'][2]):
-                            raise ValueError('record')
-                    if saved['owned'] and not saved['owned']['switch']:raise ValueError('unconfirmed ownership')
+                    saved=read_layout_journal(journal,installed)
                     self.policy.owned=saved['owned'];self.policy.pending=saved['pending']
                     if self.policy.pending:self.policy.pending['time']=time.monotonic()-2
                 except Exception:
