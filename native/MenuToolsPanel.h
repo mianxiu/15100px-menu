@@ -178,14 +178,15 @@ struct MenuToolsPanel {
                     ImGui::PushID(index);ImGui::BeginDisabled(pending || previewPending);
                     const auto type=row.value("type",std::string("other"));int typeIndex=8;
                     for(int i=0;i<IM_ARRAYSIZE(ids);++i)if(type==ids[i])typeIndex=i;
+                    const bool canPreview=type!="adjustment" && (layerPreviewReady && type!="group");
                     bool over=false,previewClick=false;ImVec2 point{};
-                    if(MenuControls::resultRow("##result",icons[typeIndex],row.at("name").get_ref<const std::string&>().c_str(),row.at("document_name").get_ref<const std::string&>().c_str(),scale,over,point,&previewClick))
+                    if(MenuControls::resultRow("##result",icons[typeIndex],row.at("name").get_ref<const std::string&>().c_str(),row.at("document_name").get_ref<const std::string&>().c_str(),scale,over,point,&previewClick,canPreview))
                         submit("layers.focus",Json{{"search_id",results.at("search_id")},{"index",index}});
                     if(previewClick && !previewPending) {
                         if(previewTarget==index && previewVisible)previewVisible=false;
                         else {
                             clearPreview();previewTarget=index;previewVisible=true;
-                            if(!layerPreviewReady && !layerThumbnailReady)previewMessage="请更新执行插件以读取缩略图";
+                            if(!layerPreviewReady)previewMessage="请更新执行插件以读取缩略图";
                             else {
                                 previewPending=true;previewQuery=results.at("search_id").get<std::string>();
                                 sendMenuTool("menu.tools.preview",Json{{"request",++previewRequest},{"search_id",previewQuery},{"index",index}});
@@ -193,7 +194,7 @@ struct MenuToolsPanel {
                         }
                     }
                     if(over){hover=index;anchor=point;}
-                    if(previewTarget==index){selectedAnchor=point;previewInView=ImGui::IsRectVisible(point,{point.x+menuSearchRowHeight*scale,point.y+menuSearchRowHeight*scale});}
+                    if(canPreview && previewTarget==index){selectedAnchor=point;previewInView=ImGui::IsRectVisible(point,{point.x+menuSearchRowHeight*scale,point.y+menuSearchRowHeight*scale});}
                     ImGui::EndDisabled();ImGui::PopID();++index;
                 }
                 if(hover!=previewHovered){previewHovered=hover;previewAt=ImGui::GetTime();}

@@ -108,17 +108,13 @@ class LayerSearch:
         if key in self.previews:return self.previews[key]
         status=await self.app.bridge.status()
         self.available()
-        value=None
-        if status.get('layer_preview_available') and row.get('type') not in ('group','adjustment'):
-            value=await asyncio.to_thread(self._read,{},row)
-        if value is None or value.get('fallback') is True:
-            self.available()
-            async with self.app.operation_lock:
-                await self.app.broadcast({'type':'operation','busy':True,'action':'layer.thumbnail'})
-                try:
-                    if menu_guard:await menu_guard()
-                    value=await self.app.bridge.execute_thumbnail(result['session'],row,before_dispatch=menu_guard)
-                finally:await self.app.broadcast({'type':'operation','busy':self.app.bridge.busy})
+        if not status.get('layer_preview_available'):
+            raise RuntimeError('当前PS版本不支持静默图层预览')
+        if row.get('type') in ('group','adjustment'):
+            return {'available':False,'reason':'此图层类型不支持静默像素预览'}
+        value=await asyncio.to_thread(self._read,{},row)
+        if value.get('fallback') is True:
+            return {'available':False,'reason':'此图层不支持当前版本的静默预览'}
         value=preview_result(value)
         if self.result is result:
             if len(self.previews)>=16:self.previews.pop(next(iter(self.previews)))

@@ -1,5 +1,9 @@
 # Photoshop Menu TODO
 
+- [x] 274候选代码／自动检查／构建：取消新建文档和PNG导出回退，仅保留直接像素读取。无直接接口的宿主（本机PS24.0.1）、组和单独调整层不显示预览按钮，也不留隐藏命中；F搜索／筛选／定位保留。后台与UXP拒绝旧layer.thumbnail，旧心跳不能启用回退。669项低CPU回归、原生矩阵、最终冻结包与嵌入源码核验通过；已移除未交付PNG实现及解码依赖，失败实现保留在忽略提交的诊断目录。无性能提升声明。
+- [ ] 274实际入口／PS验收／Release：最终候选尚未替换运行入口，后台保持停止；PNG实验bb461b0b5dec5f001fefad8a2b98f580为未知，当前活动保护和原始记录保留，未重发或记成功。缺少可信执行退出凭据，现有全局只读／IME例外不涵盖此导出；已向用户请求仅此条的完整归档、最新分层备份、正常PS退出并确认原进程退出后释放槽位的授权。正式下载仍为273，Wiki新说明尚未推送；待授权后完成原稿恢复、最终入口与下载验收。
+- [x] 274实验事实：PS24.0.1 COM单像素层静默导出成功，命令返回112.265ms（不是完整预览耗时）；验证器初缺PIL，未重发原导出，读取现有PNG后关闭自建文档并保持原稿。显式图层ID实验实际导出当前蓝层而非指定红层，故不能据此承诺正确目标。UXP内首次原生导出未确认PNG完成，保留未知；没有将其标为可用或继续试验。证据.runtime/quick-export274-probe、quick-export274-target-id.log、thumbnail274-base.json、quick-export274-unknown/bb461b0b5dec5f001fefad8a2b98f580、tests274-disabled-final-low.log、native274-disabled-selftest.log、proof274-disabled.log及smoke274-disabled.log。
+
 - [x] 273代码／测试／构建／实际入口：复现Desktop.event漏转发menu.tools.preview.result，真实272请求已成功生成128×72图片且临时文档关闭，故障在回传链路；补齐白名单并保留完整会话／请求／像素，匹配结果且实际空闲后清理缩略图遗留busyFeedback，未知仍忙不清。668项低CPU回归、真实JSON管道专项、原生纹理／旧会话／未知保护矩阵及冻结独立复测通过；首轮冻结重复启动超过15秒的失败日志保留，未定因。实际273／UXP75与组件一致，无PS重启，原稿／配置／旧未知保持。证据.runtime/thumbnail273-before-regression.log、thumbnail273-transport-regression.log、thumbnail273-user-evidence、runtime273-verified.json、tests273-final-low.log、native273-low-output.log、smoke273-final.log及smoke273-recheck.log。
 - [ ] 273实际预览点击／PS实屏仍待验：实际查找已打开，但Computer Use窗口清单未提供原生工具窗口，未发送替代输入，也未用纹理自测冒充实屏；旧PS临时副本可能短暂切换画布的现有限制保留。
 - [x] 273已公开交付：源码e5e498a／v0.4.273标签、Wiki578a8c4已推送；668项低CPU回归、原生矩阵、JSON通道专项、冻结独立复测及两项GitHub UI检查通过。39页／236链接、11个远端主要页面／图片通过；统一ZIP／SHA和Latest清单匿名下载核验后，GitHub与dist仅保留273发行物，旧标签／源码／配置／诊断保留。实际入口273／UXP75组件一致，无当前pending；原稿／选择／历史保持。实屏与实际点击预览仍待验，旧PS副本闪切不承诺消除。证据.runtime/release-0.4.273-public-verification.json、manifest273-verification.json、release273-cleanup.json、dist273-cleanup.json、wiki273-public-verification.json、runtime273-verified.json和originals273-verified.json。

@@ -356,7 +356,7 @@ module.exports = function createLabels(ps, session, options={}) {
     if(request.command==='text.replace')return textTools.replace(request);
     if(request.command==='text.split')return textTools.split(request);
     if(request.command==='layer.focus')return layerSearch.focus(request);
-    if(request.command==='layer.thumbnail')return layerSearch.thumbnail(request);
+    if(request.command==='layer.thumbnail')throw Error('非静默缩略图已停用，未提交操作');
     if(request.command==='stability.internal')return stability.execute(request,setLabel);
     if(['shape.copyPaint','shape.pastePaint'].includes(request.command))return paintClipboard.execute(request);
     if(caps.commands.includes(request.command))return caps.execute(request);
@@ -2153,77 +2153,6 @@ function createLayerSearch(ps,session,capture) {
     },{commandName:'定位图层',timeOut:0});}
     catch(error){if(uncertain){const unknown=Error('定位恢复结果待核对');unknown.resultUnknown=true;throw unknown;}throw error;}
   }
-  async function thumbnail(request) {
-    const row=request.destination;
-    // Validate the search identity before entering a modal or creating a document.
-    await preview(row,async()=>{if(Date.now()>request.expires_at_ms)throw Error('预览已过期');},true);
-    let uncertain=false;
-    try {return await ps.core.executeAsModal(async context=>{
-      const original=await capture(),expected=request.target;
-      const same=(a,b)=>a?.session===b?.session&&a.document_id===b.document_id&&a.active_layer_id===b.active_layer_id&&a.layer_ids.join(',')===b.layer_ids.join(',');
-      if(!same(original,expected)||context.isCancelled||Date.now()>request.expires_at_ms)throw Error('当前选择已改变，预览已取消');
-      await preview(row,null,true);
-      const documents=Array.from(ps.app.documents),source=documents.find(d=>d.id===row.document_id);
-      const ids=documents.map(d=>d.id).sort((a,b)=>a-b).join(',');
-      const sourceState={history:source.activeHistoryState.id,selection:Array.from(source.activeLayers,l=>l.id).join(',')};
-      function find(layers) {
-        const stack=Array.from(layers);let visited=0;
-        while(stack.length){if(++visited>20000)throw Error('图层超过兼容预览读取上限');const layer=stack.pop();if(layer.id===row.layer_id)return layer;if(layer.layers)stack.push(...layer.layers);}
-      }
-      const layer=find(source.layers);
-      if(!layer)throw Error('预览图层已改变');
-      if(layer.layers){const stack=Array.from(layer.layers);let count=0;while(stack.length){if(++count>512)return {available:false,reason:'图层组超过512层，未创建预览副本'};const child=stack.pop();if(child.layers)stack.push(...child.layers);}}
-      if(row.type==='adjustment')return {available:false,reason:'调整图层没有独立图像，请预览包含它的组'};
-      if(source.mode!==ps.constants.DocumentMode.RGB||source.bitsPerChannel!==ps.constants.BitsPerChannelType.EIGHT)
-        return {available:false,reason:'旧版兼容预览目前支持RGB／8位文档'};
-      if(source.width*source.height>64000000)return {available:false,reason:'文档超过6400万像素，未创建预览副本'};
-      let temporary=null,file=null,answer;
-      try {
-        const storage=require('uxp').storage,folder=await storage.localFileSystem.getTemporaryFolder();
-        file=await folder.createFile('menu-thumbnail-'+request.id+'.bmp',{overwrite:false});
-        temporary=await ps.app.createDocument({name:'Photoshop Menu Preview',width:source.width,height:source.height,resolution:source.resolution,
-          mode:ps.constants.NewDocumentMode.RGB,fill:ps.constants.DocumentFill.TRANSPARENT,depth:8,colorProfileName:source.colorProfileName});
-        await context.hostControl.registerAutoCloseDocument(temporary.id);
-        const copied=await layer.duplicate(temporary,ps.constants.ElementPlacement.PLACEATBEGINNING);
-        copied.visible=true;
-        // The owned blank raster layer gives fill-only groups renderable bounds.
-        await temporary.mergeVisibleLayers();
-        const bounds=temporary.activeLayers[0].bounds;
-        if(bounds.right<=bounds.left||bounds.bottom<=bounds.top)answer={available:false,reason:'图层没有可显示的像素'};
-        else {
-          await temporary.trim(ps.constants.TrimType.TRANSPARENT);
-          await temporary.flatten();
-          const factor=Math.min(1,128/Math.max(temporary.width,temporary.height));
-          await temporary.resizeImage(Math.max(1,Math.round(temporary.width*factor)),Math.max(1,Math.round(temporary.height*factor)));
-          await temporary.saveAs.bmp(file,{depth:ps.constants.BMPDepthType.TWENTYFOUR,alphaChannels:false,rleCompression:false},true);
-          const raw=await file.read({format:storage.formats.binary}),view=new DataView(raw);
-          if(raw.byteLength<54||raw.byteLength>128*128*4+4096||view.getUint16(0,true)!==0x4d42)throw Error('缩略图文件无效');
-          const start=view.getUint32(10,true),width=view.getInt32(18,true),signedHeight=view.getInt32(22,true),height=Math.abs(signedHeight);
-          const stride=Math.ceil(width*3/4)*4;
-          if(width<1||height<1||width>128||height>128||view.getUint16(28,true)!==24||view.getUint32(30,true)!==0||start<54||start+stride*height>raw.byteLength)throw Error('缩略图像素格式无效');
-          const pixels=[];
-          for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=start+(signedHeight>0?height-1-y:y)*stride+x*3;pixels.push(view.getUint8(i+2),view.getUint8(i+1),view.getUint8(i),255);}
-          answer={available:true,width,height,pixels,legacy:true};
-        }
-      } finally {
-        try {
-          if(temporary)await temporary.closeWithoutSaving();
-          await batch([{_obj:'select',_target:docRef(original.document_id),_options:{dialogOptions:'silent'}}]);
-          if(!same(await capture(),original)) {
-            const order=original.layer_ids.filter(id=>id!==original.active_layer_id).concat(original.active_layer_id);
-            for(let i=0;i<order.length;i++)await batch([{_obj:'select',_target:[{_ref:'layer',_id:order[i]}],makeVisible:false,
-              ...(i?{selectionModifier:{_enum:'selectionModifierType',_value:'addToSelection'}}:{}),_options:{dialogOptions:'silent'}}]);
-          }
-          if(!same(await capture(),original)||Array.from(ps.app.documents,d=>d.id).sort((a,b)=>a-b).join(',')!==ids||
-             source.activeHistoryState.id!==sourceState.history||Array.from(source.activeLayers,l=>l.id).join(',')!==sourceState.selection)throw Error('预览收尾未确认');
-        } catch(error){uncertain=true;throw error;}
-        finally {if(file)await file.delete();}
-      }
-      await preview(row,null,true);
-      return answer;
-    },{commandName:'图层缩略图',timeOut:0});}
-    catch(error){if(uncertain){const unknown=Error('预览临时文档或选择恢复待核对');unknown.resultUnknown=true;throw unknown;}throw error;}
-  }
   async function preview(row,checkpoint,verifyOnly=false) {
     if(!row||!Number.isSafeInteger(row.document_id)||row.document_id<=0||!Number.isSafeInteger(row.layer_id)||row.layer_id<=0||typeof row.name!=='string'||row.name.length>2000||typeof row.document_name!=='string'||row.document_name.length>2000||!types.includes(row.type)||!Number.isSafeInteger(row.parent_id)||!Number.isInteger(row.layer_kind))throw Error('预览目标无效，请重新搜索');
     if(!verifyOnly&&typeof ps.imaging?.getPixels!=='function')return {available:false,reason:'当前PS不支持图层像素预览'};
@@ -2238,7 +2167,7 @@ function createLayerSearch(ps,session,capture) {
       await verify();
       const [mode]=await batch([property('mode',docRef(row.document_id))],checkpoint);
       if(mode.mode?._value!=='RGBColor')return {available:false,reason:'当前仅支持RGB图层预览'};
-      if(row.type==='group' || row.type==='adjustment')return {available:false,fallback:true,reason:'该图层类型需要隔离合成预览'};
+      if(row.type==='group' || row.type==='adjustment')return {available:false,fallback:true,reason:'该图层类型不支持静默像素预览'};
       const [area]=await batch([{_obj:'get',_target:[{_ref:'property',_property:'boundsNoEffects'},{_ref:'layer',_id:row.layer_id},...docRef(row.document_id)],_options:{dialogOptions:'silent'}}],checkpoint);
       const bounds=area.boundsNoEffects,number=v=>typeof v==='number'?v:v?._value;
       const sourceWidth=number(bounds?.right)-number(bounds?.left),sourceHeight=number(bounds?.bottom)-number(bounds?.top);
@@ -2264,7 +2193,7 @@ function createLayerSearch(ps,session,capture) {
       return {available:true,width:w,height:h,pixels};
     } finally {image?.imageData?.dispose();}
   }
-  return {search,focus,preview,thumbnail};
+  return {search,focus,preview};
 }
 function createTextTools(ps,session,capture,readTree) {
   let snapshot=null,serial=0;

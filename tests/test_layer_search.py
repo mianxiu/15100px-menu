@@ -19,47 +19,41 @@ class LayerSearchTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):await search.preview({'search_id':'old','index':0})
 
 
-    async def test_legacy_preview_uses_durable_worker_and_cache_until_new_search(self):
-        app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
-            bridge=SimpleNamespace(status=AsyncMock(return_value={}),execute_thumbnail=AsyncMock(return_value={'available':True,'width':1,'height':1,'pixels':[1,2,3,255]}),busy=False),broadcast=AsyncMock())
+    async def test_preview_read_failure_never_dispatches_or_caches_a_fallback(self):
+        app=SimpleNamespace(bridge=SimpleNamespace(status=AsyncMock(return_value={'layer_preview_available':True}),execute_thumbnail=AsyncMock()),broadcast=AsyncMock())
         search=LayerSearch(app);search.available=Mock();search.valid_until=time.monotonic()+60
-        row={'layer_id':2};search.result={'search_id':'q','session':'s','items':[row]};guard=AsyncMock()
-        first=await search.preview({'search_id':'q','index':0},menu_guard=guard)
-        self.assertEqual(await search.preview({'search_id':'q','index':0},menu_guard=guard),first)
-        app.bridge.execute_thumbnail.assert_awaited_once_with('s',row,before_dispatch=guard)
-        guard.assert_awaited_once();app.desktop.focus_search_result.assert_not_called()
-        self.assertFalse(app.operation_lock.locked())
-        with patch.object(search,'_read',return_value={'search_id':'new','session':'s','items':[]}):await search.search({})
-        self.assertEqual(search.previews,{})
+        search.result={'search_id':'q','session':'s','items':[{'layer_id':2,'type':'pixel'}]}
+        for error in ('timeout','stale target','priority interrupted'):
+            with patch.object(search,'_read',side_effect=RuntimeError(error)):
+                with self.assertRaisesRegex(RuntimeError,error):await search.preview({'search_id':'q','index':0})
+            self.assertFalse(search.previews);app.bridge.execute_thumbnail.assert_not_awaited();app.broadcast.assert_not_awaited()
 
-    async def test_legacy_failure_is_not_cached_or_replayed_and_unknown_busy_remains(self):
-        app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
-            bridge=SimpleNamespace(status=AsyncMock(return_value={}),execute_thumbnail=AsyncMock(side_effect=RuntimeError('unknown')),busy=True),broadcast=AsyncMock())
+    async def test_legacy_capability_flag_and_unsupported_layer_never_trigger_export(self):
+        bridge=SimpleNamespace(status=AsyncMock(return_value={'layer_thumbnail_available':True}),execute_thumbnail=AsyncMock())
+        search=LayerSearch(SimpleNamespace(bridge=bridge));search.available=Mock();search.valid_until=time.monotonic()+60
+        row={'layer_id':2,'type':'pixel'};search.result={'search_id':'q','session':'s','items':[row]}
+        with patch.object(search,'_read') as read:
+            with self.assertRaisesRegex(RuntimeError,'不支持静默'):await search.preview({'search_id':'q','index':0})
+            bridge.status.return_value={'layer_preview_available':True}
+            for kind in ('group','adjustment'):
+                row['type']=kind;self.assertFalse((await search.preview({'search_id':'q','index':0}))['available'])
+            read.assert_not_called();bridge.execute_thumbnail.assert_not_awaited()
+
+    async def test_no_silent_capability_refuses_before_any_host_preview(self):
+        app=SimpleNamespace(bridge=SimpleNamespace(status=AsyncMock(return_value={}),execute_thumbnail=AsyncMock()))
         search=LayerSearch(app);search.available=Mock();search.valid_until=time.monotonic()+60
         search.result={'search_id':'q','session':'s','items':[{'layer_id':2}]}
-        with self.assertRaisesRegex(RuntimeError,'unknown'):await search.preview({'search_id':'q','index':0})
-        self.assertFalse(search.previews);self.assertFalse(app.operation_lock.locked())
-        app.broadcast.assert_awaited_with({'type':'operation','busy':True})
-        self.assertEqual(app.bridge.execute_thumbnail.await_count,1)
+        with patch.object(search,'_read') as read:
+            with self.assertRaisesRegex(RuntimeError,'不支持静默'):await search.preview({'search_id':'q','index':0})
+            read.assert_not_called();app.bridge.execute_thumbnail.assert_not_awaited()
 
-    async def test_modern_unsupported_falls_back_once_but_failed_reads_never_do(self):
-        for kind in ('pixel','group','adjustment'):
-            app=SimpleNamespace(operation_lock=asyncio.Lock(),broadcast=AsyncMock(),
-                bridge=SimpleNamespace(status=AsyncMock(return_value={'layer_preview_available':True}),busy=False,
-                    execute_thumbnail=AsyncMock(return_value={'available':True,'width':1,'height':1,'pixels':[1,2,3,255]})))
-            search=LayerSearch(app);search.available=Mock();search.valid_until=time.monotonic()+60
-            row={'layer_id':2,'type':kind};search.result={'search_id':'q','session':'s','items':[row]}
-            with patch.object(search,'_read',return_value={'available':False,'fallback':True,'reason':'unsupported'}) as read:
-                await search.preview({'search_id':'q','index':0})
-                self.assertEqual(read.call_count,1 if kind=='pixel' else 0)
-            app.bridge.execute_thumbnail.assert_awaited_once_with('s',row,before_dispatch=None)
-            self.assertFalse(app.operation_lock.locked())
-            if kind=='pixel':
-                for error in ('timeout','stale target','priority interrupted'):
-                    search.previews.clear();app.bridge.execute_thumbnail.reset_mock()
-                    with patch.object(search,'_read',side_effect=RuntimeError(error)):
-                        with self.assertRaisesRegex(RuntimeError,error):await search.preview({'search_id':'q','index':0})
-                    app.bridge.execute_thumbnail.assert_not_awaited();self.assertFalse(search.previews)
+    async def test_direct_read_unsupported_never_uses_legacy_document_copy(self):
+        app=SimpleNamespace(bridge=SimpleNamespace(status=AsyncMock(return_value={'layer_preview_available':True}),execute_thumbnail=AsyncMock()))
+        search=LayerSearch(app);search.available=Mock();search.valid_until=time.monotonic()+60
+        search.result={'search_id':'q','session':'s','items':[{'layer_id':2,'type':'pixel'}]}
+        with patch.object(search,'_read',return_value={'available':False,'fallback':True,'reason':'unsupported'}):
+            value=await search.preview({'search_id':'q','index':0})
+        self.assertFalse(value['available']);app.bridge.execute_thumbnail.assert_not_awaited()
 
     def test_query_validation(self):
         self.assertEqual(query_parameters({}),{'name':'','document':'','type':'all'})

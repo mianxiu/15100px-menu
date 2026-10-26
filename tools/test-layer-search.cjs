@@ -9,7 +9,7 @@ const ps={core:{executeAsModal:async fn=>fn({isCancelled:false})},action:{batchP
   if(c._obj==='get'){
     assert.equal(c._options.dialogOptions,'silent');
     if(!doc)return {_obj:'error'};
-    return {[ref[0]._property]:({documentID:doc.id,title:doc.title,numberOfLayers:doc.rows.length,hasBackgroundLayer:false,mode:{_value:'RGBColor'},boundsNoEffects:pixelBounds})[ref[0]._property]};
+    return {[ref[0]._property]:({documentID:doc.id,title:doc.title,numberOfLayers:doc.rows.length,hasBackgroundLayer:false,mode:{_value:'RGBColor'},boundsNoEffects:pixelBounds,bounds:pixelBounds})[ref[0]._property]};
   }
   if(c._obj==='multiGet'){
     assert.equal(c._options.dialogOptions,'silent');
@@ -67,36 +67,14 @@ const search=context.search,query={name:'重名',document:'',type:'all'};
   const limited=await search.search({...query,name:''});assert.equal(limited.items.length,500);assert.equal(limited.truncated,true);
 
   docs=[{id:1,title:'原稿.psd',rows:[row(11,'重名'),row(12,'重名',3)]}];activeDoc=1;selected=[11,12];active=12;
-  // The old-host path owns only its temporary document and file.
-  const bmp=new ArrayBuffer(62),bmpView=new DataView(bmp);
-  bmpView.setUint16(0,0x4d42,true);bmpView.setUint32(10,54,true);bmpView.setInt32(18,2,true);bmpView.setInt32(22,1,true);bmpView.setUint16(28,24,true);
-  new Uint8Array(bmp).set([0,0,255,0,255,0,0,0],54);
-  let removed=0,closed=0,created=0,failSave=false,failClose=false;
-  const sourceDoc={id:1,layers:[],activeLayers:[{id:11},{id:12}],activeHistoryState:{id:7},mode:'RGB',bitsPerChannel:8,width:2,height:1,resolution:72,colorProfileName:'sRGB'};
-  const sourceLayer={id:11,duplicate:async temp=>({visible:false,bounds:{left:0,top:0,right:2,bottom:1}})};sourceDoc.layers=[sourceLayer];
-  ps.constants={DocumentMode:{RGB:'RGB'},BitsPerChannelType:{EIGHT:8},NewDocumentMode:{RGB:'RGB'},DocumentFill:{TRANSPARENT:'transparent'},ElementPlacement:{PLACEATBEGINNING:'beginning'},TrimType:{TRANSPARENT:'transparent'},BMPDepthType:{TWENTYFOUR:24}};
-  const appDocs=[sourceDoc],file={read:async()=>bmp,delete:async()=>removed++};
-  ps.app={documents:appDocs,createDocument:async options=>{
-    assert.equal(options.width,2);assert.equal(options.depth,8);created++;activeDoc=900;
-    const temp={id:900,width:2,height:1,activeLayers:[{bounds:{left:0,top:0,right:2,bottom:1}}],mergeVisibleLayers:async()=>{},trim:async()=>{},flatten:async()=>{},resizeImage:async(w,h)=>{assert.equal(w,2);assert.equal(h,1);},
-      saveAs:{bmp:async(entry,options)=>{assert.equal(entry,file);assert.equal(options.depth,24);if(failSave)throw Error('save failed');}},
-      closeWithoutSaving:async()=>{if(failClose)throw Error('close failed');appDocs.splice(1);closed++;}};
-    appDocs.push(temp);return temp;
-  }};
-  context.require=()=>({storage:{formats:{binary:'binary'},localFileSystem:{getTemporaryFolder:async()=>({createFile:async()=>file})}}});
-  ps.core.executeAsModal=async fn=>fn({isCancelled:false,hostControl:{registerAutoCloseDocument:async id=>assert.equal(id,900)}});
-  const thumbnailRequest={id:'a'.repeat(32),target:await capture(),destination:result.items[0],expires_at_ms:Date.now()+5000};
-  const beforePreview=JSON.stringify(await capture());
-  const legacy=await search.thumbnail(thumbnailRequest);
-  assert.deepEqual(Array.from(legacy.pixels),[255,0,0,255,0,255,0,255]);assert.equal(legacy.legacy,true);
-  assert.equal(JSON.stringify(await capture()),beforePreview);assert.equal(appDocs.length,1);assert.equal(removed,1);assert.equal(closed,1);
-  failSave=true;await assert.rejects(search.thumbnail(thumbnailRequest),/save failed/);failSave=false;
-  assert.equal(appDocs.length,1);assert.equal(removed,2);assert.equal(closed,2);assert.equal(JSON.stringify(await capture()),beforePreview);
-  await assert.rejects(search.thumbnail({...thumbnailRequest,destination:{...result.items[0],name:'stale'}}),/已改变/);assert.equal(created,2);
-  failSave=failClose=true;await assert.rejects(search.thumbnail(thumbnailRequest),error=>error.resultUnknown===true);
-  assert.equal(created,3);assert.equal(removed,3);assert.equal(closed,2);
-  appDocs.splice(1);activeDoc=1;failSave=failClose=false;
-  console.log('Legacy thumbnail: RGB pixels, bounded BMP, temporary cleanup, original selection, stale refusal and cleanup unknown passed');
+  const beforeUnsupported=JSON.stringify(await capture()),writesBefore=writes;
+  ps.app={documents:[],createDocument:()=>assert.fail('Preview must never create a document')};
+  ps.imaging=undefined;
+  const unavailable=await search.preview(result.items[0]);assert.equal(unavailable.available,false);
+  assert.equal(typeof search.thumbnail,'undefined');assert.equal(writes,writesBefore);assert.equal(JSON.stringify(await capture()),beforeUnsupported);
+  assert(!source.slice(source.lastIndexOf('function createLayerSearch(')).includes('ps.app.createDocument'));
+  assert(!source.slice(source.lastIndexOf('function createLayerSearch(')).includes('exportSelectionAsFileTypePressed'));
+  console.log('Unavailable silent preview: no document, export, selection or fallback; direct imaging retained');
   console.log('Layer search: name/file/type, native chunks, limits, yield, stale, cross-document, rollback and unknown passed');
   const worker=fs.readFileSync('uxp/offline-probe/main.js','utf8'),files=new Map(),id='a'.repeat(32);
   let calls=0;
