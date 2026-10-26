@@ -48,7 +48,7 @@ static LRESULT state(HWND focus) {
     DWORD pid=0;
     if(focus && (GetWindowThreadProcessId(focus,&pid)!=GetCurrentThreadId() || pid!=GetCurrentProcessId()))return 9;
     return 1 | (disabledWindow?2:0) | (!disabledWindow && focus && (associated(focus) || InputContextTsf::available())?4:0) |
-        (restoreFailed?8:0) | (restored?16:0) | (tsf.keyboard?32:0);
+        (restoreFailed?8:0) | (restored?16:0) | (tsf.keyboard && tsf.currentDisabled()?32:0);
 }
 static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM lParam) {
     if(message==controlMessage && (wParam>>8)==nonce) {
@@ -56,6 +56,7 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
         if(operation==3){restore();return state(focus);}
         if(operation==1)return state(focus);
         if(operation==4){
+            if(disabledWindow && (associated(disabledWindow) || !tsf.currentDisabled()))restore();
             if(disabledWindow==focus && foreground() && ownFocus(focus))deadline=GetTickCount64()+1500;
             return state(focus);
         }
@@ -63,18 +64,20 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
             GUITHREADINFO info{};info.cbSize=sizeof(info);
             if(disabledWindow || !foreground() || !ownFocus(focus) || !GetGUIThreadInfo(0,&info) || info.hwndCaret || info.hwndCapture || info.hwndMenuOwner || info.hwndMoveSize)return state(focus)|8;
             const auto context=associated(focus);
-            if(!context && !InputContextTsf::available())return state(focus);
+            if(!context && !InputContextTsf::available())return state(focus)|8;
             if(context && ImmGetCompositionStringW(context,GCS_COMPSTR,nullptr,0)>0)return state(focus)|8;
             restored=false;originalContext=context;disabledWindow=focus;deadline=GetTickCount64()+1500;
             changing=true;const bool tsfDisabled=tsf.start();const auto previous=ImmAssociateContext(focus,nullptr);changing=false;
-            if(!tsfDisabled || previous!=context || associated(focus) || !ownFocus(focus)){restore();return state(focus)|8;}
-            return state(focus);
+            if(!tsfDisabled || previous!=context || associated(focus) || !tsf.currentDisabled() || !ownFocus(focus)){restore();return state(focus)|8;}
+            const auto status=state(focus);
+            return status&2?status:status|8;
         }
         return state(focus)|8;
     }
     if(message==WM_TIMER) {
         const bool exited=!owner || WaitForSingleObject(owner,0)!=WAIT_TIMEOUT;
         if(disabledWindow && (exited || !foreground() || GetFocus()!=disabledWindow || GetTickCount64()>deadline))restore();
+        if(disabledWindow && (associated(disabledWindow) || !tsf.currentDisabled()))restore();
         if(exited && !disabledWindow)DestroyWindow(window);
         return 0;
     }
@@ -96,7 +99,7 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK InputContextHook(int code,WPAR
         if(!attachMessage){attachMessage=RegisterWindowMessageW(L"PhotoshopMenu.InputContext.Attach.v1");controlMessage=RegisterWindowMessageW(L"PhotoshopMenu.InputContext.Control.v1");}
         const auto& event=*reinterpret_cast<CWPSTRUCT*>(lParam);
         if(!changing && disabledWindow && event.hwnd!=control &&
-            (event.message==WM_KILLFOCUS || event.message==WM_LBUTTONDOWN || event.message==WM_LBUTTONDBLCLK || event.message==WM_RBUTTONDOWN ||
+            (event.message==WM_KILLFOCUS || event.message==WM_INPUTLANGCHANGE || event.message==WM_LBUTTONDOWN || event.message==WM_LBUTTONDBLCLK || event.message==WM_RBUTTONDOWN ||
              (event.message==WM_ACTIVATEAPP && !event.wParam) ||
              (event.message==WM_KEYDOWN && (event.wParam=='T' || event.wParam==VK_RETURN || event.wParam==VK_F2))))restore();
         if(event.message==attachMessage && event.wParam && event.lParam>0) {

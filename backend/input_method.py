@@ -17,13 +17,13 @@ def ime_target(value):
 
 class ImePolicy:
     def __init__(self):
-        self.owned=None;self.pending=None;self.attempted=None;self.manual=None
+        self.owned=None;self.pending=None;self.attempted=None
         self.state='unknown';self.confirmed_disables=0;self.confirmed_restores=0
 
     def step(self,sample,intent,now):
         self.state=sample.get('state','unknown')
         if not sample.get('ime') or type(sample.get('ime_open')) is not int:return
-        if self.state=='input':self.manual=None;self.attempted=None
+        if self.state=='input':self.attempted=None
         if self.pending:
             request=self.pending
             if ime_target(sample)!=ime_target(request):return
@@ -40,16 +40,15 @@ class ImePolicy:
             if ime_target(sample)!=ime_target(self.owned):return
             if sample['ime_open']!=0:
                 self.owned=None
+                self.attempted=None
                 if sample.get('native_restored'):
-                    self.confirmed_restores+=1;self.manual=None;self.attempted=None
-                    if self.state=='non-input' and intent is not None:
-                        self.attempted=intent;return self.request(sample,True,now)
-                    return
-                if self.state!='input':self.manual=ime_target(sample);self.state='manual-change'
+                    self.confirmed_restores+=1
+                if self.state=='non-input' and intent is not None:
+                    self.attempted=intent;return self.request(sample,True,now)
                 return
             if self.state!='non-input':return self.request(sample,False,now)
         elif (intent is not None and intent!=self.attempted and self.state=='non-input' and
-              sample['ime_open']==1 and ime_target(sample)!=self.manual):
+              sample['ime_open']==1):
             self.attempted=intent
             return self.request(sample,True,now)
 
@@ -211,14 +210,14 @@ class InputMethod(InputLanguage):
                     blocked=mouse or sample.get('blocked') or self.desktop.visible or self.busy() or not self.desktop.settings['enabled'] or old_context
                     if bool(blocked)!=blocked_before:episode+=1;blocked_before=bool(blocked)
                     if blocked:examined=None;tool=None
-                    row=sample.get('accessibility',{});context=(scope,sample.get('focus'),serial)
+                    row=sample.get('accessibility',{});context=(scope,sample.get('focus'),serial,sample.get('layout'))
                     needs_tool=(sample.get('workspace') and sample.get('state')=='unknown' and control_state(row,sample.get('pid'))!='input' and
                                 (row.get(30003) in CONTAINERS or protected or self.accessibility is None))
                     reconcile=getattr(self.desktop,'input_language_reconcile',None)
                     if needs_tool and context==examined and tool is None and not blocked and reconcile and reconcile():examined=None
                     if needs_tool and context!=examined and not blocked:
                         examined=context;tool=self.read_tool();sample=self.sample()
-                    same=(tuple(sample.get('identity',[])),sample.get('focus'),self.snapshot()[0])==context
+                    same=(tuple(sample.get('identity',[])),sample.get('focus'),self.snapshot()[0],sample.get('layout'))==context
                     evidence=tool if same and examined==context else None
                     if sample.get('root'):
                         protected=protected and not (isinstance(evidence,dict) and evidence.get('isModal') is False)
@@ -227,8 +226,10 @@ class InputMethod(InputLanguage):
                         sample=self.ime.read(sample)
                     elif self.policy.owned or self.policy.pending:
                         sample=self.ime.observe_owned(self.policy.pending or self.policy.owned)
-                    if self.policy.owned and not self.policy.pending and sample.get('identity')==self.policy.owned['identity'] and sample.get('layout')!=self.policy.owned['layout']:
-                        self.retire(path,'manual-keyboard-layout-change');self.policy.manual=ime_target(sample)
+                    if (self.policy.owned and not self.policy.pending and sample.get('identity')==self.policy.owned['identity'] and
+                            sample.get('layout')!=self.policy.owned['layout'] and sample.get('ime_open')==1 and
+                            (self.context_schema==1 or sample.get('native_restored'))):
+                        self.retire(path,'confirmed-keyboard-layout-change')
                     if self.policy.owned and not self.policy.pending and sample.get('identity')==self.policy.owned['identity'] and sample.get('ime') and sample['ime']!=self.policy.owned['ime']:
                         self.retire(path,'original-ime-window-ended')
                     eligible=same and not blocked and sample.get('state')=='non-input' and sample.get('ime') is not None
@@ -269,7 +270,7 @@ class InputMethod(InputLanguage):
                     if old_context and not self.policy.owned and not self.policy.pending:
                         self.ime=NativeImeContext(self.user);self.context_schema=2;old_context=False;examined=None
                         self.report['mechanism']='ps-thread-context-association'
-                except Exception as error:self.report.update(state='unknown',error_type=type(error).__name__)
+                except Exception as error:self.report.update(state='unknown',error_type=type(error).__name__,native_error_code=getattr(error,'winerror',None))
         finally:
             if self.ime and (self.policy.owned or self.policy.pending):
                 try:

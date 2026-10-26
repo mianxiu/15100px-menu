@@ -1,10 +1,19 @@
+import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock,patch
 from backend.input_context import NativeImeContext
 
 
 class NativeContextTransportTests(unittest.TestCase):
+    def test_native_profile_command_has_bounded_cold_start_budget(self):
+        value=NativeImeContext.__new__(NativeImeContext)
+        value.user=SimpleNamespace(GetPropW=Mock(return_value=123));value.message=99
+        send=Mock(return_value=(1,35))
+        with patch.dict(sys.modules,{'win32gui':SimpleNamespace(SendMessageTimeout=send)}):
+            self.assertEqual(value.command(7,2,8),35)
+        send.assert_called_once_with(7,99,(123<<8)|2,8,2,1000)
+
     def context(self):
         value=NativeImeContext.__new__(NativeImeContext)
         value.user=SimpleNamespace(GetPropW=Mock(return_value=123));value.command=Mock(return_value=3)

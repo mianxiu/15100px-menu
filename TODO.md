@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 270代码／测试／构建／实际入口：手动重开中文不再持续停用非输入保护；PS布局变化重新读取工具，当前TSF上下文／实际禁用值与IMM关联均核验，暂时无TSF焦点时保留原值保护，真正新上下文不沿用旧指针。666项低CPU完整回归、27项输入专项、原生菜单矩阵、原生IMM／TSF低CPU与正常夹具及冻结启动／重启通过。实际270／UXP75、PS内加载DLL与最终构建一致；PS24.0.1低CPU35→21→35、查找输入21及HKL不变通过，原稿／配置／资源保持。共享应答上限200→1000ms，不增加固定等待；首条未确认原生IME请求按全局授权完整归档、最新分层备份及原进程正常退出后才释放槽位，仍为未知、不重发／不记成功。证据.runtime/runtime270-verified.json、input270-native-tsf-low.log、input270-native-tsf-normal.log、eng270-tsf-foreground-refused.json、recovery270ime与tests270-final-low.log。
+- [ ] 270普通CPU的PS重新保护后半段、实体切中文后A／拼音候选／快速输入仍待验：原生夹具正常配置通过，但PS普通组在原生恢复21后焦点切离而暂停，未计正向通过；Computer Use两次相同窗口归属错误，没有发送按键。后续短批次继续按PS真实前台条件，不绕过产品保护。切换后的极快首键仍有异步竞争边界；无实体延迟基线，不声明性能提升。升级270需保存文档并正常重启PS，不能仅重启后台或只核对UXP75。
+
 - [x] 269已公开交付：源码7d515ba与v0.4.269标签已推送；统一ZIP／SHA和Latest清单匿名下载校验通过，核验后GitHub与dist只保留269发行物，旧标签／源码／配置／诊断保持。Wiki d2344c0已同步，39页／236链接及10个主要远端页面、图片和README通过，源码／标签GitHub UI contract两次成功。实际269／UXP75最终空闲、组件／配置／旧未知及两份原稿内容核验通过。证据.runtime/release-0.4.269-public-verification.json、manifest269-verification.json、release269-cleanup.json、dist269-cleanup.json、wiki269-public-verification.json和originals269-verified.json。
 
 - [x] 269代码／测试／构建／实际入口：复现CMYK转RGB后纯色层保留浮点RGB而缺少入口，按原生取样校准显示，未改色保留原始描述；组缩略图隔离合成后读边界，现代接口明确不支持才回退；新增标签边界细分25.2，宿主色表有限重读／小数／同进程多窗口与来源标记。实际269／UXP75组件一致，664项最终低CPU回归、原生完整矩阵、冻结启动／重启通过。PS24.0.1低CPU／正常完成转换纯色编辑与一次撤销、14张图片、10次缓存零宿主请求及16次旧标签写入／一次撤销，原稿／配置／资源保持。证据.runtime/runtime269-verified.json、fill269-api.json、fill269-float-calibration.json、thumbnail269-base.json、thumbnail269-extra.json、originals269-verified.json和tests269-final-low.log；初版不支持浮点的复现、夹具Make／转换命令失败、20步历史容量断言失败均保留，修正夹具后独立新事务复验，不重发未知。

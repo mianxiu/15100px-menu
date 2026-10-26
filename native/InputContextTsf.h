@@ -3,6 +3,7 @@
 #include <oleauto.h>
 
 struct InputContextTsf {
+    ITfContext* context=nullptr;
     ITfThreadMgr* thread=nullptr;
     ITfCompartmentMgr* compartments=nullptr;
     ITfCompartment* keyboard=nullptr;
@@ -26,10 +27,22 @@ struct InputContextTsf {
         if(!keyboard)return true;
         VARIANT value{};const bool ok=SUCCEEDED(keyboard->GetValue(&value)) && value.vt==VT_I4 && value.lVal==1;VariantClear(&value);return ok;
     }
+    bool currentDisabled()const {
+        auto focused=current();
+        if(!context){if(focused)focused->Release();return focused==nullptr;}
+        IUnknown *expected=nullptr,*actual=nullptr;
+        // Detaching IMM can temporarily remove TSF focus; keep the verified original disabled until focus returns or changes.
+        const bool same=!focused || (SUCCEEDED(context->QueryInterface(IID_IUnknown,reinterpret_cast<void**>(&expected))) &&
+            SUCCEEDED(focused->QueryInterface(IID_IUnknown,reinterpret_cast<void**>(&actual))) && expected==actual);
+        if(expected)expected->Release();
+        if(actual)actual->Release();
+        if(focused)focused->Release();
+        return same && disabled();
+    }
     bool start() {
-        const auto context=current(&thread);
+        context=current(&thread);
         if(!context){if(thread){thread->Release();thread=nullptr;}return true;}
-        const auto queried=context->QueryInterface(IID_ITfCompartmentMgr,reinterpret_cast<void**>(&compartments));context->Release();
+        const auto queried=context->QueryInterface(IID_ITfCompartmentMgr,reinterpret_cast<void**>(&compartments));
         if(FAILED(queried) || FAILED(compartments->GetCompartment(GUID_COMPARTMENT_KEYBOARD_DISABLED,&keyboard)) ||
            FAILED(keyboard->GetValue(&original)) || (original.vt!=VT_EMPTY && original.vt!=VT_I4) || FAILED(thread->Activate(&client)))return false;
         activated=true;VARIANT value{};value.vt=VT_I4;value.lVal=1;changed=true;
@@ -55,6 +68,7 @@ struct InputContextTsf {
         if(keyboard)keyboard->Release();
         if(compartments)compartments->Release();
         if(thread)thread->Release();
-        keyboard=nullptr;compartments=nullptr;thread=nullptr;VariantClear(&original);client=0;return true;
+        if(context)context->Release();
+        keyboard=nullptr;compartments=nullptr;thread=nullptr;context=nullptr;VariantClear(&original);client=0;return true;
     }
 };

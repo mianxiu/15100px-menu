@@ -47,12 +47,11 @@ class ImePolicyTests(unittest.TestCase):
             self.assertIsNone(p.step({**sample('outside',0),field:value},None,.2))
         self.assertEqual(p.step(sample('outside',0),None,.3)['ime'],20)
 
-    def test_manual_open_is_respected_until_a_real_input_cycle(self):
+    def test_manual_reopen_rearms_non_input_without_waiting_for_an_edit_cycle(self):
         p=ImePolicy();p.step(sample(),7,0);p.step(sample(opened=0),7,.1)
-        p.step(sample(),8,.2);self.assertIsNone(p.owned)
-        self.assertIsNone(p.step(sample(),9,.3))
-        p.step(sample('input'),None,.4)
-        self.assertIsNotNone(p.step(sample(),10,.5))
+        request=p.step(sample(),7,.2)
+        self.assertEqual(request['wanted'],0);self.assertEqual(p.pending,request)
+        self.assertIsNone(p.step(sample(),8,2));self.assertEqual(p.state,'request-not-confirmed')
 
     def test_ps_reopening_ime_for_input_is_not_a_manual_override(self):
         p=ImePolicy();p.step(sample(),7,0);p.step(sample(opened=0),7,.1)
@@ -62,7 +61,7 @@ class ImePolicyTests(unittest.TestCase):
     def test_native_input_restore_does_not_permanently_disable_eng_as_manual_change(self):
         p=ImePolicy();p.step(sample(),7,0);p.step(sample(opened=0),7,.1)
         request=p.step({**sample(),'native_restored':True},8,.2)
-        self.assertEqual(request['wanted'],0);self.assertIsNone(p.manual)
+        self.assertEqual(request['wanted'],0)
         self.assertEqual(p.confirmed_restores,1)
 
 
@@ -143,13 +142,13 @@ class ImeWorkerTests(unittest.TestCase):
         self.desktop=SimpleNamespace(runtime=Path(temp.name),visible=False,settings={'enabled':True},stop=threading.Event(),input_language_busy=lambda:False,input_language_tool=lambda:{'classID':'moveTool','isModal':False})
         if tool is not None:self.desktop.input_language_tool=tool
         if reconcile is not None:self.desktop.input_language_reconcile=reconcile
-        self.c=InputMethod(self.desktop);self.opened=1;self.kind=50033;self.outside=False;self.posts=[]
+        self.c=InputMethod(self.desktop);self.layout=0x8040804;self.native_restored=False;self.opened=1;self.kind=50033;self.outside=False;self.posts=[]
         if legacy is not None:(self.desktop.runtime/'input-language-owned.json').write_text(json.dumps(legacy),'utf-8')
         def observe():
             if self.outside:return {'state':'outside'}
-            return {**sample(), 'state':'unknown','workspace':True,'pid':2,'class':'PSViewC','accessibility':legacy_tests.FocusAccessibilityTests().row(self.kind)}
+            return {**sample(), 'layout':self.layout,'state':'unknown','workspace':True,'pid':2,'class':'PSViewC','accessibility':legacy_tests.FocusAccessibilityTests().row(self.kind)}
         self.c.sample=observe
-        def read(value):return {**value,'ime':20,'ime_open':self.opened}
+        def read(value):return {**value,'layout':self.layout,'ime':20,'ime_open':self.opened,'native_restored':self.native_restored}
         def send(value):
             self.posts.append(value['wanted'])
             if acknowledge:self.opened=value['wanted']
@@ -174,6 +173,17 @@ class ImeWorkerTests(unittest.TestCase):
         self.outside=False;self.c.activity();self.wait(lambda:self.c.policy.confirmed_disables==3)
         self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2)
         self.assertEqual(self.posts[-2:],[0,1]);self.assertIsNone(self.c.policy.pending)
+
+    def test_manual_layout_change_rechecks_tool_and_rearms_confirmed_native_restore(self):
+        provider=Mock(return_value={'classID':'moveTool','isModal':False})
+        self.start(tool=provider);self.wait(lambda:self.c.policy.confirmed_disables==1)
+        calls=provider.call_count
+        self.layout=0x4090409;self.native_restored=True;self.opened=1;self.c.wake.set()
+        self.wait(lambda:self.c.policy.confirmed_disables==2)
+        self.assertGreater(provider.call_count,calls);self.assertEqual(self.posts,[0,0])
+        self.assertEqual(self.c.policy.owned['layout'],self.layout)
+        self.assertIsNone(self.c.policy.pending);self.user.PostMessageW.assert_not_called()
+        self.kind=50004;self.c.activity();self.wait(lambda:self.posts==[0,0,1])
 
     def test_unknown_close_is_not_retried_even_during_shutdown(self):
         self.start(acknowledge=False);self.wait(lambda:len(self.posts)==1)

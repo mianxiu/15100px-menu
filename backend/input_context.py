@@ -49,7 +49,7 @@ class NativeImeContext:
         import win32gui
         nonce=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Nonce.v1')
         if not nonce:raise RuntimeError('PS输入保护身份已失效')
-        return win32gui.SendMessageTimeout(window,self.message,(nonce<<8)|operation,focus,2,200)[1]
+        return win32gui.SendMessageTimeout(window,self.message,(nonce<<8)|operation,focus,2,1000)[1]
 
     def read(self,sample):
         value={**sample,'ime':None,'ime_open':None}

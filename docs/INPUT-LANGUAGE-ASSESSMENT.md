@@ -1,5 +1,20 @@
 # PS 临时 IME：当前实现、验证范围及历史评估
 
+## 270：手动切中文后的重新保护
+
+269中仍有两处缺口：策略把手动重新开启IME记为持续让行，直到下一轮真实输入；原生租约只持有旧TSF compartment指针，输入法切换后当前上下文或实际KEYBOARD_DISABLED值可能已改变。用户2026-10-26明确要求手动选中文后仍保护PS快捷键，此处保留用户选择的HKL／输入法，取消“直到下一轮编辑都停用保护”的规则。
+
+非输入区域在确认原保护已恢复后重新核验当前状态并建立独立新租约。布局变化时重新读取工具状态；仍未确认的原生请求不清除、不重发。原生保留当前ITfContext的COM身份，检查实际禁用值；IMM重新关联、TSF值被重置或上下文更换时，续约／看门狗恢复旧租约，后台重新核验。状态查询只读，不在诊断中执行恢复；当前存在活动TSF上下文时必须匹配COM身份；解除IMM关联后，PS可能暂时没有活动TSF上下文，此时仍保留并读取原TSF的禁用值，不能丢掉这一层保护。新上下文出现或禁用值被重置时才结束旧租约并重新核验。WM_INPUTLANGCHANGE也触发原上下文恢复，但不能仅依赖它，因为[微软明确说明IME配置变化不一定发送该消息](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-inputlangchange)。
+
+进入文字／重命名／数值／查找输入、未知、失焦、暂停或租约过期时继续恢复，只操作自己持有的PS上下文。新组件在原PS进程退出前被固定，更新需保存最新分层备份、正常重启PS；不强制结束进程或切英文布局。
+
+666项低CPU完整回归和27项输入专项通过；原生低CPU／正常夹具覆盖真实IMM重新关联、真实TSF值重置、同一HWND更换TSF上下文、语言变化通知、原值恢复、无关新上下文保持、nonce、输入／失焦及超时。初版时序／焦点夹具失败与逐命令追踪保留，正式夹具通过AssociateFocus绑定真实窗口与TSF文档，未绕过产品前台条件。最终原生查询保持只读。证据.runtime/input270-native-tsf-low.log、input270-native-tsf-normal.log、input270-trace/test.log、tests270-final-low.log。
+
+低CPU第一次PS原生命令未取得可信确认，保留未知；将共享命令应答上限从200ms改为1000ms，不添加固定等待，收到即返回。补充原生错误码诊断；新启动中观察到1460读超时但没有修改pending，不能把读超时当作修改成功。旧修改未知依用户全局授权归档，保存最新分层副本、正常退出服务／PS并用原进程句柄确认退出后才释放槽位；原请求未重发、未记成功或恢复。未完成测试的空白自建文档也保留了备份与仅跳过恢复它的审计，原稿已恢复。证据.runtime/recovery270ime/ime-unknown-normal-exit、owned-fixture-audit.json、eng270-new-startup-status.json。原200ms请求没有可比成功完成时间，不计算提速率。
+
+Computer Use刷新返回的PS窗口后仍连续两次报“window id ... no longer belongs to ...; current owner is ...”，两处owner文本相同；没有发送按键，未把接口状态读回当作实体中文切换／首字母验收。初始自建文档未经编辑已关闭，原稿保留，见.runtime/eng270-baseline-target.json。异步识别仍有首键竞争边界；本轮是恢复保护的功能修复，没有可比实体按键延迟基线，不声明提速。实际270／UXP75和PS中加载的DLL哈希已核验一致。PS24.0.1低CPU真实35（IMM和TSF均保护）→21（恢复）→35（无需按键或编辑即重新保护）、查找面板打开恢复21、中文HKL0x08040804不变通过，原稿／配置／资源保持。初次IMM先解绑使实际PS只返回3的报告保留；改为先保存并禁用TSF、再解绑IMM，合法暂时无TSF焦点时继续检查原值，最终低CPU35通过。普通组已取得35和恢复21，但随后真实焦点离开PS而停验，未记为重新保护通过；额外菜单关闭后焦点切离也未计通过，没有连续抢焦点。证据.runtime/runtime270-verified.json、eng270-tsf-foreground-refused.json、eng270-imm-only-before.json、eng270-low-after-close-foreground-refused.json和eng270-low-live.json。
+
+
 ## 264：PS线程内禁用输入上下文
 
 用户再次提供了快捷键触发中文候选栏的截图。261只有默认IME窗口的开关控制；264改为当前PS线程内的原生辅助组件，临时解除窗口IMM关联，并对当前TSF编辑上下文设置KEYBOARD_DISABLED。原键盘布局、输入法配置和转换模式不切换。组件只在经过进程、线程、焦点、UIA和工具状态核验后启用，不在低级键盘钩子里做PS查询。
