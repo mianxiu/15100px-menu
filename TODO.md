@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 271代码／测试／构建／实际入口：F查找的输入焦点圈和类型选中底色改用共享中性色，当前筛选细下划线，保留蓝色hover与键盘导航。667项低CPU回归、原生显示／焦点／输入／取消矩阵、四主题三档字号6张渲染及冻结启动／重启通过；实际271／UXP75、运行菜单／热键／嵌入资源一致。PS24低CPU／正常只读查找各一组，原文档／历史／资源保持，未新建文档或重启PS。实体输入／PS实屏仍待验；首轮渲染错误入口未计入，首轮验收记录落盘夹具错误及一次UXP短暂重连的启动拒绝保留，独立重验通过。证据.runtime/runtime271-verified.json、search271-live.json、search271-final-preview、tests271-final-low.log和native271-low-output.log。
+- [ ] 271公开交付：待源码／标签、Wiki、Release与匿名下载校验；不以本机更新替代公开发布。
+
 - [x] 270补充颜色模式覆盖核验：原269／UXP75共用浮点RGB修复无需新增代码；实际270／PS24.0.1低CPU／正常各RGB对照、CMYK／Lab／灰度转RGB，8／16位共16组，读取／原生取样校准／不改色原始描述保持／改色一次撤销／组结构通过，原稿、配置及资源保持，实际EXE仍与已发布270一致。首轮取样器历史及Lab无ColorProfileName夹具失败保留。证据.runtime/colors270-mode-coverage-verified.json、colors271-converted-baseline.json与colors271-converted-rest.json；文件名271仅为实验编号，不代表发布271。
 - [ ] 原CMYK／Lab／灰度文档直接使用自定义颜色面板：当前仍限RGB8／16位；需保持原模式、ICC及色域往返校验后再开放，不将应用工作空间转换冒充嵌入ICC。自定义ICC、32位／HDR及位图／索引／多通道不在本次16组通过范围。
 

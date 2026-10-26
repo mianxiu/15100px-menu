@@ -65,6 +65,17 @@ class MenuUiContractTests(unittest.TestCase):
         for shared in ('surface','outline','segment'):
             self.assertIn('MenuControls::'+shared,caps)
 
+    def test_search_uses_shared_neutral_emphasis_without_disabling_input_navigation(self):
+        controls=(ROOT/'native/MenuControls.h').read_text('utf-8')
+        panel=(ROOT/'native/MenuToolsPanel.h').read_text('utf-8')
+        self.assertIn('enum class Emphasis {Accent,Neutral}',controls)
+        self.assertIn('Emphasis emphasis=Emphasis::Accent',controls)
+        self.assertIn('ImGui::GetStyleColorVec4(ImGuiCol_Border)',controls)
+        self.assertIn('hovered?Emphasis::Accent:emphasis',controls)
+        self.assertIn('"##layer","搜索图层…",name,sizeof(name),MenuControls::Emphasis::Neutral',panel)
+        self.assertIn('"##types",kinds,kind,scale,MenuControls::Emphasis::Neutral',panel)
+        self.assertNotIn('SetNavCursorVisible(false)',panel)
+
     def test_shared_controls_keep_ps_tokens_and_keyboard_navigation(self):
         source=(ROOT/'native/MenuControls.h').read_text('utf-8')
         self.assertNotRegex(source,r'IM_COL32\(|ImVec4\(')

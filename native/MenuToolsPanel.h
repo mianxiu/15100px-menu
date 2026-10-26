@@ -160,12 +160,12 @@ struct MenuToolsPanel {
         if(mode=="search") {
             if(focus){ImGui::SetKeyboardFocusHere();focus=false;}
             ImGui::PushID(int(menuEpoch));
-            const bool enter=MenuControls::input("##layer","搜索图层…",name,sizeof(name));
+            const bool enter=MenuControls::input("##layer","搜索图层…",name,sizeof(name),MenuControls::Emphasis::Neutral);
             ImGui::PopID();
             if(ImGui::IsItemEdited())changeSearch(ImGui::GetTime());
                 const char* ids[]={"all","pixel","text","group","shape","smart-object","adjustment","fill","other"};
             const int icons[]={7,35,36,2,37,38,6,1,40};
-            if(MenuControls::segments("##types",kinds,kind,scale))changeSearch(ImGui::GetTime()-.18);
+            if(MenuControls::segments("##types",kinds,kind,scale,MenuControls::Emphasis::Neutral))changeSearch(ImGui::GetTime()-.18);
             if(enter && !pending)changeSearch(ImGui::GetTime()-.18);
             if(available && searchDue(ImGui::GetTime())) {
                 searchDirty=false;submit("layers.search",Json{{"name",name},{"type",ids[kind]}});
