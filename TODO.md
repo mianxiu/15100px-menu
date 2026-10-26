@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 270补充颜色模式覆盖核验：原269／UXP75共用浮点RGB修复无需新增代码；实际270／PS24.0.1低CPU／正常各RGB对照、CMYK／Lab／灰度转RGB，8／16位共16组，读取／原生取样校准／不改色原始描述保持／改色一次撤销／组结构通过，原稿、配置及资源保持，实际EXE仍与已发布270一致。首轮取样器历史及Lab无ColorProfileName夹具失败保留。证据.runtime/colors270-mode-coverage-verified.json、colors271-converted-baseline.json与colors271-converted-rest.json；文件名271仅为实验编号，不代表发布271。
+- [ ] 原CMYK／Lab／灰度文档直接使用自定义颜色面板：当前仍限RGB8／16位；需保持原模式、ICC及色域往返校验后再开放，不将应用工作空间转换冒充嵌入ICC。自定义ICC、32位／HDR及位图／索引／多通道不在本次16组通过范围。
+
 - [x] 270已公开交付：源码1f7e906与v0.4.270标签已推送；统一ZIP／SHA和Latest清单匿名下载校验通过，随后GitHub与dist仅保留270发行物，旧标签／源码／配置／诊断保持。Wiki b8ca31d已同步，39页／236链接、11个主要远端页面、图片和README通过；源码／标签GitHub UI contract两次成功。本机实际270／UXP75及PS已加载DLL核验一致，无当前pending；低CPU PS接口循环通过，普通组后半段与实体中文首键继续保留待验。证据.runtime/release-0.4.270-public-verification.json、manifest270-verification.json、release270-cleanup.json、dist270-cleanup.json、wiki270-public-verification.json和runtime270-verified.json。
 
 - [x] 270代码／测试／构建／实际入口：手动重开中文不再持续停用非输入保护；PS布局变化重新读取工具，当前TSF上下文／实际禁用值与IMM关联均核验，暂时无TSF焦点时保留原值保护，真正新上下文不沿用旧指针。666项低CPU完整回归、27项输入专项、原生菜单矩阵、原生IMM／TSF低CPU与正常夹具及冻结启动／重启通过。实际270／UXP75、PS内加载DLL与最终构建一致；PS24.0.1低CPU35→21→35、查找输入21及HKL不变通过，原稿／配置／资源保持。共享应答上限200→1000ms，不增加固定等待；首条未确认原生IME请求按全局授权完整归档、最新分层备份及原进程正常退出后才释放槽位，仍为未知、不重发／不记成功。证据.runtime/runtime270-verified.json、input270-native-tsf-low.log、input270-native-tsf-normal.log、eng270-tsf-foreground-refused.json、recovery270ime与tests270-final-low.log。
