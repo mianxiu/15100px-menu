@@ -365,7 +365,7 @@ module.exports = function createLabels(ps, session, options={}) {
     const quickIndex=quickCommands.indexOf(command);
     if (!['label','select','moveToTop','moveToBottom'].includes(command) && quickIndex<0) throw Error('Unknown command');
     if (command === 'label' && !colors.has(request.color)) throw Error('Unknown label color');
-    if(command==='label' && ['seafoam','indigo','magenta','fuchsia'].includes(request.color) && !(parseInt(ps.app.version,10)>=25))throw Error('此标签颜色需要Photoshop2024或更新版本');
+    if(command==='label' && ['seafoam','indigo','magenta','fuchsia'].includes(request.color) && !extendedLabelColors(ps.app.version))throw Error('此标签颜色需要Photoshop25.2或更新版本');
     const expected = request.target;
     if (!expected || expected.session !== session) throw Error('Plugin session changed');
     const started=Date.now(),timings={};
@@ -1021,7 +1021,14 @@ function createShapePaint(ps,session,capture,selectionContext,legacyPreview=fals
   // and array order while ignoring object insertion order across IPC.
   const valueKey=value=>JSON.stringify(value,(_,v)=>v && !Array.isArray(v) && typeof v==='object'?
     Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])):v);
-  const rgb=color=>color?._obj==='RGBColor'?[color.red,color.grain??color.green,color.blue].map(v=>Math.round(Number(v))):null;
+  const rgb=color=>{
+    if(color?._obj!=='RGBColor')return null;
+    // Converted fills can retain normalized, out-of-gamut RGB; clamp only the menu value, preserving the raw descriptor.
+    const floating=['redFloat','greenFloat','blueFloat'].some(key=>Object.prototype.hasOwnProperty.call(color,key));
+    const values=floating?[color.redFloat,color.greenFloat,color.blueFloat]:[color.red,color.grain??color.green,color.blue];
+    return values.every(v=>typeof v==='number' && Number.isFinite(v) && (floating || v>=0 && v<=255))?
+      values.map(v=>Math.round(Math.max(0,Math.min(255,floating?v*255:v)))):null;
+  };
   function paint(raw) {
     if(raw?._obj==='solidColorLayer') {const c=rgb(raw.color);return c && c.every(v=>Number.isFinite(v))?{kind:'solid',rgb:c}:null;}
     if(raw?._obj==='gradientLayer') {
@@ -1876,6 +1883,10 @@ function createBatchMasks(ps,session,capture,selectionContext,legacyPreview) {
   return {observe,apply,prepare,prepareLegacy,finishLegacy};
 }
 
+function extendedLabelColors(version) {
+  const match=/^(\d+)\.(\d+)(?:\.|$)/.exec(String(version));
+  return !!match && (Number(match[1])>25 || Number(match[1])===25 && Number(match[2])>=2);
+}
 function selectionKind(k,kind,background) {
   if(background)return 'background';
   for(const [key,name] of [['NORMAL','pixel'],['GROUP','group'],['TEXT','text'],['SMARTOBJECT','smart'],
@@ -2175,7 +2186,9 @@ function createLayerSearch(ps,session,capture) {
         await context.hostControl.registerAutoCloseDocument(temporary.id);
         const copied=await layer.duplicate(temporary,ps.constants.ElementPlacement.PLACEATBEGINNING);
         copied.visible=true;
-        const bounds=copied.bounds;
+        // The owned blank raster layer gives fill-only groups renderable bounds.
+        await temporary.mergeVisibleLayers();
+        const bounds=temporary.activeLayers[0].bounds;
         if(bounds.right<=bounds.left||bounds.bottom<=bounds.top)answer={available:false,reason:'图层没有可显示的像素'};
         else {
           await temporary.trim(ps.constants.TrimType.TRANSPARENT);
@@ -2225,17 +2238,30 @@ function createLayerSearch(ps,session,capture) {
       await verify();
       const [mode]=await batch([property('mode',docRef(row.document_id))],checkpoint);
       if(mode.mode?._value!=='RGBColor')return {available:false,reason:'当前仅支持RGB图层预览'};
-      image=await ps.imaging.getPixels({documentID:row.document_id,layerID:row.layer_id,targetSize:{width:128,height:128},componentSize:8,colorSpace:'RGB',applyAlpha:false});
+      if(row.type==='group' || row.type==='adjustment')return {available:false,fallback:true,reason:'该图层类型需要隔离合成预览'};
+      const [area]=await batch([{_obj:'get',_target:[{_ref:'property',_property:'boundsNoEffects'},{_ref:'layer',_id:row.layer_id},...docRef(row.document_id)],_options:{dialogOptions:'silent'}}],checkpoint);
+      const bounds=area.boundsNoEffects,number=v=>typeof v==='number'?v:v?._value;
+      const sourceWidth=number(bounds?.right)-number(bounds?.left),sourceHeight=number(bounds?.bottom)-number(bounds?.top);
+      if(!Number.isFinite(sourceWidth)||!Number.isFinite(sourceHeight)||sourceWidth<=0||sourceHeight<=0)return {available:false,fallback:true,reason:'目标缺少直接像素边界'};
+      const targetSize=sourceWidth>=sourceHeight?{width:Math.min(128,Math.ceil(sourceWidth))}:{height:Math.min(128,Math.ceil(sourceHeight))};
+      try {
+        image=await ps.imaging.getPixels({documentID:row.document_id,layerID:row.layer_id,targetSize,componentSize:8,colorSpace:'RGB',colorProfile:'sRGB IEC61966-2.1',applyAlpha:false});
+      } catch(error){return {available:false,fallback:true,reason:'直接像素读取不可用：'+String(error.message||error).slice(0,120)};}
       if(checkpoint)await checkpoint();
       const data=image?.imageData,width=data?.width,height=data?.height,components=data?.components;
       if(!data||width===0||height===0)return {available:false,reason:'图层没有可显示的像素'};
-      if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||width>128||height<1||height>128||![3,4].includes(components)||data.componentSize!==8)throw Error('预览像素格式不支持');
-      const raw=await data.getData({chunky:true});
+      if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>512||height>512||width*height>65536||![3,4].includes(components)||data.componentSize!==8)return {available:false,fallback:true,reason:'直接预览像素格式不支持'};
+      let raw;
+      try {raw=await data.getData({chunky:true});}
+      catch(error){return {available:false,fallback:true,reason:'直接像素解码不可用：'+String(error.message||error).slice(0,120)};}
       if(raw.length!==width*height*components)throw Error('预览像素不完整');
-      const pixels=[];
-      for(let i=0;i<raw.length;i+=components)pixels.push(raw[i],raw[i+1],raw[i+2],components===4?raw[i+3]:255);
+      const factor=Math.min(1,128/Math.max(width,height)),w=Math.max(1,Math.round(width*factor)),h=Math.max(1,Math.round(height*factor)),pixels=[];
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+        const i=(Math.min(height-1,Math.floor(y/factor))*width+Math.min(width-1,Math.floor(x/factor)))*components;
+        pixels.push(raw[i],raw[i+1],raw[i+2],components===4?raw[i+3]:255);
+      }
       await verify();
-      return {available:true,width,height,pixels};
+      return {available:true,width:w,height:h,pixels};
     } finally {image?.imageData?.dispose();}
   }
   return {search,focus,preview,thumbnail};

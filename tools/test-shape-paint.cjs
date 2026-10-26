@@ -69,6 +69,18 @@ async function main(){
  data=await inspect();r=request(data);r.paint.fill={kind:'pattern',enabled:true,name:'Loaded Pattern'};await api.setLabel(r);assert.equal(fill.pattern.name,'Loaded Pattern');
  data=await inspect();r=request(data);r.paint.fill.name='Removed Pattern';const before=history;await assert.rejects(api.setLabel(r),/图案预设/);assert.equal(history,before);
  layer.allLocked=true;assert.equal((await inspect()).available,false);layer.allLocked=false;
+ // A CMYK-to-RGB conversion can retain normalized out-of-gamut RGB, even in an 8-bit document.
+ const beforeConverted=copy(fill);
+ fill={_obj:'solidColorLayer',color:{_obj:'RGBColor',redFloat:-.2,greenFloat:.619,blueFloat:1.1}};
+ data=await inspect();assert.equal(data.available,true);assert.deepEqual(data.fill.rgb,[0,158,255]);
+ const floatFill=copy(fill),unchangedSets=sets;
+ await api.setLabel(request(data));assert.deepEqual(fill,floatFill);assert.equal(sets,unchangedSets);
+ data=await inspect();r=request(data);r.paint.fill.rgb=[10,30,80];await api.setLabel(r);
+ assert.deepEqual((await inspect()).fill.rgb,[10,30,80]);
+ for(const bad of [{redFloat:NaN,greenFloat:0,blueFloat:0},{redFloat:0,greenFloat:0},{redFloat:0,greenFloat:0,blueFloat:'1'}]) {
+  fill={_obj:'solidColorLayer',color:{_obj:'RGBColor',...bad}};assert.equal((await inspect()).available,false);
+ }
+ fill=beforeConverted;
  const vectorFill=copy(fill),vectorStroke=copy(stroke);
  vector=false;fill={_obj:'solidColorLayer',color:{_obj:'RGBColor',red:12,grain:34,blue:56}};
  const maskReadsBeforeFill=maskReads;data=await inspect();assert.equal(data.available,true);assert.equal(data.vector,false);assert.equal(maskReads,maskReadsBeforeFill);

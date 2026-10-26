@@ -2,9 +2,12 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock,patch
 
 from backend.layer_labels import LABEL_COLORS, SLOT_NAMES, THEME_NAMES, LabelPalette, read_label_palette
+
+
+FALLBACK=[{**v,'source':'fallback'} for v in LABEL_COLORS]
 
 
 def fixture(modern=False):
@@ -48,8 +51,35 @@ class LabelPaletteTests(unittest.TestCase):
             self.assertEqual(colors[8]['rgb'],LABEL_COLORS[8]['rgb'])
             self.assertEqual(colors[0]['rgb'],[13,33,50])
 
+    def test_float_channels_and_partial_modern_palette_are_reported(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'UIColors.txt'
+            path.write_text(fixture().replace('[10, 30, 50, 1.0]','[10.5, 30.0, 50, 1.0]'),encoding='utf-8')
+            reader=LabelPalette(lambda _:path)
+            values=reader.refresh({'connected':True,'photoshop_version':'25.2','layer_context':{'session':'a'},'ui_theme':'light'})
+            self.assertEqual(values[0]['rgb'],[11,30,50])
+            self.assertEqual(reader.source,'host-ui-colors-partial')
+            self.assertEqual(values[8]['source'],'fallback')
+            self.assertEqual(values[0]['source'],'host-ui-colors')
+
+    def test_transient_startup_lookup_retries_bounded_without_queries_after_success(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'UIColors.txt';path.write_text(fixture(),encoding='utf-8')
+            locate=Mock(side_effect=[OSError('workspace not ready'),path])
+            reader=LabelPalette(locate);state={'connected':True,'photoshop_version':'24.0.1','layer_context':{'session':'a'}}
+            with patch('backend.layer_labels.time.monotonic',return_value=10):
+                self.assertEqual(reader.refresh(state),FALLBACK)
+                reader.refresh(state);locate.assert_called_once()
+            with patch('backend.layer_labels.time.monotonic',return_value=13):
+                reader.refresh(state);reader.refresh(state)
+            self.assertEqual(locate.call_count,2);self.assertEqual(reader.source,'host-ui-colors')
+            reader=LabelPalette(Mock(side_effect=OSError('unavailable')))
+            for tick in (1,2,3,5,10,100):
+                with patch('backend.layer_labels.time.monotonic',return_value=tick):reader.refresh(state)
+            self.assertEqual(reader.locate.call_count,3)
+
     def test_invalid_resource_data_rejected(self):
-        for bad in ('[256,30,50,1.0]','[-1,30,50,1.0]','[true,30,50,1.0]','[10,30,50,0.5]','[10.5,30,50,1.0]'):
+        for bad in ('[256,30,50,1.0]','[-1,30,50,1.0]','[true,30,50,1.0]','[10,30,50,0.5]'):
             with self.subTest(bad=bad),self.assertRaises(ValueError):
                 read_label_palette(fixture().replace('[10, 30, 50, 1.0]',bad,1))
         with self.assertRaises(ValueError):read_label_palette('SlotColorRed: [[1,2,3,1],[1,2,3,1],[1,2,3,1],[1,2,3,1]]')
@@ -60,12 +90,12 @@ class LabelPaletteTests(unittest.TestCase):
             for content in (None,'x'*(1024*1024+1),'SlotColorRed: ['):
                 if content is not None:path.write_text(content,encoding='utf-8')
                 reader=LabelPalette(lambda _:path)
-                self.assertEqual(reader.refresh(state),LABEL_COLORS);self.assertEqual(reader.source,'fallback')
+                self.assertEqual(reader.refresh(state),FALLBACK);self.assertEqual(reader.source,'fallback')
 
     def test_no_unverified_host_lookup_and_unknown_theme_uses_dark(self):
         locate=Mock(side_effect=AssertionError('No host lookup expected'))
-        self.assertEqual(LabelPalette(locate).refresh({'connected':False}),LABEL_COLORS)
-        self.assertEqual(LabelPalette(locate).refresh({'connected':True,'photoshop_version':'24.0.1'}),LABEL_COLORS)
+        self.assertEqual(LabelPalette(locate).refresh({'connected':False}),FALLBACK)
+        self.assertEqual(LabelPalette(locate).refresh({'connected':True,'photoshop_version':'24.0.1'}),FALLBACK)
         locate.assert_not_called()
 
     def test_concurrent_status_reads_share_one_completed_resource_snapshot(self):

@@ -237,10 +237,10 @@ static std::array<RECT,12> labelRows{};
 static int labelCount=8;
 static int labelColumns(){return labelCount/2;}
 static int supportedLabelCount(const Json& ps) {
-    int host=0,major=0,minor=0,patch=0;
-    std::sscanf(ps.value("photoshop_version",std::string()).c_str(),"%d",&host);
+    int host=0,hostMinor=0,major=0,minor=0,patch=0;
+    std::sscanf(ps.value("photoshop_version",std::string()).c_str(),"%d.%d",&host,&hostMinor);
     std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);
-    return host>=25 && ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=69)?12:8;
+    return (host>25 || host==25 && hostMinor>=2) && ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=69)?12:8;
 }
 static constexpr int recentActionBase=16;
 struct RecentPreset {std::string id,name,size,detail;bool available=true;};
@@ -2574,8 +2574,11 @@ int main() {
                 holdFinished=false;pieReady=true;renderedHit=-1;
                 panelKind=2;
                 if(supportedLabelCount(Json{{"photoshop_version","24.0.1"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=8 ||
-                   supportedLabelCount(Json{{"photoshop_version","25.0"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=12 ||
-                   supportedLabelCount(Json{{"photoshop_version","25.0"},{"uxp_version","0.3.68"},{"uxp_ready",true}})!=8)
+                   supportedLabelCount(Json{{"photoshop_version","25.0"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=8 ||
+                   supportedLabelCount(Json{{"photoshop_version","25.1"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=8 ||
+                   supportedLabelCount(Json{{"photoshop_version","25.10"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=12 ||
+                   supportedLabelCount(Json{{"photoshop_version","25.2"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=12 ||
+                   supportedLabelCount(Json{{"photoshop_version","25.2"},{"uxp_version","0.3.68"},{"uxp_ready",true}})!=8)
                     throw std::runtime_error("Host label palette capability mismatch");
                 labelCount=12;redrawPresets();pinned=true;
                 for(int i=0;i<labelCount;++i) {

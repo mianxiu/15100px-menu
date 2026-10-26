@@ -3,8 +3,9 @@ import json
 from pathlib import Path
 import re
 import threading
+import time
 
-# Spellings are Action Manager enums, not UI names; the last four need PS25+.
+# Spellings are Action Manager enums, not UI names; the last four need PS25.2+.
 LABEL_COLORS = [
     {"id": "none", "label": "无颜色", "rgb": [105, 109, 117]},
     {"id": "red", "label": "红色", "rgb": [224, 91, 88]},
@@ -35,10 +36,10 @@ def read_label_palette(text):
             if not match:continue
             values = json.loads(match[1])
             if (len(values)!=4 or any(len(row)!=4 or
-                    any(type(v) is not int or not 0<=v<=255 for v in row[:3]) or
+                    any(type(v) not in (int,float) or not 0<=v<=255 for v in row[:3]) or
                     type(row[3]) not in (int,float) or row[3]!=1 for row in values)):
                 raise ValueError('无效的Photoshop标签色表')
-            colors.setdefault(item['id'], {})[field] = [row[:3] for row in values]
+            colors.setdefault(item['id'], {})[field] = [[int(v+.5) for v in row[:3]] for row in values]
     if any(item['id'] not in colors or 'rgb' not in colors[item['id']] for item in LABEL_COLORS[:8]):
         raise ValueError('Photoshop标签色表不完整')
     return colors
@@ -50,8 +51,9 @@ def running_label_file(host_version):
     try:
         roots=[]
         win32gui.EnumWindows(lambda hwnd,_:roots.append(hwnd) if win32gui.GetClassName(hwnd)=='Photoshop' else None,None)
-        if len(roots)!=1:raise OSError('无法确认唯一Photoshop工作区')
-        pid=win32process.GetWindowThreadProcessId(roots[0])[1]
+        pids={win32process.GetWindowThreadProcessId(hwnd)[1] for hwnd in roots}
+        if len(pids)!=1:raise OSError('无法确认唯一Photoshop工作区')
+        pid=next(iter(pids))
         handle=win32api.OpenProcess(0x410,False,pid)
         try:path=Path(win32process.GetModuleFileNameEx(handle,0))
         finally:handle.Close()
@@ -68,6 +70,7 @@ class LabelPalette:
         self.identity=None
         self.colors={}
         self.source='fallback'
+        self.attempts=0;self.retry_at=0
 
     def refresh(self, status):
         host=status.get('photoshop_version')
@@ -76,19 +79,23 @@ class LabelPalette:
             if status.get('connected') and isinstance(host,str) and isinstance(session,str):
                 identity=(host,session)
                 if identity!=self.identity:
-                    self.identity=identity;self.colors={};self.source='fallback'
+                    self.identity=identity;self.colors={};self.source='fallback';self.attempts=0;self.retry_at=0
+                if self.source=='fallback' and self.attempts<3 and time.monotonic()>=self.retry_at:
+                    self.attempts+=1;self.retry_at=time.monotonic()+2
                     try:
                         with self.locate(host).open('rb') as stream:data=stream.read(1024*1024+1)
                         if len(data)>1024*1024:raise ValueError('Photoshop标签色表过大')
                         self.colors=read_label_palette(data.decode('utf-8-sig'))
-                        self.source='host-ui-colors'
+                        from .photoshop_version import version_tuple
+                        count=12 if version_tuple(host)>=(25,2,0) else 8
+                        self.source='host-ui-colors' if all('rgb' in self.colors.get(v['id'],{}) for v in LABEL_COLORS[:count]) else 'host-ui-colors-partial'
                     except (OSError,ValueError,TypeError,KeyError):pass
             colors=self.colors
         index=THEME_NAMES.index(status.get('ui_theme')) if status.get('ui_theme') in THEME_NAMES else 3
         result=[]
         for item in LABEL_COLORS:
             color=colors.get(item['id'],{})
-            result.append({**item,'rgb':list(color.get('rgb',[item['rgb']]*4)[index]),
+            result.append({**item,'source':'host-ui-colors' if 'rgb' in color else 'fallback','rgb':list(color.get('rgb',[item['rgb']]*4)[index]),
                            **({'disabled_rgb':list(color['disabled_rgb'][index])} if 'disabled_rgb' in color else {})})
         return result
 
@@ -101,7 +108,7 @@ def label_script(action):
         if (!app.documents.length) throw new Error('请先打开文档');
         var s = stringIDToTypeID;
         var color = %s;
-        if (/^(seafoam|indigo|magenta|fuchsia)$/.test(color) && parseInt(app.version,10)<25) throw new Error('此标签颜色需要Photoshop2024或更新版本');
+        if (/^(seafoam|indigo|magenta|fuchsia)$/.test(color) && (parseInt(app.version.split('.')[0],10)<25 || parseInt(app.version.split('.')[0],10)===25 && parseInt(app.version.split('.')[1]||'0',10)<2)) throw new Error('此标签颜色需要Photoshop25.2或更新版本');
         var selected = [], wanted = {}, inherited = 0;
         var selection = new ActionReference();
         selection.putProperty(s('property'), s('targetLayersIDs'));

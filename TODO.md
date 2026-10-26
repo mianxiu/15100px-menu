@@ -1,5 +1,9 @@
 # Photoshop Menu TODO
 
+- [x] 269代码／测试／构建／实际入口：复现CMYK转RGB后纯色层保留浮点RGB而缺少入口，按原生取样校准显示，未改色保留原始描述；组缩略图隔离合成后读边界，现代接口明确不支持才回退；新增标签边界细分25.2，宿主色表有限重读／小数／同进程多窗口与来源标记。实际269／UXP75组件一致，664项最终低CPU回归、原生完整矩阵、冻结启动／重启通过。PS24.0.1低CPU／正常完成转换纯色编辑与一次撤销、14张图片、10次缓存零宿主请求及16次旧标签写入／一次撤销，原稿／配置／资源保持。证据.runtime/runtime269-verified.json、fill269-api.json、fill269-float-calibration.json、thumbnail269-base.json、thumbnail269-extra.json、originals269-verified.json和tests269-final-low.log；初版不支持浮点的复现、夹具Make／转换命令失败、20步历史容量断言失败均保留，修正夹具后独立新事务复验，不重发未知。
+- [ ] 269的PS25原故障／新增四色／现代Imaging实机、原生色块逐像素对照、实体点击及实屏仍待验；没有PS25环境，不把协议模拟或PS24接口检查当作通过。原生组PNG导出未修改，无性能提升声明；公开交付另核验。
+
+
 - [x] 268已公开交付：源码c93570a与v0.4.268标签已推送；统一ZIP／SHA和Latest清单匿名下载校验通过，匿名API403改用公开Latest跳转核验，未绕过下载检查。核验后GitHub与dist仅保留268发行物，旧标签／源码／配置／诊断保持。Wiki6a1685d已同步，39页／236链接及9个主要远端页面、图片和README通过，源码／标签GitHub UI contract两次成功。证据.runtime/release-0.4.268-public-verification.json、manifest268-verification.json、release268-cleanup.json、dist268-cleanup.json与wiki268-public-verification.json。
 
 - [x] 268代码／测试／构建／实际入口：搜索右侧独立点击缩略图，旧PS隔离副本文档生成最多128×128白底图，现代路径保留；搜索内16项缓存、目标／源历史／选择／文档集合校验与持久未知保护。661项低CPU回归、原生完整矩阵、最终冻结启动重启及实际268／UXP74组件一致。PS24.0.1低CPU／正常共10项像素／文字／组／隐藏／跨文档图片、10次零宿主请求缓存复用通过，原稿／配置／资源保持。证据.runtime/runtime268-verified.json、thumbnail268-base.json、thumbnail268-extra.json、tests268-low.log及native268-low-output.log。

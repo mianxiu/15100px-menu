@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(require.resolve('../uxp/offline-probe/labels.js'),'utf8');
-let activeDoc=1,selected=[11,12],active=12,writes=0,failSelect=false,failRestore=false,badList=false;
+let activeDoc=1,selected=[11,12],active=12,writes=0,failSelect=false,failRestore=false,badList=false;let pixelBounds={left:0,top:0,right:2,bottom:1};
 const row=(id,name,kind=1,extra={})=>({layerID:id,name,layerKind:kind,parentLayerID:0,layerSection:{_value:'layerSectionContent'},...extra});
 let docs=[{id:1,title:'原稿.psd',rows:[row(11,'重名'),row(12,'重名',3)]},{id:2,title:'目标.psd',rows:[row(21,'重名',4,{hasVectorMask:true}),row(22,'填充',4)]}];
 const capture=async()=>({session:'s',document_id:activeDoc,active_layer_id:active,layer_ids:[...selected].sort((a,b)=>a-b)});
@@ -9,7 +9,7 @@ const ps={core:{executeAsModal:async fn=>fn({isCancelled:false})},action:{batchP
   if(c._obj==='get'){
     assert.equal(c._options.dialogOptions,'silent');
     if(!doc)return {_obj:'error'};
-    return {[ref[0]._property]:({documentID:doc.id,title:doc.title,numberOfLayers:doc.rows.length,hasBackgroundLayer:false,mode:{_value:'RGBColor'}})[ref[0]._property]};
+    return {[ref[0]._property]:({documentID:doc.id,title:doc.title,numberOfLayers:doc.rows.length,hasBackgroundLayer:false,mode:{_value:'RGBColor'},boundsNoEffects:pixelBounds})[ref[0]._property]};
   }
   if(c._obj==='multiGet'){
     assert.equal(c._options.dialogOptions,'silent');
@@ -37,10 +37,18 @@ const search=context.search,query={name:'重名',document:'',type:'all'};
   let disposed=0;const original=JSON.stringify(await capture());
   const tile={width:2,height:1,components:4,componentSize:8,getData:async()=>new Uint8Array([255,0,0,255,0,255,0,128]),dispose:()=>disposed++};
   assert.equal((await search.preview(result.items[0])).available,false);
-  ps.imaging={getPixels:async options=>{assert.equal(options.layerID,11);assert.equal(options.targetSize.width,128);return {imageData:tile};}};
+  ps.imaging={getPixels:async options=>{assert.equal(options.layerID,11);assert.equal(options.targetSize.width,2);assert.equal(options.colorProfile,'sRGB IEC61966-2.1');return {imageData:tile};}};
   const image=await search.preview(result.items[0]);assert.deepEqual(Array.from(image.pixels),[255,0,0,255,0,255,0,128]);assert.equal(disposed,1);
   assert.equal(JSON.stringify(await capture()),original);assert.equal(writes,0);
-  tile.getData=async()=>{throw Error('pixels failed');};await assert.rejects(search.preview(result.items[0]),/pixels failed/);assert.equal(disposed,2);
+  pixelBounds={left:0,top:0,right:1,bottom:20000};
+  ps.imaging.getPixels=async options=>{assert.deepEqual(Object.keys(options.targetSize),['height']);assert.equal(options.targetSize.height,128);return {imageData:{width:1,height:128,components:4,componentSize:8,getData:async()=>new Uint8Array(512),dispose:()=>{}}};};
+  assert.equal((await search.preview(result.items[0])).height,128);
+  pixelBounds={left:0,top:0,right:2,bottom:1};
+  ps.imaging.getPixels=async()=>{throw Error('unsupported pixels');};
+  assert.equal((await search.preview(result.items[0])).fallback,true);
+  ps.imaging.getPixels=async()=>({imageData:tile});
+
+  tile.getData=async()=>{throw Error('pixels failed');};assert.equal((await search.preview(result.items[0])).fallback,true);assert.equal(disposed,2);
   tile.getData=async()=>new Uint8Array(8);ps.imaging.getPixels=async()=>{docs[0].rows[0].name='changed';return {imageData:tile};};
   await assert.rejects(search.preview(result.items[0]),/已改变/);assert.equal(disposed,3);docs[0].rows[0].name='重名';
   assert.equal((await search.search({...query,document:'目标',type:'shape'})).items[0].layer_id,21);
@@ -70,7 +78,7 @@ const search=context.search,query={name:'重名',document:'',type:'all'};
   const appDocs=[sourceDoc],file={read:async()=>bmp,delete:async()=>removed++};
   ps.app={documents:appDocs,createDocument:async options=>{
     assert.equal(options.width,2);assert.equal(options.depth,8);created++;activeDoc=900;
-    const temp={id:900,width:2,height:1,trim:async()=>{},flatten:async()=>{},resizeImage:async(w,h)=>{assert.equal(w,2);assert.equal(h,1);},
+    const temp={id:900,width:2,height:1,activeLayers:[{bounds:{left:0,top:0,right:2,bottom:1}}],mergeVisibleLayers:async()=>{},trim:async()=>{},flatten:async()=>{},resizeImage:async(w,h)=>{assert.equal(w,2);assert.equal(h,1);},
       saveAs:{bmp:async(entry,options)=>{assert.equal(entry,file);assert.equal(options.depth,24);if(failSave)throw Error('save failed');}},
       closeWithoutSaving:async()=>{if(failClose)throw Error('close failed');appDocs.splice(1);closed++;}};
     appDocs.push(temp);return temp;

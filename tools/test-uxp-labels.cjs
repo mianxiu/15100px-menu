@@ -29,8 +29,9 @@ async function main() {
   assert.equal((await api.setLabel(request)).count,2);
   assert.equal((await api.setLabel({...request,color:'none'})).color,'none');
   ps.app.version='24.0.1';
-  for(const color of ['seafoam','indigo','magenta','fuchsia'])await assert.rejects(api.setLabel({...request,command:'label',color}),/2024/);
-  ps.app.version='25.0';
+  for(const color of ['seafoam','indigo','magenta','fuchsia'])await assert.rejects(api.setLabel({...request,command:'label',color}),/25.2/);
+  for(const version of ['25.0','25.1','25.1.9']){ps.app.version=version;await assert.rejects(api.setLabel({...request,color:'seafoam'}),/25.2/);}
+  ps.app.version='25.2';
   for(const color of ['seafoam','indigo','magenta','fuchsia'])assert.equal((await api.setLabel({...request,command:'label',color})).color,color);
   mismatch=true; await assert.rejects(api.setLabel(request)); assert.equal(rollback,1);
   ps.core.executeAsModal=async fn=>fn({hostControl:{suspendHistory:async()=>1,resumeHistory:async(id,commit)=>{if(!commit)throw Error('rollback failed');}}});

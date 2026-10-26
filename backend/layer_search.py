@@ -26,6 +26,7 @@ def query_parameters(args):
 
 def preview_result(data):
     if not isinstance(data,dict) or type(data.get('available')) is not bool:raise ValueError('图层预览结果不完整')
+    if 'fallback' in data and (type(data['fallback']) is not bool or data['available'] and data['fallback']):raise ValueError('图层预览回退状态无效')
     if not data['available'] and (not isinstance(data.get('reason'),str) or len(data['reason'])>300):raise ValueError('图层预览状态无效')
     if data['available']:
         width,height,pixels=data.get('width'),data.get('height'),data.get('pixels')
@@ -67,7 +68,7 @@ class LayerSearch:
         if preview is not None and version(heartbeat.get('probe_version'))<(0,3,70):raise RuntimeError('请更新执行插件以读取图层预览')
         token=json.loads(transport.config.read_text('utf-8-sig'))['token']
         identity=secrets.token_hex(16)
-        lifetime=3000 if preview is not None else 30000
+        lifetime=15000 if preview is not None else 30000
         request={'token':token,'id':identity,'session':heartbeat['session'],'query':query,'expires_at_ms':int(time.time()*1000)+lifetime}
         if preview is not None:request['preview']=preview
         temporary=folder/(identity+'.search.tmp')
@@ -107,9 +108,11 @@ class LayerSearch:
         if key in self.previews:return self.previews[key]
         status=await self.app.bridge.status()
         self.available()
-        if status.get('layer_preview_available'):
+        value=None
+        if status.get('layer_preview_available') and row.get('type') not in ('group','adjustment'):
             value=await asyncio.to_thread(self._read,{},row)
-        else:
+        if value is None or value.get('fallback') is True:
+            self.available()
             async with self.app.operation_lock:
                 await self.app.broadcast({'type':'operation','busy':True,'action':'layer.thumbnail'})
                 try:

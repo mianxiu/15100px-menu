@@ -42,6 +42,25 @@ class LayerSearchTests(unittest.IsolatedAsyncioTestCase):
         app.broadcast.assert_awaited_with({'type':'operation','busy':True})
         self.assertEqual(app.bridge.execute_thumbnail.await_count,1)
 
+    async def test_modern_unsupported_falls_back_once_but_failed_reads_never_do(self):
+        for kind in ('pixel','group','adjustment'):
+            app=SimpleNamespace(operation_lock=asyncio.Lock(),broadcast=AsyncMock(),
+                bridge=SimpleNamespace(status=AsyncMock(return_value={'layer_preview_available':True}),busy=False,
+                    execute_thumbnail=AsyncMock(return_value={'available':True,'width':1,'height':1,'pixels':[1,2,3,255]})))
+            search=LayerSearch(app);search.available=Mock();search.valid_until=time.monotonic()+60
+            row={'layer_id':2,'type':kind};search.result={'search_id':'q','session':'s','items':[row]}
+            with patch.object(search,'_read',return_value={'available':False,'fallback':True,'reason':'unsupported'}) as read:
+                await search.preview({'search_id':'q','index':0})
+                self.assertEqual(read.call_count,1 if kind=='pixel' else 0)
+            app.bridge.execute_thumbnail.assert_awaited_once_with('s',row,before_dispatch=None)
+            self.assertFalse(app.operation_lock.locked())
+            if kind=='pixel':
+                for error in ('timeout','stale target','priority interrupted'):
+                    search.previews.clear();app.bridge.execute_thumbnail.reset_mock()
+                    with patch.object(search,'_read',side_effect=RuntimeError(error)):
+                        with self.assertRaisesRegex(RuntimeError,error):await search.preview({'search_id':'q','index':0})
+                    app.bridge.execute_thumbnail.assert_not_awaited();self.assertFalse(search.previews)
+
     def test_query_validation(self):
         self.assertEqual(query_parameters({}),{'name':'','document':'','type':'all'})
         for value in ({'name':None},{'name':'x'*201},{'document':[]},{'type':'fake'}):
@@ -88,7 +107,7 @@ class LayerPreviewReadTests(unittest.TestCase):
     def test_pixel_shape_and_component_validation(self):
         tile={'available':True,'width':1,'height':1,'pixels':[255,0,0,128]}
         self.assertEqual(self.read(tile),tile)
-        for bad in ({**tile,'width':129},{**tile,'pixels':[True,0,0,255]},{**tile,'pixels':[256,0,0,255]},{'available':False,'reason':[]}):
+        for bad in ({**tile,'width':129},{**tile,'pixels':[True,0,0,255]},{**tile,'pixels':[256,0,0,255]},{'available':False,'reason':[]},{'available':False,'reason':'x','fallback':'yes'},{**tile,'fallback':True}):
             with self.assertRaises(ValueError):self.read(bad)
 
     def test_superseding_search_cancels_old_preview_without_wait(self):
