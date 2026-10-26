@@ -1,7 +1,9 @@
 # Photoshop Menu TODO
 
+- [x] 268已公开交付：源码c93570a与v0.4.268标签已推送；统一ZIP／SHA和Latest清单匿名下载校验通过，匿名API403改用公开Latest跳转核验，未绕过下载检查。核验后GitHub与dist仅保留268发行物，旧标签／源码／配置／诊断保持。Wiki6a1685d已同步，39页／236链接及9个主要远端页面、图片和README通过，源码／标签GitHub UI contract两次成功。证据.runtime/release-0.4.268-public-verification.json、manifest268-verification.json、release268-cleanup.json、dist268-cleanup.json与wiki268-public-verification.json。
+
 - [x] 268代码／测试／构建／实际入口：搜索右侧独立点击缩略图，旧PS隔离副本文档生成最多128×128白底图，现代路径保留；搜索内16项缓存、目标／源历史／选择／文档集合校验与持久未知保护。661项低CPU回归、原生完整矩阵、最终冻结启动重启及实际268／UXP74组件一致。PS24.0.1低CPU／正常共10项像素／文字／组／隐藏／跨文档图片、10次零宿主请求缓存复用通过，原稿／配置／资源保持。证据.runtime/runtime268-verified.json、thumbnail268-base.json、thumbnail268-extra.json、tests268-low.log及native268-low-output.log。
-- [ ] 268实体点击、真实PS实屏、现代直接接口和其他硬件仍待验；两次菜单保护拒绝未计正向通过；离屏中／大字号图标不稳定与267同字库空图对照保留。旧路径RGB／8位、6400万像素及512层组限制保留；公开交付另列核验。
+- [ ] 268实体点击、真实PS实屏、现代直接接口和其他硬件仍待验；两次菜单保护拒绝未计正向通过；离屏中／大字号图标不稳定与267同字库空图对照保留。旧路径RGB／8位、6400万像素及512层组限制保留；公开交付见独立核验记录。
 
 
 - [x] 267已公开交付：源码6672f87与v0.4.267标签已推送；统一ZIP／SHA和Latest清单匿名下载校验通过，GitHub与dist仅保留267发行物，旧标签／源码／配置／诊断保持。Wiki ca8d482已同步，39页／235链接及9个主要远端页面、图片和README核验通过；源码／标签GitHub UI contract两次成功。证据.runtime/release-0.4.267-public-verification.json、manifest267-verification.json、release267-cleanup.json、dist267-cleanup.json与wiki267-public-verification.json。
