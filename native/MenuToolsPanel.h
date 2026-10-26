@@ -19,9 +19,9 @@ struct MenuToolsPanel {
     ImVec2 thumbnailSize{};
     int previewHovered=-1,previewTarget=-1,previewRequest=0;
     double previewAt=0;
-    bool previewPending=false;
+    bool previewPending=false,previewVisible=false;
     std::string previewQuery,previewMessage;
-    void clearPreview(){if(thumbnail){thumbnail->Release();thumbnail=nullptr;}thumbnailSize={};previewTarget=-1;previewMessage.clear();}
+    void clearPreview(){if(thumbnail){thumbnail->Release();thumbnail=nullptr;}thumbnailSize={};previewTarget=-1;previewVisible=false;previewMessage.clear();}
     bool loadPreview(const Json& result) {
         clearPreview();
         if(!result.value("available",false)){previewMessage=result.value("reason",std::string("没有可显示的内容"));return false;}
@@ -39,7 +39,7 @@ struct MenuToolsPanel {
     bool searchDirty=false;
     double searchChanged=0;
     void changeSearch(double now){clearPreview();previewHovered=-1;searchDirty=true;searchChanged=now;results=Json();error.clear();}
-    bool searchDue(double now)const{return searchDirty && !pending && ready && now-searchChanged>=.18;}
+    bool searchDue(double now)const{return searchDirty && !pending && !previewPending && ready && now-searchChanged>=.18;}
     int kind=0,request=0;
     Json results;
     MenuSplitPreview split;
@@ -76,11 +76,11 @@ struct MenuToolsPanel {
         if(event.value("type",std::string())=="menu.tools.preview.result") {
             if(!active || !previewPending || event.value("request",-1)!=previewRequest)return;
             previewPending=false;
-            if(results.is_null() || results.value("search_id",std::string())!=previewQuery || previewHovered!=previewTarget)return;
+            if(results.is_null() || results.value("search_id",std::string())!=previewQuery)return;
             const int selected=previewTarget;
             if(!event.value("ok",false))previewMessage=event.value("error",std::string("预览未能读取"));
             else if(!loadPreview(event.at("result")) && previewMessage.empty())previewMessage="预览像素不可用";
-            previewTarget=selected;requireText(previewMessage);return;
+            previewTarget=selected;previewVisible=true;requireText(previewMessage);return;
         }
         if(!active || !pending || event.value("request",-1)!=request)return;
         pending=false;
@@ -173,29 +173,33 @@ struct MenuToolsPanel {
             if(!results.is_null()) {
                 const float rows=std::max(menuSearchRowHeight*scale,ImGui::GetContentRegionAvail().y-h-gap);
                 ImGui::BeginChild("##results",{0,rows},ImGuiChildFlags_None);
-                int index=0,hover=-1;ImVec2 anchor{};
+                int index=0,hover=-1;bool previewInView=false;ImVec2 anchor{},selectedAnchor{};
                 for(const auto& row:results.at("items")) {
-                    ImGui::PushID(index);ImGui::BeginDisabled(pending);
+                    ImGui::PushID(index);ImGui::BeginDisabled(pending || previewPending);
                     const auto type=row.value("type",std::string("other"));int typeIndex=8;
                     for(int i=0;i<IM_ARRAYSIZE(ids);++i)if(type==ids[i])typeIndex=i;
-                    bool over=false;ImVec2 point{};
-                    if(MenuControls::resultRow("##result",icons[typeIndex],row.at("name").get_ref<const std::string&>().c_str(),row.at("document_name").get_ref<const std::string&>().c_str(),scale,over,point))
+                    bool over=false,previewClick=false;ImVec2 point{};
+                    if(MenuControls::resultRow("##result",icons[typeIndex],row.at("name").get_ref<const std::string&>().c_str(),row.at("document_name").get_ref<const std::string&>().c_str(),scale,over,point,&previewClick))
                         submit("layers.focus",Json{{"search_id",results.at("search_id")},{"index",index}});
+                    if(previewClick && !previewPending) {
+                        if(previewTarget==index && previewVisible)previewVisible=false;
+                        else {
+                            clearPreview();previewTarget=index;previewVisible=true;
+                            if(!layerPreviewReady && !layerThumbnailReady)previewMessage="请更新执行插件以读取缩略图";
+                            else {
+                                previewPending=true;previewQuery=results.at("search_id").get<std::string>();
+                                sendMenuTool("menu.tools.preview",Json{{"request",++previewRequest},{"search_id",previewQuery},{"index",index}});
+                            }
+                        }
+                    }
                     if(over){hover=index;anchor=point;}
+                    if(previewTarget==index){selectedAnchor=point;previewInView=ImGui::IsRectVisible(point,{point.x+menuSearchRowHeight*scale,point.y+menuSearchRowHeight*scale});}
                     ImGui::EndDisabled();ImGui::PopID();++index;
                 }
                 if(hover!=previewHovered){previewHovered=hover;previewAt=ImGui::GetTime();}
-                if(hover>=0 && ImGui::GetTime()-previewAt>=.25) {
-                    if(!previewPending && previewTarget!=hover) {
-                        clearPreview();previewTarget=hover;
-                        if(!layerPreviewReady)previewMessage="当前PS不支持图层像素预览";
-                        else {
-                            previewPending=true;previewQuery=results.at("search_id").get<std::string>();
-                            sendMenuTool("menu.tools.preview",Json{{"request",++previewRequest},{"search_id",previewQuery},{"index",hover}});
-                        }
-                    }
-                    MenuControls::previewTile(previewTarget==hover?thumbnail:nullptr,thumbnailSize,previewMessage.empty()?"正在读取预览…":previewMessage.c_str(),anchor,{at.x,at.y,at.x+width,at.y+height},scale);
-                }
+                if(previewVisible && previewTarget>=0 && previewInView)
+                    MenuControls::previewTile(thumbnail,thumbnailSize,previewMessage.empty()?"正在生成预览…":previewMessage.c_str(),selectedAnchor,{at.x,at.y,at.x+width,at.y+height},scale);
+                else if(hover>=0 && ImGui::GetTime()-previewAt>=.25)MenuControls::tip("点击预览图层",scale);
                 ImGui::EndChild();
             }
         } else {

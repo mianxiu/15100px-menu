@@ -272,7 +272,7 @@ static const char* capsLabels[]={"复制图层样式","粘贴图层样式","打�
 static bool capsReady=false;
 static bool documentSortReady=false;
 static bool individualSmartReady=false;
-static bool layerSearchReady=false,textSplitReady=false,layerPreviewReady=false;
+static bool layerSearchReady=false,textSplitReady=false,layerPreviewReady=false,layerThumbnailReady=false;
 static RECT toolRow{};
 static bool menuToolsVisible();
 static int capsCount() {return panelKind==2?9:5;}
@@ -605,6 +605,7 @@ static void accept(const Json& event) {
         {int major=0,minor=0,patch=0;std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);shapeClipboardReady=ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=41);}
         shapeClipboardAvailable=ps.value("shape_clipboard_available",false);
         layerPreviewReady=ps.value("layer_preview_available",false);
+        layerThumbnailReady=ps.value("layer_thumbnail_available",false);
         if (data.contains("recent_documents")) {
             recentPresets.clear();const auto& recent=data["recent_documents"];
             recentMessage=recent.value("message","");
@@ -2741,7 +2742,7 @@ int main() {
                         platform.Platform_GetClipboardTextFn=oldGet;platform.Platform_SetClipboardTextFn=oldSet;platform.Platform_ClipboardUserData=oldData;
                         std::cout<<"Soft-wrap editor passed: resize, UTF-8 cursor, exact copy/paste, Chinese edit, undo, no synthetic newlines or horizontal scroll\n";
                     }
-                    int choice=0,iconChoice=0,rowClicks=0;char query[16]{};POINT second{},seam{},iconSecond{},iconSeam{},rowMain{},rowPreview{};bool focusQuery=false,rowPreviewHovered=false;
+                    int choice=0,iconChoice=0,rowClicks=0,previewClicks=0;char query[16]{};POINT second{},seam{},iconSecond{},iconSeam{},rowMain{},rowPreview{};bool focusQuery=false,rowPreviewHovered=false;
                     auto controlsFrame=[&](bool disabled){
                         const auto padding=ImGui::GetStyle().FramePadding;
                         const auto border=ImGui::GetStyle().FrameBorderSize;
@@ -2774,7 +2775,9 @@ int main() {
                             const auto row=ImGui::GetCursorScreenPos();const float rowWidth=ImGui::GetContentRegionAvail().x;ImVec2 anchor{};
                             rowMain={LONG(row.x+12*scale),LONG(row.y+menuSearchRowHeight*scale*.5f)};
                             rowPreview={LONG(row.x+rowWidth-menuSearchRowHeight*scale*.5f),rowMain.y};
-                            if(MenuControls::resultRow("##compact-result",36,"文字图层长名称","示例.psd",scale,rowPreviewHovered,anchor))rowClicks++;
+                            bool previewClick=false;
+                            if(MenuControls::resultRow("##compact-result",36,"文字图层长名称","示例.psd",scale,rowPreviewHovered,anchor,&previewClick))rowClicks++;
+                            if(previewClick)previewClicks++;
                             if(std::abs(ImGui::GetItemRectSize().y-menuSearchRowHeight*scale)>.1f)throw std::runtime_error("Compact result height drifted");
                             ImGui::EndDisabled();
                         }
@@ -2834,7 +2837,11 @@ int main() {
                     if(rowClicks!=1)throw std::runtime_error("Compact row did not locate exactly once");
                     io.AddMousePosEvent(float(rowPreview.x),float(rowPreview.y));controlsFrame(false);
                     io.AddMouseButtonEvent(0,true);controlsFrame(false);io.AddMouseButtonEvent(0,false);controlsFrame(false);
-                    if(rowClicks!=1 || !rowPreviewHovered)throw std::runtime_error("Preview hover gained a locate action");
+                    if(rowClicks!=1 || !rowPreviewHovered || previewClicks!=1)throw std::runtime_error("Preview click did not stay separate from locate");
+                    controlsFrame(false);controlsFrame(false);
+                    if(previewClicks!=1)throw std::runtime_error("Preview hover repeated a click");
+                    io.AddMouseButtonEvent(0,true);controlsFrame(true);io.AddMouseButtonEvent(0,false);controlsFrame(true);
+                    if(previewClicks!=1)throw std::runtime_error("Disabled preview gained a click");
                     io.AddMousePosEvent(-1000,-1000);ImGui::SetWindowFocus(nullptr);
                     std::cout<<"Shared Caps/tools UI passed: input/button/font/border parity, style restoration, segment click, divider cancel and disabled protection\n";
                     std::cout<<"Chinese input passed: own WM_CHAR to UTF-8 input, new glyph upload, preserved edit buffer and Windows IME caret position\n";

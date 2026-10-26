@@ -24,12 +24,24 @@ def query_parameters(args):
     return value
 
 
+def preview_result(data):
+    if not isinstance(data,dict) or type(data.get('available')) is not bool:raise ValueError('图层预览结果不完整')
+    if not data['available'] and (not isinstance(data.get('reason'),str) or len(data['reason'])>300):raise ValueError('图层预览状态无效')
+    if data['available']:
+        width,height,pixels=data.get('width'),data.get('height'),data.get('pixels')
+        if (type(width) is not int or type(height) is not int or not 1<=width<=128 or not 1<=height<=128 or
+                not isinstance(pixels,list) or len(pixels)!=width*height*4 or any(type(p) is not int or not 0<=p<=255 for p in pixels)):
+            raise ValueError('图层预览像素无效')
+    return data
+
+
 class LayerSearch:
     def __init__(self, app):
         self.app=app
         self.searching=False
         self.result=None
         self.valid_until=0
+        self.previews={}
 
     def available(self):
         require_available(self.app)
@@ -40,6 +52,7 @@ class LayerSearch:
         if self.searching:raise RuntimeError('搜索进行中，请等待结果')
         self.searching=True
         self.result=None
+        self.previews.clear()
         try:
             result=await asyncio.to_thread(self._read,query)
             self.result=result
@@ -73,14 +86,7 @@ class LayerSearch:
                     if result.get('error'):raise RuntimeError(result['error'])
                     data=result.get('result')
                     if preview is not None:
-                        if not isinstance(data,dict) or type(data.get('available')) is not bool:raise ValueError('图层预览结果不完整')
-                        if not data['available'] and (not isinstance(data.get('reason'),str) or len(data['reason'])>300):raise ValueError('图层预览状态无效')
-                        if data['available']:
-                            width,height,pixels=data.get('width'),data.get('height'),data.get('pixels')
-                            if (type(width) is not int or type(height) is not int or not 1<=width<=128 or not 1<=height<=128 or
-                                    not isinstance(pixels,list) or len(pixels)!=width*height*4 or any(type(p) is not int or not 0<=p<=255 for p in pixels)):
-                                raise ValueError('图层预览像素无效')
-                        return data
+                        return preview_result(data)
                     if not isinstance(data,dict) or data.get('session')!=heartbeat['session'] or not isinstance(data.get('items'),list) or len(data['items'])>500:raise ValueError('搜索结果不完整')
                     return {**data,'search_id':identity,'message':'搜索完成'}
             except (OSError,json.JSONDecodeError):pass
@@ -94,10 +100,27 @@ class LayerSearch:
             raise ValueError('搜索结果已过期，请重新搜索')
         return result,result['items'][index]
 
-    async def preview(self,args):
+    async def preview(self,args,menu_guard=None):
         result,row=self.destination(args)
         self.available()
-        return await asyncio.to_thread(self._read,{},row)
+        key=args['index']
+        if key in self.previews:return self.previews[key]
+        status=await self.app.bridge.status()
+        self.available()
+        if status.get('layer_preview_available'):
+            value=await asyncio.to_thread(self._read,{},row)
+        else:
+            async with self.app.operation_lock:
+                await self.app.broadcast({'type':'operation','busy':True,'action':'layer.thumbnail'})
+                try:
+                    if menu_guard:await menu_guard()
+                    value=await self.app.bridge.execute_thumbnail(result['session'],row,before_dispatch=menu_guard)
+                finally:await self.app.broadcast({'type':'operation','busy':self.app.bridge.busy})
+        value=preview_result(value)
+        if self.result is result:
+            if len(self.previews)>=16:self.previews.pop(next(iter(self.previews)))
+            self.previews[key]=value
+        return value
 
     async def focus(self,args,menu_guard=None):
         result,row=self.destination(args)

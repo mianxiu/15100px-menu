@@ -298,6 +298,7 @@ async function publishHeartbeat(folder,reason,interval=5000,extra={}) {
     await record(folder,'probe-last.json',{...heartbeatValue,...extra,reason,
       sequence:++sequence,plugin_time_ms:now,layer_observation:observation,
       layer_preview_available:typeof require('photoshop').imaging?.getPixels==='function',
+      layer_thumbnail_available:true,
       shape_clipboard_available:labels.paintClipboardAvailable?.()===true});
     lastHeartbeat=now;
   } finally {heartbeatWriting=false;}
@@ -345,7 +346,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.73', session, transport: 'plugin-data-files',
+        probe_version: '0.3.74', session, transport: 'plugin-data-files',
         photoshop_version: optional(() => uxp.host.version),
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
@@ -420,7 +421,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.73', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.74', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

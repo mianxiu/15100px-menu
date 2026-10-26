@@ -82,7 +82,7 @@ template<size_t N> bool iconSegments(const char* id,const char* const (&names)[N
     }
     ImGui::PopID();ImGui::SetCursorScreenPos(origin);ImGui::Dummy({width,((N+columns-1)/columns)*(h+gap)-gap});return changed;
 }
-inline bool resultRow(const char* id,int icon,const char* title,const char* detail,float scale,bool& previewHover,ImVec2& previewAnchor) {
+inline bool resultRow(const char* id,int icon,const char* title,const char* detail,float scale,bool& previewHover,ImVec2& previewAnchor,bool* previewClick=nullptr) {
     const auto at=ImGui::GetCursorScreenPos();const float width=ImGui::GetContentRegionAvail().x,h=menuSearchRowHeight*scale,pad=menuControlPadding*scale;
     const float actionWidth=std::max(1.f,width-h);auto* draw=ImGui::GetWindowDrawList();
     const bool clicked=ImGui::InvisibleButton(id,{actionWidth,h},ImGuiButtonFlags_EnableNav);
@@ -100,8 +100,12 @@ inline bool resultRow(const char* id,int icon,const char* title,const char* deta
     ImGui::RenderNavCursor(ImRect(at,{at.x+actionWidth,at.y+h}),ImGui::GetItemID());
     if(ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))tip((std::string(title)+"\n"+detail).c_str(),scale);
     previewAnchor={at.x+actionWidth,at.y};
+    ImGui::SetCursorScreenPos(previewAnchor);
+    const bool opened=ImGui::InvisibleButton("##preview",{h,h},ImGuiButtonFlags_EnableNav);
+    if(previewClick)*previewClick=opened && !disabled;
+    if(!disabled && ImGui::IsItemHovered())draw->AddRectFilled(previewAnchor,{at.x+width,at.y+h},ImGui::GetColorU32(ImGuiCol_ButtonHovered),ImGui::GetStyle().FrameRounding);
     drawStyledMenuIcon(draw,39,{previewAnchor.x+(h-glyph)*.5f,at.y+(h-glyph)*.5f},glyph,ink,surface);
-    previewHover=!disabled && ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(previewAnchor,{at.x+width,at.y+h});
+    previewHover=!disabled && ImGui::IsItemHovered();
     ImGui::SetCursorScreenPos(at);ImGui::Dummy({width,h});return clicked && !disabled;
 }
 inline void previewTile(ID3D11ShaderResourceView* image,ImVec2 imageSize,const char* message,ImVec2 anchor,ImVec4 limit,float scale) {

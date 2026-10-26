@@ -43,7 +43,7 @@ class MenuTools:
             await asyncio.to_thread(self.app.desktop.require_menu_tools,epoch)
         event={'type':'menu.tools.result','epoch':epoch,'request':value['request'],'action':value['action']}
         if self.pending and epoch==self.epoch and value['request']==self.last_request:return {'message':'已忽略重复工具请求'}
-        if self.pending:
+        if self.pending or self.preview_request is not None:
             self.app.desktop.event({**event,'ok':False,'error':'操作进行中，本次请求未接受'})
             return {'message':'操作进行中'}
         self.pending=True
@@ -93,7 +93,10 @@ class MenuTools:
             if epoch!=self.epoch:raise RuntimeError('查找已关闭或重新打开')
             await asyncio.to_thread(self.app.desktop.require_menu_tools,epoch)
             require_available(self.app);self.preview_request=identity;acquired=True
-            result=await self.search.preview(params)
+            async def guard(_target=None):
+                if epoch!=self.epoch:raise RuntimeError('查找已关闭或重新打开')
+                await asyncio.to_thread(self.app.desktop.require_menu_tools,epoch)
+            result=await self.search.preview(params,menu_guard=guard)
             if epoch!=self.epoch:return {'message':'已忽略旧预览'}
             await asyncio.to_thread(self.app.desktop.require_menu_tools,epoch)
             self.app.desktop.event({**event,'ok':True,'result':result})

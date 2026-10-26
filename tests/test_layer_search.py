@@ -11,12 +11,36 @@ from backend.layer_search import LayerSearch,query_parameters
 
 class LayerSearchTests(unittest.IsolatedAsyncioTestCase):
     async def test_preview_uses_stored_destination_and_rejects_stale_results(self):
-        search=LayerSearch(None);search.available=Mock();search.valid_until=time.monotonic()+60
+        search=LayerSearch(SimpleNamespace(bridge=SimpleNamespace(status=AsyncMock(return_value={'layer_preview_available':True}))));search.available=Mock();search.valid_until=time.monotonic()+60
         row={'document_id':1,'layer_id':2};search.result={'search_id':'q','session':'s','items':[row]}
         with patch.object(search,'_read',return_value={'available':False,'reason':'empty'}) as read:
             await search.preview({'search_id':'q','index':0,'destination':{'layer_id':999}})
             read.assert_called_once_with({},row)
             with self.assertRaises(ValueError):await search.preview({'search_id':'old','index':0})
+
+
+    async def test_legacy_preview_uses_durable_worker_and_cache_until_new_search(self):
+        app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
+            bridge=SimpleNamespace(status=AsyncMock(return_value={}),execute_thumbnail=AsyncMock(return_value={'available':True,'width':1,'height':1,'pixels':[1,2,3,255]}),busy=False),broadcast=AsyncMock())
+        search=LayerSearch(app);search.available=Mock();search.valid_until=time.monotonic()+60
+        row={'layer_id':2};search.result={'search_id':'q','session':'s','items':[row]};guard=AsyncMock()
+        first=await search.preview({'search_id':'q','index':0},menu_guard=guard)
+        self.assertEqual(await search.preview({'search_id':'q','index':0},menu_guard=guard),first)
+        app.bridge.execute_thumbnail.assert_awaited_once_with('s',row,before_dispatch=guard)
+        guard.assert_awaited_once();app.desktop.focus_search_result.assert_not_called()
+        self.assertFalse(app.operation_lock.locked())
+        with patch.object(search,'_read',return_value={'search_id':'new','session':'s','items':[]}):await search.search({})
+        self.assertEqual(search.previews,{})
+
+    async def test_legacy_failure_is_not_cached_or_replayed_and_unknown_busy_remains(self):
+        app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
+            bridge=SimpleNamespace(status=AsyncMock(return_value={}),execute_thumbnail=AsyncMock(side_effect=RuntimeError('unknown')),busy=True),broadcast=AsyncMock())
+        search=LayerSearch(app);search.available=Mock();search.valid_until=time.monotonic()+60
+        search.result={'search_id':'q','session':'s','items':[{'layer_id':2}]}
+        with self.assertRaisesRegex(RuntimeError,'unknown'):await search.preview({'search_id':'q','index':0})
+        self.assertFalse(search.previews);self.assertFalse(app.operation_lock.locked())
+        app.broadcast.assert_awaited_with({'type':'operation','busy':True})
+        self.assertEqual(app.bridge.execute_thumbnail.await_count,1)
 
     def test_query_validation(self):
         self.assertEqual(query_parameters({}),{'name':'','document':'','type':'all'})

@@ -12,6 +12,20 @@ from backend.uxp_recovery import PendingUxp
 
 
 class RecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_thumbnail_receipt_limit_is_bounded_and_does_not_expand_other_commands(self):
+        pending=self.bridge.transport.pending
+        request={'id':'a'*32,'session':'one','operation':'set_label','command':'layer.thumbnail'}
+        pending.begin(request,self.folder,'b'*32)
+        self.receipt(result={'available':True,'width':128,'height':128,'pixels':[255]*65536})
+        self.assertTrue(pending.read_result()['result']['available'])
+        restored=PendingUxp(pending.path,pending.storage);self.assertIs(restored.value['thumbnail'],True)
+        self.receipt(result={'pixels':[255]*150000});self.assertIsNone(pending.read_result())
+        pending.clear()
+        pending.begin({**request,'command':'label'},self.folder,'c'*32)
+        self.receipt(result={'pixels':[255]*65536});self.assertIsNone(pending.read_result())
+        with self.assertRaises(ValueError):pending.validate({**pending.value,'thumbnail':False})
+        pending.clear()
+
     async def test_direct_caps_late_receipt_requires_bound_target_before_releasing_busy(self):
         self.heartbeat()
         heartbeat=json.loads((self.folder/'probe-last.json').read_text('utf-8'));heartbeat['probe_version']='0.3.34'

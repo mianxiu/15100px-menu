@@ -60,7 +60,7 @@ class MenuToolsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_preview_does_not_take_the_write_slot_and_drops_old_epoch(self):
         entered=asyncio.Event();release=asyncio.Event()
-        async def read(args):entered.set();await release.wait();return {'available':False,'reason':'empty'}
+        async def read(args,menu_guard=None):entered.set();await release.wait();return {'available':False,'reason':'empty'}
         self.tools.search.preview=AsyncMock(side_effect=read)
         args={'menu_epoch':7,'params':{'request':1,'search_id':'q','index':0}}
         task=asyncio.create_task(self.tools.preview(args));await entered.wait()
@@ -105,6 +105,10 @@ class MenuToolsTests(unittest.IsolatedAsyncioTestCase):
         await self.tools.request(self.request())
         self.tools.search.search.assert_not_called()
         self.assertTrue(self.tools.pending)
+        self.tools.pending=False;self.tools.preview_request=(7,9)
+        await self.tools.request(self.request())
+        self.tools.search.search.assert_not_called()
+        self.assertEqual(self.tools.preview_request,(7,9))
 
     async def test_duplicate_in_flight_cannot_finish_the_original_ui_request(self):
         self.tools.pending=True;self.tools.last_request=1

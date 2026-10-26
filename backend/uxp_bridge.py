@@ -144,6 +144,8 @@ class UxpTransport:
                     raise RuntimeError('文字拆分需要正常重启PS加载UXP0.3.59')
                 if payload.get('command') in ('text.replace','text.split') and 'value' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,71):
                     raise RuntimeError('文字处理计划需要正常重启PS加载UXP0.3.71；未提交修改')
+                if payload.get('command')=='layer.thumbnail' and version(heartbeat.get('probe_version'))<(0,3,74):
+                    raise RuntimeError('旧版缩略图需要更新并正常重启PS加载UXP0.3.74')
                 if payload.get('command')=='layer.focus' and (version(heartbeat.get('probe_version'))<(0,3,57) or payload.get('target',{}).get('session')!=heartbeat.get('session')):
                     raise RuntimeError('搜索会话或UXP版本已改变，请重新搜索')
                 if payload.get('stability_run') and version(heartbeat.get('probe_version'))<(0,3,47):
@@ -430,6 +432,7 @@ class UxpBridge(PhotoshopBridge):
             value['uxp_ready']=compatible(heartbeat.get('probe_version')) and time.time()*1000-heartbeat.get('plugin_time_ms',0)<15000
             value['uxp_version']=heartbeat.get('probe_version')
             value['layer_preview_available']=heartbeat.get('layer_preview_available') is True
+            value['layer_thumbnail_available']=heartbeat.get('layer_thumbnail_available') is True
             value['photoshop_version']=heartbeat.get('photoshop_version')
             capability=heartbeat.get('document_redraw_available')
             value['document_redraw_available']=capability if type(capability) is bool else None
@@ -524,6 +527,20 @@ class UxpBridge(PhotoshopBridge):
             raise ValueError('Invalid frozen batch mask target')
         self._captured_app=target['session'];self._captured_target={**bound,'session':target['session']}
         return {**self._captured_target,'instance_binding':self._captured_app}
+
+    async def execute_thumbnail(self,session,destination,before_dispatch=None):
+        if self.execution_guard:self.execution_guard()
+        def capture():
+            target=self._capture_target()
+            if target['session']!=session:raise RuntimeError('搜索会话已改变，请重新搜索')
+            return target
+        def write(action):
+            if self.focus_guard:self.focus_guard()
+            self.transport.task_id=self._active_task_id;self._uxp_worker_active=True
+            try:return json.dumps(self.transport.call('set_label',command='layer.thumbnail',target=self._captured_target,destination=destination)['result'])
+            finally:self._uxp_worker_active=False
+        value=await self._execute_task('layer.thumbnail',before_dispatch,capture=capture,execute=write)
+        return json.loads(value['result'])
 
     async def execute_focus(self,session,destination,before_dispatch=None):
         if self.execution_guard:self.execution_guard()

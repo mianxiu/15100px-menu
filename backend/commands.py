@@ -53,6 +53,7 @@ class Command:
 
 
 INTERNAL_COMMANDS = MappingProxyType({
+    'layer.thumbnail': Command('layer.thumbnail','生成图层缩略图','temporary-document-closed; original-selection-preserved',channel='uxp-local-files'),
     'stability.internal': Command('stability.internal','隔离稳定性测试','owned-document-only; verified-readback',channel='uxp-local-files'),
 })
 REGISTRY = MappingProxyType({

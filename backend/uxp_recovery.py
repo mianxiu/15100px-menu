@@ -43,6 +43,8 @@ class PendingUxp:
             raise ValueError('Not a modifying request')
         if 'preview_command' in value and value['preview_command'] not in ('shape.preview','shape.legacy.preview'):
             raise ValueError('Invalid preview execution identity')
+        if 'thumbnail' in value and (value['thumbnail'] is not True or value.get('operation')!='set_label'):
+            raise ValueError('Invalid thumbnail receipt identity')
         if 'capture_current' in value and value['capture_current'] is not True:
             raise ValueError('Invalid target binding mode')
 
@@ -51,6 +53,7 @@ class PendingUxp:
             raise RuntimeError('上一项 UXP 操作结果待核对，未提交新任务')
         value = {key: request[key] for key in ('id', 'session', 'operation')}
         if request.get('capture_current') is True:value['capture_current']=True
+        if request.get('command')=='layer.thumbnail':value['thumbnail']=True
         if request.get('command') in ('shape.preview','shape.legacy.preview'):value['preview_command']=request['command']
         value.update(schema=1, folder=str(Path(folder).resolve()), task_id=task_id,
                      submitted_at_ms=int(time.time()*1000))
@@ -78,7 +81,7 @@ class PendingUxp:
         if not value: return None
         try:
             path = Path(value['folder']) / ('result-'+value['id']+'.json')
-            if path.stat().st_size > 65536: return None
+            if path.stat().st_size > (512*1024 if value.get('thumbnail') is True else 65536): return None
             result = json.loads(path.read_text('utf-8-sig'))
             if not isinstance(result, dict): return None
             if any(result.get(key) != value[key] for key in ('id', 'session', 'operation')):
