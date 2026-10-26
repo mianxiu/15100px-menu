@@ -425,7 +425,7 @@ class Desktop:
                 self.menu_ready.clear()
 
     def event(self, event):
-        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress','mask.preview','preview.progress','preview.menu.confirmed','menu.tools.opened','menu.tools.result'):
+        if event.get('type') not in ('status', 'operation', 'notice', 'popup.prepare', 'document', 'diagnostic.progress','mask.preview','preview.progress','preview.menu.confirmed','menu.tools.opened','menu.tools.result','menu.tools.preview.result'):
             return
         preview=getattr(self,'mask_preview',None)
         if preview and event.get('type')=='preview.progress' and event.get('epoch')==preview.epoch:

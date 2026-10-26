@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import os
 import subprocess
@@ -133,6 +134,19 @@ class MenuToolsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MenuToolsDesktopTests(unittest.TestCase):
+    def test_preview_result_reaches_native_transport_intact(self):
+        desktop=Desktop('http://localhost',Mock());stream=io.StringIO()
+        desktop.process=SimpleNamespace(poll=lambda:None,stdin=stream)
+        for payload in ({'ok':True,'result':{'available':True,'width':1,'height':1,'pixels':[255,0,0,255]}},
+                        {'ok':True,'result':{'available':False,'reason':'empty'}},
+                        {'ok':False,'error':'unknown'}):
+            event={'type':'menu.tools.preview.result','epoch':7,'request':9,**payload}
+            desktop.event(event)
+            self.assertEqual(json.loads(stream.getvalue()),event)
+            stream.seek(0);stream.truncate()
+        desktop.event({'type':'not-a-menu-event'})
+        self.assertEqual(stream.getvalue(),'')
+
     def test_native_menu_hands_focus_to_its_verified_owner(self):
         desktop=Desktop('http://localhost',Mock());desktop.hwnd=2
         foreground=[2];desktop.gui=Mock();desktop.gui.GetForegroundWindow.side_effect=lambda:foreground[0]

@@ -577,7 +577,11 @@ static std::string shortcut(const std::string& raw) {
 }
 static void accept(const Json& event) {
     std::string type=event.value("type","");
-    if(type=="menu.tools.opened" || type=="menu.tools.result" || type=="menu.tools.preview.result"){menuTools.receive(event);return;}
+    if(type=="menu.tools.opened" || type=="menu.tools.result" || type=="menu.tools.preview.result"){
+        const bool pending=menuTools.previewPending;menuTools.receive(event);
+        if(type=="menu.tools.preview.result" && pending && !menuTools.previewPending && !taskBusy)busyFeedback=false;
+        return;
+    }
     if(type=="preview.pending") {
         PreviewPendingHint::update(event,window,ImGui::GetStyle(),int(menuFontEms[menuFontIndex(MenuTextRole::Secondary)]));return;
     }
@@ -3857,10 +3861,18 @@ int main() {
                     menuTools.results=Json{{"search_id","current"},{"items",Json::array()}};
                     menuTools.previewPending=true;menuTools.previewQuery="current";menuTools.previewHovered=menuTools.previewTarget=0;menuTools.previewRequest=1;
                     const Json tile={{"available",true},{"width",2},{"height",1},{"pixels",Json({255,0,0,255,0,255,0,128})}};
-                    menuTools.receive(Json{{"type","menu.tools.preview.result"},{"epoch",menuEpoch-1},{"request",1},{"ok",true},{"result",tile}});
-                    if(!menuTools.previewPending || menuTools.thumbnail)throw std::runtime_error("Stale image crossed menu epoch");
-                    menuTools.receive(Json{{"type","menu.tools.preview.result"},{"epoch",menuEpoch},{"request",1},{"ok",true},{"result",tile}});
-                    if(menuTools.previewPending || !menuTools.thumbnail || menuTools.thumbnailSize.x!=2)throw std::runtime_error("Image result did not create a bounded texture");
+                    accept(Json{{"type","operation"},{"busy",true},{"action","layer.thumbnail"}});
+                    accept(Json{{"type","operation"},{"busy",false}});
+                    accept(Json{{"type","menu.tools.preview.result"},{"epoch",menuEpoch-1},{"request",1},{"ok",true},{"result",tile}});
+                    if(!menuTools.previewPending || menuTools.thumbnail || !busyFeedback)throw std::runtime_error("Stale image changed preview protection");
+                    accept(Json{{"type","menu.tools.preview.result"},{"epoch",menuEpoch},{"request",1},{"ok",true},{"result",tile}});
+                    if(menuTools.previewPending || !menuTools.thumbnail || !menuTools.previewVisible || menuTools.thumbnailSize.x!=2 || busyFeedback || taskBusy)
+                        throw std::runtime_error("Completed image did not create a visible texture and release preview-only feedback");
+                    menuTools.previewPending=true;menuTools.previewRequest=2;
+                    accept(Json{{"type","operation"},{"busy",true},{"action","layer.thumbnail"}});
+                    accept(Json{{"type","menu.tools.preview.result"},{"epoch",menuEpoch},{"request",2},{"ok",false},{"error","unknown"}});
+                    if(!taskBusy || !busyFeedback)throw std::runtime_error("Unknown preview released busy protection");
+                    accept(Json{{"type","operation"},{"busy",false}});busyFeedback=false;
                     menuTools.changeSearch(4);
                     if(menuTools.thumbnail || menuTools.previewTarget!=-1)throw std::runtime_error("Old search retained its image");
                     if(menuTools.loadPreview(Json{{"available",true},{"width",129},{"height",1},{"pixels",Json::array()}}))throw std::runtime_error("Unbounded thumbnail accepted");

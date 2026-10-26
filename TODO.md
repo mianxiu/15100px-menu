@@ -1,5 +1,9 @@
 # Photoshop Menu TODO
 
+- [x] 273代码／测试／构建／实际入口：复现Desktop.event漏转发menu.tools.preview.result，真实272请求已成功生成128×72图片且临时文档关闭，故障在回传链路；补齐白名单并保留完整会话／请求／像素，匹配结果且实际空闲后清理缩略图遗留busyFeedback，未知仍忙不清。668项低CPU回归、真实JSON管道专项、原生纹理／旧会话／未知保护矩阵及冻结独立复测通过；首轮冻结重复启动超过15秒的失败日志保留，未定因。实际273／UXP75与组件一致，无PS重启，原稿／配置／旧未知保持。证据.runtime/thumbnail273-before-regression.log、thumbnail273-transport-regression.log、thumbnail273-user-evidence、runtime273-verified.json、tests273-final-low.log、native273-low-output.log、smoke273-final.log及smoke273-recheck.log。
+- [ ] 273实际预览点击／PS实屏仍待验：实际查找已打开，但Computer Use窗口清单未提供原生工具窗口，未发送替代输入，也未用纹理自测冒充实屏；旧PS临时副本可能短暂切换画布的现有限制保留。
+- [ ] 273公开交付：待源码／标签、Wiki和Release下载核验。
+
 - [x] 272代码／测试／构建／实际入口：按用户明确范围，仅F搜索输入框外圈使用中性焦点边框；筛选恢复原蓝色选中态，移除271额外筛选样式及下划线。667项低CPU回归、原生独立复测、冻结启动／重启通过；当前主题三档字号仅核对输入边框与筛选样式，中／大字号离屏图标缺失保留既有待验，不声明整张渲染全部正确。实际272／UXP75与组件一致，PS24低CPU只读搜索／筛选、窗口内容／范围与历史通过；正常组在all读取后，text因面板关闭／重开被保护拒绝，未计通过。首轮原生自测退出1但脚本未保存stdout，独立复测前补齐输出保存，原失败记录保留；不伪称定因。原稿／配置／CPU恢复；实体输入／PS实屏待验。证据.runtime/runtime272-verified.json、search272-live.json、originals272-verified.json、native272-selftest.log、native272-selftest-diagnostic.log、tests272-final-low.log及search272-preview。
 - [x] 272已公开交付：源码23879a5／v0.4.272标签、Wiki4e91f34已推送；667项回归、两项GitHub UI检查及39页／236链接、11个主要远端页面通过。统一ZIP／SHA和Latest清单匿名下载核验通过，之后GitHub与dist只保留272发行物，旧标签、源码、配置、诊断保留。实际272／UXP75及组件一致，原稿内容／选择／历史保持，无当前pending；普通CPU后半段、PS实屏与实体输入仍待验。证据.runtime/release-0.4.272-public-verification.json、manifest272-verification.json、release272-cleanup.json、dist272-cleanup.json、wiki272-public-verification.json、runtime272-verified.json和originals272-verified.json。
 
