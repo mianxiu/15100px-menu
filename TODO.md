@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 270已公开交付：源码1f7e906与v0.4.270标签已推送；统一ZIP／SHA和Latest清单匿名下载校验通过，随后GitHub与dist仅保留270发行物，旧标签／源码／配置／诊断保持。Wiki b8ca31d已同步，39页／236链接、11个主要远端页面、图片和README通过；源码／标签GitHub UI contract两次成功。本机实际270／UXP75及PS已加载DLL核验一致，无当前pending；低CPU PS接口循环通过，普通组后半段与实体中文首键继续保留待验。证据.runtime/release-0.4.270-public-verification.json、manifest270-verification.json、release270-cleanup.json、dist270-cleanup.json、wiki270-public-verification.json和runtime270-verified.json。
+
 - [x] 270代码／测试／构建／实际入口：手动重开中文不再持续停用非输入保护；PS布局变化重新读取工具，当前TSF上下文／实际禁用值与IMM关联均核验，暂时无TSF焦点时保留原值保护，真正新上下文不沿用旧指针。666项低CPU完整回归、27项输入专项、原生菜单矩阵、原生IMM／TSF低CPU与正常夹具及冻结启动／重启通过。实际270／UXP75、PS内加载DLL与最终构建一致；PS24.0.1低CPU35→21→35、查找输入21及HKL不变通过，原稿／配置／资源保持。共享应答上限200→1000ms，不增加固定等待；首条未确认原生IME请求按全局授权完整归档、最新分层备份及原进程正常退出后才释放槽位，仍为未知、不重发／不记成功。证据.runtime/runtime270-verified.json、input270-native-tsf-low.log、input270-native-tsf-normal.log、eng270-tsf-foreground-refused.json、recovery270ime与tests270-final-low.log。
 - [ ] 270普通CPU的PS重新保护后半段、实体切中文后A／拼音候选／快速输入仍待验：原生夹具正常配置通过，但PS普通组在原生恢复21后焦点切离而暂停，未计正向通过；Computer Use两次相同窗口归属错误，没有发送按键。后续短批次继续按PS真实前台条件，不绕过产品保护。切换后的极快首键仍有异步竞争边界；无实体延迟基线，不声明性能提升。升级270需保存文档并正常重启PS，不能仅重启后台或只核对UXP75。
 
