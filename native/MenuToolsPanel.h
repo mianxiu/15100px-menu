@@ -165,7 +165,7 @@ struct MenuToolsPanel {
             if(ImGui::IsItemEdited())changeSearch(ImGui::GetTime());
                 const char* ids[]={"all","pixel","text","group","shape","smart-object","adjustment","fill","other"};
             const int icons[]={7,35,36,2,37,38,6,1,40};
-            if(MenuControls::segments("##types",kinds,kind,scale,MenuControls::Emphasis::Neutral))changeSearch(ImGui::GetTime()-.18);
+            if(MenuControls::segments("##types",kinds,kind,scale))changeSearch(ImGui::GetTime()-.18);
             if(enter && !pending)changeSearch(ImGui::GetTime()-.18);
             if(available && searchDue(ImGui::GetTime())) {
                 searchDirty=false;submit("layers.search",Json{{"name",name},{"type",ids[kind]}});

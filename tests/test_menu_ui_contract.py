@@ -71,9 +71,9 @@ class MenuUiContractTests(unittest.TestCase):
         self.assertIn('enum class Emphasis {Accent,Neutral}',controls)
         self.assertIn('Emphasis emphasis=Emphasis::Accent',controls)
         self.assertIn('ImGui::GetStyleColorVec4(ImGuiCol_Border)',controls)
-        self.assertIn('hovered?Emphasis::Accent:emphasis',controls)
         self.assertIn('"##layer","搜索图层…",name,sizeof(name),MenuControls::Emphasis::Neutral',panel)
-        self.assertIn('"##types",kinds,kind,scale,MenuControls::Emphasis::Neutral',panel)
+        self.assertIn('"##types",kinds,kind,scale)',panel)
+        self.assertNotIn('kinds,kind,scale,MenuControls::Emphasis::Neutral',panel)
         self.assertNotIn('SetNavCursorVisible(false)',panel)
 
     def test_shared_controls_keep_ps_tokens_and_keyboard_navigation(self):

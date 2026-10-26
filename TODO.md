@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 272代码／测试／构建／实际入口：按用户明确范围，仅F搜索输入框外圈使用中性焦点边框；筛选恢复原蓝色选中态，移除271额外筛选样式及下划线。667项低CPU回归、原生独立复测、冻结启动／重启通过；当前主题三档字号仅核对输入边框与筛选样式，中／大字号离屏图标缺失保留既有待验，不声明整张渲染全部正确。实际272／UXP75与组件一致，PS24低CPU只读搜索／筛选、窗口内容／范围与历史通过；正常组在all读取后，text因面板关闭／重开被保护拒绝，未计通过。首轮原生自测退出1但脚本未保存stdout，独立复测前补齐输出保存，原失败记录保留；不伪称定因。原稿／配置／CPU恢复；实体输入／PS实屏待验。证据.runtime/runtime272-verified.json、search272-live.json、originals272-verified.json、native272-selftest.log、native272-selftest-diagnostic.log、tests272-final-low.log及search272-preview。
+- [ ] 272公开交付：待源码／标签、Wiki和Release下载核验。
+
 - [x] 271代码／测试／构建／实际入口：F查找的输入焦点圈和类型选中底色改用共享中性色，当前筛选细下划线，保留蓝色hover与键盘导航。667项低CPU回归、原生显示／焦点／输入／取消矩阵、四主题三档字号6张渲染及冻结启动／重启通过；实际271／UXP75、运行菜单／热键／嵌入资源一致。PS24低CPU／正常只读查找各一组，原文档／历史／资源保持，未新建文档或重启PS。实体输入／PS实屏仍待验；首轮渲染错误入口未计入，首轮验收记录落盘夹具错误及一次UXP短暂重连的启动拒绝保留，独立重验通过。证据.runtime/runtime271-verified.json、search271-live.json、search271-final-preview、tests271-final-low.log和native271-low-output.log。
 - [x] 271已公开交付：源码b4eadb3及v0.4.271标签、Wiki ce2c1dc已推送；667项回归及两项GitHub UI检查通过，39页／236链接与11个远端主要页面核验通过。统一ZIP／SHA和Latest更新清单匿名下载通过，随后GitHub与dist只保留271发行物；旧标签、源码、配置和诊断保留。实际入口271／UXP75、运行组件、原稿内容／历史与无当前pending核验通过。证据.runtime/release-0.4.271-public-verification.json、manifest271-verification.json、release271-cleanup.json、dist271-cleanup.json、wiki271-public-verification.json、runtime271-verified.json和originals271-verified.json。
 

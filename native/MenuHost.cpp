@@ -2769,7 +2769,7 @@ int main() {
                             second={LONG(at.x+first+next*.5f),LONG(at.y+input*.5f)};
                             seam={LONG(at.x+first+next),second.y};
                             const auto expectedHeight=MenuControls::segmentsHeight(names,ImGui::GetContentRegionAvail().x,scale);
-                            ImGui::BeginDisabled(disabled);MenuControls::segments("##types",names,choice,scale,MenuControls::Emphasis::Neutral);ImGui::EndDisabled();
+                            ImGui::BeginDisabled(disabled);MenuControls::segments("##types",names,choice,scale);ImGui::EndDisabled();
                             if(std::abs(ImGui::GetItemRectSize().y-expectedHeight)>.1f)throw std::runtime_error("Wrapped text filters lost measured height");
                             const char* iconNames[]={"全部","文字","智能对象"};const int iconIds[]={7,36,38};const auto bar=ImGui::GetCursorScreenPos();
                             iconSecond={LONG(bar.x+figmaDisplayIconWidth*scale*1.5f),LONG(bar.y+figmaDisplayWidgetHeight*scale*.5f)};
