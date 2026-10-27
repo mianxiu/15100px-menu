@@ -235,7 +235,8 @@ static bool applyLabelColors(const Json& values) {
 }
 static std::array<RECT,12> labelRows{};
 static int labelCount=8;
-static int labelColumns(){return labelCount/2;}
+static int labelColumns(){return 4;}
+static int labelRowCount(){return labelCount/labelColumns();}
 static int supportedLabelCount(const Json& ps) {
     int host=0,hostMinor=0,major=0,minor=0,patch=0;
     std::sscanf(ps.value("photoshop_version",std::string()).c_str(),"%d.%d",&host,&hostMinor);
@@ -978,7 +979,7 @@ static void drawLabels() {
     ImGui::EndDisabled();ImGui::PopItemFlag();ImGui::SetCursorScreenPos(saved);
 }
 static void colorGrid() {
-    layoutLabels(ImGui::GetCursorScreenPos());drawLabels();ImGui::Dummy({float(labelColumns()*36)*scale,72*scale});
+    layoutLabels(ImGui::GetCursorScreenPos());drawLabels();ImGui::Dummy({float(labelColumns()*36)*scale,float(labelRowCount()*36)*scale});
 }
 static void contextItems() {
     ImGui::TextDisabled("%s",panelTitle());ImGui::Separator();
@@ -1464,7 +1465,7 @@ static void drawCapsBar() {
         }
         MenuControls::outline(d,{left,y},{x,y+h},scale);
     };
-    drawGroup(0,capsBottomCount()-1,0,pieCenter.y+107*scale);
+    drawGroup(0,capsBottomCount()-1,0,pieCenter.y+(107+(rowVisible(1)?(labelRowCount()-2)*21.f:0))*scale);
     if(individualSmartReady && panelKind!=3 && layerCount && layerKind)
         drawGroup(9,10,pieCenter.x+65*scale,pieCenter.y+((layerKind==4 && layerCount==1)?15.f:-15.f)*scale);
     if(panelKind==2 && documentSortReady)drawGroup(7,8,0,holdRows[2].top-h-menuControlPadding*scale);
@@ -1552,7 +1553,7 @@ static void drawPie() {
     for (int i=0;i<4;++i) {
         if (!rowVisible(i)) continue;
         float width=i==1?(14+labelColumns()*21)*scale:basicLabelExtent(i).x+basicTextOffset()+figmaBasicRightPadding*scale;
-        float height=i==1?56*scale:rowHeight;
+        float height=i==1?(14+labelRowCount()*21)*scale:rowHeight;
         // Palette below the centre; both sort buttons form one row above it.
         // A closer palette leaves space for the read-only footer underneath.
         float radius=(i==1?45.f:65.f)*scale;
@@ -1693,7 +1694,7 @@ static void drawPie() {
     if(shapeEyedropActive)messages.push_back("屏幕取色：点击颜色；右键取消取色");
     if(shapeEditor.ready() && shapeEditor.copyFailed)messages.push_back("剪贴板暂时不可用，未复制颜色");
     messages.push_back(taskStatus()+(taskFailed && !taskError.empty()?"\n"+taskError:""));
-    drawFooter(messages,pieCenter.y+(!editing && capsReady && panelKind!=4?143.f:116.f)*scale,panelKind==4);
+    drawFooter(messages,pieCenter.y+((!editing && capsReady && panelKind!=4?143.f:116.f)+(!editing && rowVisible(1)?(labelRowCount()-2)*21.f:0))*scale,panelKind==4);
     const int tipAction=shapeEditor.ready() && shapeTipCandidate>=200?shapeTipCandidate:actionTipText(selected)?selected:-1;
     const bool ownEditorTip=tipAction>=200 && tipAction<200+shapeTipCount && shapeEditor.ready();
     const bool showTip=!pieAnimating && !holdFinished && !inputFocused && !ImGui::IsAnyItemActive() && (ownEditorTip || canExecute());
@@ -1996,6 +1997,7 @@ int main() {
         }
         else if (i+1<argc && arg==L"--preview-layer-context") {
             std::ifstream source(std::filesystem::path(argv[++i]));Json data;source>>data;
+            if(data.contains("photoshop"))labelCount=supportedLabelCount(data.at("photoshop"));
             if(data.contains("label_colors"))applyLabelColors(data["label_colors"]);
             capsReady=data.value("caps_ready",false);
             individualSmartReady=data.value("individual_smart_ready",false);
@@ -2600,6 +2602,17 @@ int main() {
                     state["extended_label_colors"]=false;if(supportedLabelCount(state)!=8)throw std::runtime_error("Rejected label capability enabled controls");
                     state["extended_label_colors"]=true;state["uxp_version"]="0.3.78";
                     if(supportedLabelCount(state)!=8)throw std::runtime_error("Old executor enabled extended labels");
+                }
+                {
+                    const bool oldCaps=capsReady,oldAware=layerAware;capsReady=layerAware=true;
+                    labelCount=8;redrawPresets();const auto legacy=holdRows[1],bar=capsRows[0];
+                    labelCount=12;redrawPresets();
+                    if(holdRows[1].left!=legacy.left || holdRows[1].right!=legacy.right || holdRows[1].top!=legacy.top ||
+                       labelRows[8].left!=labelRows[0].left || labelRows[8].top!=labelRows[4].bottom || labelRows[11].right!=labelRows[3].right ||
+                       capsRows[0].top<=bar.top || capsRows[0].top<holdRows[1].bottom+menuControlPadding*scale-1 || footerBounds.y<=capsRows[0].bottom ||
+                       holdRows[1].right+menuControlPadding*scale>quickRows[0].left)
+                        throw std::runtime_error("Three-row palette overlaps controls or moves its existing anchor");
+                    capsReady=oldCaps;layerAware=oldAware;
                 }
                 labelCount=12;redrawPresets();pinned=true;
                 for(int i=0;i<labelCount;++i) {

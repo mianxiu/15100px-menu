@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 279代码／测试／构建／实际入口：12项颜色标签由6列2行改为4列3行，8项仍4列2行；单格、枚举顺序、色板顶部／中心和右侧按钮锚点保持，外框／真实命中共同收窄，第三行增加21逻辑单位后字母栏与信息区同步下移。普通色板也使用实际行数。675项低CPU回归、原生完整SHOWWINDOW／hover／输入／焦点／取消矩阵及新增三行宽度／顶部锚点／间距／命中／枚举断言、冻结资源／启动／重启通过。实际279／UXP79、EXE／菜单／热键及配置一致，PS会话保持、无PS重启或文档写入；当前无活动pending，旧未知保持。证据.runtime/native279-low.log、tests279-low.log、proof279.log、smoke279.log、recovery279palette与runtime279-verified.json。
+- [ ] 279视觉待验：当前主题下8／12项及小中大字号均已生成GPU和CPU离屏图，但部分图局部缺图，不能标全部视觉通过；几何／命中断言与渲染生成分别记录。CUA按list_windows返回对象绑定PS窗口10297958时，报归属不匹配但期望／实际字符串相同；未重复旧失败绑定、不发键鼠，PS实屏、实体输入、现代宿主及其他DPI仍待验。原失败图保留.runtime/palette279-preview-gpu-first，CPU图在palette279-preview，不把预览当实屏。没有速度提升声明。
+
 - [x] 278公开交付：源码103fc21／v0.4.278及Wiki1800d52已推送；675项回归及两项GitHub UI检查通过，39页／243链接、11个远端主要页面／图片／README核验通过。统一ZIP／SHA和Latest清单匿名下载核验后，GitHub及dist仅保留278，旧标签／源码／诊断保持。实际278／UXP79和组件一致，当前无活动pending；原稿最新分层备份、正常重启恢复、基础标签16项和新增颜色写前拒绝8项均有独立证据。现代PS／原截图电脑和实体输入／实屏待验，不声明全版本已修或提速。证据.runtime/release-0.4.278-public-verification.json、manifest278-verification.json、release278-cleanup.json、dist278-cleanup.json、wiki278-public-verification.json与runtime278-verified.json。
 
 - [x] 278代码／测试／构建／实际入口：复现菜单宿主版本25.2但DOM版本字段缺失时新增标签错误拒绝，统一使用UXP host.version，79执行端报告extended_label_colors；原生和后台发布前核对同一能力，旧插件／未知能力保持8项且无隐藏新增命中。675项低CPU回归、现代四色模型、原生完整矩阵与冻结启动／重启通过；实际278／UXP79、EXE／菜单／热键／配置一致。正常退出、最新分层原稿备份和生产COM启动恢复通过；PS24低CPU／正常各8个基础标签写入与一次撤销、各4个新增标签写前拒绝通过，源文档／主题／资源及旧未知保持，无新活动pending。证据.runtime/labels278-before.log、labels278-after.log、tests278-low.log、native278-low.log、labels278-interface、recovery278reload与runtime278-verified.json。
