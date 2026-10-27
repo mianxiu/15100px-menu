@@ -40,10 +40,33 @@ inline bool multiline(const char* id,char* value,size_t capacity,float height) {
     const bool changed=ImGui::InputTextMultiline(id,value,capacity,{-1,height},ImGuiInputTextFlags_AllowTabInput|ImGuiInputTextFlags_WordWrap);
     requireText(value);return changed;
 }
-inline void textPreview(const char* id,const char* value,float height) {
+using TextRange=std::pair<int,int>;
+inline void textPreview(const char* id,const char* value,float height,const std::vector<TextRange>& matches={}) {
     MenuTextStyle text(MenuTextRole::Body);
     ImGui::BeginChild(id,{0,height},ImGuiChildFlags_Borders|ImGuiChildFlags_AlwaysUseWindowPadding);
-    ImGui::PushTextWrapPos(0);ImGui::TextUnformatted(value);ImGui::PopTextWrapPos();ImGui::EndChild();
+    if(matches.empty()){ImGui::PushTextWrapPos(0);ImGui::TextUnformatted(value);ImGui::PopTextWrapPos();}
+    else {
+        auto* font=ImGui::GetFont();auto* draw=ImGui::GetWindowDrawList();const float size=ImGui::GetFontSize();
+        const auto at=ImGui::GetCursorScreenPos();const float width=std::max(1.f,ImGui::GetContentRegionAvail().x);
+        const char* end=value+strlen(value);const char* line=value;size_t range=0;int row=0;
+        while(line<end) {
+            const char* stop=ImFontCalcWordWrapPositionEx(font,size,line,end,width,ImDrawTextFlags_WrapKeepBlanks);
+            if(stop==line && *line!='\n'){unsigned int c;stop=line+ImTextCharFromUtf8(&c,line,end);}
+            const char* cursor=line;
+            while(cursor<stop) {
+                const int offset=int(cursor-value);while(range<matches.size() && matches[range].second<=offset)++range;
+                const bool accent=range<matches.size() && matches[range].first<=offset;
+                const char* next=range<matches.size()?std::min(stop,value+(accent?matches[range].second:matches[range].first)):stop;
+                const float x=ImGui::CalcTextSize(line,cursor).x;
+                draw->AddText(font,size,{at.x+x,at.y+row*size},ImGui::GetColorU32(accent?ImGuiCol_CheckMark:ImGuiCol_Text),cursor,next);
+                cursor=next;
+            }
+            ++row;line=stop<end && *stop=='\n'?stop+1:stop;
+        }
+        if(end>value && end[-1]=='\n')++row;
+        ImGui::Dummy({width,std::max(1,row)*size});
+    }
+    ImGui::EndChild();
 }
 struct TipStyle {
     explicit TipStyle(float scale) {

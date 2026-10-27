@@ -27,6 +27,23 @@ class TextPlanTests(unittest.TestCase):
         self.assertEqual(p['value'],r'\1')
         self.assertEqual(self.plan('ab','replace',find='(?=b)',replacement='X',regex=True,ignore_case=False)['value'],'aXb')
 
+    def test_match_ranges_are_utf8_bytes_in_normalized_draft_and_do_not_change_replacement(self):
+        p=self.plan('猫😀A12\r尾 a34','replace',find=r'(a)(\d+)',replacement=r'\2-\1',regex=True,ignore_case=True)
+        self.assertEqual(p['matches'],[[7,10],[15,18]])
+        self.assertEqual(p['preview'],'猫😀12-A\n尾 34-a')
+        self.assertEqual(self.plan('a\r\nb','replace',find=r'(?m)^b',replacement='B',regex=True,ignore_case=False)['matches'],[[2,3]])
+        p=self.plan('猫😀尾','replace',find=r'(?=😀)',replacement='X',regex=True,ignore_case=False)
+        self.assertEqual(p['matches'],[]);self.assertEqual(p['count'],1)
+        self.assertEqual(self.plan('xx','replace',find='q',replacement='!',regex=False,ignore_case=False)['matches'],[])
+
+    def test_python_named_groups_lookaround_inline_flags_and_conditionals(self):
+        p=self.plan('ID12 id34','replace',find=r'(?i)(?P<key>id)(?P<n>\d+)',replacement=r'\g<n>-\g<key>',regex=True,ignore_case=False)
+        self.assertEqual(p['value'],'12-ID 34-id')
+        p=self.plan('x12 x34','replace',find=r'(?<=x)\d+(?!\d)',replacement='N',regex=True,ignore_case=False)
+        self.assertEqual(p['value'],'xN xN')
+        p=self.plan('a ab','replace',find=r'(a)?(?(1)b|c)',replacement='X',regex=True,ignore_case=False)
+        self.assertEqual(p['value'],'a X')
+
     def test_cleanup_case_expansion_and_join_preserve_source_positions(self):
         self.assertEqual(self.plan('  A  \r\r B \r','trim')['value'],'A\r\rB\r')
         p=self.plan('\r A\r \rB\r','remove-empty');self.assertEqual(p['value'],' A\rB');self.assertEqual(p['origins'][:4],[1,2,3,6])
@@ -55,7 +72,8 @@ class TextPlanTests(unittest.TestCase):
 
     def test_real_owned_worker_finishes_and_regex_timeout_stops_only_worker(self):
         p={'revision':'r','draft':'猫1','operation':'replace','find':r'\d','replacement':'2','regex':True,'ignore_case':False}
-        self.assertEqual(evaluate('猫1',p)['value'],'猫2')
+        first=evaluate('猫1',p);self.assertEqual(first['value'],'猫2');self.assertEqual(first['matches'],[[3,4]])
+        with self.assertRaisesRegex(ValueError,'unknown group'):evaluate('猫1',{**p,'replacement':r'\g<missing>'})
         p.update(draft='a'*10000+'!',find='(a+)+$',replacement='x')
         start=time.monotonic()
         with self.assertRaisesRegex(ValueError,'超时'):evaluate(p['draft'],p)

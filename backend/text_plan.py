@@ -74,7 +74,7 @@ def line_ends(text,expression):
 def compute(source,params):
     params=parameters(params)
     if not isinstance(source,str) or units(source)>20000 or '\0' in source:raise ValueError('原文无效或超过处理上限')
-    text=normalize(params['draft']);origins=mapping(source,text);operation=params['operation'];count=0;breaks=None;preview=None
+    text=normalize(params['draft']);origins=mapping(source,text);operation=params['operation'];count=0;breaks=None;preview=None;matches=[]
     def edit(edits):
         nonlocal text,origins
         if units(text)+sum(units(value)-units(text[start:end]) for start,end,value in edits)>20000:raise ValueError('结果超过20000字符')
@@ -95,7 +95,13 @@ def compute(source,params):
     if operation=='replace':
         find=normalize(params['find']);replacement=normalize(params['replacement'])
         pattern=re.compile(find if params['regex'] else re.escape(find),re.IGNORECASE if params['ignore_case'] else 0)
-        substitute(pattern,lambda match:match.expand(replacement) if params['regex'] else replacement)
+        offsets=[0]
+        for char in text:offsets.append(offsets[-1]+len(char.encode('utf-8')))
+        edits=[]
+        for match in pattern.finditer(text):
+            if match.start()!=match.end():matches.append([offsets[match.start()],offsets[match.end()]])
+            edits.append((match.start(),match.end(),match.expand(replacement) if params['regex'] else replacement))
+        count=len(edits);edit(edits)
     elif operation=='trim':substitute(re.compile(r'^[^\S\n]+|[^\S\n]+$',re.MULTILINE),lambda _:'')
     elif operation=='remove-empty':
         kept=[match for match in re.finditer(r'[^\n]+',text) if match[0].strip()]
@@ -146,7 +152,7 @@ def compute(source,params):
     if operation not in ('replace','split'):count=int(changed)
     result={'value':value,'origins':origins,'count':count,'changed':changed,
             'kind':'split' if operation=='split' else 'replace','characters':len(text),
-            'preview':preview if preview is not None else text}
+            'preview':preview if preview is not None else text,'matches':matches}
     if breaks is not None:result.update(breaks=breaks,layout=params['layout'])
     return result
 
@@ -193,7 +199,7 @@ def cli():
     if len(sys.argv)!=2 or response.exists() or request.stat().st_size>200000:raise ValueError('Invalid preview envelope')
     value=json.loads(request.read_text('utf-8'));result={'id':value['id']}
     try:result['result']=compute(value['source'],value['params'])
-    except (ValueError,re.error,OverflowError) as error:result['error']=str(error)[:300]
+    except (ValueError,re.error,OverflowError,IndexError) as error:result['error']=str(error)[:300]
     response.write_text(json.dumps(result,ensure_ascii=False),'utf-8')
 
 

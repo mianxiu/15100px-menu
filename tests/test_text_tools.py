@@ -14,7 +14,7 @@ class TextToolsTests(unittest.IsolatedAsyncioTestCase):
         params={'revision':'r','draft':'猫','operation':'edit'}
         from backend.text_plan import compute
         with patch('backend.text_tools.evaluate',side_effect=compute):result=await tools.preview(params)
-        app.bridge.execute_text.assert_not_called();self.assertEqual(result['preview'],'猫')
+        app.bridge.execute_text.assert_not_called();self.assertEqual(result['preview'],'猫');self.assertEqual(result['matches'],[])
         with self.assertRaises(ValueError):await tools.apply({'revision':'r','plan_id':'old'})
         request={'revision':'r','plan_id':result['plan_id']}
         await tools.apply(request);app.bridge.execute_text.assert_awaited_once()

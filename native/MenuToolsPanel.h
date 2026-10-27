@@ -7,7 +7,10 @@ struct MenuToolsPanel {
     char draft[80001]{},find[801]{},replacement[2001]{},separator[801]{},joiner[801]=" ";
     int textTab=0,replaceMode=0,caseMode=0,tidyMode=0,splitMode=0,splitLayout=0,draftGeneration=0,previewGeneration=0,resultCount=0;
     std::string pendingAction,planId,resultValue,resultPreview,resultKind;
-    void changedText(){++draftGeneration;planId.clear();resultValue.clear();resultPreview.clear();resultKind.clear();error.clear();}
+    std::vector<MenuControls::TextRange> textMatches;std::string matchSource;
+    bool textDirty=false;double textChanged=0;
+    void changedText(){++draftGeneration;planId.clear();resultValue.clear();resultPreview.clear();resultKind.clear();textMatches.clear();matchSource.clear();error.clear();textDirty=true;textChanged=ImGui::GetTime();}
+    bool textDue(double now)const{return textDirty && active && ready && !pending && !revision.empty() && textTab==1 && find[0] && now-textChanged>=.18;}
     Json textParams()const {
         Json args={{"revision",revision},{"draft",draft},{"operation","edit"}};
         if(textTab==1){args["operation"]="replace";args["find"]=find;args["replacement"]=replacement;args["regex"]=replaceMode==1;args["ignore_case"]=caseMode==1;}
@@ -54,7 +57,7 @@ struct MenuToolsPanel {
     void open(const char* value){reset();opening=true;mode=value;sendMenuTool("menu.tools.open",Json{{"mode",value}});}
     void submit(const char* action,Json args) {
         if(!ready || pending)return;
-        pending=true;pendingAction=action;if(pendingAction=="text.preview")previewGeneration=draftGeneration;
+        pending=true;pendingAction=action;if(pendingAction=="text.preview"){previewGeneration=draftGeneration;planId.clear();textMatches.clear();}
         error.clear();sendMenuTool("menu.tools.request",Json{{"request",++request},{"action",action},{"args",args}});
     }
     void regroup(){split=menuSplitPreview(source,grouping);}
@@ -97,13 +100,27 @@ struct MenuToolsPanel {
             const auto groups=menuDefaultGroups(source);std::snprintf(grouping,sizeof(grouping),"%s",groups.c_str());regroup();requireText(source);requireText(layerName);
             std::snprintf(draft,sizeof(draft),"%s",sourceDisplay.c_str());changedText();
         } else if(action=="text.preview") {
+            textMatches.clear();matchSource.clear();
+            for(size_t i=0;draft[i];++i){if(draft[i]=='\r'){matchSource+='\n';if(draft[i+1]=='\n')++i;}else matchSource+=draft[i];}
+            std::vector<MenuControls::TextRange> validated;
+            const auto matches=result.value("matches",Json::array());int last=0;const int length=int(matchSource.size());
+            if(!matches.is_array()){error="匹配范围无效，请重新预览";return;}
+            for(const auto& span:matches) {
+                if(!span.is_array() || span.size()!=2 || !span[0].is_number_integer() || !span[1].is_number_integer()){error="匹配范围无效，请重新预览";return;}
+                const auto start=span[0].get<int64_t>(),end=span[1].get<int64_t>();
+                if(start<last || end<=start || end>length || (static_cast<unsigned char>(matchSource[start])&0xc0)==0x80 || (static_cast<unsigned char>(matchSource[end])&0xc0)==0x80){textMatches.clear();error="匹配范围无效，请重新预览";return;}
+                validated.emplace_back(int(start),int(end));last=int(end);
+            }
+            textMatches=std::move(validated);
             planId=result.at("plan_id").get<std::string>();resultValue=result.at("value").get<std::string>();
             std::replace(resultValue.begin(),resultValue.end(),'\r','\n');
             resultPreview=result.at("preview").get<std::string>();resultKind=result.at("kind").get<std::string>();resultCount=result.at("count").get<int>();requireText(resultPreview);
         } else if(action=="text.split" || action=="text.apply") {source.clear();revision.clear();changedText();}
     }
-    void drawText(float scale) {
+    void drawText(float scale,bool available) {
+        ImGui::BeginDisabled(pending);
         if(MenuControls::button("重新读取（覆盖草稿）",scale)){source.clear();revision.clear();changedText();submit("text.read",Json::object());}
+        ImGui::EndDisabled();
         if(revision.empty())return;
         {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("%s",layerName.c_str());}
         const char* tabs[]={"编辑","查找替换","整理","拆分"};
@@ -129,10 +146,15 @@ struct MenuToolsPanel {
             const char* layouts[]={"保留位置","逐行排列"};if(MenuControls::segments("##split-layout",layouts,splitLayout,scale))changedText();
             {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("分隔符保留在前一组；最多64组。保留位置要求原有换行边界，不换行文字请选择逐行排列。");}
         }
-        ImGui::BeginDisabled(pending);
-        if(MenuControls::button("计算预览",scale)){planId.clear();submit("text.preview",textParams());}
+        if(available && textDue(ImGui::GetTime())){textDirty=false;submit("text.preview",textParams());}
+        if(textTab==1 && !planId.empty()) {
+            {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("匹配 %d 处 · 强调色为匹配内容",resultCount);}
+            MenuControls::textPreview("##text-matches",matchSource.c_str(),80*scale,textMatches);
+        }
+        ImGui::BeginDisabled(pending || (textTab==1 && !find[0]));
+        if(MenuControls::button("计算预览",scale)){planId.clear();textMatches.clear();textDirty=false;submit("text.preview",textParams());}
         ImGui::EndDisabled();
-        {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("%s",planId.empty()?"折行预览 · 尚未写入PS":resultKind=="split"?("拆分预览 · "+std::to_string(resultCount)+" 个文字层").c_str():"处理结果 · 确认后写入PS");}
+        {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("%s",planId.empty()?(pending && pendingAction=="text.preview"?"正在计算预览 · 尚未写入PS":"折行预览 · 尚未写入PS"):resultKind=="split"?("拆分预览 · "+std::to_string(resultCount)+" 个文字层").c_str():"处理结果 · 确认后写入PS");}
         MenuControls::textPreview("##text-result",planId.empty()?draft:resultPreview.c_str(),130*scale);
         ImGui::BeginDisabled(planId.empty() || pending);
         if(MenuControls::button(resultKind=="split"?"确认拆分并替换原层":"确认写回文字",scale))submit("text.apply",Json{{"revision",revision},{"plan_id",planId}});
@@ -205,7 +227,7 @@ struct MenuToolsPanel {
             }
         } else {
             ImGui::BeginChild("##text-body",{0,std::max(h,ImGui::GetContentRegionAvail().y-h-gap)},ImGuiChildFlags_None);
-            drawText(scale);ImGui::EndChild();
+            drawText(scale,available);ImGui::EndChild();
         }
         ImGui::EndDisabled();
         if(MenuControls::button("关闭",scale))send("hide");

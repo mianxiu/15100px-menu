@@ -82,7 +82,7 @@ class TextTools:
         payload={key:result[key] for key in ({'value','origins','count','breaks','layout'} if split else {'value','origins','count'})}
         payload['revision']=saved['revision'];payload=mapped_parameters(payload,split)
         identity=secrets.token_hex(16);self.plan=(identity,payload,'text.split' if split else 'text.replace')
-        return {key:result[key] for key in ('preview','value','count','changed','kind','characters')}|{'plan_id':identity}
+        return {key:result[key] for key in ('preview','value','count','changed','kind','characters','matches')}|{'plan_id':identity}
 
     async def apply(self,args,menu_guard=None):
         if not isinstance(args,dict) or set(args)!={'revision','plan_id'} or not self.plan or (args['plan_id'],args['revision'])!=(self.plan[0],self.plan[1]['revision']):

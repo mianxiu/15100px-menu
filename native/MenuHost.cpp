@@ -2299,7 +2299,15 @@ int main() {
                 menuTools.receive(Json{{"type","menu.tools.opened"},{"epoch",menuEpoch},{"mode",previewTool}});
                 if(previewTool=="split")menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.read"},{"ok",true},
                     {"result",{{"name","标题与说明"},{"text","作品标题\r第一段说明文字。这是一段用于核对自动折行与中文显示的长文字，不需要先手动换行，也可以在编辑区修改，然后计算预览。Lorem ipsum dolor sit amet, consectetur adipiscing elit.\r第二段说明文字"},{"revision","preview"}}}});
-                if(previewTool=="split"){menuTools.textTab=previewTextTab;std::snprintf(menuTools.find,sizeof(menuTools.find),"文字");std::snprintf(menuTools.replacement,sizeof(menuTools.replacement),"内容");}
+                if(previewTool=="split"){
+                    menuTools.textTab=previewTextTab;std::snprintf(menuTools.find,sizeof(menuTools.find),"文字");std::snprintf(menuTools.replacement,sizeof(menuTools.replacement),"内容");
+                    if(previewTextTab==1){
+                        Json matches=Json::array();std::string output=menuTools.sourceDisplay;size_t offset=0;
+                        while((offset=output.find("文字",offset))!=std::string::npos){matches.push_back(Json::array({offset,offset+strlen("文字")}));output.replace(offset,strlen("文字"),"内容");offset+=strlen("内容");}
+                        menuTools.textDirty=false;menuTools.submit("text.preview",menuTools.textParams());
+                        menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.preview"},{"ok",true},{"result",{{"plan_id","preview-only"},{"value",output},{"preview",output},{"kind","replace"},{"count",matches.size()},{"matches",matches}}}});
+                    }
+                }
                 else {menuTools.searchDirty=false;menuTools.submit("layers.search",Json::object());menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","layers.search"},{"ok",true},
                     {"result",{{"search_id","preview"},{"scanned",24},{"items",Json::array({Json{{"name","产品标题"},{"type","text"},{"document_name","商品详情.psd"}},Json{{"name","产品说明"},{"type","smart-object"},{"document_name","商品详情.psd"}}})}}}});}
             }
@@ -2747,6 +2755,15 @@ int main() {
                             throw std::runtime_error("Wrapped paste changed real line breaks");
                         platform.Platform_GetClipboardTextFn=oldGet;platform.Platform_SetClipboardTextFn=oldSet;platform.Platform_ClipboardUserData=oldData;
                         std::cout<<"Soft-wrap editor passed: resize, UTF-8 cursor, exact copy/paste, Chinese edit, undo, no synthetic newlines or horizontal scroll\n";
+                    }
+                    {
+                        ImGui::NewFrame();ImGui::SetNextWindowPos({0,0});ImGui::SetNextWindowSize({220*scale,180*scale});
+                        ImGui::Begin("##match-test",nullptr,ImGuiWindowFlags_NoSavedSettings);
+                        {MenuControls::PanelStyle controls(scale);MenuControls::textPreview("##match-colors","前猫 alpha beta gamma\n猫后",100*scale,{{3,6},{24,27}});}
+                        int accented=0;const auto color=ImGui::GetColorU32(ImGuiCol_CheckMark);
+                        for(auto* child:ImGui::GetCurrentWindow()->DC.ChildWindows)for(const auto& vertex:child->DrawList->VtxBuffer)if(vertex.col==color)++accented;
+                        if(accented<8)throw std::runtime_error("Matched text did not render accent glyphs");
+                        ImGui::End();ImGui::Render();finishPlatformFrame();
                     }
                     int choice=0,iconChoice=0,rowClicks=0,previewClicks=0;char query[16]{};POINT second{},seam{},iconSecond{},iconSeam{},rowMain{},rowPreview{};bool focusQuery=false,rowPreviewHovered=false,showRowPreview=true;
                     auto controlsFrame=[&](bool disabled){
@@ -3840,12 +3857,20 @@ int main() {
                     if(menuTools.pending || menuTools.split.breaks!=Json({2,3}) || canExecute())throw std::runtime_error("Caps text preview is not isolated");
                     menuTools.textTab=1;std::snprintf(menuTools.find,sizeof(menuTools.find),"a");std::snprintf(menuTools.replacement,sizeof(menuTools.replacement),"猫");
                     if(menuTools.textParams().at("operation")!="replace" || menuTools.textParams().at("draft")!="a\nb")throw std::runtime_error("Text editor parameters lost source or operation");
+                    menuTools.changedText();const double textChanged=menuTools.textChanged;
+                    if(menuTools.textDue(textChanged+.17) || !menuTools.textDue(textChanged+.19))throw std::runtime_error("Text live preview debounce failed");
+                    menuTools.pending=true;if(menuTools.textDue(textChanged+1))throw std::runtime_error("Text live preview overlapped pending work");menuTools.pending=false;
                     menuTools.submit("text.preview",menuTools.textParams());const auto previewRequest=menuTools.request;menuTools.changedText();
                     menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",previewRequest},{"action","text.preview"},{"ok",true},{"result",Json::object()}});
                     if(menuTools.pending || !menuTools.planId.empty())throw std::runtime_error("Late text plan accepted after an edit");
                     menuTools.submit("text.preview",menuTools.textParams());
-                    menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.preview"},{"ok",true},{"result",{{"plan_id","bounded"},{"value","猫\rb"},{"preview","猫\nb"},{"kind","replace"},{"count",1}}}});
+                    menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.preview"},{"ok",true},{"result",{{"plan_id","bounded"},{"value","猫\rb"},{"preview","猫\nb"},{"kind","replace"},{"count",1},{"matches",Json::array({Json::array({0,1})})}}}});
+                    if(menuTools.textMatches!=std::vector<MenuControls::TextRange>{{0,1}})throw std::runtime_error("Text match range was not accepted");
                     if(menuTools.planId!="bounded" || menuTools.resultValue!="猫\nb")throw std::runtime_error("Text plan preview was not usable");
+                    menuTools.changedText();if(!menuTools.textMatches.empty() || !menuTools.planId.empty())throw std::runtime_error("Text edit retained stale highlights or apply plan");
+                    std::snprintf(menuTools.draft,sizeof(menuTools.draft),"猫a");menuTools.submit("text.preview",menuTools.textParams());
+                    menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.preview"},{"ok",true},{"result",{{"matches",Json::array({Json::array({1,3})})}}}});
+                    if(!menuTools.planId.empty() || !menuTools.textMatches.empty() || menuTools.error.empty())throw std::runtime_error("Broken UTF-8 match accepted");
                     menuTools.changedText();menuTools.textTab=0;
                     numberFrame(ImGuiKey_None,false);
                     if(pieReady || holdRows[0].right || capsRows[0].right || quickRows[0].right || holdActionAt(POINT{LONG(pieCenter.x),LONG(pieCenter.y)})!=-1)
