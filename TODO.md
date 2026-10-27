@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 277公开交付：源码46f6c1e／v0.4.277及Wiki9185752已推送，674项回归与两项GitHub UI检查通过；39页／241链接及11个远端主要页面／图片／README已核验。统一ZIP／SHA与Latest清单匿名下载后，GitHub及dist仅保留277，旧标签／源码／诊断保持。实际入口277／UXP78和新菜单组件一致，配置及旧未知保持；6组PS列表接口验收通过，实体输入／PS实屏与其他版本待验。IME未知正常退出收尾及最新分层恢复独立保留，不记原请求成功。证据.runtime/release-0.4.277-public-verification.json、manifest277-verification.json、release277-cleanup.json、dist277-cleanup.json、wiki277-public-verification.json与runtime277-verified.json。
+
 - [x] 277代码／测试／构建／实际入口：全部文本页沿用180ms静置自动预览，去掉计算按钮；空查找／拆分条件不请求，旧草稿世代结果不可确认，计算中继续编辑后只计算最新草稿。新增列表页的项目符号／连续编号／移除标记，保留空行、缩进和源样式映射，转换幂等；是文字前缀而非PS自动编号段落。674项低CPU回归、原生完整输入／焦点／取消／SHOWWINDOW矩阵、当前主题三档字号渲染、冻结资源与启动／重启通过；实际277／UXP78及菜单／热键／配置核验一致。PS24低CPU／正常各三种列表，共6组预览不改源、写回单历史／一次历史回退精确恢复通过；原稿／临时文档／资源保持。最终验收发现新原生IME禁用未确认，按全局授权保留原始未知及退出审计，保存最新分层备份，正常退出PS确认原进程结束后释放槽位，以生产COM启动恢复原稿；未重发或记为成功，最终无活动pending。证据.runtime/tests277-low.log、native277-low.log、text277-preview、text277-api、recovery277textlists、recovery277reload、runtime277-verified.json。
 - [ ] 277待验：自动预览的实体键鼠、PS实屏及其他PS版本；列表没有多级／自定义起始编号，不是PS原生段落自动列表。原生IME未确认的根因未在本次列表功能中修复，原记录仍为未知，不把正常退出收尾当作其请求成功；不声明性能提升。
 
