@@ -55,6 +55,7 @@ with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as bundle:
     bundle.write(ROOT/'docs/LEGACY-PREVIEW.md','docs/LEGACY-PREVIEW.md')
     bundle.write(ROOT/'docs/VERSION-HEALTH.md','docs/VERSION-HEALTH.md')
     bundle.write(ROOT/'docs/TEXT-TOOLS.md','docs/TEXT-TOOLS.md')
+    bundle.write(ROOT/'docs/TEXT-PREVIEW-PERFORMANCE.md','docs/TEXT-PREVIEW-PERFORMANCE.md')
     bundle.write(ROOT/'docs/INDIVIDUAL-SMART-OBJECTS.md','docs/INDIVIDUAL-SMART-OBJECTS.md')
     bundle.write(ROOT/'docs/LAYER-SORTING.md','docs/LAYER-SORTING.md')
     bundle.write(ROOT/'docs/INPUT-LANGUAGE-ASSESSMENT.md','docs/INPUT-LANGUAGE-ASSESSMENT.md')

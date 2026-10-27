@@ -7,6 +7,8 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import atexit
+import threading
 
 
 def units(text):
@@ -169,50 +171,100 @@ def compute(source,params):
     return result
 
 
+class _Evaluator:
+    def __init__(self):
+        import win32con,win32event,win32job,win32process
+        self.folder=tempfile.TemporaryDirectory(prefix='photoshop-text-')
+        self.path=Path(self.folder.name);self.process=self.job=self.request=self.response=None
+        session=secrets.token_hex(16)
+        (self.path/'session.json').write_text(json.dumps({'session':session}),'utf-8')
+        thread=None
+        try:
+            self.request=win32event.CreateEvent(None,False,False,'Local\\PhotoshopMenuText-'+session+'-request')
+            self.response=win32event.CreateEvent(None,False,False,'Local\\PhotoshopMenuText-'+session+'-response')
+            self.job=win32job.CreateJobObject(None,'')
+            limits=win32job.QueryInformationJobObject(self.job,win32job.JobObjectExtendedLimitInformation)
+            limits['BasicLimitInformation']['LimitFlags']|=win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            win32job.SetInformationJobObject(self.job,win32job.JobObjectExtendedLimitInformation,limits)
+            command=[sys.executable,'--text-plan-worker',str(self.path)] if getattr(sys,'frozen',False) else [sys.executable,'-m','backend.text_plan',str(self.path)]
+            startup=win32process.STARTUPINFO();startup.dwFlags=win32con.STARTF_USESHOWWINDOW;startup.wShowWindow=win32con.SW_HIDE
+            self.process,thread,_,_=win32process.CreateProcess(sys.executable,subprocess.list2cmdline(command),None,None,False,
+                subprocess.CREATE_NO_WINDOW|win32process.CREATE_SUSPENDED|win32process.BELOW_NORMAL_PRIORITY_CLASS,None,str(Path(__file__).resolve().parents[1]),startup)
+            win32job.AssignProcessToJobObject(self.job,self.process);win32process.ResumeThread(thread)
+        except BaseException:
+            self.close();raise
+        finally:
+            if thread:thread.Close()
+
+    def close(self):
+        import win32api,win32con,win32event,win32process
+        # This process and its bootloader children only compute local text, never PS.
+        if self.process and win32process.GetExitCodeProcess(self.process)==win32con.STILL_ACTIVE:
+            if self.job:
+                import win32job
+                win32job.TerminateJobObject(self.job,1)
+            if win32process.GetExitCodeProcess(self.process)==win32con.STILL_ACTIVE:win32api.TerminateProcess(self.process,1)
+            win32event.WaitForSingleObject(self.process,1000)
+        for name in ('process','job','request','response'):
+            handle=getattr(self,name,None)
+            if handle:handle.Close();setattr(self,name,None)
+        self.folder.cleanup()
+
+
+_evaluator=None
+_evaluation_lock=threading.Lock()
+
+
+def _close_evaluator():
+    global _evaluator
+    if _evaluator:_evaluator.close();_evaluator=None
+
+
+atexit.register(_close_evaluator)
+
+
 def evaluate(source,params):
-    import win32api,win32con,win32event,win32job,win32process
+    global _evaluator
+    import win32con,win32event,win32process
     params=parameters(params)
     if not isinstance(source,str) or units(source)>20000 or '\0' in source:raise ValueError('原文无效或超过处理上限')
-    with tempfile.TemporaryDirectory(prefix='photoshop-text-') as temporary:
-        folder=Path(temporary);identity=secrets.token_hex(16)
-        (folder/'request.json').write_text(json.dumps({'id':identity,'source':source,'params':params},ensure_ascii=False),'utf-8')
-        command=[sys.executable,'--text-plan-worker',str(folder)] if getattr(sys,'frozen',False) else [sys.executable,'-m','backend.text_plan',str(folder)]
-        job=win32job.CreateJobObject(None,'');process=thread=None;assigned=False
+    if not _evaluation_lock.acquire(blocking=False):raise ValueError('文字预览计算中，本次未接受')
+    try:
+        if _evaluator and win32process.GetExitCodeProcess(_evaluator.process)!=win32con.STILL_ACTIVE:_close_evaluator()
+        if _evaluator is None:_evaluator=_Evaluator()
+        worker=_evaluator;identity=secrets.token_hex(16)
         try:
-            limits=win32job.QueryInformationJobObject(job,win32job.JobObjectExtendedLimitInformation)
-            limits['BasicLimitInformation']['LimitFlags']|=win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            win32job.SetInformationJobObject(job,win32job.JobObjectExtendedLimitInformation,limits)
-            startup=win32process.STARTUPINFO();startup.dwFlags=win32con.STARTF_USESHOWWINDOW;startup.wShowWindow=win32con.SW_HIDE
-            process,thread,_,_=win32process.CreateProcess(sys.executable,subprocess.list2cmdline(command),None,None,False,
-                subprocess.CREATE_NO_WINDOW|win32process.CREATE_SUSPENDED|win32process.BELOW_NORMAL_PRIORITY_CLASS,None,str(Path(__file__).resolve().parents[1]),startup)
-            win32job.AssignProcessToJobObject(job,process);assigned=True;win32process.ResumeThread(thread)
-            if win32event.WaitForSingleObject(process,2000)!=win32con.WAIT_OBJECT_0:
-                win32job.TerminateJobObject(job,1);win32event.WaitForSingleObject(process,1000)
-                raise ValueError('计算预览超时，已停止独立计算进程；请简化正则或文字')
-            path=folder/'response.json'
-            if win32process.GetExitCodeProcess(process)!=0 or not path.exists() or path.stat().st_size>1024*1024:raise ValueError('文字预览计算未完成')
+            path=worker.path/'response.json';path.unlink(missing_ok=True)
+            (worker.path/'request.json').write_text(json.dumps({'id':identity,'source':source,'params':params},ensure_ascii=False),'utf-8')
+            win32event.SetEvent(worker.request)
+            waited=win32event.WaitForMultipleObjects([worker.response,worker.process],False,2000)
+            if waited==win32con.WAIT_TIMEOUT:raise ValueError('计算预览超时，已停止独立计算进程；请简化正则或文字')
+            if waited!=win32con.WAIT_OBJECT_0 or not path.exists() or path.stat().st_size>1024*1024:raise ValueError('文字预览计算未完成')
             result=json.loads(path.read_text('utf-8'))
             if result.get('id')!=identity:raise ValueError('文字预览身份不一致')
-            if result.get('error'):raise ValueError(result['error'])
-            return result['result']
-        finally:
-            # The job owns only this evaluator and its bootloader children, never PS.
-            if process and win32process.GetExitCodeProcess(process)==win32con.STILL_ACTIVE:
-                if assigned:win32job.TerminateJobObject(job,1)
-                else:win32api.TerminateProcess(process,1)
-                win32event.WaitForSingleObject(process,1000)
-            if thread:thread.Close()
-            if process:process.Close()
-            job.Close()
+            path.unlink();(worker.path/'request.json').unlink()
+        except BaseException:
+            _close_evaluator();raise
+        if result.get('error'):raise ValueError(result['error'])
+        return result['result']
+    finally:_evaluation_lock.release()
 
 
 def cli():
+    import win32con,win32event
     folder=Path(sys.argv[1]);request=folder/'request.json';response=folder/'response.json'
-    if len(sys.argv)!=2 or response.exists() or request.stat().st_size>200000:raise ValueError('Invalid preview envelope')
-    value=json.loads(request.read_text('utf-8'));result={'id':value['id']}
-    try:result['result']=compute(value['source'],value['params'])
-    except (ValueError,re.error,OverflowError,IndexError) as error:result['error']=str(error)[:300]
-    response.write_text(json.dumps(result,ensure_ascii=False),'utf-8')
+    if len(sys.argv)!=2:raise ValueError('Invalid preview envelope')
+    session=json.loads((folder/'session.json').read_text('utf-8'))['session']
+    if not isinstance(session,str) or not re.fullmatch('[0-9a-f]{32}',session):raise ValueError('Invalid preview session')
+    incoming=win32event.OpenEvent(win32con.SYNCHRONIZE,False,'Local\\PhotoshopMenuText-'+session+'-request')
+    outgoing=win32event.OpenEvent(win32con.EVENT_MODIFY_STATE,False,'Local\\PhotoshopMenuText-'+session+'-response')
+    while win32event.WaitForSingleObject(incoming,win32event.INFINITE)==win32con.WAIT_OBJECT_0:
+        if request.stat().st_size>200000:raise ValueError('Invalid preview envelope')
+        value=json.loads(request.read_text('utf-8'));result={'id':value['id']}
+        try:result['result']=compute(value['source'],value['params'])
+        except (ValueError,re.error,OverflowError,IndexError) as error:result['error']=str(error)[:300]
+        response.write_text(json.dumps(result,ensure_ascii=False),'utf-8')
+        win32event.SetEvent(outgoing)
 
 
 if __name__=='__main__':cli()

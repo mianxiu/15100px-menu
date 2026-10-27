@@ -11,6 +11,16 @@ struct MenuToolsPanel {
     bool textDirty=false;double textChanged=0;
     void changedText(){++draftGeneration;planId.clear();resultValue.clear();resultPreview.clear();resultKind.clear();textMatches.clear();matchSource.clear();error.clear();textDirty=true;textChanged=ImGui::GetTime();}
     bool textDue(double now)const{return textDirty && active && ready && !pending && !revision.empty() && (textTab!=1 || find[0]) && (textTab!=3 || (splitMode==0?grouping[0]:separator[0])) && now-textChanged>=.18;}
+    std::string textStatus()const {
+        if(!error.empty())return error;
+        if(pending && pendingAction=="text.preview")return "正在自动预览 · 可继续编辑，尚未写入PS";
+        if(planId.empty()) {
+            if(textTab==1 && !find[0])return "请输入查找内容后自动预览";
+            if(textTab==3 && !(splitMode==0?grouping[0]:separator[0]))return splitMode==0?"请输入按行分组后自动预览":"请输入分隔符或正则后自动预览";
+            return "等待自动预览 · 尚未写入PS";
+        }
+        return resultKind=="split"?"拆分预览 · "+std::to_string(resultCount)+" 个文字层":"处理结果 · 确认后写入PS";
+    }
     Json textParams()const {
         Json args={{"revision",revision},{"draft",draft},{"operation","edit"}};
         if(textTab==1){args["operation"]="replace";args["find"]=find;args["replacement"]=replacement;args["regex"]=replaceMode==1;args["ignore_case"]=caseMode==1;}
@@ -145,7 +155,7 @@ struct MenuToolsPanel {
             if(splitMode==0){MenuControls::input("##groups","例如 1-3,4,5-7",grouping,sizeof(grouping));if(ImGui::IsItemEdited())changedText();}
             else {MenuControls::input("##separator",splitMode==1?"分隔符，例如逗号或空格":"正则分隔符，例如 [,，]",separator,sizeof(separator));if(ImGui::IsItemEdited())changedText();}
             const char* layouts[]={"保留位置","逐行排列"};if(MenuControls::segments("##split-layout",layouts,splitLayout,scale))changedText();
-            {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("分隔符保留在前一组；最多64组。保留位置要求原有换行边界，不换行文字请选择逐行排列。");}
+            {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("实际文字为 %d 行（自动折行不计）。分组须覆盖所有行、至少拆成2组；保留位置要求原有换行边界，不换行文字请选择分隔符／正则与逐行排列。",1+int(std::count(draft,draft+strlen(draft),'\n')));}
         } else if(textTab==4) {
             const char* lists[]={"项目列表","编号列表","移除列表"};if(MenuControls::segments("##list-mode",lists,listMode,scale))changedText();
             {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("按非空行生成列表，保留缩进和空行；替换已有标记，不重复叠加。编号从1开始。");}
@@ -155,7 +165,7 @@ struct MenuToolsPanel {
             {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("匹配 %d 处 · 强调色为匹配内容",resultCount);}
             MenuControls::textPreview("##text-matches",matchSource.c_str(),80*scale,textMatches);
         }
-        {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("%s",planId.empty()?(pending && pendingAction=="text.preview"?"正在自动预览 · 尚未写入PS":"自动预览 · 尚未写入PS"):resultKind=="split"?("拆分预览 · "+std::to_string(resultCount)+" 个文字层").c_str():"处理结果 · 确认后写入PS");}
+        {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("%s",textStatus().c_str());}
         MenuControls::textPreview("##text-result",planId.empty()?draft:resultPreview.c_str(),130*scale);
         ImGui::BeginDisabled(planId.empty() || pending);
         if(MenuControls::button(resultKind=="split"?"确认拆分并替换原层":"确认写回文字",scale))submit("text.apply",Json{{"revision",revision},{"plan_id",planId}});

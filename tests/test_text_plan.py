@@ -80,6 +80,8 @@ class TextPlanTests(unittest.TestCase):
 
     def test_original_line_layout_and_arbitrary_boundary_refusal(self):
         self.assertEqual(self.plan('A\rB\rC','split',mode='lines',groups='1-2,3',separator='',layout='original')['breaks'],[4,5])
+        with self.assertRaisesRegex(ValueError,'2至64'):self.plan('A paragraph that only wraps on screen','split',mode='lines',groups='1',separator='',layout='original')
+        with self.assertRaisesRegex(ValueError,'覆盖所有行'):self.plan('A\rB','split',mode='lines',groups='1',separator='',layout='original')
         with self.assertRaisesRegex(ValueError,'逐行排列'):self.plan('A,B','split',mode='literal',groups='',separator=',',layout='original')
 
     def test_limits_empty_invalid_regex_and_invalid_mapping(self):
@@ -90,11 +92,44 @@ class TextPlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):mapped_parameters({'revision':'r','value':'ab','origins':[1,0,1],'count':1})
 
     def test_real_owned_worker_finishes_and_regex_timeout_stops_only_worker(self):
+        from backend import text_plan
+        import win32api,win32con,win32event,win32process
         p={'revision':'r','draft':'猫1','operation':'replace','find':r'\d','replacement':'2','regex':True,'ignore_case':False}
         first=evaluate('猫1',p);self.assertEqual(first['value'],'猫2');self.assertEqual(first['matches'],[[3,4]])
+        worker=text_plan._evaluator
         with self.assertRaisesRegex(ValueError,'unknown group'):evaluate('猫1',{**p,'replacement':r'\g<missing>'})
+        self.assertIs(text_plan._evaluator,worker)
+        self.assertEqual(evaluate('猫1',p),first)
+        self.assertIs(text_plan._evaluator,worker)
+        self.assertEqual(win32process.GetExitCodeProcess(worker.process),win32con.STILL_ACTIVE)
+        self.assertFalse((worker.path/'request.json').exists())
+        self.assertFalse((worker.path/'response.json').exists())
+        parent=win32api.GetCurrentProcess()
+        process=win32api.DuplicateHandle(parent,worker.process,parent,0,False,win32con.DUPLICATE_SAME_ACCESS)
         p.update(draft='a'*10000+'!',find='(a+)+$',replacement='x')
         start=time.monotonic()
-        with self.assertRaisesRegex(ValueError,'超时'):evaluate(p['draft'],p)
+        try:
+            with self.assertRaisesRegex(ValueError,'超时'):evaluate(p['draft'],p)
+            self.assertEqual(win32event.WaitForSingleObject(process,0),win32con.WAIT_OBJECT_0)
+        finally:process.Close()
         self.assertLess(time.monotonic()-start,5)
+        self.assertIsNone(text_plan._evaluator)
+        self.assertIsNone(worker.process)
         self.assertEqual(evaluate('x',{'revision':'r','draft':'y','operation':'edit'})['value'],'y')
+        self.assertIsNot(text_plan._evaluator,worker)
+
+    def test_evaluator_rejects_overlap_and_rejects_a_stale_response(self):
+        from backend import text_plan
+        from unittest.mock import patch
+        import win32con
+        params={'revision':'r','draft':'y','operation':'edit'}
+        with text_plan._evaluation_lock:
+            with self.assertRaisesRegex(ValueError,'本次未接受'):evaluate('x',params)
+        evaluate('x',params)
+        def stale(*_):
+            (text_plan._evaluator.path/'response.json').write_text('{"id":"old"}','utf-8')
+            return win32con.WAIT_OBJECT_0
+        with patch('win32event.SetEvent'),patch('win32event.WaitForMultipleObjects',side_effect=stale):
+            with self.assertRaisesRegex(ValueError,'身份不一致'):evaluate('x',params)
+        self.assertIsNone(text_plan._evaluator)
+        self.assertEqual(evaluate('x',params)['value'],'y')

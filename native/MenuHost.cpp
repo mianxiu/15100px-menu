@@ -2788,6 +2788,28 @@ int main() {
                         if(accented<8)throw std::runtime_error("Matched text did not render accent glyphs");
                         ImGui::End();ImGui::Render();finishPlatformFrame();
                     }
+                    {
+                        MenuToolsPanel editor;editor.active=editor.ready=true;editor.mode="split";editor.revision="r";
+                        editor.pending=true;editor.pendingAction="text.preview";std::snprintf(editor.draft,sizeof(editor.draft),"original");
+                        auto editorFrame=[&](){
+                            io.DeltaTime=1.f/60.f;ImGui::NewFrame();ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);const auto origin=ImGui::GetMainViewport()->Pos;
+                            ImGui::SetNextWindowPos(origin);ImGui::SetNextWindowSize({700*scale,850*scale});
+                            ImGui::Begin("##text-pending-test",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoSavedSettings);
+                            editor.draw(scale,{0,0},true);ImGui::End();ImGui::Render();finishPlatformFrame();
+                        };
+                        editorFrame();editorFrame();ImGuiWindow* draftWindow=nullptr;
+                        for(auto* child:GImGui->Windows)if(strstr(child->Name,"##text-pending-test/") && strstr(child->Name,"##draft"))draftWindow=child;
+                        if(!draftWindow)throw std::runtime_error("Pending text editor has no input window");
+                        io.AddMouseViewportEvent(ImGui::GetMainViewport()->ID);io.AddMousePosEvent(draftWindow->Pos.x+12*scale,draftWindow->Pos.y+12*scale);
+                        editorFrame();
+                        io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);editorFrame();io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);editorFrame();
+                        io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_A,true);editorFrame();
+                        io.AddKeyEvent(ImGuiKey_A,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);editorFrame();
+                        io.AddInputCharactersUTF8("继续中文编辑");editorFrame();
+                        if(std::string(editor.draft)!="继续中文编辑" || !editor.pending || !editor.textDirty || !editor.planId.empty())
+                            throw std::runtime_error("Pending preview blocked editable text or retained an applicable plan: "+Json{{"draft",editor.draft},{"pending",editor.pending},{"dirty",editor.textDirty},{"active",ImGui::GetActiveID()},{"child",draftWindow->Name},{"hover",GImGui->HoveredWindow?GImGui->HoveredWindow->Name:"none"},{"mouse",{io.MousePos.x,io.MousePos.y}},{"pos",{draftWindow->Pos.x,draftWindow->Pos.y}},{"plan",editor.planId}}.dump());
+                        ImGui::ClearActiveID();std::cout<<"Text panel remains clickable/editable during a pending preview; stale plan cleared\n";
+                    }
                     int choice=0,iconChoice=0,rowClicks=0,previewClicks=0;char query[16]{};POINT second{},seam{},iconSecond{},iconSeam{},rowMain{},rowPreview{};bool focusQuery=false,rowPreviewHovered=false,showRowPreview=true;
                     auto controlsFrame=[&](bool disabled){
                         const auto padding=ImGui::GetStyle().FramePadding;
@@ -3883,6 +3905,11 @@ int main() {
                     menuTools.changedText();const double textChanged=menuTools.textChanged;
                     if(menuTools.textDue(textChanged+.17) || !menuTools.textDue(textChanged+.19))throw std::runtime_error("Text live preview debounce failed");
                     menuTools.pending=true;if(menuTools.textDue(textChanged+1))throw std::runtime_error("Text live preview overlapped pending work");menuTools.pending=false;
+                    menuTools.error="拆分需要2至64组非空文字";
+                    if(menuTools.textStatus()!=menuTools.error)throw std::runtime_error("Disabled text plan hid its reason");
+                    menuTools.error.clear();menuTools.pending=true;menuTools.pendingAction="text.preview";
+                    if(menuTools.textStatus().find("可继续编辑")==std::string::npos)throw std::runtime_error("Preview editing status lost");
+                    menuTools.pending=false;
                     for(int tab=0;tab<5;++tab){menuTools.textTab=tab;if(!menuTools.textDue(textChanged+.19))throw std::runtime_error("Text tab did not auto preview");}
                     menuTools.textTab=4;
                     const char* listOperations[]={"bullet","numbered","unlist"};
