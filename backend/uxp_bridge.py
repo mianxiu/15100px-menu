@@ -144,6 +144,8 @@ class UxpTransport:
                     raise RuntimeError('文字拆分需要正常重启PS加载UXP0.3.59')
                 if payload.get('command') in ('text.replace','text.split') and 'value' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,71):
                     raise RuntimeError('文字处理计划需要正常重启PS加载UXP0.3.71；未提交修改')
+                if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,78):
+                    raise RuntimeError('文字拆分修复需要正常重启PS加载UXP0.3.78；未提交修改')
                 if payload.get('command')=='layer.thumbnail':
                     raise RuntimeError('非静默缩略图已停用，未提交操作')
                 if payload.get('command')=='layer.focus' and (version(heartbeat.get('probe_version'))<(0,3,57) or payload.get('target',{}).get('session')!=heartbeat.get('session')):

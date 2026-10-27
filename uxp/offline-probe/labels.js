@@ -2365,6 +2365,8 @@ function createTextTools(ps,session,capture,readTree) {
     const prepared=params&&Object.prototype.hasOwnProperty.call(params,'value')?plan(raw,params).value:null;
     if(prepared)raw={...raw,...prepared};
     if(prepared&&!['original','lines'].includes(params.layout))throw Error('文字拆分布局无效');
+    const flow=prepared&&params.layout==='lines';
+    if(flow&&raw.orientation&&raw.orientation._value!=='horizontal')throw Error('逐行排列暂不支持竖排文字，请选择保留位置');
     if(!Array.isArray(ends)||ends.length<2||ends.length>64||ends[ends.length-1]!==raw.textKey.length||ends.some((end,index)=>!Number.isInteger(end)||end<1||end>raw.textKey.length||(index>0&&end<=ends[index-1])||(end<raw.textKey.length&&raw.textKey[end-1]!=='\r')))throw Error('分组必须按预览行顺序完整覆盖文字，最多64组');
     let from=0;const groups=[];
     for(const end of ends) {
@@ -2383,17 +2385,23 @@ function createTextTools(ps,session,capture,readTree) {
       if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
       const before=await descriptor(request.target);
       if(!same(before,saved.row))throw Error('文字内容或样式已改变，请重新读取');
-      const [flags]=await batch([{_obj:'multiGet',_target:{_ref:ref(request.target)},extendedReference:[['visible','group','layerEffects']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}]);
+      const [flags]=await batch([{_obj:'multiGet',_target:{_ref:ref(request.target)},extendedReference:[['visible','group','layerEffects','opacity']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}]);
       if(typeof flags.visible!=='boolean'||typeof flags.group!=='boolean'||flags.group===true||flags.layerEffects&&Object.keys(flags.layerEffects).some(key=>!['_obj','scale'].includes(key)))throw Error('带剪贴或图层效果的文字暂不能安全拆分');
-      const doc=ps.app.activeDocument,width=doc.width,height=doc.height;
+      const doc=ps.app.activeDocument,width=doc.width,height=doc.height,selected=doc.activeLayers;
+      const opacity=selected?.length===1&&selected[0].id===request.target.active_layer_id?selected[0].opacity:NaN;
+      if(!Number.isFinite(opacity)||opacity<0||opacity>100||flags.opacity===undefined)throw Error('无法核对原文字透明度，未执行拆分');
       if(doc.id!==request.target.document_id||!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)throw Error('无法读取文字画布尺寸');
       const tree=await readTree(doc),original=request.target.active_layer_id,index=tree.order.indexOf(original),parent=tree.rows.find(row=>row.layerID===original)?.parentLayerID;
       if(index<0||!Number.isInteger(parent))throw Error('文字位置已改变，请重新读取');
       const history=await context.hostControl.suspendHistory({documentID:doc.id,name:'拆分文字图层'}),created=[],positions=[];
       const property=target=>({_obj:'multiGet',_target:{_ref:ref(target)},extendedReference:[['layerID','textKey','parentLayerID']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}});
+      const opacityTo=(id,value)=>({_obj:'set',_target:[{_ref:'layer',_id:id}],to:{_obj:'layer',opacity:{_unit:'percentUnit',_value:value}},_options:{dialogOptions:'silent'}});
+      const visibility=target=>({_obj:'multiGet',_target:{_ref:ref(target)},extendedReference:[['layerID','visible','opacity']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}});
+      let phase='完整文字';
       function ink(value) {
-        const box=value.boundingBox,values=['left','top','right','bottom'].map(key=>box?.[key]?._unit==='pixelsUnit'?box[key]._value:NaN);
-        if(values.some(value=>!Number.isFinite(value))||values[2]<=values[0]||values[3]<=values[1])throw Error('无法读取独立文字字形');
+        const box=value?.boundingBox,keys=['left','top','right','bottom'];
+        const values=keys.map(key=>{const item=box?.[key];return item?._unit==='pixelsUnit'?item._value:item?._unit==='pointsUnit'&&Number.isFinite(item._value)&&Number.isFinite(doc.resolution)&&doc.resolution>0?item._value*doc.resolution/72:NaN;});
+        if(values.some(value=>!Number.isFinite(value))||values[2]<=values[0]||values[3]<=values[1])throw Error('无法读取独立文字字形（'+phase+'；单位='+keys.map(key=>box?.[key]?._unit||'缺失').join('/')+'；DPI='+doc.resolution+'）');
         return values;
       }
       let write=textWriter(raw),preparedOriginal=before;
@@ -2410,10 +2418,14 @@ function createTextTools(ps,session,capture,readTree) {
           const target=await capture();
           if(target.document_id!==doc.id||target.layer_ids.length!==1||tree.order.includes(target.active_layer_id)||created.includes(target.active_layer_id))throw Error('新文字图层身份未确认');
           created.push(target.active_layer_id);
-          await batch([{_obj:'hide',_target:[{_ref:'layer',_id:target.active_layer_id}],_options:{dialogOptions:'silent'}}]);
+          // Keep text layout active without painting the measurement copy.
+          await batch([opacityTo(target.active_layer_id,0),{_obj:'show',_target:[{_ref:'layer',_id:target.active_layer_id}],_options:{dialogOptions:'silent'}}]);
+          const [fullRow]=await batch([property(target)]);
+          if(fullRow.layerID!==target.active_layer_id||fullRow.parentLayerID!==parent||fullRow.textKey?.textKey!==raw.textKey||!stylesMatch(fullRow.textKey,raw))throw Error('新文字副本读取不一致');
+          phase='完整文字';const sourceBox=ink(fullRow.textKey);
           let originalTop=null;
-          if(shape.char._value==='box'&&group.from) {
-            const resolution=doc.resolution,originalBox=ink(raw),distance=2*(originalBox[3]-originalBox[1])+100;
+          if((shape.char._value==='box'||flow)&&group.from) {
+            const resolution=doc.resolution,originalBox=sourceBox,distance=2*(originalBox[3]-originalBox[1])+100;
             if(!Number.isFinite(resolution)||resolution<=0)throw Error('无法核对文字分辨率');
             const prefix=raw.textKey.slice(0,group.to),origins=Array.from({length:prefix.length+1},(_,i)=>Math.min(i,group.to-1)),probe=mappedText(raw,prefix,origins);
             // Preserve the real prefix's wrapping; move only its ink below the target to read that target's top.
@@ -2429,21 +2441,24 @@ function createTextTools(ps,session,capture,readTree) {
             await write(outgoing);
             const [measured]=await batch([property(target)]);
             if(measured.textKey.textKey!==prefix||!stylesMatch(measured.textKey,probe))throw Error('文字基线测量读回不一致');
-            originalTop=ink(measured.textKey)[1];
+            phase='分组定位';originalTop=ink(measured.textKey)[1];
             if(originalTop<originalBox[1]-.05||originalTop>originalBox[3]+.05)throw Error('溢出文本框的文字暂不能安全拆分');
           }
-          const masked=raw.textKey.slice(0,group.from).replace(/[^\r]/g,' ')+group.text;
-          const maskedOrigins=Array.from({length:masked.length+1},(_,index)=>Math.min(index,group.to-1));
-          await write(mappedText(raw,masked,maskedOrigins));
-          const [maskRow]=await batch([property(target)]),expected=ink(maskRow.textKey);
+          let expected=null;
+          if(!flow) {
+            const masked=raw.textKey.slice(0,group.from).replace(/[^\r]/g,' ')+group.text;
+            const maskedOrigins=Array.from({length:masked.length+1},(_,index)=>Math.min(index,group.to-1));
+            await write(mappedText(raw,masked,maskedOrigins));
+            const [maskRow]=await batch([property(target)]);phase='位置参照';expected=ink(maskRow.textKey);
+          }
           const origins=Array.from({length:group.text.length+1},(_,index)=>Math.min(group.from+index,group.to-1)),value=mappedText(raw,group.text,origins);
           await write(value);
-          const [isolated]=await batch([property(target)]),box=ink(isolated.textKey);
+          const [isolated]=await batch([property(target)]);phase='独立分组';const box=ink(isolated.textKey);
           if(isolated.parentLayerID!==parent)throw Error('拆分后的父组改变，已取消');
           if(!stylesMatch(isolated.textKey,value))throw Error('拆分后的文字样式改变，已取消');
-          if(Math.abs((expected[2]-expected[0])-(box[2]-box[0]))>.05||Math.abs((expected[3]-expected[1])-(box[3]-box[1]))>.05)throw Error('拆分会改变字形排版，已取消（'+expected.map((v,i)=>Math.round((v-box[i])*1000)/1000).join(',')+'）');
-          if(shape.char._value==='box'&&(originalTop??expected[1])+box[3]-box[1]>ink(raw)[3]+.05)throw Error('溢出文本框的文字暂不能安全拆分');
-          const localX=expected[0]-box[0],localY=(originalTop??expected[1])-box[1],dx=matrix.xx*localX+matrix.yx*localY,dy=matrix.xy*localX+matrix.yy*localY;
+          if(!flow&&(Math.abs((expected[2]-expected[0])-(box[2]-box[0]))>.05||Math.abs((expected[3]-expected[1])-(box[3]-box[1]))>.05))throw Error('保留位置的排版校验未通过，请改用逐行排列（'+expected.map((v,i)=>Math.round((v-box[i])*1000)/1000).join(',')+'）');
+          if(!flow&&shape.char._value==='box'&&(originalTop??expected[1])+box[3]-box[1]>sourceBox[3]+.05)throw Error('溢出文本框的文字暂不能安全拆分');
+          const localX=flow?0:expected[0]-box[0],localY=(originalTop??(flow?box[1]:expected[1]))-box[1],dx=matrix.xx*localX+matrix.yx*localY,dy=matrix.xy*localX+matrix.yy*localY;
           const click=clone(raw.textClickPoint);
           if(click?.horizontal?._unit!=='percentUnit'||click?.vertical?._unit!=='percentUnit'||!Number.isFinite(click.horizontal._value)||!Number.isFinite(click.vertical._value))throw Error('无法核对文字锚点');
           click.horizontal._value+=dx/width*100;click.vertical._value+=dy/height*100;
@@ -2456,18 +2471,22 @@ function createTextTools(ps,session,capture,readTree) {
         await batch([{_obj:'select',_target:[{_ref:'layer',_id:original}],makeVisible:false,_options:{dialogOptions:'silent'}}]);
         if(!same(await descriptor(request.target),preparedOriginal))throw Error('原文字已改变，已取消拆分');
         await batch([{_obj:'hide',_target:[{_ref:'layer',_id:original}],_options:{dialogOptions:'silent'}},
-          ...(flags.visible?created.map(id=>({_obj:'show',_target:[{_ref:'layer',_id:id}],_options:{dialogOptions:'silent'}})):[]),
+          ...(!flags.visible?created.map(id=>({_obj:'hide',_target:[{_ref:'layer',_id:id}],_options:{dialogOptions:'silent'}})):[]),
+          ...created.map(id=>opacityTo(id,opacity)),
           {_obj:'delete',_target:ref(request.target),_options:{dialogOptions:'silent'}},
           {_obj:'select',_target:[{_ref:'layer',_id:created[0]}],makeVisible:false,_options:{dialogOptions:'silent'}}]);
         const after=await readTree(doc),wanted=tree.order.slice();wanted.splice(index,1,...created);
         if(after.order.join(',')!==wanted.join(',')||created.some(id=>after.rows.find(row=>row.layerID===id)?.parentLayerID!==parent))throw Error('拆分图层顺序读回不一致');
+        const visible=await batch(created.map(id=>visibility({...request.target,active_layer_id:id})));
+        if(visible.some((row,i)=>row.layerID!==created[i]||row.visible!==flags.visible||!same(row.opacity,flags.opacity)))throw Error('拆分文字透明度或可见性读回不一致');
         await context.hostControl.resumeHistory(history,true);snapshot=null;
         return {verified:true,count:created.length,layer_ids:created,positions};
       } catch(error) {
         try {
           await context.hostControl.resumeHistory(history,false);
           await batch([{_obj:'select',_target:[{_ref:'layer',_id:original}],makeVisible:false,_options:{dialogOptions:'silent'}}]);
-          if(!same(await descriptor(request.target),before)||(await readTree(doc)).order.join(',')!==tree.order.join(','))throw Error('Text split restore mismatch');
+          const [restored]=await batch([visibility(request.target)]);
+          if(restored.visible!==flags.visible||!same(restored.opacity,flags.opacity)||!same(await descriptor(request.target),before)||(await readTree(doc)).order.join(',')!==tree.order.join(','))throw Error('Text split restore mismatch');
         } catch(_) {uncertain=true;}
         throw error;
       }
