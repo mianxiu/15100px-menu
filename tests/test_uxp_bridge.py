@@ -322,6 +322,17 @@ class UxpDiscoveryTests(unittest.TestCase):
                     self.transport.call('set_label',command='label',color=color,target={'session':'s'})
                 self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
 
+    def test_split_requires_baseline_unit_executor_before_publication(self):
+        folder=self.heartbeat(24)
+        heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(session='s')
+        self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        for previous in ('0.3.78','0.3.79'):
+            heartbeat['probe_version']=previous;(folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+            for params in ({'value':'a\rb','layout':'lines'},{'value':'a\rb','layout':'original'},{'breaks':[2,3]}):
+                with self.assertRaisesRegex(RuntimeError,'0.3.80'):
+                    self.transport.call('set_label',command='text.split',target={'session':'s'},text=params)
+        self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
+
     def test_smart_conversion_rejects_old_plugin_before_publication(self):
         folder=self.heartbeat(24)
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(probe_version='0.3.17',session='s')

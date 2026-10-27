@@ -2295,15 +2295,27 @@ function createTextTools(ps,session,capture,readTree) {
     for(const [key,item] of Object.entries(style))if(!['_obj','baseParentStyle','styleSheetHasParent','fontAvailable','fontName','fontStyleName'].includes(key)&&!key.startsWith('implied'))value[key]=item;
     return value;
   }
-  function stylesMatch(actual,wanted) {
+  function pixels(value,resolution) {
+    if(!Number.isFinite(value?._value))return NaN;
+    return value._unit==='pixelsUnit'?value._value:value._unit==='pointsUnit'&&Number.isFinite(resolution)&&resolution>0?value._value*resolution/72:NaN;
+  }
+  function stylesMatch(actual,wanted,resolution) {
     for(const [key,field] of [['textStyleRange','textStyle'],['paragraphStyleRange','paragraphStyle']]) {
       const a=styleRuns(actual,key),b=styleRuns(wanted,key);let ai=0,bi=0;
-      const signatures=ranges=>ranges.map(row=>stable({...styleSignature(ranges[0][field].baseParentStyle),...styleSignature(row[field])}));
+      const signatures=ranges=>ranges.map(row=>{
+        const style={...styleSignature(ranges[0][field].baseParentStyle),...styleSignature(row[field])},baseline=style.baselineShift;
+        if(baseline?._unit==='pointsUnit'&&resolution===undefined)resolution=ps.app.activeDocument.resolution;
+        const offset=baseline===undefined||baseline===0?0:pixels(baseline,resolution);
+        if(field==='textStyle'&&Number.isFinite(offset))delete style.baselineShift;
+        return {style:stable(style),offset};
+      });
       const signaturesA=signatures(a),signaturesB=signatures(b);
       for(let offset=0;offset<=wanted.textKey.length;offset++) {
         while(ai<a.length-1&&offset>=a[ai].to)ai++;
         while(bi<b.length-1&&offset>=b[bi].to)bi++;
-        if(signaturesA[ai]!==signaturesB[bi])return false;
+        const left=signaturesA[ai],right=signaturesB[bi];
+        // Compare the same physical shift across descriptor unit conversions.
+        if(left.style!==right.style || Number.isFinite(left.offset)&&Number.isFinite(right.offset)&&Math.abs(left.offset-right.offset)>.0001)return false;
       }
     }
     return true;
@@ -2388,7 +2400,7 @@ function createTextTools(ps,session,capture,readTree) {
       if(!same(before,saved.row))throw Error('文字内容或样式已改变，请重新读取');
       const [flags]=await batch([{_obj:'multiGet',_target:{_ref:ref(request.target)},extendedReference:[['visible','group','layerEffects','opacity']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}]);
       if(typeof flags.visible!=='boolean'||typeof flags.group!=='boolean'||flags.group===true||flags.layerEffects&&Object.keys(flags.layerEffects).some(key=>!['_obj','scale'].includes(key)))throw Error('带剪贴或图层效果的文字暂不能安全拆分');
-      const doc=ps.app.activeDocument,width=doc.width,height=doc.height,selected=doc.activeLayers;
+      const doc=ps.app.activeDocument,width=doc.width,height=doc.height,resolution=doc.resolution,selected=doc.activeLayers;
       const opacity=selected?.length===1&&selected[0].id===request.target.active_layer_id?selected[0].opacity:NaN;
       if(!Number.isFinite(opacity)||opacity<0||opacity>100||flags.opacity===undefined)throw Error('无法核对原文字透明度，未执行拆分');
       if(doc.id!==request.target.document_id||!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)throw Error('无法读取文字画布尺寸');
@@ -2401,7 +2413,7 @@ function createTextTools(ps,session,capture,readTree) {
       let phase='完整文字';
       function ink(value) {
         const box=value?.boundingBox,keys=['left','top','right','bottom'];
-        const values=keys.map(key=>{const item=box?.[key];return item?._unit==='pixelsUnit'?item._value:item?._unit==='pointsUnit'&&Number.isFinite(item._value)&&Number.isFinite(doc.resolution)&&doc.resolution>0?item._value*doc.resolution/72:NaN;});
+        const values=keys.map(key=>pixels(box?.[key],resolution));
         if(values.some(value=>!Number.isFinite(value))||values[2]<=values[0]||values[3]<=values[1])throw Error('无法读取独立文字字形（'+phase+'；单位='+keys.map(key=>box?.[key]?._unit||'缺失').join('/')+'；DPI='+doc.resolution+'）');
         return values;
       }
@@ -2410,7 +2422,7 @@ function createTextTools(ps,session,capture,readTree) {
         if(prepared&&prepared.textKey!==before.textKey.textKey) {
           await textWriter(before.textKey)(prepared);
           preparedOriginal=await descriptor(request.target);
-          if(preparedOriginal.textKey.textKey!==prepared.textKey||!stylesMatch(preparedOriginal.textKey,prepared)||!same(layout(preparedOriginal.textKey),layout(before.textKey)))throw Error('拆分前的文字或样式读回不一致');
+          if(preparedOriginal.textKey.textKey!==prepared.textKey||!stylesMatch(preparedOriginal.textKey,prepared,resolution)||!same(layout(preparedOriginal.textKey),layout(before.textKey)))throw Error('拆分前的文字或样式读回不一致');
           raw=preparedOriginal.textKey;write=textWriter(raw);
         }
         for(const group of groups) {
@@ -2422,26 +2434,27 @@ function createTextTools(ps,session,capture,readTree) {
           // Keep text layout active without painting the measurement copy.
           await batch([opacityTo(target.active_layer_id,0),{_obj:'show',_target:[{_ref:'layer',_id:target.active_layer_id}],_options:{dialogOptions:'silent'}}]);
           const [fullRow]=await batch([property(target)]);
-          if(fullRow.layerID!==target.active_layer_id||fullRow.parentLayerID!==parent||fullRow.textKey?.textKey!==raw.textKey||!stylesMatch(fullRow.textKey,raw))throw Error('新文字副本读取不一致');
+          if(fullRow.layerID!==target.active_layer_id||fullRow.parentLayerID!==parent||fullRow.textKey?.textKey!==raw.textKey||!stylesMatch(fullRow.textKey,raw,resolution))throw Error('新文字副本读取不一致');
           phase='完整文字';const sourceBox=ink(fullRow.textKey);
           let originalTop=null;
           if((shape.char._value==='box'||flow)&&group.from) {
-            const resolution=doc.resolution,originalBox=sourceBox,distance=2*(originalBox[3]-originalBox[1])+100;
+            const originalBox=sourceBox,distance=2*(originalBox[3]-originalBox[1])+100;
             if(!Number.isFinite(resolution)||resolution<=0)throw Error('无法核对文字分辨率');
             const prefix=raw.textKey.slice(0,group.to),origins=Array.from({length:prefix.length+1},(_,i)=>Math.min(i,group.to-1)),probe=mappedText(raw,prefix,origins);
             // Preserve the real prefix's wrapping; move only its ink below the target to read that target's top.
             probe.textStyleRange=probe.textStyleRange.flatMap(range=>{
               if(range.from>=group.from)return [range];
               const shifted=clone(range),style=shifted.textStyle,baseline=style.baselineShift;
-              if(baseline&&(baseline._unit!=='pixelsUnit'||!Number.isFinite(baseline._value)))throw Error('无法核对文字基线');
-              shifted.to=Math.min(range.to,group.from);style.baselineShift={_unit:'pixelsUnit',_value:(baseline?baseline._value:0)-distance};delete style.impliedBaselineShift;
+              const offset=baseline===undefined||baseline===0?0:pixels(baseline,resolution);
+              if(!Number.isFinite(offset))throw Error('无法核对文字基线（单位='+String(baseline?._unit||'缺失')+'；DPI='+resolution+'）');
+              shifted.to=Math.min(range.to,group.from);style.baselineShift={_unit:'pixelsUnit',_value:offset-distance};delete style.impliedBaselineShift;
               return range.to>group.from?[shifted,{...range,from:group.from}]:[shifted];
             });
             const outgoing=clone(probe);
             for(const range of outgoing.textStyleRange)if(range.from<group.from)range.textStyle.baselineShift={_unit:'pointsUnit',_value:range.textStyle.baselineShift._value*72/resolution};
             await write(outgoing);
             const [measured]=await batch([property(target)]);
-            if(measured.textKey.textKey!==prefix||!stylesMatch(measured.textKey,probe))throw Error('文字基线测量读回不一致');
+            if(measured.textKey.textKey!==prefix||!stylesMatch(measured.textKey,probe,resolution))throw Error('文字基线测量读回不一致');
             phase='分组定位';originalTop=ink(measured.textKey)[1];
             if(originalTop<originalBox[1]-.05||originalTop>originalBox[3]+.05)throw Error('溢出文本框的文字暂不能安全拆分');
           }
@@ -2456,7 +2469,7 @@ function createTextTools(ps,session,capture,readTree) {
           await write(value);
           const [isolated]=await batch([property(target)]);phase='独立分组';const box=ink(isolated.textKey);
           if(isolated.parentLayerID!==parent)throw Error('拆分后的父组改变，已取消');
-          if(!stylesMatch(isolated.textKey,value))throw Error('拆分后的文字样式改变，已取消');
+          if(!stylesMatch(isolated.textKey,value,resolution))throw Error('拆分后的文字样式改变，已取消');
           if(!flow&&(Math.abs((expected[2]-expected[0])-(box[2]-box[0]))>.05||Math.abs((expected[3]-expected[1])-(box[3]-box[1]))>.05))throw Error('保留位置的排版校验未通过，请改用逐行排列（'+expected.map((v,i)=>Math.round((v-box[i])*1000)/1000).join(',')+'）');
           if(!flow&&shape.char._value==='box'&&(originalTop??expected[1])+box[3]-box[1]>sourceBox[3]+.05)throw Error('溢出文本框的文字暂不能安全拆分');
           const localX=flow?0:expected[0]-box[0],localY=(originalTop??(flow?box[1]:expected[1]))-box[1],dx=matrix.xx*localX+matrix.yx*localY,dy=matrix.xy*localX+matrix.yy*localY;
@@ -2465,7 +2478,7 @@ function createTextTools(ps,session,capture,readTree) {
           click.horizontal._value+=dx/width*100;click.vertical._value+=dy/height*100;
           await write({...value,textClickPoint:click});
           const [placed]=await batch([property(target)]),actualClick=placed.textKey.textClickPoint;
-          if(placed.layerID!==target.active_layer_id||placed.parentLayerID!==parent||placed.textKey.textKey!==group.text||!stylesMatch(placed.textKey,value)||!Number.isFinite(actualClick?.horizontal?._value)||!Number.isFinite(actualClick?.vertical?._value)||
+          if(placed.layerID!==target.active_layer_id||placed.parentLayerID!==parent||placed.textKey.textKey!==group.text||!stylesMatch(placed.textKey,value,resolution)||!Number.isFinite(actualClick?.horizontal?._value)||!Number.isFinite(actualClick?.vertical?._value)||
               !same(placed.textKey.antiAlias,raw.antiAlias)||!same(placed.textKey.textGridding,raw.textGridding)||!same(placed.textKey.orientation,raw.orientation)||!same(placed.textKey.transform,raw.transform)||Math.abs((actualClick?.horizontal?._value-click.horizontal._value)*width/100)>.05||Math.abs((actualClick?.vertical?._value-click.vertical._value)*height/100)>.05)throw Error('拆分位置或样式读回不一致');
           positions.push({layer_id:target.active_layer_id,dx,dy});
         }
