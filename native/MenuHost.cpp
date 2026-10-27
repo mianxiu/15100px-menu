@@ -240,7 +240,7 @@ static int supportedLabelCount(const Json& ps) {
     int host=0,hostMinor=0,major=0,minor=0,patch=0;
     std::sscanf(ps.value("photoshop_version",std::string()).c_str(),"%d.%d",&host,&hostMinor);
     std::sscanf(ps.value("uxp_version",std::string()).c_str(),"%d.%d.%d",&major,&minor,&patch);
-    return (host>25 || host==25 && hostMinor>=2) && ps.value("uxp_ready",false) && (major>0 || minor>3 || minor==3 && patch>=69)?12:8;
+    return (host>25 || host==25 && hostMinor>=2) && ps.value("uxp_ready",false) && ps.value("extended_label_colors",false) && (major>0 || minor>3 || minor==3 && patch>=79)?12:8;
 }
 static constexpr int recentActionBase=16;
 struct RecentPreset {std::string id,name,size,detail;bool available=true;};
@@ -2590,13 +2590,17 @@ int main() {
                 SetWindowPos(window,nullptr,testOrigin.x,testOrigin.y,static_cast<int>(620*scale),static_cast<int>(440*scale),SWP_NOZORDER|SWP_NOACTIVATE);
                 holdFinished=false;pieReady=true;renderedHit=-1;
                 panelKind=2;
-                if(supportedLabelCount(Json{{"photoshop_version","24.0.1"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=8 ||
-                   supportedLabelCount(Json{{"photoshop_version","25.0"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=8 ||
-                   supportedLabelCount(Json{{"photoshop_version","25.1"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=8 ||
-                   supportedLabelCount(Json{{"photoshop_version","25.10"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=12 ||
-                   supportedLabelCount(Json{{"photoshop_version","25.2"},{"uxp_version","0.3.69"},{"uxp_ready",true}})!=12 ||
-                   supportedLabelCount(Json{{"photoshop_version","25.2"},{"uxp_version","0.3.68"},{"uxp_ready",true}})!=8)
-                    throw std::runtime_error("Host label palette capability mismatch");
+                for(const auto& host: {"24.0.1","25.0","25.1"})
+                    if(supportedLabelCount(Json{{"photoshop_version",host},{"uxp_version","0.3.79"},{"uxp_ready",true},{"extended_label_colors",true}})!=8)
+                        throw std::runtime_error("Old host enabled extended labels");
+                for(const auto& host: {"25.2","25.10","26.0","27.0"}) {
+                    Json state={{"photoshop_version",host},{"uxp_version","0.3.79"},{"uxp_ready",true},{"extended_label_colors",true}};
+                    if(supportedLabelCount(state)!=12)throw std::runtime_error("Confirmed label capability hidden");
+                    state.erase("extended_label_colors");if(supportedLabelCount(state)!=8)throw std::runtime_error("Missing label capability enabled controls");
+                    state["extended_label_colors"]=false;if(supportedLabelCount(state)!=8)throw std::runtime_error("Rejected label capability enabled controls");
+                    state["extended_label_colors"]=true;state["uxp_version"]="0.3.78";
+                    if(supportedLabelCount(state)!=8)throw std::runtime_error("Old executor enabled extended labels");
+                }
                 labelCount=12;redrawPresets();pinned=true;
                 for(int i=0;i<labelCount;++i) {
                     holdFinished=false;pieReady=true;

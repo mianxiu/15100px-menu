@@ -146,6 +146,9 @@ class UxpTransport:
                     raise RuntimeError('文字处理计划需要正常重启PS加载UXP0.3.71；未提交修改')
                 if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,78):
                     raise RuntimeError('文字拆分修复需要正常重启PS加载UXP0.3.78；未提交修改')
+                if payload.get('command') in (None,'label') and payload.get('color') in ('seafoam','indigo','magenta','fuchsia'):
+                    if version(heartbeat.get('probe_version'))<(0,3,79):raise RuntimeError('新增标签需要正常重启PS加载UXP0.3.79；未提交修改')
+                    if version_tuple(heartbeat.get('photoshop_version'))<(25,2,0) or heartbeat.get('extended_label_colors') is not True:raise RuntimeError('当前PS执行端未确认支持此标签颜色；未提交修改')
                 if payload.get('command')=='layer.thumbnail':
                     raise RuntimeError('非静默缩略图已停用，未提交操作')
                 if payload.get('command')=='layer.focus' and (version(heartbeat.get('probe_version'))<(0,3,57) or payload.get('target',{}).get('session')!=heartbeat.get('session')):
@@ -436,6 +439,7 @@ class UxpBridge(PhotoshopBridge):
             value['layer_preview_available']=heartbeat.get('layer_preview_available') is True
             value['layer_thumbnail_available']=False
             value['photoshop_version']=heartbeat.get('photoshop_version')
+            value['extended_label_colors']=heartbeat.get('extended_label_colors') is True
             capability=heartbeat.get('document_redraw_available')
             value['document_redraw_available']=capability if type(capability) is bool else None
             value['legacy_preview_available']=heartbeat.get('legacy_preview_available') is True

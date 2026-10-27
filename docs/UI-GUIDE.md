@@ -39,6 +39,8 @@ Adobe明确getPixels不支持图层组。组直接走隔离副本；其他目标
 
 ## 标签数量与版本适配
 
+278／UXP79统一使用`uxp.host.version`初始化标签能力，显示与执行不再分别读取UXP宿主版本和Photoshop DOM版本。执行端通过已有心跳报告`extended_label_colors`，只有PS25.2+、实际加载79及明确能力为true时显示12项；旧插件、缺失或拒绝能力时保持8项，显示和真实命中同步收窄。后台发布新增标签前也校验同一心跳的版本与能力，不把旧插件未知能力当作支持，不以COM注册或安装目录版本代替当前宿主。官方版本来源见[Adobe UXP host](https://developer.adobe.com/photoshop/uxp/2022/uxp-api/reference-js/modules/uxp/host-information/host)。无需新增PS查询；色表、主题、父组继承、目标与一次撤销保护保持。
+
 267／UXP73增加宿主标签配色：后台只读实际运行Photoshop的Required/UIColors.txt，按PS版本／会话缓存四套SlotColor正常色与Disabled色；通过既有状态传给原生，清除斜线使用主题文字色。文件缺失、超限或条目缺失时保留备用色，不能将备用色标作宿主颜色匹配通过。旧PS为7种颜色加清除，共8项；269起PS25.2+且执行插件满足能力要求时为11种颜色加清除，共12项，不强行给旧宿主发送新增枚举。
 
 本机PS24未发出主题通知，因此使用官方prefers-color-scheme四主题的隐藏CSS观察补齐状态，复用现有本地心跳，不新增PS偏好查询或定时器。CSS尚未就绪时保留启动时的已知主题，不能把auto等未知值当成某一主题；有效通知可直接更新，迟到启动读取不得覆盖新主题。后续标签UI必须沿用此宿主色表与正常／禁用状态，不恢复固定单套RGB；读取失败仍保留明确的备用路径。

@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [x] 278代码／测试／构建／实际入口：复现菜单宿主版本25.2但DOM版本字段缺失时新增标签错误拒绝，统一使用UXP host.version，79执行端报告extended_label_colors；原生和后台发布前核对同一能力，旧插件／未知能力保持8项且无隐藏新增命中。675项低CPU回归、现代四色模型、原生完整矩阵与冻结启动／重启通过；实际278／UXP79、EXE／菜单／热键／配置一致。正常退出、最新分层原稿备份和生产COM启动恢复通过；PS24低CPU／正常各8个基础标签写入与一次撤销、各4个新增标签写前拒绝通过，源文档／主题／资源及旧未知保持，无新活动pending。证据.runtime/labels278-before.log、labels278-after.log、tests278-low.log、native278-low.log、labels278-interface、recovery278reload与runtime278-verified.json。
+- [ ] 278待验及失败记录：现代PS25.2+新增四色、原截图电脑、实体输入／PS实屏未实测，不能把模型版本字段复现直接认定为远端已验；无性能提升声明。首轮生产界面通道在一条成功后因焦点切离于发布前拒绝，未重发原请求，保留报告，原稿／临时文档／资源已收尾；后续独立隔离接口16项通过。恢复脚本终端信息遗留UXP78字样，实际心跳／安装／恢复收据和最终资源核验均为79，不以旧日志文字替代版本证据。证据.runtime/labels278-live与recover278.log。
+
 - [x] 277公开交付：源码46f6c1e／v0.4.277及Wiki9185752已推送，674项回归与两项GitHub UI检查通过；39页／241链接及11个远端主要页面／图片／README已核验。统一ZIP／SHA与Latest清单匿名下载后，GitHub及dist仅保留277，旧标签／源码／诊断保持。实际入口277／UXP78和新菜单组件一致，配置及旧未知保持；6组PS列表接口验收通过，实体输入／PS实屏与其他版本待验。IME未知正常退出收尾及最新分层恢复独立保留，不记原请求成功。证据.runtime/release-0.4.277-public-verification.json、manifest277-verification.json、release277-cleanup.json、dist277-cleanup.json、wiki277-public-verification.json与runtime277-verified.json。
 
 - [x] 277代码／测试／构建／实际入口：全部文本页沿用180ms静置自动预览，去掉计算按钮；空查找／拆分条件不请求，旧草稿世代结果不可确认，计算中继续编辑后只计算最新草稿。新增列表页的项目符号／连续编号／移除标记，保留空行、缩进和源样式映射，转换幂等；是文字前缀而非PS自动编号段落。674项低CPU回归、原生完整输入／焦点／取消／SHOWWINDOW矩阵、当前主题三档字号渲染、冻结资源与启动／重启通过；实际277／UXP78及菜单／热键／配置核验一致。PS24低CPU／正常各三种列表，共6组预览不改源、写回单历史／一次历史回退精确恢复通过；原稿／临时文档／资源保持。最终验收发现新原生IME禁用未确认，按全局授权保留原始未知及退出审计，保存最新分层备份，正常退出PS确认原进程结束后释放槽位，以生产COM启动恢复原稿；未重发或记为成功，最终无活动pending。证据.runtime/tests277-low.log、native277-low.log、text277-preview、text277-api、recovery277textlists、recovery277reload、runtime277-verified.json。

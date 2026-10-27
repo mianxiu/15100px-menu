@@ -28,11 +28,21 @@ async function main() {
   doc.activeLayers=[{id:30,kind:'pixel'},{id:31,kind:'pixel'}];
   assert.equal((await api.setLabel(request)).count,2);
   assert.equal((await api.setLabel({...request,color:'none'})).color,'none');
+  // The menu receives UXP host metadata; the Photoshop DOM version may be absent.
+  delete ps.app.version;
+  const modern=create(ps,'session',{hostVersion:'25.2.0'});
+  for(const color of ['seafoam','indigo','magenta','fuchsia'])assert.equal((await modern.setLabel({...request,color})).color,color);
+  for(const version of ['24.0.1','25.0','25.1','25.1.9',undefined,'','unknown']) {
+    const old=create(ps,'session',{hostVersion:version});const before=sets;
+    for(const color of ['seafoam','indigo','magenta','fuchsia'])await assert.rejects(old.setLabel({...request,color}),/25.2/);
+    assert.equal(sets,before,'Unsupported host must fail before writes');
+  }
   ps.app.version='24.0.1';
-  for(const color of ['seafoam','indigo','magenta','fuchsia'])await assert.rejects(api.setLabel({...request,command:'label',color}),/25.2/);
-  for(const version of ['25.0','25.1','25.1.9']){ps.app.version=version;await assert.rejects(api.setLabel({...request,color:'seafoam'}),/25.2/);}
-  ps.app.version='25.2';
-  for(const color of ['seafoam','indigo','magenta','fuchsia'])assert.equal((await api.setLabel({...request,command:'label',color})).color,color);
+  for(const version of ['25.2','25.10.0','26.0.0','27.0.0']) {
+    const current=create(ps,'session',{hostVersion:version});
+    assert.equal(current.extendedLabelColors,true);
+    for(const color of ['seafoam','indigo','magenta','fuchsia'])assert.equal((await current.setLabel({...request,color})).color,color);
+  }
   mismatch=true; await assert.rejects(api.setLabel(request)); assert.equal(rollback,1);
   ps.core.executeAsModal=async fn=>fn({hostControl:{suspendHistory:async()=>1,resumeHistory:async(id,commit)=>{if(!commit)throw Error('rollback failed');}}});
   await assert.rejects(api.setLabel(request),error=>error.resultUnknown===true);

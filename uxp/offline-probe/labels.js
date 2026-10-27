@@ -1,6 +1,7 @@
 // Experimental executor: only fixed-target labels, no arbitrary scripts.
 module.exports = function createLabels(ps, session, options={}) {
   const nativeSelection=options.nativeSelection===true;
+  const extendedColors=extendedLabelColors(options.hostVersion);
   const layerSearch=createLayerSearch(ps,session,captureSelection);
   const textTools=createTextTools(ps,session,captureSelection,creationTree);
   // A bounded work-planning hint only. Every result still reads and validates
@@ -365,7 +366,7 @@ module.exports = function createLabels(ps, session, options={}) {
     const quickIndex=quickCommands.indexOf(command);
     if (!['label','select','moveToTop','moveToBottom'].includes(command) && quickIndex<0) throw Error('Unknown command');
     if (command === 'label' && !colors.has(request.color)) throw Error('Unknown label color');
-    if(command==='label' && ['seafoam','indigo','magenta','fuchsia'].includes(request.color) && !extendedLabelColors(ps.app.version))throw Error('此标签颜色需要Photoshop25.2或更新版本');
+    if(command==='label' && ['seafoam','indigo','magenta','fuchsia'].includes(request.color) && !extendedColors)throw Error('此标签颜色需要Photoshop25.2或更新版本');
     const expected = request.target;
     if (!expected || expected.session !== session) throw Error('Plugin session changed');
     const started=Date.now(),timings={};
@@ -770,7 +771,7 @@ module.exports = function createLabels(ps, session, options={}) {
     return {samples,equivalent:Object.values(samples).every(sample=>signature(sample.value)===signature(samples.dom.value)),
       constant_contract:{layer_kinds:Object.fromEntries(Object.entries(ps.constants.LayerKind))}};
   }
-  return {readText:textTools.read,searchLayers:layerSearch.search,previewLayer:layerSearch.preview,styleReadComparison,labelInheritanceComparison,feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
+  return {extendedLabelColors:extendedColors,readText:textTools.read,searchLayers:layerSearch.search,previewLayer:layerSearch.preview,styleReadComparison,labelInheritanceComparison,feedbackReadComparison,nativeReadComparison,selectionContextNative:(checkpoint,full=false)=>nativeSelectionContext(ps,session,readSelectionContext,checkpoint,!full,nativePlan),stability,capture,captureSelection,setLabel,documentTarget,createDocument,selectionContext,selectionContextFresh,selectionMatches,interfacePreferences,observeShape:async(...args)=>{
     if(!nativeSelection)return shapePaint.observe(...args);
     // Only explicit optional editor reads enter a short read-only modal scope.
     // Idle selection polling uses batchPlay and never occupies modal execution.

@@ -40,7 +40,8 @@ const inputTool=(()=>{
 // A 24.1+ host still needs its actual official redraw API; no nested JSX.
 const legacyPreview=/^24\.0(?:\.\d+)*$/.test(String(uxp.host?.version || ''));
 const nativeSelection=/^24\.2(?:\.\d+)*$/.test(String(uxp.host?.version || ''));
-const labels = require('./labels.js')(require('photoshop'), session, {legacyPreview,nativeSelection});
+const hostVersion=uxp.host.version;
+const labels = require('./labels.js')(require('photoshop'), session, {legacyPreview,nativeSelection,hostVersion});
 const seen = new Set();
 let sequence = 0;
 let running = false;
@@ -347,8 +348,9 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.78', session, transport: 'plugin-data-files',
-        photoshop_version: optional(() => uxp.host.version),
+        probe_version: '0.3.79', session, transport: 'plugin-data-files',
+        photoshop_version: hostVersion,
+        extended_label_colors:labels.extendedLabelColors,
         uxp_version: optional(() => uxp.versions.uxp),
         document_redraw_available: typeof require('photoshop').core?.redrawDocument === 'function',
         legacy_preview_available:legacyPreview,
@@ -422,7 +424,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.78', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.79', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
