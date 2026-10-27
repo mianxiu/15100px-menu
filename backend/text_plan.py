@@ -17,6 +17,7 @@ def units(text):
 def parameters(value):
     common={'revision','draft','operation'}
     extras={'edit':set(),'trim':set(),'remove-empty':set(),'space':set(),'upper':set(),'lower':set(),
+            'bullet':set(),'numbered':set(),'unlist':set(),
             'join':{'separator'},'replace':{'find','replacement','regex','ignore_case'},
             'split':{'mode','groups','separator','layout'}}
     if not isinstance(value,dict) or not isinstance(value.get('operation'),str) or value['operation'] not in extras or set(value)!=common|extras[value['operation']]:raise ValueError('无效的文字处理参数')
@@ -116,6 +117,17 @@ def compute(source,params):
         if units(transformed)!=units(text):raise ValueError('此文字的大小写映射暂不支持')
         text=transformed
     elif operation=='join':substitute(re.compile('\n'),lambda _:normalize(params['separator']))
+    elif operation in ('bullet','numbered','unlist'):
+        edits=[];number=0
+        for line in re.finditer(r'(?m)^[^\S\n]*\S[^\n]*',text):
+            start=line.start()+len(re.match(r'[^\S\n]*',line[0])[0])
+            marker=re.match(r'(?:[•●▪◦*+\-][^\S\n]+|[0-9]+[.)、][^\S\n]+)',text[start:line.end()])
+            end=start+(marker.end() if marker else 0)
+            if not text[end:line.end()].strip():continue
+            number+=1
+            prefix='• ' if operation=='bullet' else str(number)+'. ' if operation=='numbered' else ''
+            edits.append((start,end,prefix))
+        edit(edits)
     elif operation=='split':
         if params['mode']=='lines':ends=line_ends(text,params['groups'])
         else:

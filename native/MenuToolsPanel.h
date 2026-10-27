@@ -5,17 +5,18 @@ struct MenuToolsPanel {
     std::string mode,error,source,sourceDisplay,revision,layerName;
     char name[801]{},grouping[4001]{};
     char draft[80001]{},find[801]{},replacement[2001]{},separator[801]{},joiner[801]=" ";
-    int textTab=0,replaceMode=0,caseMode=0,tidyMode=0,splitMode=0,splitLayout=0,draftGeneration=0,previewGeneration=0,resultCount=0;
+    int textTab=0,replaceMode=0,caseMode=0,tidyMode=0,listMode=0,splitMode=0,splitLayout=0,draftGeneration=0,previewGeneration=0,resultCount=0;
     std::string pendingAction,planId,resultValue,resultPreview,resultKind;
     std::vector<MenuControls::TextRange> textMatches;std::string matchSource;
     bool textDirty=false;double textChanged=0;
     void changedText(){++draftGeneration;planId.clear();resultValue.clear();resultPreview.clear();resultKind.clear();textMatches.clear();matchSource.clear();error.clear();textDirty=true;textChanged=ImGui::GetTime();}
-    bool textDue(double now)const{return textDirty && active && ready && !pending && !revision.empty() && textTab==1 && find[0] && now-textChanged>=.18;}
+    bool textDue(double now)const{return textDirty && active && ready && !pending && !revision.empty() && (textTab!=1 || find[0]) && (textTab!=3 || (splitMode==0?grouping[0]:separator[0])) && now-textChanged>=.18;}
     Json textParams()const {
         Json args={{"revision",revision},{"draft",draft},{"operation","edit"}};
         if(textTab==1){args["operation"]="replace";args["find"]=find;args["replacement"]=replacement;args["regex"]=replaceMode==1;args["ignore_case"]=caseMode==1;}
         if(textTab==2){const char* operations[]={"trim","remove-empty","space","join","upper","lower"};args["operation"]=operations[tidyMode];if(tidyMode==3)args["separator"]=joiner;}
         if(textTab==3){const char* modes[]={"lines","literal","regex"};args["operation"]="split";args["mode"]=modes[splitMode];args["groups"]=grouping;args["separator"]=separator;args["layout"]=splitLayout==0?"original":"lines";}
+        if(textTab==4){const char* operations[]={"bullet","numbered","unlist"};args["operation"]=operations[listMode];}
         return args;
     }
     ID3D11ShaderResourceView* thumbnail=nullptr;
@@ -123,7 +124,7 @@ struct MenuToolsPanel {
         ImGui::EndDisabled();
         if(revision.empty())return;
         {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("%s",layerName.c_str());}
-        const char* tabs[]={"编辑","查找替换","整理","拆分"};
+        const char* tabs[]={"编辑","查找替换","整理","拆分","列表"};
         if(MenuControls::segments("##text-tabs",tabs,textTab,scale))changedText();
         {MenuTextStyle text(MenuTextRole::Body);ImGui::TextUnformatted("编辑文字");}
         ImGui::PushID(int(menuEpoch));
@@ -145,16 +146,16 @@ struct MenuToolsPanel {
             else {MenuControls::input("##separator",splitMode==1?"分隔符，例如逗号或空格":"正则分隔符，例如 [,，]",separator,sizeof(separator));if(ImGui::IsItemEdited())changedText();}
             const char* layouts[]={"保留位置","逐行排列"};if(MenuControls::segments("##split-layout",layouts,splitLayout,scale))changedText();
             {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("分隔符保留在前一组；最多64组。保留位置要求原有换行边界，不换行文字请选择逐行排列。");}
+        } else if(textTab==4) {
+            const char* lists[]={"项目列表","编号列表","移除列表"};if(MenuControls::segments("##list-mode",lists,listMode,scale))changedText();
+            {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("按非空行生成列表，保留缩进和空行；替换已有标记，不重复叠加。编号从1开始。");}
         }
         if(available && textDue(ImGui::GetTime())){textDirty=false;submit("text.preview",textParams());}
         if(textTab==1 && !planId.empty()) {
             {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("匹配 %d 处 · 强调色为匹配内容",resultCount);}
             MenuControls::textPreview("##text-matches",matchSource.c_str(),80*scale,textMatches);
         }
-        ImGui::BeginDisabled(pending || (textTab==1 && !find[0]));
-        if(MenuControls::button("计算预览",scale)){planId.clear();textMatches.clear();textDirty=false;submit("text.preview",textParams());}
-        ImGui::EndDisabled();
-        {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("%s",planId.empty()?(pending && pendingAction=="text.preview"?"正在计算预览 · 尚未写入PS":"折行预览 · 尚未写入PS"):resultKind=="split"?("拆分预览 · "+std::to_string(resultCount)+" 个文字层").c_str():"处理结果 · 确认后写入PS");}
+        {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("%s",planId.empty()?(pending && pendingAction=="text.preview"?"正在自动预览 · 尚未写入PS":"自动预览 · 尚未写入PS"):resultKind=="split"?("拆分预览 · "+std::to_string(resultCount)+" 个文字层").c_str():"处理结果 · 确认后写入PS");}
         MenuControls::textPreview("##text-result",planId.empty()?draft:resultPreview.c_str(),130*scale);
         ImGui::BeginDisabled(planId.empty() || pending);
         if(MenuControls::button(resultKind=="split"?"确认拆分并替换原层":"确认写回文字",scale))submit("text.apply",Json{{"revision",revision},{"plan_id",planId}});

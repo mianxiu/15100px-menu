@@ -1971,7 +1971,7 @@ int main() {
         else if (i+1<argc && arg==L"--preview-kind") {
             std::wstring kind=argv[++i];previewKind=kind==L"context"?"context":kind==L"hold"?"hold":kind==L"busy"?"busy":"menu";
         }
-        else if(i+1<argc && arg==L"--preview-text-tab") {std::wstring value=argv[++i];previewTextTab=value==L"replace"?1:value==L"tidy"?2:value==L"split"?3:0;}
+        else if(i+1<argc && arg==L"--preview-text-tab") {std::wstring value=argv[++i];previewTextTab=value==L"replace"?1:value==L"tidy"?2:value==L"split"?3:value==L"list"?4:0;}
         else if(i+1<argc && arg==L"--preview-tool") {std::wstring value=argv[++i];if(value==L"search" || value==L"split")previewTool=std::string(value.begin(),value.end());}
         else if (i+1<argc && arg==L"--preview-theme") {
             std::wstring value=argv[++i];std::string name(value.begin(),value.end());
@@ -2298,7 +2298,7 @@ int main() {
                 layerSearchReady=textSplitReady=true;holdFinished=false;pinned=true;capable=allowed=true;
                 menuTools.receive(Json{{"type","menu.tools.opened"},{"epoch",menuEpoch},{"mode",previewTool}});
                 if(previewTool=="split")menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.read"},{"ok",true},
-                    {"result",{{"name","标题与说明"},{"text","作品标题\r第一段说明文字。这是一段用于核对自动折行与中文显示的长文字，不需要先手动换行，也可以在编辑区修改，然后计算预览。Lorem ipsum dolor sit amet, consectetur adipiscing elit.\r第二段说明文字"},{"revision","preview"}}}});
+                    {"result",{{"name","标题与说明"},{"text","作品标题\r第一段说明文字。这是一段用于核对自动折行与中文显示的长文字，不需要先手动换行，修改后自动预览。Lorem ipsum dolor sit amet, consectetur adipiscing elit.\r第二段说明文字"},{"revision","preview"}}}});
                 if(previewTool=="split"){
                     menuTools.textTab=previewTextTab;std::snprintf(menuTools.find,sizeof(menuTools.find),"文字");std::snprintf(menuTools.replacement,sizeof(menuTools.replacement),"内容");
                     if(previewTextTab==1){
@@ -2306,6 +2306,12 @@ int main() {
                         while((offset=output.find("文字",offset))!=std::string::npos){matches.push_back(Json::array({offset,offset+strlen("文字")}));output.replace(offset,strlen("文字"),"内容");offset+=strlen("内容");}
                         menuTools.textDirty=false;menuTools.submit("text.preview",menuTools.textParams());
                         menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.preview"},{"ok",true},{"result",{{"plan_id","preview-only"},{"value",output},{"preview",output},{"kind","replace"},{"count",matches.size()},{"matches",matches}}}});
+                    }
+                    if(previewTextTab==4){
+                        std::string output="• "+menuTools.sourceDisplay;size_t offset=0;
+                        while((offset=output.find('\n',offset))!=std::string::npos){output.insert(++offset,"• ");offset+=strlen("• ");}
+                        menuTools.textDirty=false;menuTools.submit("text.preview",menuTools.textParams());
+                        menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","text.preview"},{"ok",true},{"result",{{"plan_id","preview-only"},{"value",output},{"preview",output},{"kind","replace"},{"count",1},{"matches",Json::array()}}}});
                     }
                 }
                 else {menuTools.searchDirty=false;menuTools.submit("layers.search",Json::object());menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",menuTools.request},{"action","layers.search"},{"ok",true},
@@ -3860,6 +3866,15 @@ int main() {
                     menuTools.changedText();const double textChanged=menuTools.textChanged;
                     if(menuTools.textDue(textChanged+.17) || !menuTools.textDue(textChanged+.19))throw std::runtime_error("Text live preview debounce failed");
                     menuTools.pending=true;if(menuTools.textDue(textChanged+1))throw std::runtime_error("Text live preview overlapped pending work");menuTools.pending=false;
+                    for(int tab=0;tab<5;++tab){menuTools.textTab=tab;if(!menuTools.textDue(textChanged+.19))throw std::runtime_error("Text tab did not auto preview");}
+                    menuTools.textTab=4;
+                    const char* listOperations[]={"bullet","numbered","unlist"};
+                    for(int mode=0;mode<3;++mode){menuTools.listMode=mode;if(menuTools.textParams().at("operation")!=listOperations[mode])throw std::runtime_error("List operation parameters lost");}
+                    menuTools.textTab=3;menuTools.splitMode=1;
+                    if(menuTools.textDue(textChanged+1))throw std::runtime_error("Empty split delimiter auto submitted");
+                    menuTools.splitMode=0;menuTools.textTab=1;menuTools.find[0]=0;
+                    if(menuTools.textDue(textChanged+1))throw std::runtime_error("Empty search auto submitted");
+                    std::snprintf(menuTools.find,sizeof(menuTools.find),"a");
                     menuTools.submit("text.preview",menuTools.textParams());const auto previewRequest=menuTools.request;menuTools.changedText();
                     menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",previewRequest},{"action","text.preview"},{"ok",true},{"result",Json::object()}});
                     if(menuTools.pending || !menuTools.planId.empty())throw std::runtime_error("Late text plan accepted after an edit");

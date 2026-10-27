@@ -59,6 +59,25 @@ class TextPlanTests(unittest.TestCase):
         p=self.plan('猫,狗;尾','split',mode='regex',groups='',separator='[,;]',layout='lines')
         self.assertEqual(p['value'],'猫,\r狗;\r尾')
 
+    def test_lists_preserve_blank_lines_indent_and_character_styles(self):
+        source='  猫😀\r\r\t狗\r尾'
+        p=self.plan(source,'bullet')
+        self.assertEqual(p['value'],'  • 猫😀\r\r\t• 狗\r• 尾')
+        self.assertEqual(p['origins'][:8],[0,1,2,2,2,3,4,5])
+        self.assertEqual(self.plan(source,'numbered')['value'],'  1. 猫😀\r\r\t2. 狗\r3. 尾')
+
+    def test_list_conversion_is_idempotent_and_removes_only_markers(self):
+        source='• 猫\r  8) 狗\r- 尾\r2026年\r-2度'
+        bullet=self.plan(source,'bullet')['value']
+        self.assertEqual(bullet,'• 猫\r  • 狗\r• 尾\r• 2026年\r• -2度')
+        self.assertFalse(self.plan(bullet,'bullet')['changed'])
+        numbered=self.plan(source,'numbered')['value']
+        self.assertEqual(numbered,'1. 猫\r  2. 狗\r3. 尾\r4. 2026年\r5. -2度')
+        self.assertFalse(self.plan(numbered,'numbered')['changed'])
+        self.assertEqual(self.plan(source,'unlist')['value'],'猫\r  狗\r尾\r2026年\r-2度')
+        self.assertEqual(self.plan(' \r\t\r猫','numbered')['value'],' \r\t\r1. 猫')
+        with self.assertRaisesRegex(ValueError,'20000'):self.plan('x'*19999,'numbered')
+
     def test_original_line_layout_and_arbitrary_boundary_refusal(self):
         self.assertEqual(self.plan('A\rB\rC','split',mode='lines',groups='1-2,3',separator='',layout='original')['breaks'],[4,5])
         with self.assertRaisesRegex(ValueError,'逐行排列'):self.plan('A,B','split',mode='literal',groups='',separator=',',layout='original')
