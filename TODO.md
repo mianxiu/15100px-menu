@@ -1,6 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 275代码／测试／构建／实际入口：查找替换静置180ms后本地计算匹配与输出，主题强调色显示完整匹配，旧草稿结果立即失效；原文编辑与只读匹配预览分开，确认后才写PS。复用Body／textPreview／主题色，UTF-8范围先校验；补齐非法命名替换的错误返回。671项低CPU回归、原生完整矩阵、三档字号／四主题6张渲染、最终冻结模块／资源、冻结计算与超时、启动／重启通过；实际275／UXP76与组件一致，无PS重启，配置／旧未知保持。实机低CPU菜单字面替换与一次撤销通过，正则写回结果核验通过但其撤销未走完；低CPU／正常各两项只读PS读取＋独立冻结计算通过，不冒充正常组菜单写入。实体输入／PS实屏、菜单焦点转交和正常CPU宿主写回仍待验。
+- [x] 275已公开交付：源码050c135／v0.4.275及Wiki2508b0a已推送；671项回归与两项GitHub UI检查通过，39页／237链接、11个远端主要页面／图片／README核验通过。统一ZIP／SHA及Latest清单匿名下载后，GitHub和dist仅保留275发行物；旧标签、源码及诊断保持。实际275／UXP76及组件一致，当前无活动pending；只读预览阶段原稿保持，全程新增Nudge仍保留为来源未确认，最新分层备份及原源文件保持，焦点转交／正常宿主写入／实体输入和PS实屏待验。证据.runtime/release-0.4.275-public-verification.json、manifest275-verification.json、release275-cleanup.json、dist275-cleanup.json、wiki275-public-verification.json与runtime275-verified.json。
 - [ ] 275验收边界：原生焦点转交一次SendMessageTimeout1460；测试夹具还先后出现多传匹配字段而被写前拒绝、一次完整原始状态比较失败（未留下差异，后续独立证据不变）、下一轮面板会话拒绝、对隐藏成功反馈等待及过严前台类名等待超时。均保留原始记录，不记为产品修复；无新增未知写入，临时文档关闭、CPU恢复。原稿目标与数量保持，但全程历史由2增至3，新增Nudge来源未确认；不记全程原稿历史不变、不擅自撤销，已保存最新分层副本，原源文件未改。证据.runtime/text275-live-first.json、text275-live-second.json、text275-live-third.json、text275-live-fourth.json、text275-rest、text275-api、text275-readonly、originals275-discrepancy-preserved.json、runtime275-verified.json与tests275-final-low.log。没有可比提速基线，不声明速度提升；实际服务预览与独立冷启动计算样本分开保存。
 
 - [x] 274代码／自动检查／构建：取消新建文档和PNG导出回退，仅保留直接像素读取。无直接接口的宿主（本机PS24.0.1）、组和单独调整层不显示预览按钮，也不留隐藏命中；F搜索／筛选／定位保留。后台与UXP拒绝旧layer.thumbnail，旧心跳不能启用回退。669项低CPU回归、原生矩阵、最终冻结包与嵌入源码核验通过；已移除未交付PNG实现及解码依赖，失败实现保留在忽略提交的诊断目录。无性能提升声明。
