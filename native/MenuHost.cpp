@@ -2283,6 +2283,15 @@ int main() {
                 std::string many="a";for(int i=1;i<200;++i)many+="\ra";
                 const auto bounded=menuSplitPreview(many,menuDefaultGroups(many));
                 if(!bounded.error.empty() || bounded.count>64)throw std::runtime_error("Caps split default exceeded group limit");
+                const auto nested=menuIndentLines("甲\n乙😀\n丙",4,15,15,1);
+                if(!nested.error.empty() || nested.text!="甲\n\t乙😀\n\t丙" || nested.start!=5 || nested.end!=17)
+                    throw std::runtime_error("List indentation lost selected UTF-8 lines or selection");
+                const auto reduced=menuIndentLines(nested.text,nested.end,nested.start,nested.start,-1);
+                if(reduced.text!="甲\n乙😀\n丙")throw std::runtime_error("Reverse list selection did not outdent the same lines");
+                const auto boundary=menuIndentLines("a\nb\nc",0,4,4,1);
+                if(boundary.text!="\ta\n\tb\nc")throw std::runtime_error("List indentation included the unselected next line");
+                const auto maximum=menuIndentLines("a\n\t\t\t\t\tb",0,8,8,1);
+                if(maximum.error.empty() || maximum.text!="a\n\t\t\t\t\tb")throw std::runtime_error("List depth limit partly changed selected text");
             }
             if (!matches(2,"CapsLock+w") || !matches(0,"组内") || !matches(1,"orange color") || matches(3,"top") || matches(0,"missing"))
                 throw std::runtime_error("Search self-test failed");
@@ -2786,6 +2795,21 @@ int main() {
                         int accented=0;const auto color=ImGui::GetColorU32(ImGuiCol_CheckMark);
                         for(auto* child:ImGui::GetCurrentWindow()->DC.ChildWindows)for(const auto& vertex:child->DrawList->VtxBuffer)if(vertex.col==color)++accented;
                         if(accented<8)throw std::runtime_error("Matched text did not render accent glyphs");
+                        {
+                            MenuTextStyle text(MenuTextRole::Body);
+                            const std::string list="• "+std::string(80,'x')+"\n    1.1. "+std::string(80,'y');
+                            const auto rows=MenuControls::previewLines(list.c_str(),180*scale,true);
+                            const float rootIndent=ImGui::CalcTextSize("• ").x,childIndent=ImGui::CalcTextSize("    1.1. ").x;
+                            bool child=false,sawRootWrap=false,sawChildWrap=false;std::string rebuilt;
+                            for(const auto& row:rows){
+                                if(row.begin>list.c_str() && row.begin[-1]=='\n')child=true;
+                                if(row.x>0){if(std::abs(row.x-(child?childIndent:rootIndent))>.01f)throw std::runtime_error("List continuation lost its body indent");(child?sawChildWrap:sawRootWrap)=true;}
+                                else if(row.begin!=list.c_str() && row.begin[-1]!='\n')throw std::runtime_error("Wrapped list unexpectedly returned to the left edge");
+                                rebuilt.append(row.begin,row.end);if(*row.end=='\n')rebuilt+='\n';
+                            }
+                            if(!sawRootWrap || !sawChildWrap || rebuilt!=list)throw std::runtime_error("List wrapping changed text or omitted a level");
+                            MenuControls::textPreview("##list-wrap",list.c_str(),100*scale,{},true);
+                        }
                         ImGui::End();ImGui::Render();finishPlatformFrame();
                     }
                     {
@@ -2818,6 +2842,40 @@ int main() {
                         if(!editor.pending || editor.pendingAction!="text.write" || testedActions.size()!=actionCount+1 || editor.textStatus()!="正在写回文字…")
                             throw std::runtime_error("Invalid grouping blocked the actual write button or mislabeled its phase");
                         std::cout<<"Independent text actions passed: invalid split disabled, draft write button activates once\n";
+                        editor.pending=false;editor.textTab=4;editor.error.clear();editor.textDirty=false;ImGui::ClearActiveID();
+                        std::string largeList;
+                        for(int i=0;i<40;++i){if(i)largeList+='\n';largeList+=std::string(150,'x')+" 中文😀";}
+                        editor.setDraft(largeList);
+                        editor.selectionStart=0;editor.selectionEnd=editor.cursorPos=int(largeList.size());editor.restoreDraftFocus=true;editorFrame();editorFrame();editorFrame();
+                        int increase=1;const auto indentId=ImHashStr("增加缩进",0,ImHashData(&increase,sizeof(increase),body->GetID("##list-indent")));
+                        ImGui::ActivateItemByID(indentId);editorFrame();editorFrame();editorFrame();
+                        std::string indented="\t"+largeList;
+                        for(size_t at=0;(at=indented.find('\n',at))!=std::string::npos;at+=2)indented.insert(at+1,"\t");
+                        if(std::string(editor.draft)!=indented)throw std::runtime_error("List indent toolbar did not preserve selected text: "+Json{{"size",strlen(editor.draft)},{"expected",indented.size()},{"tabs",std::count(editor.draft,editor.draft+strlen(editor.draft),'\t')},{"selection",{editor.selectionStart,editor.selectionEnd}},{"cursor",editor.cursorPos},{"command",editor.indentCommand},{"focus",editor.restoreDraftFocus},{"pending",editor.pending},{"active",ImGui::GetActiveID()},{"toolbar",indentId},{"prefix",std::string(editor.draft).substr(0,40)}}.dump());
+                        editorFrame();editorFrame();
+                        io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_Z,true);editorFrame();
+                        io.AddKeyEvent(ImGuiKey_Z,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);editorFrame();
+                        if(std::string(editor.draft)!=largeList)throw std::runtime_error("Whole-list indentation was not one undo: "+Json{{"size",strlen(editor.draft)},{"tabs",std::count(editor.draft,editor.draft+strlen(editor.draft),'\t')},{"active",ImGui::GetActiveID()},{"input",GImGui->InputTextState.ID},{"text_len",GImGui->InputTextState.TextLen},{"focus",editor.restoreDraftFocus},{"selection",{editor.selectionStart,editor.selectionEnd}}}.dump());
+                        io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_A,true);editorFrame();
+                        io.AddKeyEvent(ImGuiKey_A,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);editorFrame();
+                        io.AddKeyEvent(ImGuiKey_Tab,true);editorFrame();io.AddKeyEvent(ImGuiKey_Tab,false);editorFrame();
+                        if(std::string(editor.draft)!=indented)throw std::runtime_error("List Tab replaced the selected text instead of indenting it");
+                        io.AddKeyEvent(ImGuiMod_Shift,true);io.AddKeyEvent(ImGuiKey_Tab,true);editorFrame();
+                        io.AddKeyEvent(ImGuiKey_Tab,false);io.AddKeyEvent(ImGuiMod_Shift,false);editorFrame();
+                        if(std::string(editor.draft)!=largeList)throw std::runtime_error("List Shift+Tab did not outdent selected text");
+                        auto& platform=ImGui::GetPlatformIO();const auto oldGet=platform.Platform_GetClipboardTextFn;const auto oldData=platform.Platform_ClipboardUserData;
+                        std::string clipboard="\t第一项\n\t\t子项";platform.Platform_ClipboardUserData=&clipboard;
+                        platform.Platform_GetClipboardTextFn=[](ImGuiContext* ctx){return static_cast<std::string*>(ctx->PlatformIO.Platform_ClipboardUserData)->c_str();};
+                        io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_A,true);editorFrame();io.AddKeyEvent(ImGuiKey_A,false);editorFrame();
+                        io.AddKeyEvent(ImGuiKey_V,true);editorFrame();io.AddKeyEvent(ImGuiKey_V,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);editorFrame();
+                        platform.Platform_GetClipboardTextFn=oldGet;platform.Platform_ClipboardUserData=oldData;
+                        if(std::string(editor.draft)!=clipboard)throw std::runtime_error("Pasted list tabs were mistaken for indentation shortcuts: "+Json{{"draft",std::string(editor.draft).substr(0,60)},{"size",strlen(editor.draft)},{"expected",clipboard},{"active",ImGui::GetActiveID()},{"input",GImGui->InputTextState.ID},{"tab_down",ImGui::IsKeyDown(ImGuiKey_Tab)},{"shift",io.KeyShift}}.dump());
+                        io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_Z,true);editorFrame();io.AddKeyEvent(ImGuiKey_Z,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);editorFrame();
+                        // Upstream paste records selection deletion and insertion separately.
+                        if(std::string(editor.draft)!="")throw std::runtime_error("List paste insertion undo failed");
+                        io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_Z,true);editorFrame();io.AddKeyEvent(ImGuiKey_Z,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);editorFrame();
+                        if(std::string(editor.draft)!=largeList)throw std::runtime_error("List paste selection undo failed");
+                        ImGui::ClearActiveID();std::cout<<"List editor passed: toolbar, multi-line Tab/Shift+Tab, exact indented paste, UTF-8 selection and large single undo\n";
                     }
                     int choice=0,iconChoice=0,rowClicks=0,previewClicks=0;char query[16]{};POINT second{},seam{},iconSecond{},iconSeam{},rowMain{},rowPreview{};bool focusQuery=false,rowPreviewHovered=false,showRowPreview=true;
                     auto controlsFrame=[&](bool disabled){
@@ -3929,8 +3987,8 @@ int main() {
                     menuTools.pending=false;
                     for(int tab=0;tab<5;++tab){menuTools.textTab=tab;if(!menuTools.textDue(textChanged+.19))throw std::runtime_error("Text tab did not auto preview");}
                     menuTools.textTab=4;
-                    const char* listOperations[]={"bullet","numbered","unlist"};
-                    for(int mode=0;mode<3;++mode){menuTools.listMode=mode;if(menuTools.textParams().at("operation")!=listOperations[mode])throw std::runtime_error("List operation parameters lost");}
+                    const char* listKinds[]={"bullet","numbered","remove"};
+                    for(int mode=0;mode<3;++mode){menuTools.listMode=mode;const auto params=menuTools.textParams();if(params.at("operation")!="list" || params.at("kind")!=listKinds[mode])throw std::runtime_error("List operation parameters lost");}
                     menuTools.textTab=3;menuTools.splitMode=1;
                     if(menuTools.textDue(textChanged+1))throw std::runtime_error("Empty split delimiter auto submitted");
                     menuTools.splitMode=0;menuTools.textTab=1;menuTools.find[0]=0;

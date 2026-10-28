@@ -1231,7 +1231,7 @@ struct IMGUI_API ImGuiInputTextDeactivatedState
 #define IMSTB_TEXTEDIT_CHARTYPE           char
 #define IMSTB_TEXTEDIT_GETWIDTH_NEWLINE   (-1.0f)
 #define IMSTB_TEXTEDIT_UNDOSTATECOUNT     99
-#define IMSTB_TEXTEDIT_UNDOCHARCOUNT      999
+#define IMSTB_TEXTEDIT_UNDOCHARCOUNT      80000
 namespace ImStb { struct STB_TexteditState; }
 typedef ImStb::STB_TexteditState ImStbTexteditState;
 

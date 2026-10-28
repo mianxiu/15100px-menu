@@ -9,6 +9,7 @@ import sys
 import tempfile
 import atexit
 import threading
+import unicodedata
 
 
 def units(text):
@@ -19,7 +20,7 @@ def units(text):
 def parameters(value):
     common={'revision','draft','operation'}
     extras={'edit':set(),'trim':set(),'remove-empty':set(),'space':set(),'upper':set(),'lower':set(),
-            'bullet':set(),'numbered':set(),'unlist':set(),
+            'bullet':set(),'numbered':set(),'unlist':set(),'list':{'kind','marker','custom_marker','numbering','start'},
             'join':{'separator'},'replace':{'find','replacement','regex','ignore_case'},
             'split':{'mode','groups','separator','layout'}}
     if not isinstance(value,dict) or not isinstance(value.get('operation'),str) or value['operation'] not in extras or set(value)!=common|extras[value['operation']]:raise ValueError('无效的文字处理参数')
@@ -30,6 +31,14 @@ def parameters(value):
     if value['operation']=='replace':
         if not value['find'] or type(value['regex']) is not bool or type(value['ignore_case']) is not bool:raise ValueError('查找内容不能为空')
     if value['operation']=='split' and (value['mode'] not in ('lines','literal','regex') or value['layout'] not in ('original','lines')):raise ValueError('无效的拆分方式')
+    if value['operation']=='list':
+        if value['kind'] not in ('bullet','numbered','remove') or value['marker'] not in ('auto','disc','circle','square','dash','check','custom') or value['numbering'] not in ('decimal','right-paren','parens','lower-alpha','upper-alpha','lower-roman','upper-roman','hierarchical','mixed'):raise ValueError('无效的列表样式')
+        if not isinstance(value['custom_marker'],str) or len(value['custom_marker'])>1 or units(value['custom_marker'])>2 or '\0' in value['custom_marker']:raise ValueError('项目符号须为一个符号字符')
+        if value['kind']=='bullet' and value['marker']=='custom' and (len(value['custom_marker'])!=1 or unicodedata.category(value['custom_marker'])[0] not in ('P','S')):raise ValueError('项目符号须为一个符号字符')
+        start=value['start']
+        if isinstance(start,str) and re.fullmatch('[1-9][0-9]{0,3}',start):start=int(start)
+        if type(start) is not int or not 1<=start<=9999:raise ValueError('起始编号须为1至9999')
+        value={**value,'start':start}
     return dict(value)
 
 
@@ -72,6 +81,54 @@ def line_ends(text,expression):
         following=last+1
     if following!=len(ends)+1 or len(result)>64:raise ValueError('按行分组须覆盖所有行，最多64组')
     return result
+
+
+def list_edits(text,params):
+    counters=[0]*6;edits=[];count=0
+    def number(n,style):
+        if style in ('lower-alpha','upper-alpha'):
+            result=''
+            while n:n,digit=divmod(n-1,26);result=chr(97+digit)+result
+            return (result.upper() if style=='upper-alpha' else result)+')'
+        if style in ('lower-roman','upper-roman'):
+            if n>3999:raise ValueError('罗马数字最多3999，请调整起始编号或样式')
+            result=''
+            for value,symbol in ((1000,'M'),(900,'CM'),(500,'D'),(400,'CD'),(100,'C'),(90,'XC'),(50,'L'),(40,'XL'),(10,'X'),(9,'IX'),(5,'V'),(4,'IV'),(1,'I')):
+                times,n=divmod(n,value);result+=symbol*times
+            return (result.lower() if style=='lower-roman' else result)+')'
+        return '('+str(n)+')' if style=='parens' else str(n)+(')' if style=='right-paren' else '.')
+    pattern=re.compile(r'(?:[•●○◦■▪□–—✓✔*+\-]|(?:[0-9]+\.)+[0-9]+\.?|[0-9]+[.)、]|\([0-9]+\)|[A-Za-z]{1,3}[.)]|[IVXLCDMivxlcdm]{1,15}[.)])[ \t]+')
+    for line in re.finditer(r'(?m)^[^\S\n]*\S[^\n]*',text):
+        leading=re.match(r'[^\S\n]*',line[0])[0];start=line.start()+len(leading)
+        marker=pattern.match(text,start,line.end())
+        if not marker:
+            symbol=text[start:start+1]
+            if symbol and unicodedata.category(symbol)[0] in ('P','S'):
+                marker=re.match(re.escape(symbol)+r'[ \t]+',text[start:line.end()])
+                end=start+marker.end() if marker else start
+            else:end=start
+        else:end=marker.end()
+        if not text[end:line.end()].strip():continue
+        count+=1
+        if params['kind']=='remove':
+            if end>start:edits.append((start,end,''))
+            continue
+        level=(len(leading.expandtabs(4))+3)//4
+        if level>=6:raise ValueError('列表最多6级，请减少缩进')
+        if params['kind']=='bullet':
+            symbols={'disc':'•','circle':'◦','square':'▪','dash':'–','check':'✓','custom':params['custom_marker']}
+            prefix=('•','◦','▪')[level%3] if params['marker']=='auto' else symbols[params['marker']]
+        else:
+            for parent in range(level):
+                if not counters[parent]:counters[parent]=params['start'] if parent==0 else 1
+            counters[level]=counters[level]+1 if counters[level] else params['start'] if level==0 else 1
+            counters[level+1:]=[0]*(5-level)
+            style=params['numbering']
+            prefix='.'.join(map(str,counters[:level+1]))+'.' if style=='hierarchical' else number(counters[level],('decimal','lower-alpha','lower-roman')[level%3] if style=='mixed' else style)
+        indent='    '*level;prefix+=' '
+        if leading!=indent:edits.append((line.start(),start,indent))
+        if text[start:end]!=prefix:edits.append((start,end,prefix))
+    return edits,count
 
 
 def compute(source,params):
@@ -119,6 +176,8 @@ def compute(source,params):
         if units(transformed)!=units(text):raise ValueError('此文字的大小写映射暂不支持')
         text=transformed
     elif operation=='join':substitute(re.compile('\n'),lambda _:normalize(params['separator']))
+    elif operation=='list':
+        edits,count=list_edits(text,params);edit(edits)
     elif operation in ('bullet','numbered','unlist'):
         edits=[];number=0
         for line in re.finditer(r'(?m)^[^\S\n]*\S[^\n]*',text):
@@ -163,7 +222,7 @@ def compute(source,params):
     value=text.replace('\n','\r')
     if not value or units(value)>20000:raise ValueError('结果不能为空或超过20000字符')
     changed=value!=source
-    if operation not in ('replace','split'):count=int(changed)
+    if operation not in ('replace','split','list'):count=int(changed)
     result={'value':value,'origins':origins,'count':count,'changed':changed,
             'kind':'split' if operation=='split' else 'replace','characters':len(text),
             'preview':preview if preview is not None else text,'matches':matches}

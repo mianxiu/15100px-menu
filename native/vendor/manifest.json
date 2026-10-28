@@ -10,7 +10,7 @@
     "imgui/imgui.cpp": "36154b4900013222bbc504f2f614345c4c5586f84d97e55b0ed954b0e77a62da",
     "imgui/imgui.h": "fa17ec4535996829433a8124d257979b70cdf27ff4b3d89a1c66228646e2a694",
     "imgui/imgui_draw.cpp": "e8a0b998a4c05f9ab237f45f9bd0cb7e28213c3c6ee9f083fee54839e7e60166",
-    "imgui/imgui_internal.h": "e8f11f33c3c9aba1a7a56b2580f34916c9f615ef009eb16a987221802f04942c",
+    "imgui/imgui_internal.h": "7c3335d08213b00d37ee3fdd8d660f344de4d42faf6ca3790f400e8828740e7a",
     "imgui/imgui_tables.cpp": "ab5b4e7f2299679da0ab5b4b0424b283c273ffce08f40cf1613ba1ad8a26bc7c",
     "imgui/imgui_widgets.cpp": "355cccd5274889e984b07bece3006e736e11ace2956b84bce3cb211b96774544",
     "imgui/imstb_rectpack.h": "889b396795202d1457560a797a7242e96f6f132d4b88ca2d69be58bf05e1771f",
@@ -28,5 +28,14 @@
     "source": "https://codeload.github.com/ocornut/imgui/zip/refs/tags/v1.92.7-docking",
     "tag": "v1.92.7-docking",
     "archive_sha256": "59a30664ea9dd80803f936ba9726c9ddbee431dfe1708e217da86bb069f251a8"
-  }
+  },
+  "local_changes": [
+    {
+      "file": "imgui/imgui_internal.h",
+      "upstream_sha256": "e8f11f33c3c9aba1a7a56b2580f34916c9f615ef009eb16a987221802f04942c",
+      "local_sha256": "7c3335d08213b00d37ee3fdd8d660f344de4d42faf6ca3790f400e8828740e7a",
+      "change": "IMSTB_TEXTEDIT_UNDOCHARCOUNT: 999 -> 80000",
+      "reason": "One whole-document list indentation must remain undoable at the existing 80000-byte editor limit."
+    }
+  ]
 }

@@ -35,35 +35,52 @@ inline bool input(const char* id,const char* hint,char* value,size_t capacity,Em
     requireText(value);
     return enter;
 }
-inline bool multiline(const char* id,char* value,size_t capacity,float height) {
+inline bool multiline(const char* id,char* value,size_t capacity,float height,ImGuiInputTextCallback callback=nullptr,void* user=nullptr) {
     MenuTextStyle text(MenuTextRole::Body);
-    const bool changed=ImGui::InputTextMultiline(id,value,capacity,{-1,height},ImGuiInputTextFlags_AllowTabInput|ImGuiInputTextFlags_WordWrap);
+    const bool changed=ImGui::InputTextMultiline(id,value,capacity,{-1,height},ImGuiInputTextFlags_AllowTabInput|ImGuiInputTextFlags_WordWrap|(callback?ImGuiInputTextFlags_CallbackAlways|ImGuiInputTextFlags_CallbackCharFilter:0),callback,user);
     requireText(value);return changed;
 }
 using TextRange=std::pair<int,int>;
-inline void textPreview(const char* id,const char* value,float height,const std::vector<TextRange>& matches={}) {
+struct PreviewLine {const char* begin;const char* end;float x;};
+inline std::vector<PreviewLine> previewLines(const char* value,float width,bool list) {
+    std::vector<PreviewLine> rows;const char* end=value+strlen(value),*line=value;float indent=0;bool first=true;
+    while(line<end) {
+        if(first && list) {
+            const char* paragraph=std::find(line,end,'\n'),*body=line;
+            while(body<paragraph && (*body==' ' || *body=='\t'))++body;
+            while(body<paragraph && *body!=' ' && *body!='\t')++body;
+            if(body==paragraph)indent=0;
+            else {while(body<paragraph && (*body==' ' || *body=='\t'))++body;indent=std::min(ImGui::CalcTextSize(line,body).x,std::max(0.f,width-ImGui::GetFontSize()));}
+        }
+        const float x=first?0:indent;
+        const char* stop=ImFontCalcWordWrapPositionEx(ImGui::GetFont(),ImGui::GetFontSize(),line,end,std::max(1.f,width-x),ImDrawTextFlags_WrapKeepBlanks);
+        if(stop==line && *line!='\n'){unsigned int c;stop=line+ImTextCharFromUtf8(&c,line,end);}
+        rows.push_back({line,stop,x});first=stop<end && *stop=='\n';line=first?stop+1:stop;
+    }
+    if(end>value && end[-1]=='\n')rows.push_back({end,end,0});
+    return rows;
+}
+inline void textPreview(const char* id,const char* value,float height,const std::vector<TextRange>& matches={},bool list=false) {
     MenuTextStyle text(MenuTextRole::Body);
     ImGui::BeginChild(id,{0,height},ImGuiChildFlags_Borders|ImGuiChildFlags_AlwaysUseWindowPadding);
-    if(matches.empty()){ImGui::PushTextWrapPos(0);ImGui::TextUnformatted(value);ImGui::PopTextWrapPos();}
+    if(matches.empty() && !list){ImGui::PushTextWrapPos(0);ImGui::TextUnformatted(value);ImGui::PopTextWrapPos();}
     else {
         auto* font=ImGui::GetFont();auto* draw=ImGui::GetWindowDrawList();const float size=ImGui::GetFontSize();
         const auto at=ImGui::GetCursorScreenPos();const float width=std::max(1.f,ImGui::GetContentRegionAvail().x);
-        const char* end=value+strlen(value);const char* line=value;size_t range=0;int row=0;
-        while(line<end) {
-            const char* stop=ImFontCalcWordWrapPositionEx(font,size,line,end,width,ImDrawTextFlags_WrapKeepBlanks);
-            if(stop==line && *line!='\n'){unsigned int c;stop=line+ImTextCharFromUtf8(&c,line,end);}
+        size_t range=0;int row=0;
+        for(const auto& layout:previewLines(value,width,list)) {
+            const char* line=layout.begin,*stop=layout.end;
             const char* cursor=line;
             while(cursor<stop) {
                 const int offset=int(cursor-value);while(range<matches.size() && matches[range].second<=offset)++range;
                 const bool accent=range<matches.size() && matches[range].first<=offset;
                 const char* next=range<matches.size()?std::min(stop,value+(accent?matches[range].second:matches[range].first)):stop;
                 const float x=ImGui::CalcTextSize(line,cursor).x;
-                draw->AddText(font,size,{at.x+x,at.y+row*size},ImGui::GetColorU32(accent?ImGuiCol_CheckMark:ImGuiCol_Text),cursor,next);
+                draw->AddText(font,size,{at.x+layout.x+x,at.y+row*size},ImGui::GetColorU32(accent?ImGuiCol_CheckMark:ImGuiCol_Text),cursor,next);
                 cursor=next;
             }
-            ++row;line=stop<end && *stop=='\n'?stop+1:stop;
+            ++row;
         }
-        if(end>value && end[-1]=='\n')++row;
         ImGui::Dummy({width,std::max(1,row)*size});
     }
     ImGui::EndChild();

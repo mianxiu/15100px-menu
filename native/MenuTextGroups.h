@@ -50,3 +50,29 @@ static MenuSplitPreview menuSplitPreview(const std::string& source,const std::st
         return result;
     } catch(const std::exception&) {return fail();}
 }
+
+struct MenuIndentResult {std::string text,error;int start,end,cursor;};
+static MenuIndentResult menuIndentLines(const std::string& text,int start,int end,int cursor,int direction) {
+    MenuIndentResult result{text,"",start,end,cursor};
+    if(direction!=1 && direction!=-1){result.error="无效的缩进操作";return result;}
+    auto position=[&](int p){p=std::clamp(p,0,int(text.size()));while(p>0 && p<int(text.size()) && (static_cast<unsigned char>(text[p])&0xc0)==0x80)--p;return p;};
+    start=position(start);end=position(end);cursor=position(cursor);
+    const int left=std::min(start,end),right=std::max(start,end),limit=right>left?right-1:right;
+    const auto newline=left?text.rfind('\n',left-1):std::string::npos;
+    int from=newline==std::string::npos?0:int(newline)+1;
+    struct Edit {int from,length;std::string value;};std::vector<Edit> edits;
+    for(;from<=limit && from<=int(text.size());) {
+        int stop=from,columns=0;
+        while(stop<int(text.size()) && (text[stop]==' ' || text[stop]=='\t')){columns=text[stop]=='\t'?(columns/4+1)*4:columns+1;++stop;}
+        const int level=(columns+3)/4;
+        if(direction>0 && level>=5){result.error="列表最多6级，请减少缩进";return result;}
+        const auto value=std::string(std::max(0,level+direction),'\t');
+        if(text.substr(from,stop-from)!=value)edits.push_back({from,stop-from,value});
+        const auto next=text.find('\n',stop);if(next==std::string::npos)break;from=int(next)+1;
+    }
+    auto mapped=[&](int p){int shift=0;for(const auto& edit:edits){if(p>=edit.from+edit.length)shift+=int(edit.value.size())-edit.length;else if(p>=edit.from)return edit.from+shift+int(edit.value.size());}return p+shift;};
+    result.start=mapped(start);result.end=mapped(end);result.cursor=mapped(cursor);
+    for(auto edit=edits.rbegin();edit!=edits.rend();++edit)result.text.replace(edit->from,edit->length,edit->value);
+    if(result.text.size()>=80001){result.text=text;result.start=start;result.end=end;result.cursor=cursor;result.error="缩进后的文字超出编辑上限";}
+    return result;
+}

@@ -5,6 +5,42 @@ from backend.text_tools import mapped_parameters
 
 
 class TextPlanTests(unittest.TestCase):
+    def list(self,source,kind='numbered',**options):
+        return self.plan(source,'list',**{'kind':kind,'marker':'auto','custom_marker':'','numbering':'decimal','start':1,**options})
+
+    def test_multilevel_lists_restart_children_and_preserve_blank_lines_and_styles(self):
+        source='Parent\n\tChild 😀\n\tSecond\n\t\tDeep\n\nNext\n\tChild'
+        value=compute(source,{'revision':'r','draft':source,'operation':'list','kind':'numbered','marker':'auto','custom_marker':'','numbering':'hierarchical','start':3})
+        self.assertEqual(value['value'],'3. Parent\r    3.1. Child 😀\r    3.2. Second\r        3.2.1. Deep\r\r4. Next\r    4.1. Child')
+        self.assertEqual(value['count'],6)
+        self.assertEqual(self.list(source,'bullet')['value'],'• Parent\r    ◦ Child 😀\r    ◦ Second\r        ▪ Deep\r\r• Next\r    ◦ Child')
+        self.assertTrue(all(a<=b for a,b in zip(value['origins'],value['origins'][1:])))
+        self.assertEqual(value['origins'][value['value'].index('😀')],source.index('😀'))
+        nested=self.list(' \tBody','bullet')
+        self.assertEqual(nested['value'],'    ◦ Body');self.assertEqual(nested['origins'][4:6],[2,2])
+
+    def test_list_styles_custom_symbols_idempotence_and_safe_marker_removal(self):
+        base={'revision':'r','draft':'First\n\tChild\nSecond','operation':'list','kind':'numbered','marker':'auto','custom_marker':'','numbering':'mixed','start':1}
+        self.assertEqual(compute(base['draft'],base)['value'],'1. First\r    a) Child\r2. Second')
+        for style,expected in [('right-paren','27)'),('parens','(27)'),('lower-alpha','aa)'),('upper-alpha','AA)'),('lower-roman','xxvii)'),('upper-roman','XXVII)')]:
+            result=compute('Text',{**base,'draft':'Text','numbering':style,'start':27})
+            self.assertEqual(result['value'],expected+' Text')
+        source='• First\n    a) Child\n        iv) Deep\n1.2. Next\n2026年\n-2度'
+        value=compute(source,{**base,'draft':source,'kind':'bullet','marker':'custom','custom_marker':'→'})['value']
+        self.assertEqual(value,'→ First\r    → Child\r        → Deep\r→ Next\r→ 2026年\r→ -2度')
+        self.assertFalse(compute(value,{**base,'draft':value,'kind':'bullet','marker':'custom','custom_marker':'→'})['changed'])
+        self.assertEqual(compute(value,{**base,'draft':value,'kind':'remove'})['value'],'First\r    Child\r        Deep\rNext\r2026年\r-2度')
+        numbered=compute(source,{**base,'draft':source})['value']
+        again=compute(numbered,{**base,'draft':numbered})
+        self.assertFalse(again['changed']);self.assertEqual(again['origins'],list(range(units(numbered)+1)))
+
+    def test_list_option_limits_are_checked_before_a_write_plan(self):
+        base={'revision':'r','draft':'Text','operation':'list','kind':'numbered','marker':'auto','custom_marker':'','numbering':'decimal','start':'9'}
+        self.assertEqual(compute('Text',base)['value'],'9. Text')
+        for patch in ({'kind':'other'},{'numbering':'bad'},{'marker':'bad'},{'start':0},{'start':True},{'start':'1.5'},{'start':10000},{'custom_marker':'xx'},{'kind':'bullet','marker':'custom','custom_marker':'a'}):
+            with self.assertRaises(ValueError):compute('Text',{**base,**patch})
+        with self.assertRaisesRegex(ValueError,'6级'):compute('Text',{**base,'draft':'\t'*6+'Text'})
+        with self.assertRaisesRegex(ValueError,'3999'):compute('Text',{**base,'numbering':'upper-roman','start':4000})
     def plan(self,source,operation='edit',draft=None,**extras):
         result=compute(source,{'revision':'r','draft':source if draft is None else draft,'operation':operation,**extras})
         params={key:value for key,value in result.items() if key in {'value','origins','count','breaks','layout'}}

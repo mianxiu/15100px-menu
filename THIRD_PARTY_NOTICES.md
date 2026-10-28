@@ -17,6 +17,8 @@
 
 native/vendor/manifest.json 保存直接纳入的 C++ 依赖版本与哈希。字体版权／许可取自字体名称表，并保留原始字形与名称；不将字体改为 MIT。
 
+ImGui 1.92.7-docking 的本地单行修改：将 imgui_internal.h 中的 IMSTB_TEXTEDIT_UNDOCHARCOUNT 从999增为80000，以容纳文本工具整段缩进的一次撤销。原始／修改后哈希与原因记录在 manifest.json 的 local_changes；版本与 MIT 许可不变，未将本地修改冒称为上游原文件。
+
 frontend/package-lock.json 与 requirements*.txt 记录安装／构建依赖；它们由上游独立维护，适用上游许可。更新依赖或字体时，同时核对并更新相关声明。
 
 统一后台分发 ZIP 随附项目 LICENSE、本文件、licenses/ 中的声明，以及 C++ 库与字体的原始版权／许可。仅安装 Photoshop 插件不提供 Photoshop 或 Adobe 软件许可。

@@ -5,11 +5,34 @@ struct MenuToolsPanel {
     std::string mode,error,source,sourceDisplay,revision,layerName;
     char name[801]{},grouping[4001]{};
     char draft[80001]{},find[801]{},replacement[2001]{},separator[801]{},joiner[801]=" ";
+    char listCustom[9]{},listStart[9]="1";
+    int listMarker=0,listNumbering=0,indentCommand=0,selectionStart=0,selectionEnd=0,cursorPos=0,draftBufferId=0;
+    bool restoreDraftFocus=false;
     int textTab=0,replaceMode=0,caseMode=0,tidyMode=0,listMode=0,splitMode=0,splitLayout=0,draftGeneration=0,previewGeneration=0,resultCount=0;
     std::string pendingAction,planId,resultValue,resultPreview,resultKind;
     std::vector<MenuControls::TextRange> textMatches;std::string matchSource;
     bool textDirty=false;double textChanged=0;
     void changedText(){++draftGeneration;planId.clear();resultValue.clear();resultPreview.clear();resultKind.clear();textMatches.clear();matchSource.clear();error.clear();textDirty=true;textChanged=ImGui::GetTime();}
+    void setDraft(const std::string& value){std::snprintf(draft,sizeof(draft),"%s",value.c_str());++draftBufferId;indentCommand=selectionStart=selectionEnd=cursorPos=0;restoreDraftFocus=false;changedText();}
+    static int draftCallback(ImGuiInputTextCallbackData* data) {
+        auto& panel=*static_cast<MenuToolsPanel*>(data->UserData);
+        if(data->EventFlag==ImGuiInputTextFlags_CallbackCharFilter) {
+            const auto& io=ImGui::GetIO();
+            if(panel.textTab==4 && data->EventChar=='\t' && ImGui::IsKeyDown(ImGuiKey_Tab) && !io.KeyCtrl && !io.KeyAlt && !io.KeySuper){panel.indentCommand=1;return 1;}
+            return 0;
+        }
+        if(panel.restoreDraftFocus){data->SelectionStart=panel.selectionStart;data->SelectionEnd=panel.selectionEnd;data->CursorPos=panel.cursorPos;panel.restoreDraftFocus=false;}
+        const auto& io=ImGui::GetIO();
+        if(panel.textTab==4)ImGui::SetKeyOwner(ImGuiKey_Tab,data->ID);
+        if(panel.textTab==4 && io.KeyShift && !io.KeyCtrl && !io.KeyAlt && !io.KeySuper && ImGui::IsKeyPressed(ImGuiKey_Tab))panel.indentCommand=-1;
+        if(panel.indentCommand) {
+            const auto result=menuIndentLines(data->Buf,data->SelectionStart,data->SelectionEnd,data->CursorPos,panel.indentCommand);panel.indentCommand=0;
+            if(!result.error.empty()){panel.error=result.error;requireText(panel.error);}
+            else if(result.text!=data->Buf){data->DeleteChars(0,data->BufTextLen);data->InsertChars(0,result.text.c_str());data->SelectionStart=result.start;data->SelectionEnd=result.end;data->CursorPos=result.cursor;}
+        }
+        panel.selectionStart=data->SelectionStart;panel.selectionEnd=data->SelectionEnd;panel.cursorPos=data->CursorPos;
+        return 0;
+    }
     bool textDue(double now)const{return textDirty && active && ready && !pending && !revision.empty() && (textTab!=1 || find[0]) && (textTab!=3 || splitMode==0 || separator[0]) && now-textChanged>=.18;}
     bool canWriteText()const{return !pending && !revision.empty() && draft[0];}
     std::string textStatus()const {
@@ -28,7 +51,7 @@ struct MenuToolsPanel {
         if(textTab==1){args["operation"]="replace";args["find"]=find;args["replacement"]=replacement;args["regex"]=replaceMode==1;args["ignore_case"]=caseMode==1;}
         if(textTab==2){const char* operations[]={"trim","remove-empty","space","join","upper","lower"};args["operation"]=operations[tidyMode];if(tidyMode==3)args["separator"]=joiner;}
         if(textTab==3){const char* modes[]={"lines","literal","regex"};args["operation"]="split";args["mode"]=modes[splitMode];args["groups"]=grouping[0]?std::string(grouping):menuDefaultGroups(draft);args["separator"]=separator;args["layout"]=splitLayout==0?"original":"lines";}
-        if(textTab==4){const char* operations[]={"bullet","numbered","unlist"};args["operation"]=operations[listMode];}
+        if(textTab==4){const char* kinds[]={"bullet","numbered","remove"},*markers[]={"auto","disc","circle","square","dash","check","custom"},*styles[]={"decimal","right-paren","parens","lower-alpha","upper-alpha","lower-roman","upper-roman","hierarchical","mixed"};args["operation"]="list";args["kind"]=kinds[listMode];args["marker"]=markers[listMarker];args["custom_marker"]=listMarker==6?listCustom:"";args["numbering"]=styles[listNumbering];args["start"]=listMode==1?listStart:"1";}
         return args;
     }
     ID3D11ShaderResourceView* thumbnail=nullptr;
@@ -111,7 +134,7 @@ struct MenuToolsPanel {
             source=result.at("text").get<std::string>();sourceDisplay=source;std::replace(sourceDisplay.begin(),sourceDisplay.end(),'\r','\n');
             revision=result.at("revision").get<std::string>();layerName=result.at("name").get<std::string>();
             grouping[0]=0;splitLayout=source.find_first_of("\r\n")==std::string::npos?1:0;regroup();requireText(source);requireText(layerName);
-            std::snprintf(draft,sizeof(draft),"%s",sourceDisplay.c_str());changedText();
+            setDraft(sourceDisplay);
         } else if(action=="text.preview") {
             textMatches.clear();matchSource.clear();
             for(size_t i=0;draft[i];++i){if(draft[i]=='\r'){matchSource+='\n';if(draft[i+1]=='\n')++i;}else matchSource+=draft[i];}
@@ -140,8 +163,10 @@ struct MenuToolsPanel {
         if(MenuControls::segments("##text-tabs",tabs,textTab,scale))changedText();
         {MenuTextStyle text(MenuTextRole::Body);ImGui::TextUnformatted("编辑文字");}
         ImGui::PushID(int(menuEpoch));
-        if(MenuControls::multiline("##draft",draft,sizeof(draft),110*scale))changedText();
-        ImGui::PopID();
+        ImGui::PushID(draftBufferId);
+        if(restoreDraftFocus)ImGui::SetKeyboardFocusHere();
+        if(MenuControls::multiline("##draft",draft,sizeof(draft),110*scale,draftCallback,this))changedText();
+        ImGui::PopID();ImGui::PopID();
         if(textTab==1) {
             const char* modes[]={"普通查找","正则表达式"};if(MenuControls::segments("##replace-mode",modes,replaceMode,scale))changedText();
             const char* cases[]={"区分大小写","忽略大小写"};if(MenuControls::segments("##replace-case",cases,caseMode,scale))changedText();
@@ -160,7 +185,16 @@ struct MenuToolsPanel {
             {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("留空自动按行分组，最多64组，自动折行不计。写回当前文字保留原图层，拆成多个图层才替换原层；保留位置要求原有换行边界。");}
         } else if(textTab==4) {
             const char* lists[]={"项目列表","编号列表","移除列表"};if(MenuControls::segments("##list-mode",lists,listMode,scale))changedText();
-            {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("按非空行生成列表，保留缩进和空行；替换已有标记，不重复叠加。编号从1开始。");}
+            if(listMode==0) {
+                const char* markers[]={"随层级 • ◦ ▪","•","◦","▪","–","✓","自定义"};if(MenuControls::segments("##list-markers",markers,listMarker,scale))changedText();
+                if(listMarker==6){MenuControls::input("##list-custom","项目符号（一个字符）",listCustom,sizeof(listCustom));if(ImGui::IsItemEdited())changedText();}
+            } else if(listMode==1) {
+                const char* styles[]={"1.","1)","(1)","a)","A)","i)","I)","1.1","1.a.i"};if(MenuControls::segments("##list-numbering",styles,listNumbering,scale))changedText();
+                MenuControls::input("##list-start","起始编号 1—9999",listStart,sizeof(listStart));if(ImGui::IsItemEdited())changedText();
+            }
+            int indent=-1;const char* actions[]={"减少缩进","增加缩进"};
+            if(MenuControls::segments("##list-indent",actions,indent,scale)){indentCommand=indent==0?-1:1;restoreDraftFocus=true;}
+            {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("缩进作用于选中行或当前行，最多6级；Tab增加、Shift+Tab减少。预览自动更新编号，空行保留；每级写入4个空格，写回PS后不自动续号。");}
         }
         if(available && textDue(ImGui::GetTime())){textDirty=false;submit("text.preview",textParams());}
         if(textTab==1 && !planId.empty()) {
@@ -168,7 +202,7 @@ struct MenuToolsPanel {
             MenuControls::textPreview("##text-matches",matchSource.c_str(),80*scale,textMatches);
         }
         {MenuTextStyle text(MenuTextRole::Secondary);ImGui::TextWrapped("%s",textStatus().c_str());}
-        MenuControls::textPreview("##text-result",planId.empty()?draft:resultPreview.c_str(),130*scale);
+        MenuControls::textPreview("##text-result",planId.empty()?draft:resultPreview.c_str(),130*scale,{},textTab==4 && !planId.empty() && listMode!=2);
         const bool processed=textTab!=3 && !planId.empty() && resultKind=="replace";
         ImGui::BeginDisabled(!canWriteText());
         if(MenuControls::button(processed?"写回预览结果":"写回当前文字",scale)) {
@@ -182,7 +216,7 @@ struct MenuToolsPanel {
             ImGui::EndDisabled();
         }
         ImGui::BeginDisabled(planId.empty() || pending);
-        if(MenuControls::button("将结果继续编辑",scale)){std::snprintf(draft,sizeof(draft),"%s",resultValue.c_str());textTab=0;changedText();}
+        if(MenuControls::button("将结果继续编辑",scale)){setDraft(resultValue);textTab=0;}
         ImGui::EndDisabled();
     }
     void draw(float scale,ImVec2 center,bool available) {
