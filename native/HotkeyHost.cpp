@@ -41,6 +41,15 @@ struct KeyMachine {
     ULONGLONG pressTime=0;
     void cancelGesture() { pending=-1; used=true; }
     void seed(int raw) { physical[raw]=held[alias(raw)]=true; }
+    void reconcileModifiers(unsigned down) {
+        for(int group=0;group<3;++group) {
+            const int key=VK_SHIFT+group,left=VK_LSHIFT+2*group;
+            // A consumed modifier may not reach Windows' async state.
+            if(consumed[key])continue;
+            physical[key]=false;physical[left]=(down&(1u<<(group*2)))!=0;physical[left+1]=(down&(2u<<(group*2)))!=0;
+            held[key]=physical[left] || physical[left+1];
+        }
+    }
     bool modified() const { return held[16] || held[17] || held[18] || held[91] || held[92]; }
     bool event(int raw,bool down,bool scope,const Config& cfg,bool visible,Action& action,ULONGLONG now=0,bool reserveOnly=false) {
         action=None; if (raw<0 || raw>=256) return false;
@@ -423,11 +432,21 @@ static bool routeKey(KeyMachine& state,int raw,bool down,bool commandScope,bool 
     bool reserve=raw==VK_CAPITAL && processScope && !commandScope;
     return state.event(raw,down,commandScope || reserve,cfg,visible,action,now,reserve);
 }
+static unsigned physicalModifiers(bool altDown=false) {
+    unsigned down=0;
+    for(int i=0;i<6;++i)if(GetAsyncKeyState(VK_LSHIFT+i)&0x8000)down|=1u<<i;
+    if(altDown && !(down&48))down|=16;
+    return down;
+}
 static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
     CallbackTiming timing;
     if (code>=0) {
         lastInputTick=GetTickCount64();
         const auto& input=*reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
+        const int logical=alias(input.vkCode);
+        // The current hook event has not updated async state yet.
+        if((message==WM_KEYDOWN || message==WM_SYSKEYDOWN) && logical!=VK_SHIFT && logical!=VK_CONTROL && logical!=VK_MENU && logical!=VK_LWIN && logical!=VK_RWIN)
+            keys.reconcileModifiers(physicalModifiers((input.flags&LLKHF_ALTDOWN)!=0));
         Action action;
         HWND foreground=GetForegroundWindow();
         bool processScope=photoshopKeyScope(foreground);
@@ -736,8 +755,8 @@ static void writeActions() {
 }
 static void checkAt(bool value,int line) { if (!value) throw std::runtime_error("Native hook self-test failed at line "+std::to_string(line)); }
 #define check(value) checkAt(value,__LINE__)
-static bool renewalAllowed(ULONGLONG now,ULONGLONG last,bool capsHeld,bool winHeld,bool mouseHeld) {
-    return !capsHeld && !winHeld && !mouseHeld && now-last>=250;
+static bool renewalAllowed(ULONGLONG now,ULONGLONG last,bool keyHeld,bool winHeld,bool mouseHeld) {
+    return !keyHeld && !winHeld && !mouseHeld && now-last>=250;
 }
 static void sampleCapsState(bool force=false) {
     static bool sampled=false,previous=false;
@@ -758,6 +777,30 @@ static void sampleCapsState(bool force=false) {
     } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
 }
 static int selfTest() {
+    {
+        Config c;c.enabled=true;c.bindings[0]={Toggle,{VK_CAPITAL},1};Action action;
+        for(int side=0;side<6;++side) {
+            KeyMachine state;state.seed(VK_LSHIFT+side);
+            check(state.event(VK_CAPITAL,true,true,c,false,action,1000) && action==None);
+            check(state.event(VK_CAPITAL,false,true,c,false,action,1010) && action==None);
+            state.reconcileModifiers(0);
+            check(!state.modified() && !state.physical[VK_LSHIFT+side]);
+            check(state.event(VK_CAPITAL,true,true,c,false,action,1020) && action==HoldBegin);
+            check(state.event(VK_CAPITAL,false,true,c,false,action,1030) && action==HoldPin);
+            state.reconcileModifiers(1u<<side);
+            check(state.modified() && state.physical[VK_LSHIFT+side]);
+            check(state.event(VK_CAPITAL,true,true,c,false,action,1040) && action==None);
+            check(state.event(VK_CAPITAL,false,true,c,false,action,1050) && action==None);
+        }
+        KeyMachine both;both.reconcileModifiers(48);both.event(VK_LMENU,false,false,c,false,action);
+        check(both.held[VK_MENU] && both.physical[VK_RMENU]);both.reconcileModifiers(0);check(!both.modified());
+        both.seed(VK_LMENU);both.consumed[VK_MENU]=true;both.reconcileModifiers(0);check(both.held[VK_MENU]);
+        check(both.event(VK_LMENU,false,false,c,false,action) && !both.held[VK_MENU]);
+        both.seed(VK_LWIN);both.reconcileModifiers(0);check(both.held[VK_LWIN]);
+        KeyMachine real;real.seed(VK_LMENU);const auto sampled=physicalModifiers();real.reconcileModifiers(sampled);
+        check(real.held[VK_MENU]==bool(sampled&48));
+        std::cout<<"Modifier reconciliation passed: missed releases, real holds, left/right pairs, consumed modifiers, Caps recovery and OS sampling\n";
+    }
     KeyMachine languageKeys;
     check(textLanguageIntent('T',languageKeys) && !textLanguageIntent(VK_F2,languageKeys) && !textLanguageIntent('A',languageKeys));
     check(languageActivityKey('A',languageKeys) && languageActivityKey('V',languageKeys) && languageActivityKey(VK_ESCAPE,languageKeys) && !languageActivityKey(VK_SHIFT,languageKeys));
@@ -1259,8 +1302,9 @@ int main(int argc,char** argv) {
             }
         } else if (message.message==WM_TIMER && message.wParam==renewal) {
             auto now=GetTickCount64(),started=microseconds();
+            if(now-lastInputTick>=250)keys.reconcileModifiers(physicalModifiers());
             bool mouseHeld=sampleClicks.held[0] || sampleClicks.held[1];for (bool held:mouseConsumed) mouseHeld=mouseHeld || held;
-            bool attempted=renewalAllowed(now,lastInputTick,keys.physical[VK_CAPITAL],winRight.physical,mouseHeld);
+            bool attempted=renewalAllowed(now,lastInputTick,keys.physical[VK_CAPITAL] || keys.modified(),winRight.physical,mouseHeld);
             // Unhooking while Windows has pending hook calls can lose an
             // event. Keep the same hook throughout holds and rapid input.
             bool renewed=!attempted || renewHooks(keyHook,mouseHook);
