@@ -1,12 +1,12 @@
 # Photoshop Menu TODO
 
 - [x] 285列表选项随文字层保存：复用原生文字层＋自有XMP命名空间，保存编号／符号选项并读取PS最新正文；原生面板恢复列表页／选项，继续编辑保留草稿，移除只清理自有属性，其他插件数据保持。688项回归、原生列表恢复与完整输入／焦点／取消／SHOWWINDOW、JS失鲜／回滚／未知及冻结启动／重启通过；实际285／UXP81，正常PS退出／分层副本备份／内容恢复、配置／组件／旧未知保持。PS24低CPU72DPI点文字／正常300DPI段落文字两组完整保存重开、改名、同／跨文档复制、原生最新正文、仅选项像素及单历史／一次撤销通过，最终冻结生产读取通过。见docs/TEXT-LIST-OBJECTS.md和.runtime/list285-interface-complete、list285-frozen-read.json、runtime285-verified.json。
-- [ ] 285公开交付：源码／标签、Wiki、统一包和更新清单下载核验后，只保留最新版Release和dist发行物。
+- [x] 285公开交付：源码3fe7b5c／v0.4.285与Wiki5cbb1e6已推送；统一ZIP／SHA和更新清单匿名下载核验通过，GitHub与dist仅保留285，旧标签／源码／诊断保持。40页／256链接及14个远端页面、图片和README核验通过，源码／标签两项CI成功；实际285／UXP81及组件匹配、原稿恢复、配置和历史未知保持。证据.runtime/release-0.4.285-public-verification.json、manifest285-verification.json、release285-cleanup.json、dist285-cleanup.json、wiki285-public-verification.json、runtime285-verified.json。
 
 - [x] 284修饰键残留造成Caps无法唤出：按键日志复现PS范围／输入保护均正常但残留Alt、Caps被拦却无动作；正常重启旧服务后用户确认恢复。修复版对未消费的Shift／Ctrl／Alt做实际状态同步，避免在当前修饰键事件上读取尚未更新的异步状态；保留左右键／消费配对及Win右键映射，持有修饰键不重挂。原生六侧组合专项、10,000组Caps／Tab、30轮钩子重建、683项低CPU回归、最终冻结启动／重启通过。实际284／UXP80与菜单／热键／冻结资源／配置一致，无当前pending，PS会话和旧未知保持。用户确认最终284正常，按安装时间与轮转日志核验真实PS Caps匹配／打开；两个Windows交互工具初始化失败，未发送自动键鼠，不计自动实屏通过。原始松键遗漏来源未确定，不声明性能提升；证据.runtime/caps284-baseline.json、caps284-restart.json、hotkey284-prove.log、tests284-low.log、smoke284.log、recovery284caps与runtime284-verified.json。
 - [x] 284公开交付：源码17aca6d／v0.4.284、Wiki462621a已推送；统一ZIP／SHA与更新清单匿名下载核验通过，GitHub和dist仅保留284，Git标签／历史及诊断证据保留。40页／254链接、13个远端页面和图片／README核验通过，源码及标签CI成功；实际入口284及组件哈希一致，用户确认新版Caps正常。证据.runtime/release-0.4.284-public-verification.json、manifest284-verification.json、release284-cleanup.json、dist284-cleanup.json、wiki284-public-verification.json与runtime284-verified.json。
 
-- [ ] 列表对象的双击入口：285已选择原生文字层＋XMP并闭环保存／复制／撤销，仍需验证复用Windows hook时真实缩略图命中／新鲜目标、按键配对与原生默认动作保留，可靠时双击进入同一列表工具。不新增PS原生LayerKind，不将UXP通知当拦截，不先打开PSB再关闭；智能对象外壳与内部实例更新仍为候选。见[文字样式方案](docs/TEXT-STYLE-PLAN.md)。
+- [ ] 列表对象的双击入口：285已选择原生文字层＋XMP并闭环保存／复制／撤销。PS24只读UIA完整遍历16控件未提供图层行／缩略图／蒙版独立区域，现有面板识别不能作为精确命中；未启用猜测拦截，证据.runtime/list285-accessibility.json、layers285-hwnd.json。仍需另一条真实缩略图命中来源及新鲜目标、按键配对和原生默认动作验证。不新增PS原生LayerKind，不将UXP通知当拦截，不先打开PSB再关闭；智能对象外壳与内部实例更新仍为候选。见[文字样式方案](docs/TEXT-STYLE-PLAN.md)。
 
 - [ ] 文字样式读取与所见即所得：按2026-10-28用户要求，读取现有PS字符／段落样式，字体、字号、自动／固定行距、缩进和混合状态进入同一目标绑定草稿；准确效果由PS原生排版，预览与确认使用同一草稿，保留取消恢复／一次撤销／未知保护。优先旧版PS24.0.1：先显示原样式，再闭环写入与画布预览；面板准确图片仅在静默能力实测可用时开放，不回退新文档／PNG，不把本地排版当PS结果。先保留文本工具入口、区分内容处理和样式排版，后续可独立但不复制执行链。尚未实施，不能标当前可用；方案与分步验收见[文字样式方案](docs/TEXT-STYLE-PLAN.md)。
 
