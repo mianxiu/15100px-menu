@@ -1,7 +1,7 @@
 # Photoshop Menu TODO
 
 - [x] 284修饰键残留造成Caps无法唤出：按键日志复现PS范围／输入保护均正常但残留Alt、Caps被拦却无动作；正常重启旧服务后用户确认恢复。修复版对未消费的Shift／Ctrl／Alt做实际状态同步，避免在当前修饰键事件上读取尚未更新的异步状态；保留左右键／消费配对及Win右键映射，持有修饰键不重挂。原生六侧组合专项、10,000组Caps／Tab、30轮钩子重建、683项低CPU回归、最终冻结启动／重启通过。实际284／UXP80与菜单／热键／冻结资源／配置一致，无当前pending，PS会话和旧未知保持。用户确认最终284正常，按安装时间与轮转日志核验真实PS Caps匹配／打开；两个Windows交互工具初始化失败，未发送自动键鼠，不计自动实屏通过。原始松键遗漏来源未确定，不声明性能提升；证据.runtime/caps284-baseline.json、caps284-restart.json、hotkey284-prove.log、tests284-low.log、smoke284.log、recovery284caps与runtime284-verified.json。
-- [ ] 284公开交付：源码／标签、Wiki、统一包和更新清单下载核验后，只保留最新版Release和dist发行物。
+- [x] 284公开交付：源码17aca6d／v0.4.284、Wiki462621a已推送；统一ZIP／SHA与更新清单匿名下载核验通过，GitHub和dist仅保留284，Git标签／历史及诊断证据保留。40页／254链接、13个远端页面和图片／README核验通过，源码及标签CI成功；实际入口284及组件哈希一致，用户确认新版Caps正常。证据.runtime/release-0.4.284-public-verification.json、manifest284-verification.json、release284-cleanup.json、dist284-cleanup.json、wiki284-public-verification.json与runtime284-verified.json。
 
 - [ ] 候选“列表对象”可行性：评估原生文字层＋持久标记，或嵌入式智能对象＋列表源数据，双击已确认的对象缩略图进入同一列表／样式工具。不是新增PS原生LayerKind；不将UXP通知当拦截，不先打开PSB再关闭。复用现有Windows hook的可行性、准确命中／新鲜目标、原生默认动作保留、PSD重开／复制／撤销及智能对象内部更新和实例关系均待验证；尚未选择承载方式、未实现，不改变先读样式的主线。见[文字样式方案](docs/TEXT-STYLE-PLAN.md)。
 
