@@ -5,10 +5,12 @@ const original={layerID:11,name:'mixed',layerKind:3,layerLocking:{protectAll:fal
  textStyleRange:[{_obj:'textStyleRange',from:0,to:2,textStyle:{fontPostScriptName:'Alpha',size:12,color:{red:1}}},{_obj:'textStyleRange',from:2,to:5,textStyle:{fontPostScriptName:'Beta',size:16}},{_obj:'textStyleRange',from:5,to:9,textStyle:{fontPostScriptName:'Gamma',size:20}}],
  paragraphStyleRange:[{_obj:'paragraphStyleRange',from:0,to:5,paragraphStyle:{align:'left'}},{_obj:'paragraphStyleRange',from:5,to:9,paragraphStyle:{align:'center'}}],
  antiAlias:{_value:'antiAliasCrisp'},textClickPoint:{x:1,y:2},orientation:'horizontal',textShape:[{char:{_value:'paint'},transform:{xx:1,yy:1}}],warp:{style:'none'},kerningRange:[]}};
-let row=clone(original),target={session:'s',document_id:1,active_layer_id:11,layer_ids:[11]},before,history=0,commits=0,writes=0,failWrite=false,wrongStyle=false,rollbackFail=false,materializeParagraphs=false;
+let row=clone(original),target={session:'s',document_id:1,active_layer_id:11,layer_ids:[11]},before,history=0,commits=0,writes=0,failWrite=false,wrongStyle=false,rollbackFail=false,materializeParagraphs=false,wrongXmp=false;
 const ps={core:{executeAsModal:async fn=>fn({isCancelled:false,hostControl:{suspendHistory:async()=>{history++;before=clone(row);return 'h';},resumeHistory:async(_,commit)=>{if(commit)commits++;else{if(rollbackFail)throw Error('rollback');row=before;}}}})},action:{batchPlay:async commands=>commands.map(c=>{
  assert.equal(c._options.dialogOptions,'silent');
  if(c._obj==='multiGet')return clone(row);
+ if(c._obj==='get'&&c._target[0]._property==='XMPMetadataAsUTF8')return {XMPMetadataAsUTF8:row.XMPMetadataAsUTF8||''};
+ if(c._obj==='set'&&c.to?._obj==='layer'){assert.equal(c._target[0]._property,'XMPMetadataAsUTF8');if(!wrongXmp)row.XMPMetadataAsUTF8=c.to.XMPMetadataAsUTF8;return {};}
  if(c._obj==='set'){
   assert.equal(c._target.length,1);assert.equal(c._target[0]._ref,'textLayer');assert.equal(c._target[0]._value,'targetEnum');
   writes++;if(failWrite)return {_obj:'error'};
@@ -54,5 +56,11 @@ async function request(find,replacement){const read=await tools.read();return {t
  let mapped={target:read.target,text:{revision:read.revision,value:'X猫😀\rBC猫',origins:[0,1,2,3,4,5,6,7,8],count:1},expires_at_ms:Date.now()+5000};
  await tools.replace(mapped);assert.equal(row.textKey.textKey,'X猫😀\rBC猫');assert.equal(row.textKey.textStyleRange[1].textStyle.fontPostScriptName,'Beta');
  row=clone(original);read=await tools.read();mapped.text.revision=read.revision;mapped.text.origins=[1,0,2,3,4,5,6,7,8];const pre=writes;await assert.rejects(tools.replace(mapped),/计划无效/);assert.equal(writes,pre);
+ row=clone(original);row.XMPMetadataAsUTF8='foreign';read=await tools.read();assert.equal(read.list_xmp,'foreign');
+ const tagged={target:read.target,text:{revision:read.revision,value:row.textKey.textKey,origins:Array.from({length:row.textKey.textKey.length+1},(_,i)=>i),count:0,list_xmp:'foreign + list options'},expires_at_ms:Date.now()+5000};
+ const taggedHistory=history;await tools.replace(tagged);assert.equal(history,taggedHistory+1);assert.equal(row.XMPMetadataAsUTF8,'foreign + list options');assert.equal(row.textKey.textKey,original.textKey.textKey);
+ read=await tools.read();tagged.text.revision=read.revision;tagged.text.list_xmp='new';row.XMPMetadataAsUTF8='externally changed';const staleWrites=writes;await assert.rejects(tools.replace(tagged),/样式已改变/);assert.equal(writes,staleWrites);
+ read=await tools.read();tagged.text.revision=read.revision;wrongXmp=true;const prior=clone(row);await assert.rejects(tools.replace(tagged),/列表标记读回/);assert.deepEqual(row,prior);wrongXmp=false;
+ read=await tools.read();tagged.text.revision=read.revision;tagged.text.list_xmp='x'.repeat(131073);await assert.rejects(tools.replace(tagged),/标记数据无效/);
  console.log('Text tools: mixed styles, UTF-16, paragraph ranges, no-op, stale target, missing fonts, rollback and unknown passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

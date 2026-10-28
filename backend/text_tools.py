@@ -4,10 +4,13 @@ import secrets
 from .layer_search import require_available
 from .operation_target import validate_target
 from .text_plan import evaluate,parameters,units
+from . import text_list
 
 
 def mapped_parameters(value,split=False):
     keys={'revision','value','origins','count'}|({'breaks','layout'} if split else set())
+    if not split and isinstance(value,dict) and 'list_options' in value:
+        keys.add('list_options');value={**value,'list_options':text_list.options(value['list_options'])}
     if (not isinstance(value,dict) or set(value)!=keys or not isinstance(value['revision'],str) or not 1<=len(value['revision'])<=128 or
             not isinstance(value['value'],str) or not 1<=units(value['value'])<=20000 or '\0' in value['value'] or '\n' in value['value'] or
             type(value['count']) is not int or not 0<=value['count']<=40001 or not isinstance(value['origins'],list) or
@@ -19,7 +22,12 @@ def mapped_parameters(value,split=False):
     return {**value,'origins':list(value['origins']),**({'breaks':list(value['breaks'])} if split else {})}
 
 
-def replace_parameters(value):
+def replace_parameters(value,*,allow_xmp=False):
+    if allow_xmp and isinstance(value,dict) and 'list_xmp' in value:
+        text_list.read(value['list_xmp'])
+        base=replace_parameters({key:item for key,item in value.items() if key!='list_xmp'})
+        if 'list_options' in base:raise ValueError('无效的列表写入参数')
+        return {**base,'list_xmp':value['list_xmp']}
     if isinstance(value,dict) and 'value' in value:return mapped_parameters(value)
     if (not isinstance(value,dict) or set(value)!={'revision','find','replacement'} or
             not isinstance(value['revision'],str) or not 1<=len(value['revision'])<=128 or
@@ -64,7 +72,11 @@ class TextTools:
             if len(target['layer_ids'])!=1 or snapshot['target'].get('session')!=result.get('session'):
                 raise RuntimeError('文字读取会话不一致')
             self.snapshot=snapshot
-            return {**snapshot,'message':'文字已读取；预览不会修改PS'}
+            public={key:value for key,value in snapshot.items() if key!='list_xmp'}
+            if 'list_xmp' in snapshot:
+                try:public['list_options']=text_list.read(snapshot['list_xmp'])
+                except ValueError as error:public['list_warning']=str(error)
+            return {**public,'message':'文字已读取；预览不会修改PS'}
         finally:self.reading=False
 
     async def replace(self,args):
@@ -74,18 +86,27 @@ class TextTools:
         return await self._apply(split_parameters(args),'text.split',menu_guard)
 
     async def write(self,args,menu_guard=None):
-        if not isinstance(args,dict) or set(args)!={'revision','draft'}:raise ValueError('无效的文字写回参数')
+        if not isinstance(args,dict) or set(args) not in ({'revision','draft'},{'revision','draft','list_options'}):raise ValueError('无效的文字写回参数')
         result=await self.preview({**args,'operation':'edit'})
         return await self.apply({'revision':args['revision'],'plan_id':result['plan_id']},menu_guard)
 
     async def preview(self,args):
-        self.available();params=parameters(args);saved=self.snapshot;self.plan=None
+        self.available();saved=self.snapshot;self.plan=None
+        carried=isinstance(args,dict) and 'list_options' in args
+        if carried and args.get('operation') in ('list','split'):raise ValueError('列表草稿参数无效')
+        params=parameters({key:value for key,value in args.items() if key!='list_options'} if carried else args)
         if not saved or params['revision']!=saved['revision']:raise ValueError('文字读取已过期，请重新读取')
         result=await asyncio.to_thread(evaluate,saved['text'],params)
         if self.snapshot is not saved:raise ValueError('文字读取已改变，请重新预览')
         split=result['kind']=='split'
         payload={key:result[key] for key in ({'value','origins','count','breaks','layout'} if split else {'value','origins','count'})}
         payload['revision']=saved['revision'];payload=mapped_parameters(payload,split)
+        if params['operation']=='list' or carried:
+            value=args['list_options'] if carried else (None if params['kind']=='remove' else {key:params[key] for key in text_list.KEYS})
+            value=text_list.options(value)
+            if 'list_xmp' not in saved:raise ValueError('列表保存需要正常重启PS加载UXP0.3.81')
+            text_list.write(saved['list_xmp'],value)
+            payload['list_options']=value
         identity=secrets.token_hex(16);self.plan=(identity,payload,'text.split' if split else 'text.replace')
         return {key:result[key] for key in ('preview','value','count','changed','kind','characters','matches')}|{'plan_id':identity}
 
@@ -99,6 +120,9 @@ class TextTools:
         self.available()
         snapshot=self.snapshot
         if not snapshot or params['revision']!=snapshot['revision']:raise ValueError('文本预览已过期，请重新读取')
+        if 'list_options' in params:
+            if 'list_xmp' not in snapshot:raise ValueError('列表保存需要正常重启PS加载UXP0.3.81')
+            params={**{key:value for key,value in params.items() if key!='list_options'},'list_xmp':text_list.write(snapshot['list_xmp'],params['list_options'])}
         app=self.app
         async with app.operation_lock:
             await app.broadcast({'type':'operation','busy':True,'action':command})

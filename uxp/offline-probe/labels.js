@@ -2212,7 +2212,10 @@ function createTextTools(ps,session,capture,readTree) {
   const ref=target=>[{_ref:'layer',_id:target.active_layer_id},{_ref:'document',_id:target.document_id}];
   async function descriptor(target) {
     if(target?.session!==session||target.layer_ids.length!==1)throw Error('请单选一个文字图层');
-    const [row]=await batch([{_obj:'multiGet',_target:{_ref:ref(target)},extendedReference:[['layerID','name','layerKind','layerLocking','textKey']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}}]);
+    const [row,metadata]=await batch([{_obj:'multiGet',_target:{_ref:ref(target)},extendedReference:[['layerID','name','layerKind','layerLocking','textKey']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}},
+      {_obj:'get',_target:[{_ref:'property',_property:'XMPMetadataAsUTF8'},...ref(target)],_options:{dialogOptions:'silent'}}]);
+    if(metadata.XMPMetadataAsUTF8!==undefined&&typeof metadata.XMPMetadataAsUTF8!=='string')throw Error('图层元数据读取结果无效');
+    row.XMPMetadataAsUTF8=metadata.XMPMetadataAsUTF8||'';
     if(row.layerID!==target.active_layer_id||row.layerKind!==3||!row.textKey||typeof row.textKey.textKey!=='string')throw Error('请单选一个文字图层');
     if(row.layerLocking&&Object.entries(row.layerLocking).some(([key,value])=>key!=='_obj'&&value===true))throw Error('请先解锁文字图层');
     if(row.textKey.textKey.length>20000||JSON.stringify(row.textKey).length>524288)throw Error('文本或样式超出本次处理上限');
@@ -2340,13 +2343,15 @@ function createTextTools(ps,session,capture,readTree) {
     const target=await capture(),row=await descriptor(target);
     const revision=session+':text:'+String(++serial);
     snapshot={target,row,revision,time:Date.now()};
-    return {target,revision,text:row.textKey.textKey,name:row.name};
+    return {target,revision,text:row.textKey.textKey,name:row.name,list_xmp:row.XMPMetadataAsUTF8};
   }
   async function replace(request) {
     const saved=snapshot,params=request.text;
     if(!saved||params?.revision!==saved.revision||!sameTarget(saved.target,request.target)||Date.now()-saved.time>(Object.prototype.hasOwnProperty.call(params || {},'value')?1800000:60000))throw Error('文本预览已过期，请重新读取');
     const wanted=plan(saved.row.textKey,params);
-    if(wanted.value.textKey===saved.row.textKey.textKey)return {verified:true,count:0};
+    const tagging=Object.prototype.hasOwnProperty.call(params,'list_xmp');
+    if(tagging&&(typeof params.list_xmp!=='string'||params.list_xmp.length>131072||params.list_xmp.includes('\0')))throw Error('列表标记数据无效');
+    if(wanted.value.textKey===saved.row.textKey.textKey&&(!tagging||params.list_xmp===(saved.row.XMPMetadataAsUTF8||'')))return {verified:true,count:0};
     let uncertain=false;
     try {return await ps.core.executeAsModal(async context=>{
       if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
@@ -2358,8 +2363,10 @@ function createTextTools(ps,session,capture,readTree) {
         // PS24.0 rejects a document-qualified textLayer identifier. The modal
         // fresh capture above binds the active text reference to this exact ID.
         await textWriter(before.textKey)(wanted.value);
+        if(tagging&&params.list_xmp!==(before.XMPMetadataAsUTF8||''))await batch([{_obj:'set',_target:[{_ref:'property',_property:'XMPMetadataAsUTF8'},...ref(request.target)],to:{_obj:'layer',XMPMetadataAsUTF8:params.list_xmp},_options:{dialogOptions:'silent'}}]);
         const after=await descriptor(request.target);
         if(after.textKey.textKey!==wanted.value.textKey||!stylesMatch(after.textKey,wanted.value)||!same(layout(after.textKey),layout(before.textKey)))throw Error('文本或样式读回不一致');
+        if((after.XMPMetadataAsUTF8||'')!==(tagging?params.list_xmp:(before.XMPMetadataAsUTF8||'')))throw Error('列表标记读回不一致');
         await context.hostControl.resumeHistory(history,true);snapshot=null;
         return {verified:true,count:wanted.count};
       } catch(error) {

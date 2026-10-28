@@ -3989,6 +3989,12 @@ int main() {
                     menuTools.textTab=4;
                     const char* listKinds[]={"bullet","numbered","remove"};
                     for(int mode=0;mode<3;++mode){menuTools.listMode=mode;const auto params=menuTools.textParams();if(params.at("operation")!="list" || params.at("kind")!=listKinds[mode])throw std::runtime_error("List operation parameters lost");}
+                    const Json savedList={{"kind","numbered"},{"marker","custom"},{"custom_marker","✓"},{"numbering","hierarchical"},{"start",7}};
+                    menuTools.restoreList(savedList);
+                    if(menuTools.textTab!=4 || menuTools.listMode!=1 || menuTools.listMarker!=6 || menuTools.listNumbering!=7 || std::string(menuTools.listStart)!="7" || std::string(menuTools.listCustom)!="✓")throw std::runtime_error("Saved list options were not restored");
+                    menuTools.draftList=savedList;menuTools.draftListChanged=true;menuTools.textTab=0;
+                    if(menuTools.textParams().at("list_options")!=savedList)throw std::runtime_error("Continuing a list draft dropped options");
+                    menuTools.draftListChanged=false;
                     menuTools.textTab=3;menuTools.splitMode=1;
                     if(menuTools.textDue(textChanged+1))throw std::runtime_error("Empty split delimiter auto submitted");
                     menuTools.splitMode=0;menuTools.textTab=1;menuTools.find[0]=0;

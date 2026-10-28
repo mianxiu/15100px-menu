@@ -348,7 +348,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.80', session, transport: 'plugin-data-files',
+        probe_version: '0.3.81', session, transport: 'plugin-data-files',
         photoshop_version: hostVersion,
         extended_label_colors:labels.extendedLabelColors,
         uxp_version: optional(() => uxp.versions.uxp),
@@ -424,7 +424,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.80', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.81', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};

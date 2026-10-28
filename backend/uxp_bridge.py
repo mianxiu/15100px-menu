@@ -144,6 +144,8 @@ class UxpTransport:
                     raise RuntimeError('文字拆分需要正常重启PS加载UXP0.3.59')
                 if payload.get('command') in ('text.replace','text.split') and 'value' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,71):
                     raise RuntimeError('文字处理计划需要正常重启PS加载UXP0.3.71；未提交修改')
+                if payload.get('command')=='text.replace' and 'list_xmp' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,81):
+                    raise RuntimeError('列表保存需要正常重启PS加载UXP0.3.81；未提交修改')
                 if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,78):
                     raise RuntimeError('文字拆分修复需要正常重启PS加载UXP0.3.78；未提交修改')
                 if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,80):
@@ -556,7 +558,7 @@ class UxpBridge(PhotoshopBridge):
     async def execute_text(self,target,params,action,before_dispatch=None):
         from .text_tools import replace_parameters,split_parameters
         if action not in ('text.replace','text.split'):raise ValueError('无效的文字操作')
-        params=(split_parameters if action=='text.split' else replace_parameters)(params)
+        params=split_parameters(params) if action=='text.split' else replace_parameters(params,allow_xmp=True)
         if self.execution_guard:self.execution_guard()
         def write(action):
             if self.focus_guard:self.focus_guard()

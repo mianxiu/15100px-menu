@@ -6,6 +6,32 @@ from backend.text_tools import TextTools,replace_parameters,split_parameters
 
 
 class TextToolsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_list_plan_is_private_persistent_and_derived_from_current_read(self):
+        from backend.text_list import read
+        from backend.text_plan import compute
+        from tests.test_text_list import OPTIONS,FOREIGN
+        app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
+            bridge=SimpleNamespace(execute_text=AsyncMock(return_value={}),busy=False,layer_context={}),broadcast=AsyncMock())
+        tools=TextTools(app);tools.available=Mock();target={'session':'s','document_id':1,'layer_ids':[2],'active_layer_id':2}
+        tools.snapshot={'revision':'r','text':'current PS text','target':target,'list_xmp':FOREIGN}
+        with patch('backend.text_tools.evaluate',side_effect=compute):
+            result=await tools.preview({'revision':'r','draft':'current PS text','operation':'list',**OPTIONS})
+        self.assertNotIn('list_xmp',result);app.bridge.execute_text.assert_not_called()
+        await tools.apply({'revision':'r','plan_id':result['plan_id']})
+        payload=app.bridge.execute_text.call_args.args[1]
+        self.assertEqual(read(payload['list_xmp']),OPTIONS);self.assertNotIn('list_options',payload)
+        self.assertEqual(replace_parameters(payload,allow_xmp=True),payload)
+        with self.assertRaises(ValueError):replace_parameters(payload)
+        tools.snapshot={'revision':'r','text':'current PS text','target':target,'list_xmp':FOREIGN}
+        with patch('backend.text_tools.evaluate',side_effect=compute):
+            await tools.write({'revision':'r','draft':'continue editing','list_options':{**OPTIONS,'start':'4'}})
+        carried=app.bridge.execute_text.call_args.args[1]
+        self.assertEqual(carried['value'],'continue editing');self.assertEqual(read(carried['list_xmp']),{**OPTIONS,'start':4})
+        tools.snapshot={'revision':'r','text':'current PS text','target':target}
+        with patch('backend.text_tools.evaluate',side_effect=compute):
+            with self.assertRaisesRegex(ValueError,'0.3.81'):await tools.preview({'revision':'r','draft':'new','operation':'list',**OPTIONS})
+        self.assertIsNone(tools.plan)
+
     async def test_write_current_draft_is_independent_of_an_invalid_split_and_is_one_shot(self):
         from backend.text_plan import compute
         app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),

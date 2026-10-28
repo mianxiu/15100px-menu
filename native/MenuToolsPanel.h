@@ -6,6 +6,18 @@ struct MenuToolsPanel {
     char name[801]{},grouping[4001]{};
     char draft[80001]{},find[801]{},replacement[2001]{},separator[801]{},joiner[801]=" ";
     char listCustom[9]{},listStart[9]="1";
+    inline static constexpr const char* listKinds[]={"bullet","numbered","remove"},*listMarkers[]={"auto","disc","circle","square","dash","check","custom"},*listStyles[]={"decimal","right-paren","parens","lower-alpha","upper-alpha","lower-roman","upper-roman","hierarchical","mixed"};
+    Json draftList=nullptr;bool draftListChanged=false;
+    void restoreList(const Json& value) {
+        if(!value.is_object())return;
+        const auto kind=value.value("kind",std::string()),marker=value.value("marker",std::string()),numbering=value.value("numbering",std::string());
+        const auto k=std::find(std::begin(listKinds),std::end(listKinds),kind),m=std::find(std::begin(listMarkers),std::end(listMarkers),marker),n=std::find(std::begin(listStyles),std::end(listStyles),numbering);
+        if(k==std::end(listKinds) || k-std::begin(listKinds)>1 || m==std::end(listMarkers) || n==std::end(listStyles) || !value.contains("start") || !value.at("start").is_number_integer())return;
+        const auto start=value.at("start").get<int64_t>();const auto custom=value.value("custom_marker",std::string());
+        if(start<1 || start>9999 || custom.size()>=sizeof(listCustom))return;
+        listMode=int(k-std::begin(listKinds));listMarker=int(m-std::begin(listMarkers));listNumbering=int(n-std::begin(listStyles));
+        std::snprintf(listStart,sizeof(listStart),"%d",int(start));std::snprintf(listCustom,sizeof(listCustom),"%s",custom.c_str());textTab=4;
+    }
     int listMarker=0,listNumbering=0,indentCommand=0,selectionStart=0,selectionEnd=0,cursorPos=0,draftBufferId=0;
     bool restoreDraftFocus=false;
     int textTab=0,replaceMode=0,caseMode=0,tidyMode=0,listMode=0,splitMode=0,splitLayout=0,draftGeneration=0,previewGeneration=0,resultCount=0;
@@ -51,7 +63,8 @@ struct MenuToolsPanel {
         if(textTab==1){args["operation"]="replace";args["find"]=find;args["replacement"]=replacement;args["regex"]=replaceMode==1;args["ignore_case"]=caseMode==1;}
         if(textTab==2){const char* operations[]={"trim","remove-empty","space","join","upper","lower"};args["operation"]=operations[tidyMode];if(tidyMode==3)args["separator"]=joiner;}
         if(textTab==3){const char* modes[]={"lines","literal","regex"};args["operation"]="split";args["mode"]=modes[splitMode];args["groups"]=grouping[0]?std::string(grouping):menuDefaultGroups(draft);args["separator"]=separator;args["layout"]=splitLayout==0?"original":"lines";}
-        if(textTab==4){const char* kinds[]={"bullet","numbered","remove"},*markers[]={"auto","disc","circle","square","dash","check","custom"},*styles[]={"decimal","right-paren","parens","lower-alpha","upper-alpha","lower-roman","upper-roman","hierarchical","mixed"};args["operation"]="list";args["kind"]=kinds[listMode];args["marker"]=markers[listMarker];args["custom_marker"]=listMarker==6?listCustom:"";args["numbering"]=styles[listNumbering];args["start"]=listMode==1?listStart:"1";}
+        if(textTab==4){args["operation"]="list";args["kind"]=listKinds[listMode];args["marker"]=listMarkers[listMarker];args["custom_marker"]=listMarker==6?listCustom:"";args["numbering"]=listStyles[listNumbering];args["start"]=listMode==1?listStart:"1";}
+        else if(textTab!=3 && draftListChanged)args["list_options"]=draftList;
         return args;
     }
     ID3D11ShaderResourceView* thumbnail=nullptr;
@@ -135,6 +148,9 @@ struct MenuToolsPanel {
             revision=result.at("revision").get<std::string>();layerName=result.at("name").get<std::string>();
             grouping[0]=0;splitLayout=source.find_first_of("\r\n")==std::string::npos?1:0;regroup();requireText(source);requireText(layerName);
             setDraft(sourceDisplay);
+            draftList=nullptr;draftListChanged=false;
+            if(result.contains("list_options"))restoreList(result.at("list_options"));
+            if(result.contains("list_warning")){error=result.at("list_warning").get<std::string>();requireText(error);}
         } else if(action=="text.preview") {
             textMatches.clear();matchSource.clear();
             for(size_t i=0;draft[i];++i){if(draft[i]=='\r'){matchSource+='\n';if(draft[i+1]=='\n')++i;}else matchSource+=draft[i];}
@@ -207,7 +223,7 @@ struct MenuToolsPanel {
         ImGui::BeginDisabled(!canWriteText());
         if(MenuControls::button(processed?"写回预览结果":"写回当前文字",scale)) {
             if(processed)submit("text.apply",Json{{"revision",revision},{"plan_id",planId}});
-            else submit("text.write",Json{{"revision",revision},{"draft",draft}});
+            else {Json args={{"revision",revision},{"draft",draft}};if(draftListChanged)args["list_options"]=draftList;submit("text.write",args);}
         }
         ImGui::EndDisabled();
         if(textTab==3) {
@@ -216,7 +232,10 @@ struct MenuToolsPanel {
             ImGui::EndDisabled();
         }
         ImGui::BeginDisabled(planId.empty() || pending);
-        if(MenuControls::button("将结果继续编辑",scale)){setDraft(resultValue);textTab=0;}
+        if(MenuControls::button("将结果继续编辑",scale)){
+            if(textTab==4){const auto params=textParams();draftList=nullptr;if(listMode!=2){draftList=Json::object();for(const char* key:{"kind","marker","custom_marker","numbering","start"})draftList[key]=params.at(key);}draftListChanged=true;}
+            setDraft(resultValue);textTab=0;
+        }
         ImGui::EndDisabled();
     }
     void draw(float scale,ImVec2 center,bool available) {

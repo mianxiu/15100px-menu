@@ -299,6 +299,14 @@ class UxpDiscoveryTests(unittest.TestCase):
                 self.transport.call('set_label',command=command,target={'session':'s'},text={'value':'x'})
         self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
 
+    def test_list_metadata_rejects_old_executor_before_publication(self):
+        folder=self.heartbeat(24)
+        heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(session='s',probe_version='0.3.80')
+        (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8');self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        with self.assertRaisesRegex(RuntimeError,'0.3.81'):
+            self.transport.call('set_label',command='text.replace',target={'session':'s'},text={'value':'same','list_xmp':'<x/>'})
+        self.assertFalse((folder/'probe-request.json').exists());self.assertIsNone(self.transport.pending.value)
+
     def test_split_rejects_old_geometry_executor_before_publication(self):
         folder=self.heartbeat(24)
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'));heartbeat.update(session='s')
