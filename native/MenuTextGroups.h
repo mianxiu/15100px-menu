@@ -12,7 +12,9 @@ static std::string menuUtf8(const std::wstring& value) {
     std::string result(size,0);WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,value.data(),int(value.size()),result.data(),size,nullptr,nullptr);return result;
 }
 static std::string menuDefaultGroups(const std::string& source) {
-    const auto text=menuWide(source);const int lines=1+int(std::count(text.begin(),text.end(),L'\r')),size=(lines+63)/64;
+    const auto text=menuWide(source);int lines=1;
+    for(size_t i=0;i<text.size();++i)if(text[i]==L'\r'){++lines;if(i+1<text.size() && text[i+1]==L'\n')++i;}else if(text[i]==L'\n')++lines;
+    const int size=(lines+63)/64;
     std::string result;
     for(int from=1;from<=lines;from+=size){int to=std::min(lines,from+size-1);if(!result.empty())result+=',';result+=std::to_string(from);if(to!=from)result+='-'+std::to_string(to);}
     return result;

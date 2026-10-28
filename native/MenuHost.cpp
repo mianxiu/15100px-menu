@@ -2809,6 +2809,15 @@ int main() {
                         if(std::string(editor.draft)!="继续中文编辑" || !editor.pending || !editor.textDirty || !editor.planId.empty())
                             throw std::runtime_error("Pending preview blocked editable text or retained an applicable plan: "+Json{{"draft",editor.draft},{"pending",editor.pending},{"dirty",editor.textDirty},{"active",ImGui::GetActiveID()},{"child",draftWindow->Name},{"hover",GImGui->HoveredWindow?GImGui->HoveredWindow->Name:"none"},{"mouse",{io.MousePos.x,io.MousePos.y}},{"pos",{draftWindow->Pos.x,draftWindow->Pos.y}},{"plan",editor.planId}}.dump());
                         ImGui::ClearActiveID();std::cout<<"Text panel remains clickable/editable during a pending preview; stale plan cleared\n";
+                        editor.pending=false;editor.textDirty=false;editor.textTab=3;editor.error="invalid grouping";
+                        std::snprintf(editor.grouping,sizeof(editor.grouping),"1");editorFrame();
+                        auto* body=draftWindow->ParentWindow;const auto actionCount=testedActions.size();
+                        ImGui::ActivateItemByID(body->GetID("拆成多个图层"));editorFrame();
+                        if(editor.pending || testedActions.size()!=actionCount)throw std::runtime_error("Invalid split action was enabled");
+                        ImGui::ActivateItemByID(body->GetID("写回当前文字"));editorFrame();
+                        if(!editor.pending || editor.pendingAction!="text.write" || testedActions.size()!=actionCount+1 || editor.textStatus()!="正在写回文字…")
+                            throw std::runtime_error("Invalid grouping blocked the actual write button or mislabeled its phase");
+                        std::cout<<"Independent text actions passed: invalid split disabled, draft write button activates once\n";
                     }
                     int choice=0,iconChoice=0,rowClicks=0,previewClicks=0;char query[16]{};POINT second{},seam{},iconSecond{},iconSeam{},rowMain{},rowPreview{};bool focusQuery=false,rowPreviewHovered=false,showRowPreview=true;
                     auto controlsFrame=[&](bool disabled){
@@ -3900,6 +3909,14 @@ int main() {
                     menuTools.receive(Json{{"type","menu.tools.result"},{"epoch",menuEpoch},{"request",request},{"action","text.read"},{"ok",true},
                         {"result",{{"text","a\rb"},{"name","source"},{"revision","r"}}}});
                     if(menuTools.pending || menuTools.split.breaks!=Json({2,3}) || canExecute())throw std::runtime_error("Caps text preview is not isolated");
+                    menuTools.textTab=3;std::snprintf(menuTools.draft,sizeof(menuTools.draft),"one\ntwo\nthree\nfour");
+                    if(menuTools.grouping[0] || menuTools.textParams().at("groups")!="1,2,3,4" || menuDefaultGroups("a\r\nb\nc\rd")!="1,2,3,4")
+                        throw std::runtime_error("Automatic split groups did not follow actual draft line breaks");
+                    std::snprintf(menuTools.grouping,sizeof(menuTools.grouping),"1");menuTools.error="invalid grouping";
+                    if(!menuTools.canWriteText() || !menuTools.planId.empty() || menuTools.textStatus().find("仍可写回当前文字")==std::string::npos)
+                        throw std::runtime_error("Invalid split disabled writing the current draft");
+                    menuTools.pending=true;if(menuTools.canWriteText())throw std::runtime_error("Direct write overlapped pending work");menuTools.pending=false;
+                    menuTools.error.clear();menuTools.grouping[0]=0;std::snprintf(menuTools.draft,sizeof(menuTools.draft),"a\nb");
                     menuTools.textTab=1;std::snprintf(menuTools.find,sizeof(menuTools.find),"a");std::snprintf(menuTools.replacement,sizeof(menuTools.replacement),"猫");
                     if(menuTools.textParams().at("operation")!="replace" || menuTools.textParams().at("draft")!="a\nb")throw std::runtime_error("Text editor parameters lost source or operation");
                     menuTools.changedText();const double textChanged=menuTools.textChanged;

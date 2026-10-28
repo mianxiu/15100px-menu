@@ -73,6 +73,11 @@ class TextTools:
     async def split(self,args,menu_guard=None):
         return await self._apply(split_parameters(args),'text.split',menu_guard)
 
+    async def write(self,args,menu_guard=None):
+        if not isinstance(args,dict) or set(args)!={'revision','draft'}:raise ValueError('无效的文字写回参数')
+        result=await self.preview({**args,'operation':'edit'})
+        return await self.apply({'revision':args['revision'],'plan_id':result['plan_id']},menu_guard)
+
     async def preview(self,args):
         self.available();params=parameters(args);saved=self.snapshot;self.plan=None
         if not saved or params['revision']!=saved['revision']:raise ValueError('文字读取已过期，请重新读取')

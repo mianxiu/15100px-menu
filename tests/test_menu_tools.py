@@ -26,6 +26,17 @@ class MenuToolsTests(unittest.IsolatedAsyncioTestCase):
     def request(self,action='layers.search',request=1,epoch=7,args=None):
         return {'menu_epoch':epoch,'params':{'request':request,'action':action,'args':args or {}}}
 
+    async def test_direct_write_routes_through_the_same_fresh_menu_guard(self):
+        async def write(args,menu_guard):
+            await menu_guard();return {'message':'written'}
+        self.tools.text.write=AsyncMock(side_effect=write)
+        args={'revision':'r','draft':'one\ntwo'}
+        result=await self.tools.request(self.request('text.write',args=args))
+        self.assertEqual(result,{'message':'written'});self.assertTrue(self.app.desktop.event.call_args.args[0]['ok'])
+        self.assertEqual(self.tools.text.write.call_args.args[0],args)
+        self.assertEqual(self.app.desktop.require_menu_tools.call_count,2)
+        self.app.broadcast.assert_awaited_once_with({'type':'notice','scope':'operation','ok':True,'message':'written'})
+
     async def test_open_is_epoch_bound_and_never_queues(self):
         await self.tools.open({'menu_epoch':6,'params':{'mode':'split'}})
         self.app.desktop.open_menu_tools.assert_called_once_with('split',6)

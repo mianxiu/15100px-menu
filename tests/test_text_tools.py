@@ -6,6 +6,34 @@ from backend.text_tools import TextTools,replace_parameters,split_parameters
 
 
 class TextToolsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_write_current_draft_is_independent_of_an_invalid_split_and_is_one_shot(self):
+        from backend.text_plan import compute
+        app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
+            bridge=SimpleNamespace(execute_text=AsyncMock(return_value={'message':'done'}),busy=False,layer_context={}),broadcast=AsyncMock())
+        tools=TextTools(app);tools.available=Mock();target={'session':'s','document_id':1,'layer_ids':[2],'active_layer_id':2}
+        tools.snapshot={'revision':'r','text':'original','target':target};draft='one\ntwo\nthree\nfour'
+        with patch('backend.text_tools.evaluate',side_effect=compute):
+            with self.assertRaises(ValueError):await tools.preview({'revision':'r','draft':draft,'operation':'split','mode':'lines','groups':'1','separator':'','layout':'original'})
+            self.assertIsNone(tools.plan);app.bridge.execute_text.assert_not_called()
+            guard=AsyncMock();await tools.write({'revision':'r','draft':draft},menu_guard=guard)
+            self.assertEqual(app.bridge.execute_text.call_args.args[2],'text.replace')
+            self.assertEqual(app.bridge.execute_text.call_args.args[1]['value'],'one\rtwo\rthree\rfour')
+            self.assertNotIn('breaks',app.bridge.execute_text.call_args.args[1])
+            guard.assert_awaited_once();app.desktop.focus_search_result.assert_called_once_with(keep_menu=True)
+            with self.assertRaises(ValueError):await tools.write({'revision':'r','draft':draft})
+            app.bridge.execute_text.assert_awaited_once()
+
+    async def test_direct_write_validates_draft_and_honors_the_menu_guard(self):
+        from backend.text_plan import compute
+        app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
+            bridge=SimpleNamespace(execute_text=AsyncMock(),busy=False),broadcast=AsyncMock())
+        tools=TextTools(app);tools.available=Mock();tools.snapshot={'revision':'r','text':'a','target':{}}
+        with patch('backend.text_tools.evaluate',side_effect=compute):
+            for args in ({'revision':'r','draft':''},{'revision':'r','draft':'x','operation':'split'},{'revision':'old','draft':'x'}):
+                with self.assertRaises(ValueError):await tools.write(args)
+            with self.assertRaisesRegex(RuntimeError,'closed'):await tools.write({'revision':'r','draft':'x'},menu_guard=AsyncMock(side_effect=RuntimeError('closed')))
+        app.bridge.execute_text.assert_not_called();app.desktop.focus_search_result.assert_not_called();self.assertIsNone(tools.plan)
+
     async def test_preview_is_local_and_apply_consumes_exact_validated_plan_once(self):
         app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
             bridge=SimpleNamespace(execute_text=AsyncMock(return_value={'message':'done'}),busy=False,layer_context={}),broadcast=AsyncMock())

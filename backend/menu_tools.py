@@ -36,7 +36,7 @@ class MenuTools:
         epoch=args.get('menu_epoch');value=args.get('params',{})
         if (type(epoch) is not int or epoch<=0 or not isinstance(value,dict) or set(value)!={'request','action','args'} or
                 type(value['request']) is not int or not 1<=value['request']<=2147483647 or
-                value['action'] not in ('layers.search','layers.focus','text.read','text.split','text.preview','text.apply') or not isinstance(value['args'],dict)):
+                value['action'] not in ('layers.search','layers.focus','text.read','text.split','text.preview','text.apply','text.write') or not isinstance(value['args'],dict)):
             raise ValueError('无效的Caps工具请求')
         async def guard(_target=None):
             if epoch != self.epoch:raise RuntimeError('工具会话已改变，本次未执行')
@@ -68,14 +68,15 @@ class MenuTools:
                 result=await self.text.preview(params)
                 await guard()
             elif action=='text.apply':result=await self.text.apply(params,menu_guard=guard)
+            elif action=='text.write':result=await self.text.write(params,menu_guard=guard)
             else:result=await self.text.split(params,menu_guard=guard)
             self.app.desktop.event({**event,'ok':True,'result':result})
-            if action in ('text.split','text.apply','layers.focus'):
+            if action in ('text.split','text.apply','text.write','layers.focus'):
                 await self.app.broadcast({'type':'notice','scope':'operation','ok':True,'message':result['message']})
             return result
         except Exception as error:
             self.app.desktop.event({**event,'ok':False,'error':str(error)})
-            if value['action'] in ('text.split','text.apply','layers.focus'):
+            if value['action'] in ('text.split','text.apply','text.write','layers.focus'):
                 await self.app.broadcast({'type':'notice','scope':'operation','ok':False,'message':str(error)})
             return {'message':str(error),'error':str(error)}
         finally:self.pending=False
