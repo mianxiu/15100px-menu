@@ -550,7 +550,24 @@ class Desktop:
         root=roots[0]
         if not keep_menu:self.hide(restore=False)
         elif self._is_menu_window(self.gui.GetForegroundWindow()):
-            self.gui.SendMessageTimeout(self.hwnd,0x8019,root,0,2,200)
+            import win32api
+            with self.window_lock:
+                window,epoch=self.hwnd,self.menu_epoch
+                if not self.visible or not self.menu_tools_active or not 0<epoch<0x80000000:
+                    raise RuntimeError('菜单会话已关闭，本次未执行')
+                deadline=time.monotonic()+.5
+                # Queue once; the native owner validates epoch and expiry before activation.
+                packet=(epoch<<32)|((win32api.GetTickCount()+500)&0xffffffff)
+                try:self.gui.PostMessage(window,0x8019,root,packet)
+                except Exception as error:raise RuntimeError('菜单焦点交接未能提交，本次未执行') from error
+            while True:
+                foreground=self.gui.GetForegroundWindow()
+                if self.hwnd!=window or self.menu_epoch!=epoch or not self.visible or not self.menu_tools_active:
+                    raise RuntimeError('菜单会话已改变，本次未执行')
+                if self._workspace_root(foreground)==root:break
+                if not self._is_menu_window(foreground):raise RuntimeError('前台已改变，本次未执行')
+                if time.monotonic()>=deadline:raise RuntimeError('菜单尚未将焦点交回PS，本次未执行；请先激活PS后重试')
+                time.sleep(.01)
         if keep_menu and self._workspace_root(self.gui.GetForegroundWindow())!=root:
             raise RuntimeError('菜单未能将焦点交回PS或前台已改变，本次未执行')
         if self._workspace_root(self.gui.GetForegroundWindow())!=root:

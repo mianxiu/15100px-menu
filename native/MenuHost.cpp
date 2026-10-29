@@ -742,6 +742,10 @@ static void finishHold(POINT point,bool requireHighlight=false,const POINT* curr
     else if (chosen>=4) send((std::string("label.")+labelColors[chosen-4].id).c_str());
     else send(chosen<0?"hide":rowAction(chosen));
 }
+static bool focusRequestCurrent(LPARAM packet,LPARAM epoch,DWORD now) {
+    const auto value=static_cast<uint64_t>(packet);const DWORD remaining=DWORD(value)-now;
+    return packet>0 && (value>>32)==static_cast<uint64_t>(epoch) && remaining>0 && remaining<=500;
+}
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     // Own both halves even when cancellation hides the window before the up.
     // The global hook normally handles this, but client blank space must also
@@ -824,6 +828,7 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         // The foreground menu process can hand activation back to its owner;
         // the backend process often cannot, especially after a native script.
         HWND target=reinterpret_cast<HWND>(wp),owner=GetWindow(hwnd,GW_OWNER),fg=GetForegroundWindow();
+        if(lp && (!focusRequestCurrent(lp,menuEpoch,GetTickCount()) || !menuTools.active || !IsWindowVisible(hwnd)))return FALSE;
         DWORD pid=0;GetWindowThreadProcessId(fg,&pid);wchar_t name[64]{};GetClassNameW(target,name,64);
         if(target!=owner || !IsWindow(target) || !IsWindowEnabled(target) || IsIconic(target) ||
            wcscmp(name,L"Photoshop")!=0 || pid!=GetCurrentProcessId())return FALSE;
@@ -2109,6 +2114,12 @@ int main() {
     } else {
         allowed=true;document="示例文档.psd";
         if (selfTest) {
+            const auto focusPacket=[](uint32_t epoch,DWORD expires){return LPARAM((uint64_t(epoch)<<32)|expires);};
+            if(!focusRequestCurrent(focusPacket(7,1500),7,1000) || !focusRequestCurrent(focusPacket(7,1001),7,1000) ||
+               !focusRequestCurrent(focusPacket(7,32),7,0xfffffff0) || focusRequestCurrent(focusPacket(7,1000),7,1000) ||
+               focusRequestCurrent(focusPacket(7,999),7,1000) || focusRequestCurrent(focusPacket(7,1501),7,1000) ||
+               focusRequestCurrent(focusPacket(7,1500),8,1000) || focusRequestCurrent(0,7,1000))
+                throw std::runtime_error("Focus request epoch/expiry/wrap validation failed");
             if(!menuShadow::texture)throw std::runtime_error("Prewarmed shadow atlas missing");
             for(double radius:{double(figmaCornerRadius),19.}){
                 if(menuShadow::alpha(0,0,radius) || menuShadow::alpha(0,radius+1+menuShadow::extent,radius) || !menuShadow::alpha(0,radius+2,radius))

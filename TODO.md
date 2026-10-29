@@ -1,5 +1,8 @@
 # Photoshop Menu TODO
 
+- [ ] 286公开交付：焦点专项、必要构建／启动检查及实际286／UXP81组件核对通过，PS24.0.1低CPU实际菜单→PS交接、写回和一次撤销通过；正常配置激活被Windows拒绝，写入未提交，不计通过。PS未重启，原稿／配置／历史未知保留，无活动未知。等待公开下载与Wiki核验；证据.runtime/runtime286-verified.json、text286-lists-live/report.json。测试按用户要求收窄，已启动的689项回归仅收集一次，不重复扩跑。
+- [ ] 文字排版编辑器（2026-10-29）：读取当前画布与完整字符／段落样式，独立画布页面缩放／平移编辑换行、列表及排版，暂不纳入查找替换；PS负责准确排版，矢量显示不能丢失字体／混合样式。写回嵌入式智能对象，内部保留可编辑文字、样式与列表源数据（用户已确认），不永久转曲。先修复PS列表续行悬挂缩进，再验证静默画布读取、矢量轮廓和智能对象事务；尚未实现，不以方案代替交付。
+
 - [x] 285列表选项随文字层保存：复用原生文字层＋自有XMP命名空间，保存编号／符号选项并读取PS最新正文；原生面板恢复列表页／选项，继续编辑保留草稿，移除只清理自有属性，其他插件数据保持。688项回归、原生列表恢复与完整输入／焦点／取消／SHOWWINDOW、JS失鲜／回滚／未知及冻结启动／重启通过；实际285／UXP81，正常PS退出／分层副本备份／内容恢复、配置／组件／旧未知保持。PS24低CPU72DPI点文字／正常300DPI段落文字两组完整保存重开、改名、同／跨文档复制、原生最新正文、仅选项像素及单历史／一次撤销通过，最终冻结生产读取通过。见docs/TEXT-LIST-OBJECTS.md和.runtime/list285-interface-complete、list285-frozen-read.json、runtime285-verified.json。
 - [x] 285公开交付：源码3fe7b5c／v0.4.285与Wiki5cbb1e6已推送；统一ZIP／SHA和更新清单匿名下载核验通过，GitHub与dist仅保留285，旧标签／源码／诊断保持。40页／256链接及14个远端页面、图片和README核验通过，源码／标签两项CI成功；实际285／UXP81及组件匹配、原稿恢复、配置和历史未知保持。证据.runtime/release-0.4.285-public-verification.json、manifest285-verification.json、release285-cleanup.json、dist285-cleanup.json、wiki285-public-verification.json、runtime285-verified.json。
 

@@ -159,15 +159,42 @@ class MenuToolsDesktopTests(unittest.TestCase):
         self.assertEqual(stream.getvalue(),'')
 
     def test_native_menu_hands_focus_to_its_verified_owner(self):
-        desktop=Desktop('http://localhost',Mock());desktop.hwnd=2
+        desktop=Desktop('http://localhost',Mock());desktop.hwnd=2;desktop.menu_epoch=7;desktop.visible=desktop.menu_tools_active=True
         foreground=[2];desktop.gui=Mock();desktop.gui.GetForegroundWindow.side_effect=lambda:foreground[0]
         desktop._is_photoshop=Mock(return_value=True);desktop._workspace_root=lambda h:1 if h==1 else None
         desktop._is_menu_window=lambda h:h==2
         desktop.gui.EnumWindows.side_effect=lambda callback,arg:callback(1,arg)
-        desktop.gui.SendMessageTimeout.side_effect=lambda *args:foreground.__setitem__(0,1)
+        desktop.gui.PostMessage.side_effect=lambda *args:foreground.__setitem__(0,1)
+        desktop.gui.SendMessageTimeout.side_effect=TimeoutError("(1460, 'SendMessageTimeout')")
         desktop.require_action_focus=Mock();desktop.focus_search_result(keep_menu=True)
-        desktop.gui.SendMessageTimeout.assert_called_once_with(2,0x8019,1,0,2,200)
+        args=desktop.gui.PostMessage.call_args.args
+        self.assertEqual(args[:3],(2,0x8019,1));self.assertEqual(args[3]>>32,7)
+        desktop.gui.SendMessageTimeout.assert_not_called()
         desktop.gui.SetForegroundWindow.assert_not_called()
+
+    def test_delayed_focus_is_confirmed_without_resending_and_close_or_foreign_cancels(self):
+        for transition in ('ready','closed','tools-closed','new-window','new-session','foreign','timeout','post-error'):
+            with self.subTest(transition=transition):
+                desktop=Desktop('http://localhost',Mock());desktop.hwnd=2;desktop.menu_epoch=7;desktop.visible=desktop.menu_tools_active=True
+                foreground=[2];elapsed=[0.];desktop.gui=Mock();desktop.gui.GetForegroundWindow.side_effect=lambda:foreground[0]
+                desktop._is_photoshop=Mock(return_value=True);desktop._workspace_root=lambda h:1 if h==1 else None;desktop._is_menu_window=lambda h:h==2
+                desktop.gui.EnumWindows.side_effect=lambda callback,arg:callback(1,arg);desktop.require_action_focus=Mock()
+                if transition=='post-error':desktop.gui.PostMessage.side_effect=OSError('message queue unavailable')
+                def wait(seconds):
+                    elapsed[0]+=.1
+                    if elapsed[0]>=.3:
+                        if transition=='ready':foreground[0]=1
+                        elif transition=='closed':desktop.visible=False
+                        elif transition=='tools-closed':desktop.menu_tools_active=False
+                        elif transition=='new-window':desktop.hwnd=4
+                        elif transition=='new-session':desktop.menu_epoch=8
+                        elif transition=='foreign':foreground[0]=3
+                with patch('backend.desktop.time.monotonic',side_effect=lambda:elapsed[0]),patch('backend.desktop.time.sleep',side_effect=wait):
+                    if transition=='ready':desktop.focus_search_result(keep_menu=True)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError,'未执行'):desktop.focus_search_result(keep_menu=True)
+                desktop.gui.PostMessage.assert_called_once();desktop.gui.SendMessageTimeout.assert_not_called();desktop.gui.SetForegroundWindow.assert_not_called()
+                self.assertEqual(desktop.require_action_focus.call_count,1 if transition=='ready' else 0)
 
     def test_foreign_foreground_is_not_activated_over_for_menu_tools(self):
         desktop=Desktop('http://localhost',Mock());desktop.hwnd=2;desktop.gui=Mock()
