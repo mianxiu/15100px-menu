@@ -17,8 +17,8 @@ def options(value):
     return {key:result[key] for key in KEYS}
 
 
-def packet(raw):
-    if not isinstance(raw,str) or len(raw)>131072 or '\0' in raw or re.search(r'<!\s*(DOCTYPE|ENTITY)\b',raw,re.I):raise ValueError('图层元数据过大或包含不支持的XML声明')
+def packet(raw,*,namespace=NAMESPACE,field='options',limit=131072):
+    if not isinstance(raw,str) or len(raw)>limit or '\0' in raw or re.search(r'<!\s*(DOCTYPE|ENTITY)\b',raw,re.I):raise ValueError('图层元数据过大或包含不支持的XML声明')
     try:doc=minidom.parseString(raw) if raw.strip() else minidom.parseString('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="'+RDF+'"/></x:xmpmeta>')
     except Exception:raise ValueError('图层元数据XML无效，未改动列表标记') from None
     stack=[(doc,0)];count=0
@@ -31,10 +31,10 @@ def packet(raw):
     found=[]
     for desc in roots[0].childNodes:
         if desc.nodeType!=Node.ELEMENT_NODE or (desc.namespaceURI,desc.localName)!=(RDF,'Description'):continue
-        attr=desc.getAttributeNodeNS(NAMESPACE,'options')
+        attr=desc.getAttributeNodeNS(namespace,field)
         if attr:found.append((desc,attr))
         for child in desc.childNodes:
-            if child.nodeType==Node.ELEMENT_NODE and (child.namespaceURI,child.localName)==(NAMESPACE,'options'):found.append((desc,child))
+            if child.nodeType==Node.ELEMENT_NODE and (child.namespaceURI,child.localName)==(namespace,field):found.append((desc,child))
     if len(found)>1:raise ValueError('图层包含冲突的列表标记')
     return doc,roots[0],found
 

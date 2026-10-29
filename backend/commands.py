@@ -34,6 +34,7 @@ COMMANDS = {**CAPS_ACTIONS,**ACTIONS, **LABEL_ACTIONS, **QUICK_ACTIONS,'shape.pa
     'layer.focus':{'label':'定位图层'},
     'text.replace':{'label':'文本查找替换'},
     'text.split':{'label':'拆分文字图层'},
+    'text.object':{'label':'写回矢量文字对象'},
     'shape.copyPaint':{'label':'复制形状填充与描边'},'shape.pastePaint':{'label':'粘贴形状填充与描边'}}
 
 
@@ -72,6 +73,7 @@ REGISTRY = MappingProxyType({
     'layer.focus':Command('layer.focus','定位图层','destination-and-selection-read-back',channel='uxp-local-files'),
     'text.replace':Command('text.replace','文本查找替换','text-style-and-layout-read-back',channel='uxp-local-files'),
     'text.split':Command('text.split','拆分文字图层','text-style-position-and-order-read-back',channel='uxp-local-files'),
+    'text.object':Command('text.object','写回矢量文字对象','vector-pdf-source-metadata-and-selection-read-back',channel='uxp-local-files'),
     **{name:Command(name,COMMANDS[name]['label'],'native-paint-path-mask-order-read-back',channel='uxp-local-files')
        for name in ('shape.copyPaint','shape.pastePaint')},
 })

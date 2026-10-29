@@ -291,7 +291,7 @@ static bool returnInputsIdle() {
         !(GetAsyncKeyState(VK_RBUTTON)&0x8000) && !(GetAsyncKeyState(VK_MBUTTON)&0x8000);
 }
 static bool canExecute() {return !menuToolsVisible() && !maskPreviewStarted && (panelKind==4?homepageCapable && !taskBusy:allowed) && !busyFeedback && !inputFocused && panelKind!=3;}
-static bool toolEnabled(int i) {return canExecute() && panelKind!=4 && (i==0?layerSearchReady:textSplitReady && layerAware && layerKind==4 && layerCount==1 && !layerLocked);}
+static bool toolEnabled(int i) {return canExecute() && panelKind!=4 && (i==0?layerSearchReady:textSplitReady && layerAware && (layerKind==4 || layerKind==5) && layerCount==1 && !layerLocked);}
 static bool capsEnabled(int i) {
     if(i==9 || i==10)return (i==9 || !layerCrossParents) && individualSmartReady && capsReady && canExecute() && panelKind!=3 && panelKind!=4 && layerAware && layerCount && layerKind && !layerLocked && !layerBackground;
     if(i>=capsCount() || i>=7 && !documentSortReady)return false;
@@ -1484,9 +1484,9 @@ static void drawCapsBar() {
 }
 static void drawToolBar() {
     toolRow={};
-    if(panelKind==3 || panelKind==4 || !layerAware || layerKind!=4 || layerCount!=1)return;
-    const char* label="文本工具";
-    const float h=menuControlHeight*scale,y=pieCenter.y-15*scale;
+    if(panelKind==3 || panelKind==4 || !layerAware || (layerKind!=4 && layerKind!=5) || layerCount!=1)return;
+    const char* label=layerKind==5?"文字源":"文本工具";
+    const float h=menuControlHeight*scale,y=pieCenter.y+(layerKind==5?15.f:-15.f)*scale;
     const auto extent=menuFont(MenuTextRole::Control)->CalcTextSizeA(basicLabelSize(),FLT_MAX,0,label);
     const float width=extent.x+2*figmaBasicLeftPadding*scale,x=pieCenter.x+65*scale;
     auto* draw=ImGui::GetWindowDrawList();POINT cursor{};GetCursorPos(&cursor);

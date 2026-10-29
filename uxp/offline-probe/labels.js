@@ -778,7 +778,8 @@ module.exports = function createLabels(ps, session, options={}) {
     return ps.core.executeAsModal(context=>{if(context.isCancelled)throw Error("Read cancelled");return shapePaint.observe(...args);},{commandName:"Read menu color",timeOut:0});
   },
     paintClipboardAvailable:paintClipboard.available,
-    prepareLegacyShape:shapePaint.prepareLegacy,finishLegacyShape:shapePaint.finishLegacy};
+    prepareLegacyShape:shapePaint.prepareLegacy,finishLegacyShape:shapePaint.finishLegacy,
+    prepareLegacyText:textTools.prepareObject,finishLegacyText:textTools.finishObject};
 };
 
 // A test owns one document in this plugin session. No name-based recovery,
@@ -2210,14 +2211,16 @@ function createTextTools(ps,session,capture,readTree) {
     return rows;
   }
   const ref=target=>[{_ref:'layer',_id:target.active_layer_id},{_ref:'document',_id:target.document_id}];
-  async function descriptor(target) {
+  async function descriptor(target,objects=false) {
     if(target?.session!==session||target.layer_ids.length!==1)throw Error('请单选一个文字图层');
     const [row,metadata]=await batch([{_obj:'multiGet',_target:{_ref:ref(target)},extendedReference:[['layerID','name','layerKind','layerLocking','textKey']],options:{failOnMissingProperty:false,failOnMissingElement:false},_options:{dialogOptions:'silent'}},
       {_obj:'get',_target:[{_ref:'property',_property:'XMPMetadataAsUTF8'},...ref(target)],_options:{dialogOptions:'silent'}}]);
     if(metadata.XMPMetadataAsUTF8!==undefined&&typeof metadata.XMPMetadataAsUTF8!=='string')throw Error('图层元数据读取结果无效');
     row.XMPMetadataAsUTF8=metadata.XMPMetadataAsUTF8||'';
-    if(row.layerID!==target.active_layer_id||row.layerKind!==3||!row.textKey||typeof row.textKey.textKey!=='string')throw Error('请单选一个文字图层');
+    if(row.layerID!==target.active_layer_id||![3,...(objects?[5]:[])].includes(row.layerKind))throw Error('请单选一个文字图层或本工具的文字对象');
     if(row.layerLocking&&Object.entries(row.layerLocking).some(([key,value])=>key!=='_obj'&&value===true))throw Error('请先解锁文字图层');
+    if(row.layerKind===5){if(row.XMPMetadataAsUTF8.length>2097152)throw Error('文字对象源超出上限');const [more]=await batch([{_obj:'get',_target:[{_ref:'property',_property:'smartObjectMore'},...ref(target)],_options:{dialogOptions:'silent'}}]);row.smartObjectMore=more.smartObjectMore;if(!sameTarget(await capture(),target))throw Error('文字对象目标已改变');return clone(row);}
+    if(!row.textKey||typeof row.textKey.textKey!=='string')throw Error('请单选一个文字图层');
     if(row.textKey.textKey.length>20000||JSON.stringify(row.textKey).length>524288)throw Error('文本或样式超出本次处理上限');
     if(row.textKey.kerningRange?.length)throw Error('含手动字距的文本暂不支持替换');
     if(!sameTarget(await capture(),target))throw Error('文字目标已改变，请重新读取');
@@ -2340,10 +2343,35 @@ function createTextTools(ps,session,capture,readTree) {
   }
   async function read() {
     snapshot=null;
-    const target=await capture(),row=await descriptor(target);
+    const target=await capture(),row=await descriptor(target,true);
     const revision=session+':text:'+String(++serial);
     snapshot={target,row,revision,time:Date.now()};
+    if(row.layerKind===5)return {target,revision,name:row.name,object_xmp:row.XMPMetadataAsUTF8};
     return {target,revision,text:row.textKey.textKey,name:row.name,list_xmp:row.XMPMetadataAsUTF8};
+  }
+  async function prepareObject(request,params){
+    const saved=snapshot;
+    if(!saved||params?.revision!==saved.revision||!sameTarget(saved.target,request.target)||Date.now()-saved.time>1800000)throw Error('文字对象读取已过期');
+    const row=await descriptor(request.target,true);if(!same(row,saved.row))throw Error('文字或对象已改变，请重新读取');
+    const existing=row.layerKind===5,raw=existing?params.object_source?.layer?.text:row.textKey;
+    if(!raw||existing&&(!params.object_source||!/^[0-9a-f]{64}$/.test(params.object_render)))throw Error('文字对象源或显示校验缺失');
+    const wanted=plan(raw,params).value,doc=ps.app.activeDocument;
+    const canvas=existing?params.object_source.canvas:{width:doc.width,height:doc.height,resolution:doc.resolution,mode:doc.mode===ps.constants.DocumentMode.RGB?'RGB':'unsupported',depth:doc.bitsPerChannel===ps.constants.BitsPerChannelType.EIGHT?8:0,profile:doc.colorProfileName};
+    if(canvas.mode!=='RGB'||canvas.depth!==8)throw Error('矢量文字对象目前仅支持RGB8源');
+    return {kind:existing?'smart-object':'text',row,before_xmp:row.XMPMetadataAsUTF8,...(!existing?{before_text:row.textKey}:{transform:row.smartObjectMore?.transform,before_render:params.object_render}),
+      source:{schema:1,canvas,layer:{name:row.name,text:{...raw,...wanted},xmp:Object.prototype.hasOwnProperty.call(params,'list_xmp')?params.list_xmp:(existing?params.object_source.layer.xmp:row.XMPMetadataAsUTF8)}}};
+  }
+  async function finishObject(request,prepared,native,expected){
+    if(native.phase!=='completed'){
+      let unknown=native.result_unknown===true;
+      if(!unknown)try{unknown=!same(await descriptor(request.target,true),prepared.row);}catch(_){unknown=true;}
+      const error=Error(native.error||'文字对象执行失败');error.resultUnknown=unknown;throw error;
+    }
+    const target=await capture();
+    if(target.document_id!==request.target.document_id||target.layer_ids.length!==1||target.active_layer_id!==native.result?.layer_id){const e=Error('文字对象目标结果待核对');e.resultUnknown=true;throw e;}
+    const row=await descriptor(target,true);
+    if(row.layerKind!==5||row.XMPMetadataAsUTF8!==expected.xmp){const e=Error('文字对象源读回不一致');e.resultUnknown=true;throw e;}
+    snapshot=null;return native.result;
   }
   async function replace(request) {
     const saved=snapshot,params=request.text;
@@ -2514,5 +2542,5 @@ function createTextTools(ps,session,capture,readTree) {
     },{commandName:'拆分文字图层',timeOut:0});}
     catch(error){if(uncertain){const unknown=Error('文字拆分恢复结果待核对');unknown.resultUnknown=true;throw unknown;}throw error;}
   }
-  return {read,replace,split};
+  return {read,replace,split,prepareObject,finishObject};
 }

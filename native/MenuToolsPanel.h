@@ -1,7 +1,7 @@
 #include "MenuTextGroups.h"
 
 struct MenuToolsPanel {
-    bool active=false,opening=false,ready=false,pending=false,focus=false;
+    bool active=false,opening=false,ready=false,pending=false,focus=false,vectorObject=false;
     std::string mode,error,source,sourceDisplay,revision,layerName;
     char name[801]{},grouping[4001]{};
     char draft[80001]{},find[801]{},replacement[2001]{},separator[801]{},joiner[801]=" ";
@@ -50,7 +50,7 @@ struct MenuToolsPanel {
     std::string textStatus()const {
         if(!error.empty())return textTab==3?error+"；仍可写回当前文字":error;
         if(pending && pendingAction=="text.preview")return "正在自动预览 · 可继续编辑，尚未写入PS";
-        if(pending && (pendingAction=="text.write" || pendingAction=="text.apply"))return pendingAction=="text.apply" && resultKind=="split"?"正在拆成多个图层…":"正在写回文字…";
+        if(pending && (pendingAction=="text.write" || pendingAction=="text.apply" || pendingAction=="text.vector"))return pendingAction=="text.apply" && resultKind=="split"?"正在拆成多个图层…":pendingAction=="text.vector" || vectorObject?"正在生成矢量文字对象…":"正在写回文字…";
         if(planId.empty()) {
             if(textTab==1 && !find[0])return "请输入查找内容后自动预览";
             if(textTab==3 && splitMode!=0 && !separator[0])return "请输入分隔符或正则；仍可写回当前文字";
@@ -144,6 +144,7 @@ struct MenuToolsPanel {
             results=result;
             for(const auto& row:results.at("items")){requireText(row.at("name"));requireText(row.at("document_name"));}
         } else if(action=="text.read") {
+            vectorObject=result.value("vector_object",false);
             source=result.at("text").get<std::string>();sourceDisplay=source;std::replace(sourceDisplay.begin(),sourceDisplay.end(),'\r','\n');
             revision=result.at("revision").get<std::string>();layerName=result.at("name").get<std::string>();
             grouping[0]=0;splitLayout=source.find_first_of("\r\n")==std::string::npos?1:0;regroup();requireText(source);requireText(layerName);
@@ -167,7 +168,7 @@ struct MenuToolsPanel {
             planId=result.at("plan_id").get<std::string>();resultValue=result.at("value").get<std::string>();
             std::replace(resultValue.begin(),resultValue.end(),'\r','\n');
             resultPreview=result.at("preview").get<std::string>();resultKind=result.at("kind").get<std::string>();resultCount=result.at("count").get<int>();requireText(resultPreview);
-        } else if(action=="text.split" || action=="text.apply" || action=="text.write") {source.clear();revision.clear();changedText();}
+        } else if(action=="text.split" || action=="text.apply" || action=="text.write" || action=="text.vector") {source.clear();revision.clear();changedText();}
     }
     void drawText(float scale,bool available) {
         ImGui::BeginDisabled(pending);
@@ -221,13 +222,17 @@ struct MenuToolsPanel {
         MenuControls::textPreview("##text-result",planId.empty()?draft:resultPreview.c_str(),130*scale,{},textTab==4 && !planId.empty() && listMode!=2);
         const bool processed=textTab!=3 && !planId.empty() && resultKind=="replace";
         ImGui::BeginDisabled(!canWriteText());
-        if(MenuControls::button(processed?"写回预览结果":"写回当前文字",scale)) {
+        if(MenuControls::button(vectorObject?"更新矢量文字对象":processed?"写回预览结果":"写回当前文字",scale)) {
             if(processed)submit("text.apply",Json{{"revision",revision},{"plan_id",planId}});
             else {Json args={{"revision",revision},{"draft",draft}};if(draftListChanged)args["list_options"]=draftList;submit("text.write",args);}
         }
+        if(!vectorObject && MenuControls::button("生成矢量文字对象",scale)) {
+            if(processed)submit("text.vector",Json{{"revision",revision},{"plan_id",planId}});
+            else {Json args={{"revision",revision},{"draft",draft}};if(draftListChanged)args["list_options"]=draftList;submit("text.vector",args);}
+        }
         ImGui::EndDisabled();
         if(textTab==3) {
-            ImGui::BeginDisabled(planId.empty() || resultKind!="split" || pending);
+            ImGui::BeginDisabled(vectorObject || planId.empty() || resultKind!="split" || pending);
             if(MenuControls::button("拆成多个图层",scale))submit("text.apply",Json{{"revision",revision},{"plan_id",planId}});
             ImGui::EndDisabled();
         }

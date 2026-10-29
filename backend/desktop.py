@@ -607,8 +607,8 @@ class Desktop:
             if not self.visible:self.open(hold=True,keyboard_anchor=True)
             if mode=='split':
                 value=self.menu_layer_context or {}
-                if value.get('kind')!='text' or len(value.get('layer_ids',[]))!=1 or value.get('locked'):
-                    raise RuntimeError('请单选未锁定的文字图层后打开文本工具')
+                if value.get('kind') not in ('text','smart') or len(value.get('layer_ids',[]))!=1 or value.get('locked'):
+                    raise RuntimeError('请单选未锁定的文字图层或文字对象后打开文本工具')
             self.hold_active=False;self.menu_tools_active=True
             self.menu_epoch+=1
             self.gui.SendMessage(self.hwnd,0x800d,1,self.menu_epoch)

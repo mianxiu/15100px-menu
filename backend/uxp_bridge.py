@@ -186,8 +186,11 @@ class UxpTransport:
                     raise RuntimeError('请更新并重新加载 UXP 0.3.31，以支持颜色及蒙版实时预览；未提交操作')
                 if payload.get('command')=='shape.preview' and (version_tuple(heartbeat.get('photoshop_version'))<(24,1,0) or heartbeat.get('document_redraw_available') is not True):
                     raise RuntimeError('当前PS使用本地草稿，实时预览需要PS24.1及官方重绘API；未提交修改')
-                legacy=payload.get('command')=='shape.legacy.preview'
-                if legacy and (preview is None or native_preview is None or not legacy_preview_available(heartbeat)):
+                text_object=payload.get('command')=='text.object'
+                if text_object and (native_preview is None or version(heartbeat.get('probe_version'))<(0,3,82)):
+                    raise RuntimeError('矢量文字对象需要正常重启PS加载UXP0.3.82；未提交操作')
+                legacy=payload.get('command')=='shape.legacy.preview' or text_object
+                if legacy and not text_object and (preview is None or native_preview is None or not legacy_preview_available(heartbeat)):
                     raise RuntimeError('旧版独立预览能力未就绪；未提交修改')
                 # A solid preview may switch to gradient within this transaction.
                 # Reject old executors before binding or publishing any request.
@@ -197,6 +200,12 @@ class UxpTransport:
                     raise RuntimeError('实时预览需要更新并加载UXP0.3.43，以核验脚本退出并恢复PS原生操作；未提交操作')
                 if preview is not None and getattr(preview,'trace',False):payload['preview_trace']=True
                 request={**payload,'id':identity,'token':token,'session':heartbeat.get('session'),'operation':operation,'expires_at_ms':int(time.time()*1000)+5000}
+                if text_object:
+                    from .settings import atomic_json
+                    params=request.pop('text');request['text']={'revision':params['revision']}
+                    data={**{k:request[k] for k in ('id','session','operation','token')},'params':params}
+                    if len(json.dumps(data,ensure_ascii=False).encode('utf-8'))>2097152:raise ValueError('文字对象参数超出上限')
+                    atomic_json(folder/('text-object-input-'+identity+'.json'),data)
                 encoded=json.dumps(request,ensure_ascii=False)
                 if len(encoded.encode('utf-8'))>4096:raise ValueError('UXP 请求超出本地协议长度，未提交操作')
                 temporary=folder/(identity+'.tmp')
@@ -233,20 +242,23 @@ class UxpTransport:
                         ready=None
                         try:
                             ready_path=folder/('legacy-prepared-'+identity+'.json')
-                            if ready_path.stat().st_size<=(1048576 if payload.get('paint',{}).get('mask_batch') else 65536):ready=json.loads(ready_path.read_text('utf-8-sig'))
+                            if ready_path.stat().st_size<=(2097152 if text_object else 1048576 if payload.get('paint',{}).get('mask_batch') else 65536):ready=json.loads(ready_path.read_text('utf-8-sig'))
                         except (OSError,ValueError):pass
                         if isinstance(ready,dict) and ready.get('phase')=='prepared' and ready.get('schema')==1 and all(ready.get(k)==request[k] for k in ('id','session','operation','token')):
                             native_started=True  # A COM error never permits invoking this again.
                             try:
                                 from .legacy_preview import returned_result
-                                native_exit['returned']=returned_result(native_preview(folder,request,ready),request)
+                                native_value=native_preview(folder,request,ready)
+                                native_exit['returned']=returned_result(native_value,request)
                                 if native_exit['returned']:
                                     # UXP must not publish a final legacy outcome
                                     # from a receipt written just before COM returns.
                                     from .settings import atomic_json
                                     try:atomic_json(folder/('legacy-exited-'+identity+'.json'),{
-                                        **{k:request[k] for k in ('id','session','operation','token')},'schema':1,'exited':True})
-                                    finally:getattr(preview,'execution_finished',preview.execution_check)()
+                                        **{k:request[k] for k in ('id','session','operation','token')},'schema':1,'exited':True,
+                                        **({'engine':'backend-preflight','not_started':True} if json.loads(native_value).get('execution_exit')=={'engine':'backend-preflight','not_started':True,'exited':True} else {'engine':'standalone-extendscript'})})
+                                    finally:
+                                        if preview is not None:getattr(preview,'execution_finished',preview.execution_check)()
                             except Exception:native_error_at=time.monotonic()
                             continue  # Read the original UXP terminal BEFORE checking host state.
                     if native_error_at is not None and time.monotonic()-native_error_at>5:
@@ -570,6 +582,42 @@ class UxpBridge(PhotoshopBridge):
                 return json.dumps(response['result'])
             finally:self._uxp_worker_active=False
         return await self._execute_task(action,before_dispatch,capture=lambda:self._bind_menu_target(target),execute=write)
+
+    async def execute_text_object(self,target,params,before_dispatch=None):
+        from .text_tools import replace_parameters
+        from . import text_object
+        params=dict(params);existing=params.pop('object_source',None);render=params.pop('object_render',None)
+        params=replace_parameters(params,allow_xmp=True)
+        if existing is not None:
+            import re
+            text_object.source(existing)
+            if not isinstance(render,str) or not re.fullmatch('[0-9a-f]{64}',render):raise ValueError('文字对象显示校验无效')
+            params.update(object_source=existing,object_render=render)
+        if self.execution_guard:self.execution_guard()
+        def write(_):
+            if self.focus_guard:self.focus_guard()
+            application=self._application()
+            self.transport.task_id=self._active_task_id;self._uxp_worker_active=True
+            def native(folder,request,ready):
+                import hashlib
+                from .settings import atomic_json
+                from .text_object_native import invoke
+                try:
+                    model=ready['prepared']['source'];encoded=text_object.source(model)
+                    xml=text_object.write(ready['prepared']['before_xmp'],model)
+                    ready['prepared']['source_sha256']=hashlib.sha256(encoded).hexdigest()
+                    atomic_json(folder/('text-object-expected-'+request['id']+'.json'),{**{k:request[k] for k in ('id','session','operation','token')},'xmp':xml})
+                except (ValueError,KeyError,TypeError,OSError) as error:
+                    rejected={**{k:request[k] for k in ('id','session','operation','token')},'schema':1,'phase':'failed','error':str(error),'not_executed':True,'result_unknown':False,'execution_exit':{'engine':'backend-preflight','not_started':True,'exited':True}}
+                    atomic_json(folder/('legacy-result-'+request['id']+'.json'),rejected)
+                    return json.dumps(rejected)
+                return invoke(application,folder,request,ready,model,xml)
+            try:
+                response=self.transport.call('set_label',command='text.object',target=self._captured_target,text=params,native_preview=native)
+                value=validate(response.get('layer_context'),self._captured_app);self.layer_context=value if fresh(value) else unavailable()
+                return json.dumps(response['result'])
+            finally:self._uxp_worker_active=False
+        return await self._execute_task('text.object',before_dispatch,capture=lambda:self._bind_menu_target(target),execute=write)
 
     async def execute_shape(self, params, before_dispatch=None, frozen_target=None, preview=None, _stability_run=None):
         from .shape_paint import parameters

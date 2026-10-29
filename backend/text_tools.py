@@ -4,7 +4,7 @@ import secrets
 from .layer_search import require_available
 from .operation_target import validate_target
 from .text_plan import evaluate,parameters,units
-from . import text_list
+from . import text_list,text_object
 
 
 def mapped_parameters(value,split=False):
@@ -64,6 +64,9 @@ class TextTools:
         try:
             result=await asyncio.to_thread(self.app.bridge.transport.call,'inspect',text_inspect=True)
             snapshot=result.get('text')
+            if isinstance(snapshot,dict) and 'object_xmp' in snapshot:
+                model=text_object.read(snapshot['object_xmp'])
+                snapshot={**snapshot,'text':model['layer']['text']['textKey'],'list_xmp':model['layer']['xmp'],'object_source':model,'object_render':text_object.render_hash(snapshot['object_xmp']),'vector_object':True}
             if (not isinstance(snapshot,dict) or not isinstance(snapshot.get('text'),str) or len(snapshot['text'])>20000 or
                     not isinstance(snapshot.get('revision'),str) or not 1<=len(snapshot['revision'])<=128 or
                     not isinstance(snapshot.get('name'),str) or len(snapshot['name'])>2000):
@@ -72,7 +75,7 @@ class TextTools:
             if len(target['layer_ids'])!=1 or snapshot['target'].get('session')!=result.get('session'):
                 raise RuntimeError('文字读取会话不一致')
             self.snapshot=snapshot
-            public={key:value for key,value in snapshot.items() if key!='list_xmp'}
+            public={key:value for key,value in snapshot.items() if key not in ('list_xmp','object_xmp','object_source','object_render')}
             if 'list_xmp' in snapshot:
                 try:public['list_options']=text_list.read(snapshot['list_xmp'])
                 except ValueError as error:public['list_warning']=str(error)
@@ -89,6 +92,15 @@ class TextTools:
         if not isinstance(args,dict) or set(args) not in ({'revision','draft'},{'revision','draft','list_options'}):raise ValueError('无效的文字写回参数')
         result=await self.preview({**args,'operation':'edit'})
         return await self.apply({'revision':args['revision'],'plan_id':result['plan_id']},menu_guard)
+
+    async def vector(self,args,menu_guard=None):
+        if isinstance(args,dict) and set(args)=={'revision','plan_id'}:
+            if not self.plan or (args['plan_id'],args['revision'])!=(self.plan[0],self.plan[1]['revision']) or self.plan[2]!='text.replace':raise ValueError('文字对象预览已改变')
+            _,params,_=self.plan;self.plan=None
+        else:
+            if not isinstance(args,dict) or set(args) not in ({'revision','draft'},{'revision','draft','list_options'}):raise ValueError('文字对象草稿无效')
+            result=await self.preview({**args,'operation':'edit'});_,params,_=self.plan;self.plan=None
+        return await self._apply(params,'text.object',menu_guard)
 
     async def preview(self,args):
         self.available();saved=self.snapshot;self.plan=None
@@ -120,6 +132,9 @@ class TextTools:
         self.available()
         snapshot=self.snapshot
         if not snapshot or params['revision']!=snapshot['revision']:raise ValueError('文本预览已过期，请重新读取')
+        if snapshot.get('vector_object'):
+            if command=='text.split':raise ValueError('矢量文字对象暂不支持拆成图层')
+            command='text.object';params={**params,'object_source':snapshot['object_source'],'object_render':snapshot['object_render']}
         if 'list_options' in params:
             if 'list_xmp' not in snapshot:raise ValueError('列表保存需要正常重启PS加载UXP0.3.81')
             params={**{key:value for key,value in params.items() if key!='list_options'},'list_xmp':text_list.write(snapshot['list_xmp'],params['list_options'])}
@@ -131,7 +146,8 @@ class TextTools:
                     await menu_guard()
                     await asyncio.to_thread(app.desktop.focus_search_result,keep_menu=True)
                 else:await asyncio.to_thread(app.desktop.focus_search_result)
-                result=await app.bridge.execute_text(snapshot['target'],params,command,**({'before_dispatch':menu_guard} if menu_guard else {}))
+                if command=='text.object':result=await app.bridge.execute_text_object(snapshot['target'],params,**({'before_dispatch':menu_guard} if menu_guard else {}))
+                else:result=await app.bridge.execute_text(snapshot['target'],params,command,**({'before_dispatch':menu_guard} if menu_guard else {}))
                 self.snapshot=None;self.plan=None
                 app.desktop.layer_context=dict(app.bridge.layer_context)
                 return result

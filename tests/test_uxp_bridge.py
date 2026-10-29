@@ -243,6 +243,32 @@ class UxpDiscoveryTests(unittest.TestCase):
         preview.bind.assert_called_once()
         self.assertEqual(self.transport.pending.value['id'],result['id'])
 
+    def test_native_no_document_change_still_records_actual_script_exit(self):
+        folder=self.heartbeat(24)
+        self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
+        heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'))
+        heartbeat.update(session='s',probe_version='0.3.82')
+        (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
+        self.transport.pending.storage=self.transport.storage
+        self.transport.task_id='e'*32
+        executed={}
+        def publish(source,destination):
+            request=json.loads(source.read_text('utf-8'))
+            ready={**{k:request[k] for k in ('id','session','operation','token')},'schema':1,'phase':'prepared'}
+            (folder/('legacy-prepared-'+request['id']+'.json')).write_text(json.dumps(ready),'utf-8')
+            source.replace(destination)
+        def native(folder,request,ready):
+            executed['id']=request['id']
+            outcome={**{k:request[k] for k in ('id','session','operation','token')},'schema':1,'phase':'failed','error':'source font missing','not_executed':True}
+            (folder/('result-'+request['id']+'.json')).write_text(json.dumps(outcome),'utf-8')
+            return json.dumps(outcome)
+        with patch('backend.uxp_bridge.publish_request',side_effect=publish):
+            with self.assertRaisesRegex(RuntimeError,'source font missing'):
+                self.transport.call('set_label',native_preview=native,command='text.object',text={'revision':'r'},target={'session':'s'})
+        exited=json.loads((folder/('legacy-exited-'+executed['id']+'.json')).read_text('utf-8'))
+        self.assertEqual(exited['engine'],'standalone-extendscript')
+        self.assertTrue(exited['exited']);self.assertNotIn('not_started',exited)
+
     def test_host_exit_without_matching_preview_terminal_keeps_unknown_request(self):
         from types import SimpleNamespace
         folder=self.heartbeat(26)

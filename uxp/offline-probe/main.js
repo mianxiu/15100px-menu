@@ -236,7 +236,7 @@ async function finishResponse(folder,response) {
     const name=completedReceipts.shift();
     // Only IDs whose terminal result was persisted by this session enter this
     // list. Never sweep an old directory or delete an unknown request's proof.
-    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-'),name.replace('result-','preview-progress-'),name.replace('result-','execution-'),name.replace('result-','legacy-prepared-'),name.replace('result-','legacy-result-'),name.replace('result-','legacy-exited-')])
+    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-'),name.replace('result-','preview-progress-'),name.replace('result-','execution-'),name.replace('result-','legacy-prepared-'),name.replace('result-','legacy-result-'),name.replace('result-','legacy-exited-'),name.replace('result-','text-object-input-'),name.replace('result-','text-object-expected-'),name.replace('result-','text-object-final-'),name.replace('result-','text-object-render-').replace('.json','.pdf'),name.replace('result-','text-object-before-').replace('.json','.pdf'),name.replace('result-','text-object-').replace('.json','.pdf')])
       try {await (await folder.getEntry(file)).delete();}catch(_){}
   }
 }
@@ -348,7 +348,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.81', session, transport: 'plugin-data-files',
+        probe_version: '0.3.82', session, transport: 'plugin-data-files',
         photoshop_version: hostVersion,
         extended_label_colors:labels.extendedLabelColors,
         uxp_version: optional(() => uxp.versions.uxp),
@@ -424,7 +424,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.81', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.82', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -483,11 +483,14 @@ async function probe(reason) {
         if(request.shape_inspect)response.shape_editor=await labels.observeShape(await labels.selectionContextFresh(),true);
       }
       if (request.operation === 'capture') response.target = await labels.capture();
-      if(request.operation==='set_label' && request.command==='shape.legacy.preview') {
+      if(request.operation==='set_label' && ['shape.legacy.preview','text.object'].includes(request.command)) {
         // Reserve the plugin's existing worker without entering executeAsModal.
         // While native JSX owns the host, only mailbox I/O and cached pulses run.
-        const prepared=await labels.prepareLegacyShape(request);
-        if(JSON.stringify(prepared).length>(request.paint?.mask_batch?900000:60000))throw Error('预览准备数据过大，请减少批量图层或路径复杂度');
+        const textObject=request.command==='text.object';
+        let input=null;
+        if(textObject){const raw=await(await folder.getEntry('text-object-input-'+request.id+'.json')).read();if(raw.length>2097152)throw Error('文字对象参数超出上限');input=JSON.parse(raw);if(!['id','session','operation','token'].every(k=>input[k]===request[k]))throw Error('文字对象参数身份无效');}
+        const prepared=textObject?await labels.prepareLegacyText(request,input.params):await labels.prepareLegacyShape(request);
+        if(JSON.stringify(prepared).length>(textObject?2097152:request.paint?.mask_batch?900000:60000))throw Error('执行准备数据过大');
         await record(folder,'legacy-prepared-'+request.id+'.json',{schema:1,id:request.id,session,operation:request.operation,token,phase:'prepared',prepared});
         await executionStage('legacy-native-wait');
         while(true) {
@@ -497,14 +500,24 @@ async function probe(reason) {
             let exited=null;
             try{const raw=await(await folder.getEntry('legacy-exited-'+request.id+'.json')).read();if(raw.length<=4096)exited=JSON.parse(raw);}catch(_){}
             if(exited?.schema===1 && exited.exited===true && exited.id===request.id && exited.session===session && exited.operation===request.operation && exited.token===token){
-              response.result=await labels.finishLegacyShape(request,prepared,native);break;
+              if(textObject){
+                try{
+                  let expected={};
+                  if(native.phase==='completed'){
+                    const raw=await(await folder.getEntry('text-object-final-'+request.id+'.json')).read();if(raw.length>4194304)throw Error('文字对象核对数据超出上限');expected=JSON.parse(raw);
+                    if(!['id','session','operation','token'].every(k=>expected[k]===request[k]))throw Error('文字对象核对身份无效');
+                  }
+                  response.result=await labels.finishLegacyText(request,prepared,native,expected);
+                }catch(error){if(native.phase==='completed')error.resultUnknown=true;throw error;}
+              }else response.result=await labels.finishLegacyShape(request,prepared,native);
+              break;
             }
           }
           await publishHeartbeat(folder,'legacy-native',1000,{phase:'preview'});
           await new Promise(resolve=>setTimeout(resolve,40));
         }
       }
-      if (request.operation === 'set_label' && request.command!=='shape.legacy.preview') response.result = await labels.setLabel(request,
+      if (request.operation === 'set_label' && !['shape.legacy.preview','text.object'].includes(request.command)) response.result = await labels.setLabel(request,
         request.command==='shape.preview'?{
           stage:async(name,seq)=>{await executionStage(name,seq);const stage=progressStage(name);if(stage)await previewProgress(stage,0,0,seq);},
           progress:previewProgress,
