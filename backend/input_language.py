@@ -176,6 +176,7 @@ class InputLanguage:
         if state=='unknown' and self.accessibility is not None and not self.busy() and not self.desktop.visible:
             try:
                 row=self.accessibility.read()
+                self.report.pop('uia_error_type',None)
                 native=row.get(30020)
                 if type(native) is int and native<0:native&=0xffffffff
                 if type(native) is not int or native and ((gui.GetAncestor(native,3) or native)!=root):row={}

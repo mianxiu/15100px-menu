@@ -2,7 +2,7 @@
 #include <msctf.h>
 #include <oleauto.h>
 
-struct InputContextTsf {
+struct InputContextTsf : ITfThreadMgrEventSink,ITfCompartmentEventSink {
     ITfContext* context=nullptr;
     ITfThreadMgr* thread=nullptr;
     ITfCompartmentMgr* compartments=nullptr;
@@ -10,6 +10,34 @@ struct InputContextTsf {
     VARIANT original{};
     TfClientId client=0;
     bool activated=false,changed=false;
+    ITfSource *threadSource=nullptr,*keyboardSource=nullptr;
+    DWORD threadCookie=TF_INVALID_COOKIE,keyboardCookie=TF_INVALID_COOKIE;
+    volatile LONG references=1;
+    void (*notify)()=nullptr;
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** value) override {
+        if(!value)return E_POINTER;
+        *value=nullptr;
+        if(id==IID_IUnknown || id==IID_ITfThreadMgrEventSink)*value=static_cast<ITfThreadMgrEventSink*>(this);
+        else if(id==IID_ITfCompartmentEventSink)*value=static_cast<ITfCompartmentEventSink*>(this);
+        else return E_NOINTERFACE;
+        AddRef();return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override{return InterlockedIncrement(&references);}
+    // The pinned DLL owns the static sink's anchor reference until PS exits.
+    ULONG STDMETHODCALLTYPE Release() override{return InterlockedDecrement(&references);}
+    HRESULT signal(){if(notify)notify();return S_OK;}
+    HRESULT STDMETHODCALLTYPE OnInitDocumentMgr(ITfDocumentMgr*) override{return signal();}
+    HRESULT STDMETHODCALLTYPE OnUninitDocumentMgr(ITfDocumentMgr*) override{return signal();}
+    HRESULT STDMETHODCALLTYPE OnSetFocus(ITfDocumentMgr*,ITfDocumentMgr*) override{return signal();}
+    HRESULT STDMETHODCALLTYPE OnPushContext(ITfContext*) override{return signal();}
+    HRESULT STDMETHODCALLTYPE OnPopContext(ITfContext*) override{return signal();}
+    HRESULT STDMETHODCALLTYPE OnChange(REFGUID id) override{return id==GUID_COMPARTMENT_KEYBOARD_DISABLED?signal():S_OK;}
+    bool watching()const{return threadCookie!=TF_INVALID_COOKIE && keyboardCookie!=TF_INVALID_COOKIE;}
+    static bool unwatch(ITfSource*& source,DWORD& cookie) {
+        if(!source)return true;
+        if(cookie!=TF_INVALID_COOKIE && FAILED(source->UnadviseSink(cookie)))return false;
+        source->Release();source=nullptr;cookie=TF_INVALID_COOKIE;return true;
+    }
     static ITfContext* current(ITfThreadMgr** manager=nullptr) {
         const auto library=GetModuleHandleW(L"msctf.dll");
         HRESULT(WINAPI*get)(ITfThreadMgr**)=nullptr;
@@ -46,6 +74,10 @@ struct InputContextTsf {
         if(FAILED(queried) || FAILED(compartments->GetCompartment(GUID_COMPARTMENT_KEYBOARD_DISABLED,&keyboard)) ||
            FAILED(keyboard->GetValue(&original)) || (original.vt!=VT_EMPTY && original.vt!=VT_I4) || FAILED(thread->Activate(&client)))return false;
         activated=true;VARIANT value{};value.vt=VT_I4;value.lVal=1;changed=true;
+        if(FAILED(thread->QueryInterface(IID_ITfSource,reinterpret_cast<void**>(&threadSource))) ||
+           FAILED(threadSource->AdviseSink(IID_ITfThreadMgrEventSink,static_cast<ITfThreadMgrEventSink*>(this),&threadCookie)) ||
+           FAILED(keyboard->QueryInterface(IID_ITfSource,reinterpret_cast<void**>(&keyboardSource))) ||
+           FAILED(keyboardSource->AdviseSink(IID_ITfCompartmentEventSink,static_cast<ITfCompartmentEventSink*>(this),&keyboardCookie)))return false;
         return SUCCEEDED(keyboard->SetValue(client,&value)) && disabled();
     }
     bool restore() {
@@ -64,6 +96,7 @@ struct InputContextTsf {
             }
             changed=false;
         }
+        if(!unwatch(keyboardSource,keyboardCookie) || !unwatch(threadSource,threadCookie))return false;
         if(activated){if(FAILED(thread->Deactivate()))return false;activated=false;}
         if(keyboard)keyboard->Release();
         if(compartments)compartments->Release();

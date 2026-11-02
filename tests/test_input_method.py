@@ -137,24 +137,26 @@ class ImeTransportTests(unittest.TestCase):
 
 
 class ImeWorkerTests(unittest.TestCase):
-    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None,created='created'):
+    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None,created='created',reject_once=False):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         self.desktop=SimpleNamespace(runtime=Path(temp.name),visible=False,settings={'enabled':True},stop=threading.Event(),input_language_busy=lambda:False,input_language_tool=lambda **_:{'classID':'moveTool','isModal':False})
         if tool is not None:self.desktop.input_language_tool=tool
         if reconcile is not None:self.desktop.input_language_reconcile=reconcile
-        self.c=InputMethod(self.desktop);self.layout=0x8040804;self.native_restored=False;self.opened=1;self.kind=50033;self.outside=False;self.posts=[]
+        self.c=InputMethod(self.desktop);self.layout=0x8040804;self.native_restored=False;self.opened=1;self.kind=50033;self.focus=10;self.revision=1;self.outside=False;self.posts=[]
         if legacy is not None:(self.desktop.runtime/'input-language-owned.json').write_text(json.dumps(legacy),'utf-8')
         def observe():
             if self.outside:return {'state':'outside'}
-            return {**sample(), 'identity':[1,2,created,3],'layout':self.layout,'state':'unknown','workspace':True,'pid':2,'class':'PSViewC','accessibility':legacy_tests.FocusAccessibilityTests().row(self.kind)}
+            return {**sample(), 'identity':[1,2,created,3],'focus':self.focus,'layout':self.layout,'state':'unknown','workspace':True,'pid':2,'class':'PSViewC','accessibility':legacy_tests.FocusAccessibilityTests().row(self.kind)}
         self.c.sample=observe
-        def read(value):return {**value,'layout':self.layout,'ime':20,'ime_open':self.opened,'native_restored':self.native_restored}
+        def read(value):return {**value,'layout':self.layout,'ime':20,'ime_open':self.opened,'native_restored':self.native_restored,'context_revision':self.revision}
+        def owned(_):return read({**sample('outside'),'identity':[1,2,created,3],'focus':self.focus})
         def send(value):
             self.posts.append(value['wanted'])
+            if reject_once and len(self.posts)==1:return {'rejected':True}
             if acknowledge:self.opened=value['wanted']
         def layouts(count,values):values[0]=0x8040804;values[1]=0x4090409;return 2
         self.user=SimpleNamespace(GetKeyboardLayout=Mock(return_value=0x8040804),GetKeyboardLayoutList=Mock(side_effect=layouts),PostMessageW=Mock(),GetAsyncKeyState=Mock(return_value=0))
-        for p in (patch('backend.input_method.ctypes.WinDLL',return_value=self.user),patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=lambda _:read({**sample('outside'),'ime_open':self.opened}))),patch('backend.input_method.NativeImeContext',return_value=SimpleNamespace(read=lambda value:{**read(value),'context_nonce':123},send=send,observe_owned=lambda _:{**read({**sample('outside'),'ime_open':self.opened}),'context_nonce':123})),patch('backend.input_method.FocusAccessibility',return_value=object()),patch('backend.input_method.process_exited',return_value=False)):
+        for p in (patch('backend.input_method.ctypes.WinDLL',return_value=self.user),patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=owned)),patch('backend.input_method.NativeImeContext',return_value=SimpleNamespace(read=lambda value:{**read(value),'context_nonce':123},send=send,observe_owned=lambda value:{**owned(value),'context_nonce':123})),patch('backend.input_method.FocusAccessibility',return_value=object()),patch('backend.input_method.process_exited',return_value=False)):
             p.start();self.addCleanup(p.stop)
         self.c.thread.start()
         def stop():self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2);self.assertFalse(self.c.thread.is_alive())
@@ -235,6 +237,38 @@ class ImeWorkerTests(unittest.TestCase):
         self.wait(lambda:provider.call_count==1);time.sleep(.12)
         self.assertEqual(provider.call_count,1);self.assertEqual(self.posts,[])
 
+    def test_native_not_armed_rechecks_without_keyboard_or_focus_activity(self):
+        provider=Mock(return_value={'classID':'moveTool','isModal':False})
+        self.start(tool=provider,reject_once=True)
+        self.wait(lambda:self.c.report.get('state')=='request-rejected')
+        calls=provider.call_count;time.sleep(.12)
+        self.assertEqual(self.posts,[0])
+        self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.assertGreater(provider.call_count,calls)
+        self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0,0])
+        self.assertEqual(len(list(self.desktop.runtime.glob('input-method-rejected-*.json'))),1)
+
+    def test_focus_roundtrip_drops_previous_tool_evidence_without_key_activity(self):
+        provider=Mock(return_value={'classID':'moveTool','isModal':False})
+        self.start(tool=provider);self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.focus=11;self.kind=None;self.c.wake.set()
+        self.wait(lambda:self.c.policy.confirmed_restores==1)
+        calls=provider.call_count
+        self.focus=10;self.kind=50033;self.c.wake.set()
+        self.wait(lambda:self.c.policy.confirmed_disables==2)
+        self.assertGreaterEqual(provider.call_count-calls,2)
+        self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0,1,0])
+
+    def test_rejected_disable_rechecks_input_instead_of_reusing_idle_tool(self):
+        provider=Mock(return_value={'classID':'moveTool','isModal':False})
+        self.start(tool=provider,reject_once=True)
+        self.wait(lambda:self.c.report.get('state')=='request-rejected')
+        provider.return_value={'classID':'typeCreateOrEditTool','isModal':True}
+        self.wait(lambda:self.c.report.get('state')=='input')
+        time.sleep(1.1)
+        self.assertEqual(self.posts,[0]);self.assertIsNone(self.c.policy.pending)
+        self.assertIsNone(self.c.policy.owned);self.assertEqual(self.c.snapshot()[0],0)
+
     def test_fresh_successful_sample_clears_stale_native_startup_error(self):
         self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
         read=self.c.ime.read;error=OSError('startup timeout');error.winerror=1460
@@ -243,6 +277,70 @@ class ImeWorkerTests(unittest.TestCase):
         self.c.ime.read=read;self.c.wake.set()
         self.wait(lambda:self.c.report.get('state')=='non-input' and 'native_error_code' not in self.c.report)
         self.assertNotIn('error_type',self.c.report);self.assertEqual(self.posts,[0])
+
+    def test_transient_unknown_recovers_in_same_focus_without_activity(self):
+        provider=Mock(return_value={'classID':'moveTool','isModal':False})
+        self.start(tool=provider);self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.kind=None;self.c.wake.set();self.wait(lambda:self.c.policy.confirmed_restores==1)
+        calls=provider.call_count;self.kind=50033;self.c.wake.set()
+        time.sleep(.15);self.assertEqual(self.posts,[0,1])
+        self.wait(lambda:self.c.policy.confirmed_disables==2)
+        self.assertGreater(provider.call_count,calls)
+        self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.focus,10)
+
+    def test_modal_tool_end_is_reobserved_in_same_focus_without_activity(self):
+        provider=Mock(return_value={'classID':'typeCreateOrEditTool','isModal':True})
+        self.start(tool=provider);self.wait(lambda:self.c.report.get('state')=='input')
+        provider.return_value={'classID':'moveTool','isModal':False}
+        self.wait(lambda:self.c.policy.confirmed_disables==1)
+        calls=provider.call_count;time.sleep(.2)
+        self.assertEqual(provider.call_count,calls,'Healthy protection must not poll the host')
+        self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0])
+
+    def test_native_revision_invalidates_cached_tool_before_reprotection(self):
+        provider=Mock(return_value={'classID':'moveTool','isModal':False})
+        self.start(tool=provider);self.wait(lambda:self.c.policy.confirmed_disables==1)
+        provider.return_value={'classID':'typeCreateOrEditTool','isModal':True}
+        self.revision+=1;self.native_restored=True;self.opened=1;self.c.wake.set()
+        self.wait(lambda:self.c.report.get('state')=='input')
+        self.assertEqual(self.posts,[0]);self.assertIsNone(self.c.policy.pending)
+        provider.return_value={'classID':'moveTool','isModal':False}
+        self.wait(lambda:self.c.policy.confirmed_disables==2)
+        self.assertEqual(self.c.snapshot()[0],0)
+
+    def test_unstable_or_input_evidence_cannot_rearm_after_unknown(self):
+        self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.kind=None;self.c.wake.set();self.wait(lambda:self.c.policy.confirmed_restores==1)
+        for _ in range(5):
+            self.kind=50033;self.c.wake.set();time.sleep(.08)
+            self.kind=None;self.c.wake.set();time.sleep(.08)
+        self.kind=50004;self.c.wake.set();self.wait(lambda:self.c.report.get('state')=='input')
+        self.assertEqual(self.posts,[0,1]);self.assertIsNone(self.c.policy.pending)
+
+    def test_broken_accessibility_client_is_rebuilt_without_focus_activity(self):
+        self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.kind=None;self.c.report['uia_error_type']='COMError';self.c.wake.set()
+        self.wait(lambda:self.c.policy.confirmed_restores==1)
+        replacement=object()
+        with patch('backend.input_method.FocusAccessibility',return_value=replacement) as factory:
+            self.wait(lambda:self.c.accessibility is replacement)
+            self.c.report.pop('uia_error_type');self.kind=50033;self.c.wake.set()
+            self.wait(lambda:self.c.policy.confirmed_disables==2)
+            self.assertEqual(factory.call_count,1)
+        self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0,1,0])
+
+    def test_context_change_during_final_read_rejects_old_non_input_evidence(self):
+        provider=Mock(return_value={'classID':'moveTool','isModal':False})
+        self.start(tool=provider);self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.kind=None;self.c.wake.set();self.wait(lambda:self.c.policy.confirmed_restores==1)
+        read=self.c.ime.read;changed=threading.Event()
+        def race(value):
+            if self.c.policy.pending and self.c.policy.pending['disable'] and not changed.is_set():
+                self.revision+=1;provider.return_value={'classID':'typeCreateOrEditTool','isModal':True};changed.set()
+            return read(value)
+        self.c.ime.read=race;self.kind=50033;self.c.wake.set()
+        self.wait(changed.is_set);self.wait(lambda:self.c.report.get('state')=='input')
+        self.assertEqual(self.posts,[0,1]);self.assertIsNone(self.c.policy.pending)
 
     def test_nonactivating_caps_close_and_known_busy_end_rearm_without_a_keystroke(self):
         self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)

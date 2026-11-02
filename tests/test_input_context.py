@@ -32,6 +32,14 @@ class NativeContextTransportTests(unittest.TestCase):
         value.command.return_value=21;request.update(wanted=1,input_restore=True)
         self.assertEqual(value.send(request)['state'],'input')
 
+    def test_read_exposes_event_subscription_and_revision_without_mutation(self):
+        value=self.context();value.control=Mock(return_value=7);value.command.return_value=99
+        sample={'root':1,'focus':2,'state':'unknown'}
+        result=value.read(sample)
+        self.assertEqual(result['ime_open'],0);self.assertTrue(result['native_events'])
+        self.assertTrue(result['tsf_disabled']);self.assertEqual(result['context_revision'],123)
+        value.command.assert_called_once_with(7,1,2)
+
     def test_reading_or_changed_layout_cannot_renew_unowned_context(self):
         value=self.context();owned={'identity':[1,2,'time',3],'layout':4,'ime':5,'focus':6,'context_nonce':7}
         for sample in ({**owned,'state':'outside'},{**owned,'state':'unknown'},{**owned,'state':'non-input','layout':8},{**owned,'state':'non-input','context_nonce':8}):value.renew(owned,sample)

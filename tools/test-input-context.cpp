@@ -4,8 +4,9 @@
 #include <stdexcept>
 
 static void check(bool value,const char* message){if(!value){std::fprintf(stderr,"foreground=%p focus=%p owned=%p restore_failed=%d tsf=%d\n",GetForegroundWindow(),GetFocus(),disabledWindow,restoreFailed,tsf.keyboard!=nullptr);throw std::runtime_error(message);}}
-int main() {
+int main(int argc,char** argv) {
     try {
+        if(argc==2 && strcmp(argv[1],"--low")==0){DWORD_PTR affinity=0,system=0;check(GetProcessAffinityMask(GetCurrentProcess(),&affinity,&system)!=0,"fixture affinity");int count=0;for(auto bits=affinity;bits;bits&=bits-1)count++;check(count==2 && GetPriorityClass(GetCurrentProcess())==BELOW_NORMAL_PRIORITY_CLASS,"fixture low CPU not applied");}
         module=GetModuleHandleW(nullptr);
         WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=module;wc.lpszClassName=L"Photoshop";
         check(RegisterClassW(&wc)!=0,"fixture class");
@@ -22,6 +23,7 @@ int main() {
         check(control && GetPropW(fixture,controlProperty)==control,"in-thread handshake");
         check(GetPropW(control,ownerProperty)==reinterpret_cast<HANDLE>(ULONG_PTR(GetCurrentProcessId())),"service ownership binding");
         const auto command=[&](UINT op,HWND target=0){return SendMessageW(control,controlMessage,(12345<<8)|op,reinterpret_cast<LPARAM>(target?target:focus));};
+        const auto dispatchContextEvents=[&](){MSG event{};bool seen=false;while(PeekMessageW(&event,control,contextChangedMessage,contextChangedMessage,PM_REMOVE)){DispatchMessageW(&event);seen=true;}check(seen,"TSF change event was not posted");};
         check(command(1)==5,"association read");
         SendMessageW(control,controlMessage,(54321<<8)|2,reinterpret_cast<LPARAM>(focus));check(associated(focus)==context,"foreign nonce changed context");
         check((command(2)&15)==3 && associated(focus)==nullptr,"disable association readback");
@@ -49,28 +51,34 @@ int main() {
         check(SUCCEEDED(text->QueryInterface(IID_ITfCompartmentMgr,reinterpret_cast<void**>(&compartments))) && SUCCEEDED(compartments->GetCompartment(GUID_COMPARTMENT_KEYBOARD_DISABLED,&keyboard)),"TSF keyboard compartment");
         VARIANT prior{},value{};check(SUCCEEDED(keyboard->GetValue(&prior)),"TSF prior value");
         check((command(2)&35)==35 && SUCCEEDED(keyboard->GetValue(&value)) && value.vt==VT_I4 && value.lVal==1,"TSF actual disabled readback");VariantClear(&value);
+        check((command(1)&64) && tsf.watching(),"TSF subscriptions not active");
         check((command(3)&15)==5,"TSF explicit restore");keyboard->Release();keyboard=nullptr;
         check(SUCCEEDED(compartments->GetCompartment(GUID_COMPARTMENT_KEYBOARD_DISABLED,&keyboard)) && SUCCEEDED(keyboard->GetValue(&value)) && value.vt==prior.vt && (value.vt==VT_EMPTY || value.lVal==prior.lVal),"TSF original value restoration");
         VariantClear(&value);
         check((command(2)&35)==35,"TSF reset disable");
         check(SUCCEEDED(manager->SetFocus(nullptr)) && (command(4)&35)==35,"temporary absent TSF focus discarded original protection");
         check(SUCCEEDED(manager->SetFocus(document)),"TSF focus return");value.vt=VT_I4;value.lVal=0;
+        const auto resetRevision=GetPropW(control,revisionProperty);
         check(SUCCEEDED(keyboard->SetValue(client,&value)),"external TSF reset");VariantClear(&value);
         check((command(1)&35)==3 && disabledWindow,"TSF drift read changed ownership or reported disabled");
-        check((command(4)&51)==17 && !disabledWindow,"external TSF reset survived lease validation");
+        dispatchContextEvents();
+        check((command(1)&51)==17 && !disabledWindow,"external TSF reset survived notification handling");
+        check(GetPropW(control,revisionProperty)!=resetRevision && !tsf.watching() && tsf.references==1,"TSF reset did not invalidate evidence or release subscriptions");
         check((command(2)&35)==35,"TSF renewed disable");
         ITfDocumentMgr* secondDocument=nullptr;ITfContext* secondText=nullptr;ITfCompartmentMgr* secondCompartments=nullptr;ITfCompartment* secondKeyboard=nullptr;
         check(SUCCEEDED(manager->CreateDocumentMgr(&secondDocument)) && SUCCEEDED(secondDocument->CreateContext(client,0,nullptr,&secondText,&cookie)) && SUCCEEDED(secondDocument->Push(secondText)) && SUCCEEDED(manager->SetFocus(secondDocument)),"second TSF context");
         associate(secondDocument);check(SUCCEEDED(manager->SetFocus(secondDocument)),"second associated focus");
         check(SUCCEEDED(secondText->QueryInterface(IID_ITfCompartmentMgr,reinterpret_cast<void**>(&secondCompartments))) && SUCCEEDED(secondCompartments->GetCompartment(GUID_COMPARTMENT_KEYBOARD_DISABLED,&secondKeyboard)),"second keyboard compartment");
         VARIANT secondPrior{};check(SUCCEEDED(secondKeyboard->GetValue(&secondPrior)),"second TSF original");
-        check((command(4)&51)==17 && !disabledWindow,"renewal accepted a different TSF context");
+        dispatchContextEvents();
+        check((command(1)&51)==17 && !disabledWindow,"notification accepted a different TSF context");
         check(SUCCEEDED(keyboard->GetValue(&value)) && value.vt==VT_I4 && value.lVal==0,"old TSF context not restored");VariantClear(&value);
         check(SUCCEEDED(secondKeyboard->GetValue(&value)) && value.vt==secondPrior.vt && (value.vt==VT_EMPTY || value.lVal==secondPrior.lVal),"unverified new TSF context modified");VariantClear(&value);
         check((command(2)&35)==35 && (command(3)&15)==5,"fresh TSF context cannot be independently protected and restored");
+        for(int i=0;i<20;i++)check((command(2)&99)==99 && (command(3)&15)==5 && tsf.references==1 && !tsf.watching(),"repeated lease leaked subscriptions or failed readback");
         VariantClear(&secondPrior);secondKeyboard->Release();secondCompartments->Release();associate(document);manager->SetFocus(document);secondDocument->Pop(TF_POPF_ALL);secondText->Release();secondDocument->Release();
         VariantClear(&prior);VariantClear(&value);keyboard->Release();compartments->Release();manager->SetFocus(nullptr);document->Pop(TF_POPF_ALL);text->Release();document->Release();manager->Deactivate();manager->Release();CoUninitialize();
         UnhookWindowsHookEx(hook);DestroyWindow(control);DestroyWindow(fixture);ImmDestroyContext(context);
-        std::puts("PS-thread context: nonce, real association, focus/mouse/profile restore, IMM reassociation, TSF reset/context replacement, lease expiry, original context and unchanged HKL passed");return 0;
+        std::puts("PS-thread context: nonce, real association, focus/mouse/profile restore, IMM reassociation, TSF event reset/context replacement without timer or renew, 20 subscription lifecycles, lease expiry, original context and unchanged HKL passed");return 0;
     }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 1;}
 }

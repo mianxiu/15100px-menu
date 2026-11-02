@@ -7,6 +7,8 @@ static const wchar_t* controlClass=L"PhotoshopMenu.InputContext.v1";
 static const wchar_t* controlProperty=L"PhotoshopMenu.InputContext.Window.v1";
 static const wchar_t* nonceProperty=L"PhotoshopMenu.InputContext.Nonce.v1";
 static const wchar_t* ownerProperty=L"PhotoshopMenu.InputContext.Owner.v1";
+static const wchar_t* revisionProperty=L"PhotoshopMenu.InputContext.Revision.v1";
+static constexpr UINT contextChangedMessage=WM_APP+51;
 static UINT attachMessage=0,controlMessage=0;
 static HMODULE module=nullptr;
 static HWND control=nullptr,root=nullptr,disabledWindow=nullptr;
@@ -17,7 +19,13 @@ static ULONG_PTR nonce=0;
 static ULONGLONG deadline=0;
 static bool restoreFailed=false,changing=false;
 static bool restored=false;
+static ULONG_PTR revision=1;
 static InputContextTsf tsf;
+
+static void contextChanged() {
+    // Defer mutation until the TSF notification callback has returned.
+    if(!changing && control && disabledWindow)PostMessageW(control,contextChangedMessage,0,0);
+}
 
 static HIMC associated(HWND window) {
     const auto context=ImmGetContext(window);
@@ -44,11 +52,18 @@ static bool ownFocus(HWND window) {
     DWORD pid=0;
     return window && GetWindowThreadProcessId(window,&pid)==GetCurrentThreadId() && pid==GetCurrentProcessId() && GetFocus()==window;
 }
+static void verifyContext() {
+    if(disabledWindow && (associated(disabledWindow) || !tsf.currentDisabled())) {
+        revision=revision==0x7fffffff?1:revision+1;
+        SetPropW(control,revisionProperty,reinterpret_cast<HANDLE>(revision));
+        restore();
+    }
+}
 static LRESULT state(HWND focus) {
     DWORD pid=0;
     if(focus && (GetWindowThreadProcessId(focus,&pid)!=GetCurrentThreadId() || pid!=GetCurrentProcessId()))return 9;
     return 1 | (disabledWindow?2:0) | (!disabledWindow && focus && (associated(focus) || InputContextTsf::available())?4:0) |
-        (restoreFailed?8:0) | (restored?16:0) | (tsf.keyboard && tsf.currentDisabled()?32:0);
+        (restoreFailed?8:0) | (restored?16:0) | (tsf.keyboard && tsf.currentDisabled()?32:0) | (tsf.watching()?64:0);
 }
 static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM lParam) {
     if(message==controlMessage && (wParam>>8)==nonce) {
@@ -56,7 +71,7 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
         if(operation==3){restore();return state(focus);}
         if(operation==1)return state(focus);
         if(operation==4){
-            if(disabledWindow && (associated(disabledWindow) || !tsf.currentDisabled()))restore();
+            verifyContext();
             if(disabledWindow==focus && foreground() && ownFocus(focus))deadline=GetTickCount64()+1500;
             return state(focus);
         }
@@ -74,15 +89,16 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
         }
         return state(focus)|8;
     }
+    if(message==contextChangedMessage){verifyContext();return 0;}
     if(message==WM_TIMER) {
         const bool exited=!owner || WaitForSingleObject(owner,0)!=WAIT_TIMEOUT;
         if(disabledWindow && (exited || !foreground() || GetFocus()!=disabledWindow || GetTickCount64()>deadline))restore();
-        if(disabledWindow && (associated(disabledWindow) || !tsf.currentDisabled()))restore();
+        verifyContext();
         if(exited && !disabledWindow)DestroyWindow(window);
         return 0;
     }
     if(message==WM_DESTROY) {
-        KillTimer(window,1);RemovePropW(root,controlProperty);RemovePropW(window,nonceProperty);RemovePropW(window,ownerProperty);
+        KillTimer(window,1);RemovePropW(root,controlProperty);RemovePropW(window,nonceProperty);RemovePropW(window,ownerProperty);RemovePropW(window,revisionProperty);
         if(owner)CloseHandle(owner);
         owner=nullptr;control=nullptr;root=nullptr;ownerId=0;
         return 0;
@@ -117,11 +133,11 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK InputContextHook(int code,WPAR
                         // The callback/window must remain valid until PS exits, even after unhooking.
                         HMODULE pinned=nullptr;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,reinterpret_cast<LPCWSTR>(&InputContextHook),&pinned);
                         WNDCLASSW wc{};wc.lpfnWndProc=procedure;wc.hInstance=module;wc.lpszClassName=controlClass;RegisterClassW(&wc);
-                        root=event.hwnd;ownerId=DWORD(event.wParam);owner=candidate;nonce=ULONG_PTR(event.lParam);
+                        root=event.hwnd;ownerId=DWORD(event.wParam);owner=candidate;nonce=ULONG_PTR(event.lParam);revision=1;tsf.notify=contextChanged;
                         control=CreateWindowExW(0,controlClass,L"",0,0,0,0,0,HWND_MESSAGE,nullptr,module,nullptr);
                         if(control){
                             if(!SetPropW(control,nonceProperty,reinterpret_cast<HANDLE>(nonce)) || !SetPropW(control,ownerProperty,reinterpret_cast<HANDLE>(ULONG_PTR(ownerId))) ||
-                               !SetPropW(root,controlProperty,control) || !SetTimer(control,1,100,nullptr))DestroyWindow(control);
+                               !SetPropW(control,revisionProperty,reinterpret_cast<HANDLE>(revision)) || !SetPropW(root,controlProperty,control) || !SetTimer(control,1,100,nullptr))DestroyWindow(control);
                         }
                         else {CloseHandle(owner);owner=nullptr;ownerId=0;}
                     } else CloseHandle(candidate);

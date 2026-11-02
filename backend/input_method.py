@@ -199,7 +199,9 @@ class InputMethod(InputLanguage):
             old_context=self.context_schema==1 and bool(self.policy.owned or self.policy.pending)
             if not old_context:self.ime=NativeImeContext(self.user);self.context_schema=2
             self.report['mechanism']='open-close-recovery' if old_context else 'ps-thread-context-association'
-            examined=None;tool=None;scope_before=None;episode=0;blocked_before=False
+            examined=None;tool=None;context_before=None;episode=0;blocked_before=False;retry_after=0
+            revision_before=None;next_tool_check=0;recovering=False;recovery_after=0;stable=None;stable_at=0
+            next_uia_check=time.monotonic()+1
             while not self.desktop.stop.is_set():
                 self.wake.wait(.05);self.wake.clear()
                 if self.desktop.stop.is_set():break
@@ -208,18 +210,27 @@ class InputMethod(InputLanguage):
                     if not self.legacy_step(sample):continue
                     if self.policy.owned and not self.policy.pending and process_exited(self.policy.owned['identity']):self.retire(path,'original-process-exited')
                     scope=tuple(sample.get('identity',[]))
-                    if scope!=scope_before:episode+=1;scope_before=scope;examined=None;tool=None
                     mouse=bool(self.user.GetAsyncKeyState(1)&0x8000)
                     blocked=mouse or sample.get('blocked') or self.desktop.visible or self.busy() or not self.desktop.settings['enabled'] or old_context
+                    if sample.get('root') and not blocked and 'uia_error_type' in self.report and time.monotonic()>=next_uia_check:
+                        try:
+                            self.accessibility=FocusAccessibility();self.report['uia_available']=True
+                            self.report['uia_reconnects']=self.report.get('uia_reconnects',0)+1
+                        except Exception as error:self.report['uia_error_type']=type(error).__name__
+                        next_uia_check=time.monotonic()+1
                     if bool(blocked)!=blocked_before:episode+=1;blocked_before=bool(blocked)
                     if blocked:examined=None;tool=None
                     row=sample.get('accessibility',{});context=(scope,sample.get('focus'),serial,sample.get('layout'))
+                    if context!=context_before:episode+=1;context_before=context;examined=None;tool=None
                     needs_tool=(sample.get('workspace') and sample.get('state')=='unknown' and control_state(row,sample.get('pid'))!='input' and
                                 (row.get(30003) in CONTAINERS or protected or self.accessibility is None))
+                    if not needs_tool:examined=None;tool=None
+                    if (needs_tool and tool is not None and not self.policy.owned and not self.policy.pending and
+                            time.monotonic()>=next_tool_check):examined=None
                     reconcile=getattr(self.desktop,'input_language_reconcile',None)
                     if needs_tool and context==examined and tool is None and not blocked and reconcile and reconcile():examined=None
                     if needs_tool and context!=examined and not blocked:
-                        examined=context;tool=self.read_tool(sample);sample=self.sample()
+                        examined=context;tool=self.read_tool(sample);next_tool_check=time.monotonic()+1;sample=self.sample()
                     same=(tuple(sample.get('identity',[])),sample.get('focus'),self.snapshot()[0],sample.get('layout'))==context
                     evidence=tool if same and examined==context else None
                     if sample.get('root'):
@@ -229,13 +240,31 @@ class InputMethod(InputLanguage):
                         sample=self.ime.read(sample)
                     elif self.policy.owned or self.policy.pending:
                         sample=self.ime.observe_owned(self.policy.pending or self.policy.owned)
+                    revision=(scope,sample.get('ime'),sample.get('context_nonce'),sample.get('context_revision'))
+                    if revision_before is not None and revision[:3]==revision_before[:3] and revision[3]!=revision_before[3]:
+                        examined=None;tool=None
+                        if scope and sample.get('state')!='outside':sample['state']='unknown'
+                    revision_before=revision
                     if (self.policy.owned and not self.policy.pending and sample.get('identity')==self.policy.owned['identity'] and
                             sample.get('layout')!=self.policy.owned['layout'] and sample.get('ime_open')==1 and
                             (self.context_schema==1 or sample.get('native_restored'))):
                         self.retire(path,'confirmed-keyboard-layout-change')
                     if self.policy.owned and not self.policy.pending and sample.get('identity')==self.policy.owned['identity'] and sample.get('ime') and sample['ime']!=self.policy.owned['ime']:
                         self.retire(path,'original-ime-window-ended')
-                    eligible=same and not blocked and sample.get('state')=='non-input' and sample.get('ime') is not None
+                    eligible=same and not blocked and sample.get('state')=='non-input' and sample.get('ime') is not None and time.monotonic()>=retry_after
+                    now=time.monotonic()
+                    if blocked or sample.get('state') in ('outside','input'):recovering=False;stable=None
+                    elif sample.get('state')=='unknown':
+                        if not recovering:recovering=True;recovery_after=now+1
+                        stable=None
+                    if recovering and eligible and not self.policy.pending and not self.policy.owned:
+                        candidate=(context,row.get(30003),row.get(30020),revision,tool)
+                        if candidate!=stable:stable=candidate;stable_at=now
+                        eligible=now>=recovery_after and now-stable_at>=.2
+                        if eligible:
+                            episode+=1;recovering=False;stable=None
+                            self.report['recovery_revalidations']=self.report.get('recovery_revalidations',0)+1
+                    elif recovering and not eligible:stable=None
                     token=(scope,sample.get('focus'),row.get(30003),epoch,episode,serial) if eligible else None
                     request=self.policy.step(sample,token,time.monotonic())
                     if self.policy.owned and not self.policy.pending and not blocked and callable(getattr(self.ime,'renew',None)):
@@ -247,6 +276,7 @@ class InputMethod(InputLanguage):
                         valid=(ime_target(fresh)==ime_target(request) and fresh.get('focus')==request['focus'] and fresh.get('ime_open')==sample.get('ime_open'))
                         if request['disable']:
                             valid=bool(valid and eligible and self.snapshot()[0]==serial and not self.desktop.visible and not self.busy() and
+                                       fresh.get('context_revision')==sample.get('context_revision') and
                                        not fresh.get('blocked') and self.focus_state(fresh,tool)=='non-input' and
                                        not any(self.user.GetAsyncKeyState(k)&0x8000 for k in range(1,256)))
                         if valid:
@@ -256,6 +286,8 @@ class InputMethod(InputLanguage):
                                     key=hashlib.sha256(json.dumps(request,sort_keys=True).encode()).hexdigest()
                                     atomic_json(path.parent/('input-method-rejected-'+key+'.json'),{'request':request,'native_reply':'not-armed','marked_success':False})
                                     self.policy.pending=None;self.policy.state='request-rejected'
+                                    # A proved rejection changed nothing; recheck fresh evidence after readiness settles.
+                                    self.policy.attempted=None;examined=None;tool=None;retry_after=time.monotonic()+1
                                 else:
                                     self.policy.step(acknowledged,token,time.monotonic())
                                     sample.update(ime_open=acknowledged['ime_open'],tsf_disabled=acknowledged['tsf_disabled'])
@@ -267,6 +299,7 @@ class InputMethod(InputLanguage):
                         confirmed_disables=self.policy.confirmed_disables,confirmed_restores=self.policy.confirmed_restores,
                         ime_open=sample.get('ime_open'),keyboard_layout=sample.get('layout'),focus_class=sample.get('class'),
                         tsf_disabled=sample.get('tsf_disabled'),
+                        native_events=sample.get('native_events'),context_revision=sample.get('context_revision'),
                         tool=tool.get('classID') if isinstance(tool,dict) else None)
                     saved=self.saved()
                     if saved!=persisted:atomic_json(path,saved);persisted=json.loads(json.dumps(saved))

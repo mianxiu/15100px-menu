@@ -58,7 +58,9 @@ class NativeImeContext:
         if not window:return value
         status=self.command(window,1,sample['focus'])
         if not status&1 or status&8:raise RuntimeError('PS输入上下文恢复待核对')
-        value.update(ime=window,ime_open=int(bool(status&4)),native_restored=bool(status&16),tsf_disabled=bool(status&32),context_nonce=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Nonce.v1'))
+        value.update(ime=window,ime_open=int(bool(status&4)),native_restored=bool(status&16),tsf_disabled=bool(status&32),native_events=bool(status&64),
+                     context_nonce=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Nonce.v1'),
+                     context_revision=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Revision.v1') or 0)
         return value
 
     def renew(self,owned,sample):
