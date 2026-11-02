@@ -1,5 +1,7 @@
 # Photoshop Menu TODO
 
+- [x] 291输入法启动就绪恢复：修复首次工具观察在UXP未就绪且未发布时失败后，不再自动读取的问题；新读取绑定当前PS创建时间，主动启动期间不发布，旧进程心跳拒绝，已发布未知不重发。44项专项与PS24.0.1冷启动无按键保护、受限CPU正常退出恢复／重启服务自动保护通过；中文HKL保持，实际291／UXP90与运行组件已更新，公开Release未发布。另一台故障电脑无原状态、实体首键及第三方输入法未验，不认定其唯一原因。见docs/INPUT-LANGUAGE-ASSESSMENT.md、.runtime/ime291-startup及recovery291finalcold。
+
 - [x] 287矢量文字对象承载与重新编辑：嵌入矢量PDF显示，同图层XMP保存原生文字／混合样式／列表源；Caps生成、文字源读取与独立更新，保留标签、父组和变换，一次撤销。PS24.0.1／UXP82正式接口低CPU72DPI及正常300DPI生成／更新通过，另验段落文字、保存重开、改名、同／跨文档复制和嵌入内容校验；实际287菜单→PS生成／更新通过。当前是RGB8承载组件，不是完整排版编辑器；最终运行候选与公开交付收尾中。见docs/TEXT-VECTOR-OBJECTS.md及.runtime/object287-interface、object287-entry、object287-native-final。
 - [ ] 287公开交付：最终候选构建、实际入口切换与效果核对、Wiki、源码／标签推送、Release下载与清单核验后仅保留最新版。
 - [x] 286公开交付：焦点专项、必要构建／启动检查及实际286／UXP81组件核对通过，PS24.0.1低CPU实际菜单→PS交接、写回和一次撤销通过；正常配置激活被Windows拒绝，写入未提交，不计通过。PS未重启，原稿／配置／历史未知保留，无活动未知。源码／标签、Release附件与更新清单匿名下载、Wiki三个改动页面及CI均已核验；仅保留286 Release和dist发行物，旧标签／历史／备份保留。证据.runtime/delivery286-final.json、runtime286-verified.json、text286-lists-live/report.json。测试按用户要求收窄，已启动的689项回归仅收集一次，不重复扩跑。

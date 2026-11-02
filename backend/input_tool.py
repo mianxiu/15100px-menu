@@ -3,6 +3,7 @@ import json
 import math
 import secrets
 import time
+from datetime import datetime
 from .settings import atomic_json
 from .uxp_bridge import publish_request
 
@@ -22,8 +23,20 @@ class ToolObservation:
             self.retry_after=None;return True
         return False
 
-    def read(self,publish=True,wait=True):
-        folder,heartbeat=self.transport.observe()
+    def read(self,publish=True,wait=True,identity=None):
+        try:
+            folder,heartbeat=self.transport.observe()
+            if identity is not None:
+                # A previous PS process can leave a fresh-looking heartbeat on disk.
+                if not isinstance(identity,(list,tuple)) or len(identity)!=4:raise RuntimeError('ENG宿主身份无效；未发布读取')
+                created=datetime.fromisoformat(identity[2])
+                if created.tzinfo is None:raise RuntimeError('ENG宿主时间身份无效；未发布读取')
+                if int(heartbeat['session'].split('-')[0])<created.timestamp()*1000:
+                    raise RuntimeError('ENG执行插件尚未属于当前PS进程；等待就绪，未发布读取')
+        except (RuntimeError,OSError,ValueError):
+            # No request exists yet: cold-start readiness must not wait for a key.
+            if publish and not self.path.exists():self.retry_after=time.monotonic()+1
+            raise
         if tuple(int(v) for v in heartbeat['probe_version'].split('.'))<(0,3,66):
             raise RuntimeError('ENG工具编辑状态需要UXP0.3.66；未尝试切换')
         token=json.loads(self.transport.config.read_text('utf-8-sig'))['token']

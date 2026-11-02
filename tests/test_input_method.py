@@ -137,16 +137,16 @@ class ImeTransportTests(unittest.TestCase):
 
 
 class ImeWorkerTests(unittest.TestCase):
-    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None):
+    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None,created='created'):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
-        self.desktop=SimpleNamespace(runtime=Path(temp.name),visible=False,settings={'enabled':True},stop=threading.Event(),input_language_busy=lambda:False,input_language_tool=lambda:{'classID':'moveTool','isModal':False})
+        self.desktop=SimpleNamespace(runtime=Path(temp.name),visible=False,settings={'enabled':True},stop=threading.Event(),input_language_busy=lambda:False,input_language_tool=lambda **_:{'classID':'moveTool','isModal':False})
         if tool is not None:self.desktop.input_language_tool=tool
         if reconcile is not None:self.desktop.input_language_reconcile=reconcile
         self.c=InputMethod(self.desktop);self.layout=0x8040804;self.native_restored=False;self.opened=1;self.kind=50033;self.outside=False;self.posts=[]
         if legacy is not None:(self.desktop.runtime/'input-language-owned.json').write_text(json.dumps(legacy),'utf-8')
         def observe():
             if self.outside:return {'state':'outside'}
-            return {**sample(), 'layout':self.layout,'state':'unknown','workspace':True,'pid':2,'class':'PSViewC','accessibility':legacy_tests.FocusAccessibilityTests().row(self.kind)}
+            return {**sample(), 'identity':[1,2,created,3],'layout':self.layout,'state':'unknown','workspace':True,'pid':2,'class':'PSViewC','accessibility':legacy_tests.FocusAccessibilityTests().row(self.kind)}
         self.c.sample=observe
         def read(value):return {**value,'layout':self.layout,'ime':20,'ime_open':self.opened,'native_restored':self.native_restored}
         def send(value):
@@ -212,11 +212,37 @@ class ImeWorkerTests(unittest.TestCase):
         self.wait(lambda:self.c.policy.confirmed_disables==1)
         self.assertEqual(provider.call_count,3);self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0])
 
+    def test_cold_start_readiness_recovers_with_no_keyboard_or_focus_activity(self):
+        from backend.input_tool import ToolObservation
+        from backend.settings import atomic_json
+        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);folder=Path(temp.name)
+        config=folder/'config.json';atomic_json(config,{'token':'startup-test'})
+        ready=(folder,{'session':'3000-startup','probe_version':'0.3.90'})
+        observe=Mock(side_effect=[RuntimeError('UXP not ready'),*([ready]*30)])
+        reader=ToolObservation(SimpleNamespace(config=config,observe=observe))
+        def publish(source,destination):
+            request=json.loads(source.read_text('utf-8'));source.replace(destination)
+            atomic_json(folder/'input-tool-response.json',{'schema':1,'id':request['id'],'session':request['session'],'token':'startup-test','phase':'completed','classID':'moveTool','isModal':False,'completed_at_ms':time.time()*1000})
+        with patch('backend.input_tool.publish_request',side_effect=publish):
+            self.start(tool=reader.read,reconcile=reader.reconcile,created='1970-01-01 00:00:02+00:00')
+            self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0])
+        self.assertFalse(reader.path.exists());self.user.PostMessageW.assert_not_called()
+
     def test_unknown_read_never_starts_another_host_observation(self):
         provider=Mock(side_effect=RuntimeError('original unknown'))
         self.start(tool=provider,reconcile=lambda:False)
         self.wait(lambda:provider.call_count==1);time.sleep(.12)
         self.assertEqual(provider.call_count,1);self.assertEqual(self.posts,[])
+
+    def test_fresh_successful_sample_clears_stale_native_startup_error(self):
+        self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
+        read=self.c.ime.read;error=OSError('startup timeout');error.winerror=1460
+        self.c.ime.read=Mock(side_effect=error);self.c.wake.set()
+        self.wait(lambda:self.c.report.get('native_error_code')==1460)
+        self.c.ime.read=read;self.c.wake.set()
+        self.wait(lambda:self.c.report.get('state')=='non-input' and 'native_error_code' not in self.c.report)
+        self.assertNotIn('error_type',self.c.report);self.assertEqual(self.posts,[0])
 
     def test_nonactivating_caps_close_and_known_busy_end_rearm_without_a_keystroke(self):
         self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)

@@ -746,7 +746,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             if isinstance(app.bridge,UxpBridge):app.bridge.document_guard=app.desktop.require_home
             if isinstance(app.bridge,UxpBridge):
                 app.desktop.layer_context_provider=app.bridge.read_layer_context
-                app.desktop.input_language_busy=lambda:app.bridge.busy or app.operation_lock.locked()
+                app.desktop.input_language_busy=lambda:app.bridge.busy or app.operation_lock.locked() or app.photoshop_launcher.active
                 from .input_tool import ToolObservation
                 tool_observer=ToolObservation(app.bridge.transport)
                 app.desktop.input_language_tool=tool_observer.read

@@ -47,6 +47,45 @@ class ToolObservationTests(unittest.TestCase):
         with patch('backend.input_tool.atomic_json',side_effect=save),patch('backend.input_tool.publish_request',side_effect=publish):self.reader.read()
         self.assertEqual(rows,['prepared','request','published'])
 
+    def test_cold_start_before_publication_rechecks_ready_host_without_input(self):
+        with patch.object(self.reader.transport,'observe',side_effect=RuntimeError('UXP starting')),patch('backend.input_tool.time.monotonic',return_value=10):
+            with self.assertRaisesRegex(RuntimeError,'starting'):self.reader.read()
+        self.assertFalse(self.reader.path.exists());self.assertEqual(self.reader.retry_after,11)
+        with patch('backend.input_tool.time.monotonic',return_value=10.9):self.assertFalse(self.reader.reconcile())
+        with patch('backend.input_tool.time.monotonic',return_value=11):self.assertTrue(self.reader.reconcile())
+        def publish(source,destination):
+            request=json.loads(source.read_text('utf-8'));source.replace(destination);self.reply(request)
+        with patch('backend.input_tool.publish_request',side_effect=publish) as sent:
+            self.assertEqual(self.reader.read()['classID'],'typeCreateOrEditTool')
+        self.assertEqual(sent.call_count,1);self.assertFalse(self.reader.path.exists())
+
+    def test_startup_failure_with_existing_unknown_never_schedules_republication(self):
+        original=self.pending();before=self.reader.path.read_bytes()
+        with patch.object(self.reader.transport,'observe',side_effect=RuntimeError('UXP starting')),patch('backend.input_tool.publish_request') as sent:
+            with self.assertRaises(RuntimeError):self.reader.read()
+            self.assertFalse(self.reader.reconcile());sent.assert_not_called()
+        self.assertIsNone(self.reader.retry_after);self.assertEqual(self.reader.path.read_bytes(),before)
+
+    def test_previous_process_heartbeat_is_not_current_readiness(self):
+        identity=[1,2,'1970-01-01 00:00:02+00:00',3]
+        self.heartbeat['session']='1000-previous'
+        with patch('backend.input_tool.publish_request') as sent:
+            with self.assertRaisesRegex(RuntimeError,'当前PS进程'):self.reader.read(identity=identity)
+            sent.assert_not_called()
+        self.assertFalse(self.reader.path.exists());self.assertIsNotNone(self.reader.retry_after)
+        self.heartbeat['session']='3000-current'
+        def publish(source,destination):
+            request=json.loads(source.read_text('utf-8'));source.replace(destination);self.reply(request)
+        with patch('backend.input_tool.publish_request',side_effect=publish):self.reader.read(identity=identity)
+        self.assertFalse(self.reader.path.exists())
+
+    def test_previous_session_pending_remains_unknown_when_ps_restarts(self):
+        self.heartbeat['session']='1000-previous';request=self.pending(session='1000-previous');before=self.reader.path.read_bytes()
+        with patch('backend.input_tool.publish_request') as sent:
+            with self.assertRaisesRegex(RuntimeError,'当前PS进程'):self.reader.read(identity=[1,2,'1970-01-01 00:00:02+00:00',3])
+            sent.assert_not_called()
+        self.assertIsNone(self.reader.retry_after);self.assertEqual(self.reader.path.read_bytes(),before)
+
     def test_failed_publication_archives_before_release_and_never_waits_for_host(self):
         error=PermissionError('sharing');error.winerror=32
         with patch('backend.input_tool.publish_request',side_effect=error):

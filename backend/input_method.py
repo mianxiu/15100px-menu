@@ -167,9 +167,12 @@ class InputMethod(InputLanguage):
         self.report.update(state='legacy-layout-recovery',legacy_pending=bool(legacy.policy.pending))
         return False
 
-    def read_tool(self):
+    def read_tool(self,sample):
         self.report['tool_reads']+=1
-        try:return self.desktop.input_language_tool()
+        try:
+            value=self.desktop.input_language_tool(identity=sample['identity'])
+            self.report.pop('tool_error_type',None)
+            return value
         except Exception as error:self.report['tool_error_type']=type(error).__name__
 
     def run(self):
@@ -216,7 +219,7 @@ class InputMethod(InputLanguage):
                     reconcile=getattr(self.desktop,'input_language_reconcile',None)
                     if needs_tool and context==examined and tool is None and not blocked and reconcile and reconcile():examined=None
                     if needs_tool and context!=examined and not blocked:
-                        examined=context;tool=self.read_tool();sample=self.sample()
+                        examined=context;tool=self.read_tool(sample);sample=self.sample()
                     same=(tuple(sample.get('identity',[])),sample.get('focus'),self.snapshot()[0],sample.get('layout'))==context
                     evidence=tool if same and examined==context else None
                     if sample.get('root'):
@@ -238,7 +241,7 @@ class InputMethod(InputLanguage):
                     if self.policy.owned and not self.policy.pending and not blocked and callable(getattr(self.ime,'renew',None)):
                         self.ime.renew(self.policy.owned,sample)
                     if request:
-                        if request['disable'] and needs_tool and self.read_tool()!=tool:
+                        if request['disable'] and needs_tool and self.read_tool(sample)!=tool:
                             self.policy.pending=None;self.policy.attempted=None;examined=None;continue
                         fresh=self.ime.read(self.sample()) if request['disable'] else self.ime.observe_owned(request)
                         valid=(ime_target(fresh)==ime_target(request) and fresh.get('focus')==request['focus'] and fresh.get('ime_open')==sample.get('ime_open'))
@@ -270,6 +273,7 @@ class InputMethod(InputLanguage):
                     if old_context and not self.policy.owned and not self.policy.pending:
                         self.ime=NativeImeContext(self.user);self.context_schema=2;old_context=False;examined=None
                         self.report['mechanism']='ps-thread-context-association'
+                    self.report.pop('error_type',None);self.report.pop('native_error_code',None)
                 except Exception as error:self.report.update(state='unknown',error_type=type(error).__name__,native_error_code=getattr(error,'winerror',None))
         finally:
             if self.ime and (self.policy.owned or self.policy.pending):
