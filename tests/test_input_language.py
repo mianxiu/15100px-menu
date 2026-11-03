@@ -337,11 +337,11 @@ class LanguageWorkerTests(unittest.TestCase):
 
 
 class LanguageSamplingTests(unittest.TestCase):
-    def sample(self,pair=list,foreign=None,caret=False):
+    def sample(self,pair=list,foreign=None,caret=False,caret_visible=True):
         controller=InputLanguage(SimpleNamespace(visible=False))
         controller.accessibility=SimpleNamespace(read=Mock(return_value=FocusAccessibilityTests().row(50033)))
         def gui_info(thread,pointer):
-            pointer._obj.focus=10;pointer._obj.caret=10 if caret else 0
+            pointer._obj.focus=10;pointer._obj.caret=10 if caret else 0;pointer._obj.flags=int(caret and caret_visible)
             return True
         controller.user=SimpleNamespace(GetGUIThreadInfo=gui_info,GetKeyboardLayout=lambda thread:0x8040804)
         handle=SimpleNamespace(Close=lambda:None)
@@ -370,4 +370,8 @@ class LanguageSamplingTests(unittest.TestCase):
 
     def test_native_caret_protects_input_before_any_accessibility_query(self):
         value,reader=self.sample(caret=True)
+        self.assertEqual(value['state'],'input');reader.assert_not_called()
+
+    def test_hidden_caret_remains_input_and_does_not_query_accessibility(self):
+        value,reader=self.sample(caret=True,caret_visible=False)
         self.assertEqual(value['state'],'input');reader.assert_not_called()

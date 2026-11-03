@@ -173,7 +173,8 @@ class InputLanguage:
         name=gui.GetClassName(focus) if focus and gui.IsWindow(focus) else ''
         state='input' if info.caret or name in ('Edit','RichEdit20W','RichEdit50W','ComboBox') else 'unknown'
         row={}
-        if state=='unknown' and self.accessibility is not None and not self.busy() and not self.desktop.visible:
+        input_panel=self.desktop.visible and (getattr(self.desktop,'color_editor_active',False) or getattr(self.desktop,'menu_tools_active',False))
+        if state=='unknown' and self.accessibility is not None and not self.busy() and not input_panel:
             try:
                 row=self.accessibility.read()
                 self.report.pop('uia_error_type',None)

@@ -236,9 +236,14 @@ class Desktop:
             return 0
         guard=self.preview_input_guard
         guarded=guard and not guard.get('release')
+        reader=getattr(getattr(self,'input_language',None),'shortcut_context',None)
+        search=reader() if callable(reader) else {}
         value={"enabled": self.settings["enabled"],
-            "text_input": bool(self.panel_context and (self.panel_context.current['kind'] == 'text' or self.panel_context.current.get('input_focused'))),
+            "text_input": bool(self.panel_context and (self.panel_context.current['kind'] == 'text' or self.panel_context.current.get('input_focused')) or
+                               callable(reader) and (search.get('state')=='input' or not self.visible and search.get('state')!='non-input')),
             "color_editor": bool(self.visible and (getattr(self,'color_editor_active',False) or getattr(self,'menu_tools_active',False))),
+            "search_non_input":search.get('state')=='non-input',
+            "search_root":search.get('root',0),"search_focus":search.get('focus',0),"search_tick":search.get('tick',0),
             "diagnostic_trace": bool(getattr(self,"diagnostic_trace",False)),
             "remote_compatibility": self.settings.get("remote_compatibility",False),
             "right_click_open": False,
@@ -353,6 +358,8 @@ class Desktop:
                     if self.input_language:self.input_language.protect()
                 elif event.get('type') == 'input.language.activity':
                     if self.input_language:self.input_language.activity()
+                elif event.get('type') == 'input.language.edit_end':
+                    if self.input_language:self.input_language.edit_end()
                 elif event.get("type") == "action":
                     logging.info('Native hook action: %s cursor=%s', event['action'], event.get('cursor'))
                     self.notify({'action':event['action'],'cursor':event['cursor']} if 'cursor' in event else event['action'])
@@ -603,6 +610,8 @@ class Desktop:
             if epoch is not None and (not self.visible or self.menu_epoch != epoch):
                 raise RuntimeError('菜单已关闭或重新打开')
             self.require_action_focus()
+            if mode=='search' and self.input_language and self.input_language.shortcut_context()['state']!='non-input':
+                raise RuntimeError('输入状态尚未确认可使用F，请先退出文字编辑')
             if getattr(self,'mask_preview',None):raise RuntimeError('请先完成颜色或羽化调整')
             if not self.visible:self.open(hold=True,keyboard_anchor=True)
             if mode=='split':

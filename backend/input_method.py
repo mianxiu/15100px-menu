@@ -108,10 +108,28 @@ class InputMethod(InputLanguage):
         super().__init__(desktop)
         self.policy=ImePolicy();self.legacy=None;self.legacy_saved=None;self.ime=None
         self.context_schema=1
+        self.shortcut_sample=None
+        self.edit_refresh_until=0
         self.report={'state':'unknown','scope':'photoshop-temporary-ime','layout_requests':0,
                      'disable_requests':0,'restore_requests':0}
 
     def saved(self):return {'schema':self.context_schema,'owned':self.policy.owned,'pending':self.policy.pending}
+
+    def click(self,hwnd,root):
+        super().click(hwnd,root)
+        with self.lock:self.edit_refresh_until=time.monotonic()+2
+        self.wake.set()
+
+    def edit_end(self):
+        self.activity()
+        with self.lock:self.edit_refresh_until=time.monotonic()+2
+        self.report['edit_end_events']=self.report.get('edit_end_events',0)+1
+        self.wake.set()
+
+    def shortcut_context(self):
+        with self.lock:
+            if self.shortcut_sample and self.shortcut_sample[0]==self.serial:return dict(self.shortcut_sample[1])
+        return {'state':'unknown','root':0,'focus':0,'tick':0}
 
     def load(self,path):
         if not path.exists():return
@@ -182,6 +200,7 @@ class InputMethod(InputLanguage):
         self.user.GetKeyboardLayout.argtypes=[W.DWORD];self.user.GetKeyboardLayout.restype=W.HANDLE
         self.user.GetKeyboardLayoutList.argtypes=[ctypes.c_int,ctypes.POINTER(W.HANDLE)]
         self.user.PostMessageW.argtypes=[W.HWND,W.UINT,W.WPARAM,W.LPARAM]
+        native_tick=ctypes.WinDLL('kernel32',use_last_error=True).GetTickCount64;native_tick.restype=ctypes.c_ulonglong
         path=self.desktop.runtime/'input-method-owned.json';persisted=None
         try:
             self.ime=ImeContext(self.user)
@@ -206,36 +225,40 @@ class InputMethod(InputLanguage):
                 self.wake.wait(.05);self.wake.clear()
                 if self.desktop.stop.is_set():break
                 try:
-                    serial,epoch,protected,_=self.snapshot();sample=self.sample()
+                    serial,epoch,protected,_=self.snapshot();observed_tick=int(native_tick());sample=self.sample()
                     if not self.legacy_step(sample):continue
                     if self.policy.owned and not self.policy.pending and process_exited(self.policy.owned['identity']):self.retire(path,'original-process-exited')
                     scope=tuple(sample.get('identity',[]))
                     mouse=bool(self.user.GetAsyncKeyState(1)&0x8000)
-                    blocked=mouse or sample.get('blocked') or self.desktop.visible or self.busy() or not self.desktop.settings['enabled'] or old_context
-                    if sample.get('root') and not blocked and 'uia_error_type' in self.report and time.monotonic()>=next_uia_check:
+                    input_panel=self.desktop.visible and (getattr(self.desktop,'color_editor_active',False) or getattr(self.desktop,'menu_tools_active',False))
+                    evidence_blocked=mouse or sample.get('blocked') or input_panel or self.busy() or not self.desktop.settings['enabled'] or old_context
+                    blocked=evidence_blocked or self.desktop.visible
+                    if sample.get('root') and not evidence_blocked and 'uia_error_type' in self.report and time.monotonic()>=next_uia_check:
                         try:
                             self.accessibility=FocusAccessibility();self.report['uia_available']=True
                             self.report['uia_reconnects']=self.report.get('uia_reconnects',0)+1
                         except Exception as error:self.report['uia_error_type']=type(error).__name__
                         next_uia_check=time.monotonic()+1
                     if bool(blocked)!=blocked_before:episode+=1;blocked_before=bool(blocked)
-                    if blocked:examined=None;tool=None
+                    if evidence_blocked:examined=None;tool=None
                     row=sample.get('accessibility',{});context=(scope,sample.get('focus'),serial,sample.get('layout'))
                     if context!=context_before:episode+=1;context_before=context;examined=None;tool=None
                     needs_tool=(sample.get('workspace') and sample.get('state')=='unknown' and control_state(row,sample.get('pid'))!='input' and
                                 (row.get(30003) in CONTAINERS or protected or self.accessibility is None))
                     if not needs_tool:examined=None;tool=None
                     if (needs_tool and tool is not None and not self.policy.owned and not self.policy.pending and
-                            time.monotonic()>=next_tool_check):examined=None
+                            (time.monotonic()>=next_tool_check or isinstance(tool,dict) and tool.get('isModal') is True and time.monotonic()<self.edit_refresh_until)):examined=None
                     reconcile=getattr(self.desktop,'input_language_reconcile',None)
-                    if needs_tool and context==examined and tool is None and not blocked and reconcile and reconcile():examined=None
-                    if needs_tool and context!=examined and not blocked:
+                    if needs_tool and context==examined and tool is None and not evidence_blocked and reconcile and reconcile():examined=None
+                    if needs_tool and context!=examined and not evidence_blocked:
                         examined=context;tool=self.read_tool(sample);next_tool_check=time.monotonic()+1;sample=self.sample()
                     same=(tuple(sample.get('identity',[])),sample.get('focus'),self.snapshot()[0],sample.get('layout'))==context
                     evidence=tool if same and examined==context else None
+                    shortcut_state='unknown'
                     if sample.get('root'):
                         protected=protected and not (isinstance(evidence,dict) and evidence.get('isModal') is False)
-                        sample['state']='input' if protected else self.focus_state(sample,evidence)
+                        shortcut_state='input' if protected else self.focus_state(sample,evidence)
+                        sample['state']=shortcut_state
                         if blocked:sample['state']='unknown'
                         sample=self.ime.read(sample)
                     elif self.policy.owned or self.policy.pending:
@@ -243,6 +266,7 @@ class InputMethod(InputLanguage):
                     revision=(scope,sample.get('ime'),sample.get('context_nonce'),sample.get('context_revision'))
                     if revision_before is not None and revision[:3]==revision_before[:3] and revision[3]!=revision_before[3]:
                         examined=None;tool=None
+                        shortcut_state='unknown'
                         if scope and sample.get('state')!='outside':sample['state']='unknown'
                     revision_before=revision
                     if (self.policy.owned and not self.policy.pending and sample.get('identity')==self.policy.owned['identity'] and
@@ -260,7 +284,8 @@ class InputMethod(InputLanguage):
                     if recovering and eligible and not self.policy.pending and not self.policy.owned:
                         candidate=(context,row.get(30003),row.get(30020),revision,tool)
                         if candidate!=stable:stable=candidate;stable_at=now
-                        eligible=now>=recovery_after and now-stable_at>=.2
+                        edit_ready=now<self.edit_refresh_until and isinstance(tool,dict) and tool.get('isModal') is False
+                        eligible=edit_ready or now>=recovery_after and now-stable_at>=.2
                         if eligible:
                             episode+=1;recovering=False;stable=None
                             self.report['recovery_revalidations']=self.report.get('recovery_revalidations',0)+1
@@ -280,7 +305,8 @@ class InputMethod(InputLanguage):
                                        not fresh.get('blocked') and self.focus_state(fresh,tool)=='non-input' and
                                        not any(self.user.GetAsyncKeyState(k)&0x8000 for k in range(1,256)))
                         if valid:
-                            atomic_json(path,self.saved());acknowledged=self.ime.send(request)
+                            atomic_json(path,self.saved());persisted=json.loads(json.dumps(self.saved()))
+                            acknowledged=self.ime.send(request)
                             if self.context_schema==2 and acknowledged:
                                 if acknowledged.get('rejected'):
                                     key=hashlib.sha256(json.dumps(request,sort_keys=True).encode()).hexdigest()
@@ -300,15 +326,22 @@ class InputMethod(InputLanguage):
                         ime_open=sample.get('ime_open'),keyboard_layout=sample.get('layout'),focus_class=sample.get('class'),
                         tsf_disabled=sample.get('tsf_disabled'),
                         native_events=sample.get('native_events'),context_revision=sample.get('context_revision'),
-                        tool=tool.get('classID') if isinstance(tool,dict) else None)
+                        tool=tool.get('classID') if isinstance(tool,dict) else None,tool_modal=tool.get('isModal') if isinstance(tool,dict) else None)
                     saved=self.saved()
                     if saved!=persisted:atomic_json(path,saved);persisted=json.loads(json.dumps(saved))
                     if old_context and not self.policy.owned and not self.policy.pending:
                         self.ime=NativeImeContext(self.user);self.context_schema=2;old_context=False;examined=None
                         self.report['mechanism']='ps-thread-context-association'
+                    with self.lock:
+                        state=shortcut_state if same and not evidence_blocked and not self.policy.pending else 'unknown'
+                        self.shortcut_sample=(serial,{'state':state,'root':sample.get('root',0),'focus':sample.get('focus',0),'tick':observed_tick})
+                        self.report['shortcut_state']=state
                     self.report.pop('error_type',None);self.report.pop('native_error_code',None)
-                except Exception as error:self.report.update(state='unknown',error_type=type(error).__name__,native_error_code=getattr(error,'winerror',None))
+                except Exception as error:
+                    with self.lock:self.shortcut_sample=None
+                    self.report.update(state='unknown',shortcut_state='unknown',error_type=type(error).__name__,native_error_code=getattr(error,'winerror',None))
         finally:
+            with self.lock:self.shortcut_sample=None
             if self.ime and (self.policy.owned or self.policy.pending):
                 try:
                     sample=self.ime.observe_owned(self.policy.pending or self.policy.owned)

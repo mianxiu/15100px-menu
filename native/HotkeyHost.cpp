@@ -14,10 +14,10 @@
 #include <vector>
 #include "ScreenSample.h"
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers, LanguageProtect, LanguageActivity };
-static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search", "input.language.protect", "input.language.activity"};
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers, LanguageProtect, LanguageActivity, LanguageEditEnd };
+static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search", "input.language.protect", "input.language.activity", "input.language.edit_end"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr; ULONGLONG sequence=0; std::array<Binding,16> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false,searchAllowed=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr,searchRoot=nullptr,searchFocus=nullptr; ULONGLONG sequence=0,searchTick=0; std::array<Binding,16> bindings{}; };
 // Opt-in remote clicks qualify only on a matching release in the same verified
 // PS workspace. No hover, taskbar or injected Alt+Tab activation is added.
 struct RemoteClickIntent {
@@ -86,7 +86,8 @@ struct KeyMachine {
                 if (b.keys[i]==VK_CAPITAL) {consumed[key]=true;return true;}
             return false;
         }
-        if(key=='F' && !modified() && !held[VK_CAPITAL] && !cfg.textInput && !(cfg.colorEditor && visible)) {
+        if(key=='F' && !modified() && !held[VK_CAPITAL]) {
+            if(!cfg.searchAllowed || cfg.textInput || (cfg.colorEditor && visible))return false;
             consumed[key]=true;action=SearchLayers;return true;
         }
         const Binding* match=nullptr;
@@ -165,6 +166,7 @@ static std::atomic<bool> closing{false};
 static DWORD hookThread;
 static HANDLE available;
 static ULONGLONG lastInputTick=0,lastScanUs=0;
+static ULONGLONG lastEditorIntentTick=0;
 struct ActivationGate {
     bool active=false,allowed=false,switching=false,taskbarSwitching=false,directSwitching=false;
     ULONGLONG clicked=0;
@@ -422,8 +424,31 @@ static bool languageActivityKey(int key,const KeyMachine& state) {
         !state.held[VK_CONTROL] && !state.held[VK_MENU] && !state.held[VK_CAPITAL] &&
         !state.held[VK_LWIN] && !state.held[VK_RWIN];
 }
+static bool languageEditEndKey(int key,const KeyMachine& state) {
+    return (key==VK_ESCAPE || (key==VK_RETURN && state.held[VK_CONTROL])) && !state.held[VK_MENU] &&
+        !state.held[VK_CAPITAL] && !state.held[VK_LWIN] && !state.held[VK_RWIN];
+}
+static bool languageEditEndEvent(int key,bool down,const KeyMachine& state,int& pending) {
+    if(down && languageEditEndKey(key,state)){pending=key;return true;}
+    if(!down && key==pending){pending=0;return true;}
+    return false;
+}
 static void CALLBACK languageFocusEvent(HWINEVENTHOOK,DWORD,HWND hwnd,LONG,LONG,DWORD,DWORD) {
-    if(hwnd && photoshopProcessWindow(hwnd))emit(LanguageActivity);
+    if(hwnd && photoshopProcessWindow(hwnd)){lastEditorIntentTick=GetTickCount64();emit(LanguageActivity);}
+}
+static bool freshSearchProof(const Config& cfg,HWND root,HWND focus,ULONGLONG now,ULONGLONG intent) {
+    return cfg.searchAllowed && root && focus && root==cfg.searchRoot && focus==cfg.searchFocus &&
+        cfg.searchTick>intent && cfg.searchTick<=now && now-cfg.searchTick<=1000;
+}
+static bool searchInputAllowed(const Config& cfg,HWND foreground,ULONGLONG now) {
+    if(cfg.textInput || cfg.colorEditor)return false;
+    const auto thread=GetWindowThreadProcessId(foreground,nullptr);
+    GUITHREADINFO info{};info.cbSize=sizeof(info);
+    if(!thread || !GetGUIThreadInfo(thread,&info) || !info.hwndFocus || info.hwndCapture || info.hwndMenuOwner || info.hwndMoveSize ||
+       info.hwndCaret)return false;
+    wchar_t name[32]{};GetClassNameW(info.hwndFocus,name,32);
+    if(wcscmp(name,L"Edit")==0 || wcscmp(name,L"RichEdit20W")==0 || wcscmp(name,L"RichEdit50W")==0 || wcscmp(name,L"ComboBox")==0)return false;
+    return freshSearchProof(cfg,GetAncestor(foreground,GA_ROOTOWNER),info.hwndFocus,now,lastEditorIntentTick);
 }
 static bool routeKey(KeyMachine& state,int raw,bool down,bool commandScope,bool processScope,
                      const Config& cfg,bool visible,Action& action,ULONGLONG now) {
@@ -474,13 +499,18 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
         }
         Config localConfig=config;
         localConfig.colorEditor=config.colorEditor && menuWindow(foreground);
+        if(input.vkCode=='F' && !repeat && (message==WM_KEYDOWN || message==WM_SYSKEYDOWN) && commandScope)
+            localConfig.searchAllowed=searchInputAllowed(config,foreground,lastInputTick);
         bool unusedPrefix=keys.pending!=-1 && !keys.used;
         bool blocked=routeKey(keys,input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
                      commandScope,processScope,localConfig,IsWindowVisible(config.overlay),action,GetTickCount64());
-        if(processScope && !blocked && !repeat && !(input.flags&LLKHF_INJECTED) &&
-            (message==WM_KEYDOWN || message==WM_SYSKEYDOWN)) {
-            if(textLanguageIntent(input.vkCode,keys))emit(LanguageProtect);
-            else if(languageActivityKey(input.vkCode,keys))emit(LanguageActivity);
+        static int pendingEditEnd=0;
+        const bool down=message==WM_KEYDOWN || message==WM_SYSKEYDOWN;
+        if(!processScope)pendingEditEnd=0;
+        if(processScope && !blocked && (!down || !repeat) && !(input.flags&LLKHF_INJECTED)) {
+            if(languageEditEndEvent(input.vkCode,down,keys,pendingEditEnd)){lastEditorIntentTick=lastInputTick;emit(LanguageEditEnd);}
+            else if(down && textLanguageIntent(input.vkCode,keys)){lastEditorIntentTick=lastInputTick;emit(LanguageProtect);}
+            else if(down && languageActivityKey(input.vkCode,keys)){lastEditorIntentTick=lastInputTick;emit(LanguageActivity);}
         }
         bool traceConfigured=false;
         if(config.diagnostic && GetTickCount64()<diagnosticUntil) for(const auto& b:config.bindings)
@@ -563,6 +593,7 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
         if (up && previewPointer(index,true,false))return 1;
         if (index>=0 && !up) {
             POINT point=reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->pt;
+            if(photoshopProcessWindow(WindowFromPoint(point)))lastEditorIntentTick=lastInputTick;
             if(previewPointer(index,false,previewGuardWindow(WindowFromPoint(point))))return 1;
             if (index==0 && !(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->flags&LLMHF_INJECTED)) {
                 HWND clicked=WindowFromPoint(point);
@@ -620,6 +651,10 @@ static Config parse(const std::string& line) {
     };
     next.enabled=field("enabled","(true|false)")=="true";
     if (std::regex_search(line,match,std::regex("\"text_input\"\\s*:\\s*(true|false)"))) next.textInput=match[1]=="true";
+    if (std::regex_search(line,match,std::regex("\"search_non_input\"\\s*:\\s*(true|false)"))) next.searchAllowed=match[1]=="true";
+    if (std::regex_search(line,match,std::regex("\"search_root\"\\s*:\\s*([0-9]+)"))) next.searchRoot=reinterpret_cast<HWND>(std::stoull(match[1]));
+    if (std::regex_search(line,match,std::regex("\"search_focus\"\\s*:\\s*([0-9]+)"))) next.searchFocus=reinterpret_cast<HWND>(std::stoull(match[1]));
+    if (std::regex_search(line,match,std::regex("\"search_tick\"\\s*:\\s*([0-9]+)"))) next.searchTick=std::stoull(match[1]);
     if (std::regex_search(line,match,std::regex("\"color_editor\"\\s*:\\s*(true|false)"))) next.colorEditor=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"diagnostic_trace\"\\s*:\\s*(true|false)"))) next.diagnostic=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"remote_compatibility\"\\s*:\\s*(true|false)"))) next.remoteCompatibility=match[1]=="true";
@@ -740,6 +775,7 @@ static void writeActions() {
             }
             if (action==LanguageProtect) line="{\"type\":\"input.language.protect\"}\n";
             else if (action==LanguageActivity) line="{\"type\":\"input.language.activity\"}\n";
+            else if (action==LanguageEditEnd) line="{\"type\":\"input.language.edit_end\"}\n";
             else if (action==PanelClick) line="{\"type\":\"panel.click\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+"}\n";
             else {
                 line=std::string("{\"type\":\"")+type+"\",\"action\":\""+names[action]+"\"";
@@ -804,6 +840,15 @@ static int selfTest() {
     KeyMachine languageKeys;
     check(textLanguageIntent('T',languageKeys) && !textLanguageIntent(VK_F2,languageKeys) && !textLanguageIntent('A',languageKeys));
     check(languageActivityKey('A',languageKeys) && languageActivityKey('V',languageKeys) && languageActivityKey(VK_ESCAPE,languageKeys) && !languageActivityKey(VK_SHIFT,languageKeys));
+    check(languageEditEndKey(VK_ESCAPE,languageKeys) && !languageEditEndKey(VK_RETURN,languageKeys));
+    languageKeys.held[VK_CONTROL]=true;check(languageEditEndKey(VK_RETURN,languageKeys) && !languageActivityKey(VK_RETURN,languageKeys));
+    languageKeys.held[VK_MENU]=true;check(!languageEditEndKey(VK_RETURN,languageKeys));languageKeys.held[VK_MENU]=false;languageKeys.held[VK_CONTROL]=false;
+    int pendingEdit=0;languageKeys.held[VK_CONTROL]=true;
+    check(languageEditEndEvent(VK_RETURN,true,languageKeys,pendingEdit));
+    languageKeys.held[VK_CONTROL]=false;
+    check(!languageEditEndEvent(VK_CONTROL,false,languageKeys,pendingEdit));
+    check(languageEditEndEvent(VK_RETURN,false,languageKeys,pendingEdit) && pendingEdit==0);
+    check(!languageEditEndEvent(VK_RETURN,false,languageKeys,pendingEdit));
     for(int modifier:{VK_CONTROL,VK_MENU,VK_CAPITAL,VK_LWIN,VK_RWIN}) {
         languageKeys.held[modifier]=true;check(!textLanguageIntent('T',languageKeys));languageKeys.held[modifier]=false;
         languageKeys.held[modifier]=true;check(!languageActivityKey('A',languageKeys));languageKeys.held[modifier]=false;
@@ -860,7 +905,7 @@ static int selfTest() {
         check(!routeKey(state,VK_F5,true,false,true,c,false,a,1050) && a==None);
     }
     {
-        Config c;c.bindings[0]={Toggle,{VK_CAPITAL},1};c.bindings[1]={EditStyle,{VK_CAPITAL,'F'},2};Action action;
+        Config c;c.searchAllowed=true;c.bindings[0]={Toggle,{VK_CAPITAL},1};c.bindings[1]={EditStyle,{VK_CAPITAL,'F'},2};Action action;
         KeyMachine f;
         check(f.event('F',true,true,c,false,action) && action==SearchLayers);
         check(f.event('F',true,true,c,false,action) && action==None);
@@ -881,6 +926,16 @@ static int selfTest() {
         check(chord.event('F',true,true,c,false,action) && action==EditStyle);
         check(chord.event('F',false,true,c,false,action));
         check(chord.event(VK_CAPITAL,false,true,c,false,action) && action==HoldCancel);
+        c.searchAllowed=false;KeyMachine unverified;
+        check(!unverified.event('F',true,true,c,false,action) && action==None);
+        check(!unverified.event('F',false,true,c,false,action));
+        c.searchAllowed=true;c.searchRoot=reinterpret_cast<HWND>(10);c.searchFocus=reinterpret_cast<HWND>(11);c.searchTick=100;
+        check(freshSearchProof(c,c.searchRoot,c.searchFocus,100,99));
+        check(!freshSearchProof(c,c.searchRoot,c.searchFocus,100,100));
+        check(!freshSearchProof(c,c.searchRoot,c.searchFocus,99,98));
+        check(!freshSearchProof(c,c.searchRoot,c.searchFocus,1101,99));
+        check(!freshSearchProof(c,reinterpret_cast<HWND>(12),c.searchFocus,100,99));
+        check(!freshSearchProof(c,c.searchRoot,reinterpret_cast<HWND>(12),100,99));
     }
     // Complete remote click pairs only: opt-in, same valid workspace and 2s.
     RemoteClickIntent remote;
@@ -977,7 +1032,7 @@ static int selfTest() {
         check(renewalAllowed(last+250,last,false,false,false));
     }
     for (const auto pair:std::array<std::pair<int,Action>,5>{{{67,CopyStyle},{86,PasteStyle},{70,EditStyle},{87,SelectAbove},{83,SelectBelow}}}) {
-        Config ref;ref.bindings[0]={Toggle,{20},1};ref.bindings[1]={pair.second,{20,pair.first},2};
+        Config ref;ref.searchAllowed=true;ref.bindings[0]={Toggle,{20},1};ref.bindings[1]={pair.second,{20,pair.first},2};
         for(bool pinned:{false,true}) {
             KeyMachine machine;Action result;
             if(!pinned)check(machine.event(20,true,true,ref,false,result,1000) && result==HoldBegin);
@@ -1147,6 +1202,31 @@ static int selfTest() {
     std::cout<<"Native hotkey self-test passed: 10000 CapsLock and Tab pairs, repeat, scope, modifiers, combinations\n";
     return 0;
 }
+static int searchInputSelfTest() {
+    HWND window=CreateWindowExW(0,L"STATIC",L"Search input protection test",WS_OVERLAPPEDWINDOW,0,0,240,140,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    check(window!=nullptr);
+    try {
+        HWND focus=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE,0,0,40,40,window,nullptr,nullptr,nullptr);
+        HWND edit=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|WS_VISIBLE,50,0,120,24,window,nullptr,nullptr,nullptr);
+        check(focus && edit);ShowWindow(window,SW_SHOW);SetForegroundWindow(window);SetFocus(focus);check(GetForegroundWindow()==window);
+        Config cfg;cfg.searchAllowed=true;cfg.searchRoot=window;cfg.searchFocus=focus;cfg.searchTick=GetTickCount64();lastEditorIntentTick=0;
+        const auto route=[&](){
+            Config local=cfg;local.searchAllowed=searchInputAllowed(cfg,window,GetTickCount64());
+            KeyMachine machine;Action action;const bool blocked=routeKey(machine,'F',true,true,true,local,false,action,GetTickCount64());
+            check(machine.event('F',false,true,local,false,action)==blocked);return blocked;
+        };
+        check(route());
+        check(CreateCaret(focus,nullptr,1,14)!=0 && ShowCaret(focus)!=0);check(!route());
+        HideCaret(focus);cfg.searchAllowed=false;check(!route());
+        cfg.searchAllowed=true;check(!route());DestroyCaret();check(route());
+        lastEditorIntentTick=GetTickCount64();check(!route());
+        Sleep(20);cfg.searchTick=GetTickCount64();check(route());
+        SetFocus(edit);cfg.searchFocus=edit;cfg.searchTick=GetTickCount64();check(!route());
+        SetFocus(focus);cfg.searchFocus=edit;check(!route());
+        cfg.searchFocus=focus;cfg.searchTick=GetTickCount64()-1001;check(!route());
+        DestroyWindow(window);std::cout<<"Search input self-test passed: real visible/hidden caret, native Edit, stale focus, input intent, expiry and paired F release\n";return 0;
+    } catch(...) {DestroyCaret();DestroyWindow(window);throw;}
+}
 static bool renewHooks(HHOOK& keyHook,HHOOK& mouseHook) {
     // Install replacements first. Preserve KeyMachine and mouseConsumed so a
     // held press keeps its original suppression decision through renewal.
@@ -1182,6 +1262,7 @@ int main(int argc,char** argv) {
         std::cout<<(photoshopProcessWindow(hwnd)?"true":"false")<<"\n";return 0;
     }
     if (argc==2 && std::string(argv[1])=="--self-test") return selfTest();
+    if (argc==2 && std::string(argv[1])=="--self-test-search-input") return searchInputSelfTest();
     if(argc==4 && std::string(argv[1])=="--inspect-preview-guard") {
         refreshPhotoshopProcesses();config.guardOwner=reinterpret_cast<HWND>(std::stoull(argv[2]));config.guardPanel=reinterpret_cast<HWND>(std::stoull(argv[3]));
         std::cout<<(previewGuardWindow(config.guardPanel)?"true":"false")<<"\n";
@@ -1323,9 +1404,11 @@ int main(int argc,char** argv) {
             sampleCapsState(true);
         } else if (message.message==WM_APP) {
             std::unique_ptr<Config> next(reinterpret_cast<Config*>(message.lParam));
+            const bool beginDiagnostic=next->diagnostic && !config.diagnostic;
             if(!next->enabled || !next->remoteCompatibility)remoteClick.workspace=0;
             config=*next;
-            diagnosticUntil=config.diagnostic?GetTickCount64()+35000:0;
+            if(beginDiagnostic)diagnosticUntil=GetTickCount64()+35000;
+            else if(!config.diagnostic)diagnosticUntil=0;
             if (!IsWindowVisible(config.overlay)) dismissPending=false;
             emit(Configured);
         } else if (message.message==WM_APP+1) emit(Error);

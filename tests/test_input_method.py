@@ -155,7 +155,7 @@ class ImeWorkerTests(unittest.TestCase):
             if reject_once and len(self.posts)==1:return {'rejected':True}
             if acknowledge:self.opened=value['wanted']
         def layouts(count,values):values[0]=0x8040804;values[1]=0x4090409;return 2
-        self.user=SimpleNamespace(GetKeyboardLayout=Mock(return_value=0x8040804),GetKeyboardLayoutList=Mock(side_effect=layouts),PostMessageW=Mock(),GetAsyncKeyState=Mock(return_value=0))
+        self.user=SimpleNamespace(GetKeyboardLayout=Mock(return_value=0x8040804),GetKeyboardLayoutList=Mock(side_effect=layouts),PostMessageW=Mock(),GetAsyncKeyState=Mock(return_value=0),GetTickCount64=Mock(side_effect=lambda:int(time.monotonic()*1000)))
         for p in (patch('backend.input_method.ctypes.WinDLL',return_value=self.user),patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=owned)),patch('backend.input_method.NativeImeContext',return_value=SimpleNamespace(read=lambda value:{**read(value),'context_nonce':123},send=send,observe_owned=lambda value:{**owned(value),'context_nonce':123})),patch('backend.input_method.FocusAccessibility',return_value=object()),patch('backend.input_method.process_exited',return_value=False)):
             p.start();self.addCleanup(p.stop)
         self.c.thread.start()
@@ -341,6 +341,71 @@ class ImeWorkerTests(unittest.TestCase):
         self.c.ime.read=race;self.kind=50033;self.c.wake.set()
         self.wait(changed.is_set);self.wait(lambda:self.c.report.get('state')=='input')
         self.assertEqual(self.posts,[0,1]);self.assertIsNone(self.c.policy.pending)
+
+    def test_canvas_editing_protects_search_then_edit_exit_rearms_ime(self):
+        provider=Mock(return_value={'classID':'typeCreateOrEditTool','isModal':True})
+        self.start(tool=provider)
+        self.wait(lambda:self.c.report.get('state')=='input')
+        self.wait(lambda:self.c.shortcut_context()['state']=='input')
+        self.assertEqual(self.c.shortcut_context()['state'],'input');self.assertEqual(self.posts,[])
+        provider.return_value={'classID':'typeCreateOrEditTool','isModal':False}
+        self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.wait(lambda:self.c.shortcut_context()['state']=='non-input')
+        proof=self.c.shortcut_context();self.assertEqual((proof['root'],proof['focus']),(1,10));self.assertGreater(proof['tick'],0)
+        self.c.protect();self.assertEqual(self.c.shortcut_context()['state'],'unknown')
+        self.assertEqual(self.c.report['layout_requests'],0)
+
+    def test_commit_and_mouse_exit_recheck_a_still_modal_first_reply(self):
+        modal={'classID':'typeCreateOrEditTool','isModal':True}
+        idle={'classID':'typeCreateOrEditTool','isModal':False}
+        provider=Mock(return_value=modal)
+        self.start(tool=provider);self.wait(lambda:self.c.report.get('state')=='input')
+        provider.side_effect=[modal,idle,idle];started=time.monotonic();self.c.edit_end()
+        self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.assertLess(time.monotonic()-started,.9,'Commit must not wait for the one-second modal cache')
+        provider.side_effect=None;provider.return_value=modal;self.c.protect()
+        self.wait(lambda:self.c.policy.confirmed_restores==1)
+        provider.side_effect=[modal,idle,idle];started=time.monotonic();self.c.click(10,1)
+        self.wait(lambda:self.c.policy.confirmed_disables==2)
+        self.assertLess(time.monotonic()-started,.9)
+        self.assertEqual(self.posts,[0,1,0])
+
+    def test_commit_with_transient_unknown_uses_fresh_idle_proof_without_fault_delay(self):
+        provider=Mock(return_value={'classID':'typeCreateOrEditTool','isModal':True})
+        self.start(tool=provider);self.wait(lambda:self.c.report.get('state')=='input')
+        self.kind=None;self.c.edit_end();self.wait(lambda:self.c.report.get('state')=='unknown')
+        self.assertEqual(self.posts,[])
+        provider.return_value={'classID':'typeCreateOrEditTool','isModal':False};self.kind=50033;started=time.monotonic();self.c.wake.set()
+        self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.assertLess(time.monotonic()-started,.9)
+
+    def test_plain_menu_keeps_search_proof_but_tool_editor_does_not(self):
+        self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.desktop.visible=True;self.c.wake.set();self.wait(lambda:self.c.policy.confirmed_restores==1)
+        self.wait(lambda:self.c.shortcut_context()['state']=='non-input')
+        self.desktop.menu_tools_active=True;self.c.wake.set()
+        self.wait(lambda:self.c.shortcut_context()['state']=='unknown')
+        self.assertIsNone(self.c.policy.owned)
+
+    def test_slow_modal_reply_cannot_expire_commit_revalidation(self):
+        modal={'classID':'typeCreateOrEditTool','isModal':True}
+        idle={'classID':'typeCreateOrEditTool','isModal':False}
+        provider=Mock(return_value=modal)
+        self.start(tool=provider);self.wait(lambda:self.c.report.get('state')=='input')
+        def slow():
+            time.sleep(.6);return modal
+        replies=iter([slow,lambda:idle,lambda:idle])
+        provider.side_effect=lambda **_:next(replies)()
+        started=time.monotonic();self.c.edit_end()
+        self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.assertLess(time.monotonic()-started,1,'Do not add the one-second modal cache after a slow reply')
+
+    def test_immediate_rejection_persists_cleared_pending_even_when_state_returns_to_empty(self):
+        self.start(reject_once=True)
+        self.wait(lambda:self.c.report.get('state')=='request-rejected')
+        path=self.desktop.runtime/'input-method-owned.json'
+        self.wait(lambda:json.loads(path.read_text('utf-8'))['pending'] is None)
+        self.assertIsNone(json.loads(path.read_text('utf-8'))['owned'])
 
     def test_nonactivating_caps_close_and_known_busy_end_rearm_without_a_keystroke(self):
         self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
