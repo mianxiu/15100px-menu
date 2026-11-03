@@ -1,4 +1,7 @@
 """Read focused control metadata only; never read text, values or UIA names."""
+import threading
+
+_initialization=threading.Lock()
 PROPERTIES=(30002,30003,30008,30010,30020,30022,30033,30040,30043,30046,30048)
 NON_INPUT=frozenset({50000,50001,50002,50005,50006,50007,50008,50009,50010,
                     50011,50012,50013,50014,50017,50018,50019,50020,50021,
@@ -33,12 +36,14 @@ def control_state(row,pid,workspace=False,tool=None):
 class FocusAccessibility:
     def __init__(self):
         import comtypes.client
-        U=comtypes.client.GetModule('UIAutomationCore.dll')
-        self.client=comtypes.client.CreateObject(U.CUIAutomation8,interface=U.IUIAutomation2)
-        self.client.AutoSetFocus=False
-        self.client.ConnectionTimeout=500;self.client.TransactionTimeout=500
-        self.cache=self.client.CreateCacheRequest()
-        for prop in PROPERTIES:self.cache.AddProperty(prop)
+        # UIAutomation can reject overlapping client/cache creation with E_FAIL.
+        with _initialization:
+            U=comtypes.client.GetModule('UIAutomationCore.dll')
+            self.client=comtypes.client.CreateObject(U.CUIAutomation8,interface=U.IUIAutomation2)
+            self.client.AutoSetFocus=False
+            self.client.ConnectionTimeout=500;self.client.TransactionTimeout=500
+            self.cache=self.client.CreateCacheRequest()
+            for prop in PROPERTIES:self.cache.AddProperty(prop)
 
     def read(self):
         element=self.client.GetFocusedElementBuildCache(self.cache)

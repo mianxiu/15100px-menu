@@ -36,6 +36,20 @@ const inputTool=(()=>{
     } finally {reading=false;}
   };
 })();
+let inputToolEventSequence=0,inputToolEventWriting=false,inputToolEventPending=null;
+async function inputToolEvent(state) {
+  if(!heartbeatFolder || !['enter','exit'].includes(state))return;
+  inputToolEventPending={schema:1,session,token,sequence:++inputToolEventSequence,state,created_at_ms:Date.now()};
+  if(inputToolEventWriting)return;
+  inputToolEventWriting=true;
+  try {
+    while(inputToolEventPending) {
+      const value=inputToolEventPending;
+      await record(heartbeatFolder,'input-tool-event.json',value);
+      if(inputToolEventPending===value)inputToolEventPending=null;
+    }
+  } finally {inputToolEventWriting=false;}
+}
 // PS24.0.0 shares the standalone app.refresh channel with 24.0.1.
 // A 24.1+ host still needs its actual official redraw API; no nested JSX.
 const legacyPreview=/^24\.0(?:\.\d+)*$/.test(String(uxp.host?.version || ''));
@@ -348,7 +362,7 @@ async function probe(reason) {
     if (!heartbeatValue) {
       heartbeatValue={
         ...await metadata(),
-        probe_version: '0.3.82', session, transport: 'plugin-data-files',
+        probe_version: '0.3.91', session, transport: 'plugin-data-files',
         photoshop_version: hostVersion,
         extended_label_colors:labels.extendedLabelColors,
         uxp_version: optional(() => uxp.versions.uxp),
@@ -424,7 +438,7 @@ async function probe(reason) {
       lastRequest=request.id;return;
     }
     seen.add(request.id); // Consume before any write; never retry after an uncertain response.
-    const response = {schema:1,session,id: request.id, probe_version: '0.3.82', operation: request.operation,
+    const response = {schema:1,session,id: request.id, probe_version: '0.3.91', operation: request.operation,
       transport: 'plugin-data-files',
       completed_at_ms: Date.now(), phase: 'completed'};
     const timingStarted=Date.now(),timings={};
@@ -576,7 +590,11 @@ probe('startup');
 // the bounded DOM poll also covers changes made by external COM scripts.
 observation.notifications={state:'pending',received:0};
 Promise.resolve().then(()=>require('photoshop').action.addNotificationListener(
-  ['select','make','delete','set','undo','redo','open','close'],(event,descriptor)=>{
+  ['select','make','delete','set','undo','redo','open','close','toolModalStateChanged','modalStateChanged'],(event,descriptor)=>{
+    if(event==='toolModalStateChanged' || event==='modalStateChanged') {
+      inputToolEvent(descriptor?.state?._value).catch(error=>console.log('Input tool event unavailable',String(error)));
+      return;
+    }
     if(event==='set') {
       const raw=descriptor?.to?.kuiBrightnessLevel;
       const theme={kPanelBrightnessOriginal:'light',kPanelBrightnessLightGray:'light-gray',

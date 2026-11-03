@@ -7,7 +7,7 @@ async function host(){
   const folder={getEntry:async name=>{if(!files.has(name))throw Error('missing');return {read:async()=>files.get(name)};},
     createFile:async name=>({write:async text=>{if(name==='input-tool-response.json' && state.failReceipt){state.failReceipt=false;throw Error('temporary receipt write failure');}files.set(name,text);}})};
   const ps={app:{documents:[]},core:{getActiveTool:async()=>{state.reads++;if(state.wait)await state.wait;if(state.error)throw Error('unavailable');return state.tool;}},
-    action:{addNotificationListener(){}}};
+    action:{addNotificationListener(events,listener){state.events=events;state.listener=listener;}}};
   const sandbox={module:{exports:{}},console,Date,setTimeout,clearTimeout,setInterval(fn,ms){timers.set(ms,fn);},
     require(name){
       if(name==='photoshop')return ps;
@@ -17,11 +17,21 @@ async function host(){
       throw Error(name);
     }};
   vm.runInNewContext(source,sandbox);await settle();
-  return {files,state,poll:async()=>{timers.get(16)();await settle();},
+  return {files,state,emit:async(event,value)=>{state.listener(event,{state:{_value:value}});await settle();},poll:async()=>{timers.get(16)();await settle();},
     request(changes={}){const request={schema:1,id:'a'.repeat(32),token:'private-test-token',session:state.session,expires_at_ms:Date.now()+1000,...changes};files.set('input-tool-request.json',JSON.stringify(request));return request;},
     response:()=>JSON.parse(files.get('input-tool-response.json'))};
 }
 (async()=>{
+  const eventHost=await host();
+  assert.ok(eventHost.state.events.includes('toolModalStateChanged'));
+  await eventHost.emit('toolModalStateChanged','enter');
+  let event=JSON.parse(eventHost.files.get('input-tool-event.json'));
+  assert.equal(event.state,'enter');assert.equal(event.token,'private-test-token');assert.equal(event.sequence,1);
+  await eventHost.emit('toolModalStateChanged','exit');
+  event=JSON.parse(eventHost.files.get('input-tool-event.json'));
+  assert.equal(event.state,'exit');assert.equal(event.sequence,2);assert.equal(eventHost.state.reads,0);
+  await eventHost.emit('modalStateChanged','invalid');
+  assert.equal(JSON.parse(eventHost.files.get('input-tool-event.json')).sequence,2);
   for(const change of [{schema:2},{token:'other'},{session:'other'},{id:'invalid'},{expires_at_ms:Date.now()+90000}]){
     const h=await host();h.request(change);await h.poll();assert.equal(h.state.reads,0);assert.equal(h.files.has('input-tool-response.json'),false);
   }

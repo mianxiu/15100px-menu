@@ -108,12 +108,41 @@ class InputMethod(InputLanguage):
         super().__init__(desktop)
         self.policy=ImePolicy();self.legacy=None;self.legacy_saved=None;self.ime=None
         self.context_schema=1
-        self.shortcut_sample=None
         self.edit_refresh_until=0
+        self.verification=None;self.ready={}
         self.report={'state':'unknown','scope':'photoshop-temporary-ime','layout_requests':0,
                      'disable_requests':0,'restore_requests':0}
 
     def saved(self):return {'schema':self.context_schema,'owned':self.policy.owned,'pending':self.policy.pending}
+
+    def ready_context(self):
+        with self.lock:return dict(self.ready)
+
+    def verify(self,request,reply):
+        self.edit_end()
+        with self.lock:self.verification=(dict(request),reply,self.serial)
+        self.wake.set()
+
+    def complete_verification(self,sample,serial=None):
+        if serial is None:serial=self.snapshot()[0]
+        guard=getattr(self.desktop,'input_focus',None)
+        focus=guard.shortcut_context() if guard else {}
+        ready=bool(self.policy.owned and not self.policy.pending and sample.get('ime_open')==0 and
+                   sample.get('tsf_disabled') is True and focus.get('state')=='non-input' and
+                   focus.get('root')==sample.get('root') and focus.get('focus')==sample.get('focus'))
+        with self.lock:
+            self.ready={key:focus[key] for key in ('root','focus','epoch')} if ready and serial==self.serial else {}
+            pending=self.verification
+            if not pending:return
+            request,reply,required_serial=pending
+            if serial<required_serial or serial!=self.serial:return
+            valid=(request.get('input_epoch')==focus.get('epoch') and request.get('root')==sample.get('root') and request.get('hwnd')==sample.get('focus'))
+            result=2 if valid and ready else 1 if valid and sample.get('state')=='input' and sample.get('ime_open')==1 and not self.policy.pending and not self.policy.owned else None
+            if not valid or self.tick()>request['expires_tick_ms']:result=0
+            if result is None:return
+            self.verification=None
+        self.report['last_ime_verification']={'id':request['verify_id'],'result':result,'reason':'scope-changed' if not valid else 'expired' if result==0 else 'protected' if result==2 else 'input-restored','elapsed_ms':max(0,self.tick()-request['expires_tick_ms']+200)}
+        reply(request,result)
 
     def click(self,hwnd,root):
         super().click(hwnd,root)
@@ -125,11 +154,6 @@ class InputMethod(InputLanguage):
         with self.lock:self.edit_refresh_until=time.monotonic()+2
         self.report['edit_end_events']=self.report.get('edit_end_events',0)+1
         self.wake.set()
-
-    def shortcut_context(self):
-        with self.lock:
-            if self.shortcut_sample and self.shortcut_sample[0]==self.serial:return dict(self.shortcut_sample[1])
-        return {'state':'unknown','root':0,'focus':0,'tick':0}
 
     def load(self,path):
         if not path.exists():return
@@ -198,9 +222,10 @@ class InputMethod(InputLanguage):
         pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
         self.user=ctypes.WinDLL('user32',use_last_error=True)
         self.user.GetKeyboardLayout.argtypes=[W.DWORD];self.user.GetKeyboardLayout.restype=W.HANDLE
+        self.tick=ctypes.WinDLL('kernel32',use_last_error=True).GetTickCount64
+        self.tick.restype=ctypes.c_ulonglong
         self.user.GetKeyboardLayoutList.argtypes=[ctypes.c_int,ctypes.POINTER(W.HANDLE)]
         self.user.PostMessageW.argtypes=[W.HWND,W.UINT,W.WPARAM,W.LPARAM]
-        native_tick=ctypes.WinDLL('kernel32',use_last_error=True).GetTickCount64;native_tick.restype=ctypes.c_ulonglong
         path=self.desktop.runtime/'input-method-owned.json';persisted=None
         try:
             self.ime=ImeContext(self.user)
@@ -213,19 +238,29 @@ class InputMethod(InputLanguage):
                     if self.legacy.policy.pending:self.legacy.policy.pending['time']=time.monotonic()-2
             except Exception as error:self.report.update(state='journal-invalid',error_type=type(error).__name__);return
             try:self.accessibility=FocusAccessibility()
-            except Exception as error:self.report['uia_error_type']=type(error).__name__
+            except Exception as error:
+                self.report['uia_error_type']=type(error).__name__
+                import logging
+                logging.exception('IME input observer initialization failed')
             self.report.update(uia_available=self.accessibility is not None,tool_reads=0)
             old_context=self.context_schema==1 and bool(self.policy.owned or self.policy.pending)
             if not old_context:self.ime=NativeImeContext(self.user);self.context_schema=2
             self.report['mechanism']='open-close-recovery' if old_context else 'ps-thread-context-association'
             examined=None;tool=None;context_before=None;episode=0;blocked_before=False;retry_after=0
             revision_before=None;next_tool_check=0;recovering=False;recovery_after=0;stable=None;stable_at=0
-            next_uia_check=time.monotonic()+1
+            next_uia_check=time.monotonic()+1;tool_event=None
             while not self.desktop.stop.is_set():
                 self.wake.wait(.05);self.wake.clear()
                 if self.desktop.stop.is_set():break
                 try:
-                    serial,epoch,protected,_=self.snapshot();observed_tick=int(native_tick());sample=self.sample()
+                    serial,epoch,protected,_=self.snapshot();sample=self.sample()
+                    event_reader=getattr(self.desktop,'input_tool_event',None)
+                    event=event_reader() if sample.get('root') and event_reader else None
+                    if event and event!=tool_event:
+                        tool_event=event
+                        self.protect() if event[2]=='enter' else self.edit_end()
+                        self.report['tool_events']=self.report.get('tool_events',0)+1
+                        continue
                     if not self.legacy_step(sample):continue
                     if self.policy.owned and not self.policy.pending and process_exited(self.policy.owned['identity']):self.retire(path,'original-process-exited')
                     scope=tuple(sample.get('identity',[]))
@@ -254,11 +289,9 @@ class InputMethod(InputLanguage):
                         examined=context;tool=self.read_tool(sample);next_tool_check=time.monotonic()+1;sample=self.sample()
                     same=(tuple(sample.get('identity',[])),sample.get('focus'),self.snapshot()[0],sample.get('layout'))==context
                     evidence=tool if same and examined==context else None
-                    shortcut_state='unknown'
                     if sample.get('root'):
                         protected=protected and not (isinstance(evidence,dict) and evidence.get('isModal') is False)
-                        shortcut_state='input' if protected else self.focus_state(sample,evidence)
-                        sample['state']=shortcut_state
+                        sample['state']='input' if protected else self.focus_state(sample,evidence)
                         if blocked:sample['state']='unknown'
                         sample=self.ime.read(sample)
                     elif self.policy.owned or self.policy.pending:
@@ -266,16 +299,33 @@ class InputMethod(InputLanguage):
                     revision=(scope,sample.get('ime'),sample.get('context_nonce'),sample.get('context_revision'))
                     if revision_before is not None and revision[:3]==revision_before[:3] and revision[3]!=revision_before[3]:
                         examined=None;tool=None
-                        shortcut_state='unknown'
                         if scope and sample.get('state')!='outside':sample['state']='unknown'
                     revision_before=revision
+                    guard=getattr(self.desktop,'input_focus',None)
+                    focus=guard.shortcut_context() if guard else {}
+                    with self.lock:verification=self.verification
+                    verified_key=bool(verification and serial==self.snapshot()[0] and serial>=verification[2] and
+                                      focus.get('state')=='non-input' and verification[0].get('input_epoch')==focus.get('epoch') and
+                                      verification[0].get('root')==sample.get('root')==focus.get('root') and
+                                      verification[0].get('hwnd')==sample.get('focus')==focus.get('focus') and
+                                      self.tick()<=verification[0]['expires_tick_ms'])
+                    if (focus.get('state')=='input' and focus.get('root')==sample.get('root') and focus.get('focus')==sample.get('focus')):
+                        sample['state']='input'
+                    menu_held=bool(self.policy.owned and not self.policy.pending and sample.get('native_menu_held') and
+                                   self.desktop.settings['enabled'] and not self.busy() and not old_context and
+                                   sample.get('ime_open')==0 and sample.get('state')!='input' and focus.get('state')!='input')
+                    retained=bool(self.policy.owned and not self.policy.pending and sample.get('ime_open')==0 and
+                                  not mouse and not sample.get('blocked') and not self.busy() and self.desktop.settings['enabled'] and not old_context and
+                                  sample.get('state')=='unknown' and focus.get('state')=='non-input' and
+                                  focus.get('root')==sample.get('root') and focus.get('focus')==sample.get('focus'))
+                    if menu_held or retained:sample['state']='non-input'
                     if (self.policy.owned and not self.policy.pending and sample.get('identity')==self.policy.owned['identity'] and
                             sample.get('layout')!=self.policy.owned['layout'] and sample.get('ime_open')==1 and
                             (self.context_schema==1 or sample.get('native_restored'))):
                         self.retire(path,'confirmed-keyboard-layout-change')
                     if self.policy.owned and not self.policy.pending and sample.get('identity')==self.policy.owned['identity'] and sample.get('ime') and sample['ime']!=self.policy.owned['ime']:
                         self.retire(path,'original-ime-window-ended')
-                    eligible=same and not blocked and sample.get('state')=='non-input' and sample.get('ime') is not None and time.monotonic()>=retry_after
+                    eligible=same and not blocked and sample.get('state')=='non-input' and sample.get('ime') is not None and (verified_key or time.monotonic()>=retry_after)
                     now=time.monotonic()
                     if blocked or sample.get('state') in ('outside','input'):recovering=False;stable=None
                     elif sample.get('state')=='unknown':
@@ -284,7 +334,7 @@ class InputMethod(InputLanguage):
                     if recovering and eligible and not self.policy.pending and not self.policy.owned:
                         candidate=(context,row.get(30003),row.get(30020),revision,tool)
                         if candidate!=stable:stable=candidate;stable_at=now
-                        edit_ready=now<self.edit_refresh_until and isinstance(tool,dict) and tool.get('isModal') is False
+                        edit_ready=verified_key or now<self.edit_refresh_until and isinstance(tool,dict) and tool.get('isModal') is False
                         eligible=edit_ready or now>=recovery_after and now-stable_at>=.2
                         if eligible:
                             episode+=1;recovering=False;stable=None
@@ -292,18 +342,21 @@ class InputMethod(InputLanguage):
                     elif recovering and not eligible:stable=None
                     token=(scope,sample.get('focus'),row.get(30003),epoch,episode,serial) if eligible else None
                     request=self.policy.step(sample,token,time.monotonic())
-                    if self.policy.owned and not self.policy.pending and not blocked and callable(getattr(self.ime,'renew',None)):
+                    if self.policy.owned and not self.policy.pending and (not blocked or menu_held or retained) and callable(getattr(self.ime,'renew',None)):
                         self.ime.renew(self.policy.owned,sample)
                     if request:
                         if request['disable'] and needs_tool and self.read_tool(sample)!=tool:
                             self.policy.pending=None;self.policy.attempted=None;examined=None;continue
                         fresh=self.ime.read(self.sample()) if request['disable'] else self.ime.observe_owned(request)
+                        if verified_key and self.tick()>verification[0]['expires_tick_ms']:verified_key=False
                         valid=(ime_target(fresh)==ime_target(request) and fresh.get('focus')==request['focus'] and fresh.get('ime_open')==sample.get('ime_open'))
                         if request['disable']:
+                            held=any(self.user.GetAsyncKeyState(k)&0x8000 for k in range(1,256))
+                            if verification:self.report['first_key_gate']={'verified':verified_key,'keys_held':held,'eligible':eligible}
                             valid=bool(valid and eligible and self.snapshot()[0]==serial and not self.desktop.visible and not self.busy() and
                                        fresh.get('context_revision')==sample.get('context_revision') and
                                        not fresh.get('blocked') and self.focus_state(fresh,tool)=='non-input' and
-                                       not any(self.user.GetAsyncKeyState(k)&0x8000 for k in range(1,256)))
+                                       (verified_key or not held))
                         if valid:
                             atomic_json(path,self.saved());persisted=json.loads(json.dumps(self.saved()))
                             acknowledged=self.ime.send(request)
@@ -326,22 +379,20 @@ class InputMethod(InputLanguage):
                         ime_open=sample.get('ime_open'),keyboard_layout=sample.get('layout'),focus_class=sample.get('class'),
                         tsf_disabled=sample.get('tsf_disabled'),
                         native_events=sample.get('native_events'),context_revision=sample.get('context_revision'),
+                        own_menu_held=menu_held,
                         tool=tool.get('classID') if isinstance(tool,dict) else None,tool_modal=tool.get('isModal') if isinstance(tool,dict) else None)
                     saved=self.saved()
                     if saved!=persisted:atomic_json(path,saved);persisted=json.loads(json.dumps(saved))
+                    self.complete_verification(sample,serial)
                     if old_context and not self.policy.owned and not self.policy.pending:
                         self.ime=NativeImeContext(self.user);self.context_schema=2;old_context=False;examined=None
                         self.report['mechanism']='ps-thread-context-association'
-                    with self.lock:
-                        state=shortcut_state if same and not evidence_blocked and not self.policy.pending else 'unknown'
-                        self.shortcut_sample=(serial,{'state':state,'root':sample.get('root',0),'focus':sample.get('focus',0),'tick':observed_tick})
-                        self.report['shortcut_state']=state
                     self.report.pop('error_type',None);self.report.pop('native_error_code',None)
                 except Exception as error:
-                    with self.lock:self.shortcut_sample=None
-                    self.report.update(state='unknown',shortcut_state='unknown',error_type=type(error).__name__,native_error_code=getattr(error,'winerror',None))
+                    self.report.update(state='unknown',error_type=type(error).__name__,native_error_code=getattr(error,'winerror',None))
+                    with self.lock:self.ready={}
+                    self.complete_verification({})
         finally:
-            with self.lock:self.shortcut_sample=None
             if self.ime and (self.policy.owned or self.policy.pending):
                 try:
                     sample=self.ime.observe_owned(self.policy.pending or self.policy.owned)

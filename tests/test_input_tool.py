@@ -21,6 +21,16 @@ class ToolObservationTests(unittest.TestCase):
         value={'schema':1,'id':'a'*32,'session':'owned-session','expires_at_ms':time.time()*1000+1000,**changes}
         atomic_json(self.reader.path,value);return value
 
+    def test_edit_events_authenticate_and_never_publish_or_settle_requests(self):
+        original=self.pending();path=self.folder/'input-tool-event.json'
+        event={'schema':1,'session':'owned-session','token':'private-test-token','sequence':2,'state':'exit','created_at_ms':time.time()*1000}
+        atomic_json(path,event)
+        self.assertEqual(self.reader.event(),('owned-session',2,'exit'))
+        for changes in ({'schema':True},{'token':'other'},{'session':'old'},{'sequence':True},{'state':'unknown'},{'created_at_ms':time.time()*1000-3000},{'created_at_ms':float('nan')}):
+            atomic_json(path,{**event,**changes});self.assertIsNone(self.reader.event())
+        self.assertEqual(json.loads(self.reader.path.read_text()),original)
+        self.assertFalse((self.folder/'input-tool-request.json').exists())
+
     def reply(self,request,**changes):
         atomic_json(self.folder/'input-tool-response.json',{
             'schema':1,'id':request['id'],'session':request['session'],'token':'private-test-token',

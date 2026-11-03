@@ -11,6 +11,25 @@ from contextlib import ExitStack
 import json
 
 
+class ConcurrentAccessibilityTests(unittest.TestCase):
+    def test_independent_mta_clients_can_initialize_together(self):
+        import pythoncom,comtypes.client
+        from backend.input_accessibility import FocusAccessibility
+        ready=threading.Barrier(2);errors=[]
+        def create():
+            pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+            reader=None
+            try:
+                reader=FocusAccessibility();ready.wait(5)
+            except Exception as error:errors.append(error);ready.abort()
+            finally:reader=None;pythoncom.CoUninitialize()
+        workers=[threading.Thread(target=create) for _ in range(2)]
+        for worker in workers:worker.start()
+        for worker in workers:worker.join(10)
+        self.assertFalse(any(worker.is_alive() for worker in workers))
+        self.assertEqual(errors,[])
+
+
 class ExitedLanguageOwnerTests(unittest.TestCase):
     def owner(self):
         return {'root':1,'identity':[1,2,'original-process',3],'focus':10,
@@ -366,7 +385,7 @@ class LanguageSamplingTests(unittest.TestCase):
     def test_foreign_focus_process_or_thread_still_cannot_grant_permission(self):
         for foreign in ((3,99),(99,2)):
             value,reader=self.sample(foreign=foreign)
-            self.assertEqual(value,{'state':'unknown'});reader.assert_not_called()
+            self.assertEqual(value,{'state':'unknown','foreign_focus':10});reader.assert_not_called()
 
     def test_native_caret_protects_input_before_any_accessibility_query(self):
         value,reader=self.sample(caret=True)

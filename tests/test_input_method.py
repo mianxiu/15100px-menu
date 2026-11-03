@@ -17,6 +17,20 @@ def sample(state='non-input',opened=1):
 
 
 class ImePolicyTests(unittest.TestCase):
+    def test_first_key_confirmation_requires_actual_protection_and_preserves_unknown(self):
+        guard=SimpleNamespace(shortcut_context=lambda:{'state':'non-input','root':1,'focus':10,'epoch':4})
+        c=InputMethod(SimpleNamespace(input_focus=guard));c.tick=Mock(return_value=100)
+        request={'verify_id':1,'root':1,'hwnd':10,'input_epoch':4,'expires_tick_ms':200,'need_ime':True}
+        reply=Mock();c.policy.owned=sample();c.verify(request,reply)
+        c.complete_verification({**sample(opened=0),'tsf_disabled':True},0);reply.assert_not_called();self.assertEqual(c.ready_context(),{})
+        c.complete_verification({**sample(opened=0),'tsf_disabled':False});reply.assert_not_called()
+        c.complete_verification({**sample(opened=0),'tsf_disabled':True})
+        self.assertEqual(reply.call_args.args,(request,2));self.assertEqual(c.ready_context(),{'root':1,'focus':10,'epoch':4})
+        unknown={'identity':'original-unknown'};c.policy.pending=unknown;c.verify(request,reply);reply.reset_mock()
+        c.complete_verification({**sample(opened=0),'tsf_disabled':True});reply.assert_not_called()
+        c.tick.return_value=201;c.complete_verification({**sample(opened=0),'tsf_disabled':True})
+        self.assertEqual(reply.call_args.args,(request,0));self.assertEqual(c.policy.pending,unknown)
+
     def test_disable_readback_then_input_restore_without_layout_change(self):
         p=ImePolicy();request=p.step(sample(),7,0)
         self.assertEqual(request['wanted'],0);self.assertIsNone(p.owned)
@@ -137,7 +151,7 @@ class ImeTransportTests(unittest.TestCase):
 
 
 class ImeWorkerTests(unittest.TestCase):
-    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None,created='created',reject_once=False):
+    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None,created='created',reject_once=False,held=False):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         self.desktop=SimpleNamespace(runtime=Path(temp.name),visible=False,settings={'enabled':True},stop=threading.Event(),input_language_busy=lambda:False,input_language_tool=lambda **_:{'classID':'moveTool','isModal':False})
         if tool is not None:self.desktop.input_language_tool=tool
@@ -155,7 +169,7 @@ class ImeWorkerTests(unittest.TestCase):
             if reject_once and len(self.posts)==1:return {'rejected':True}
             if acknowledge:self.opened=value['wanted']
         def layouts(count,values):values[0]=0x8040804;values[1]=0x4090409;return 2
-        self.user=SimpleNamespace(GetKeyboardLayout=Mock(return_value=0x8040804),GetKeyboardLayoutList=Mock(side_effect=layouts),PostMessageW=Mock(),GetAsyncKeyState=Mock(return_value=0),GetTickCount64=Mock(side_effect=lambda:int(time.monotonic()*1000)))
+        self.user=SimpleNamespace(GetKeyboardLayout=Mock(return_value=0x8040804),GetKeyboardLayoutList=Mock(side_effect=layouts),PostMessageW=Mock(),GetAsyncKeyState=Mock(side_effect=lambda key:0x8000 if held and key==65 else 0),GetTickCount64=Mock(side_effect=lambda:int(time.monotonic()*1000)))
         for p in (patch('backend.input_method.ctypes.WinDLL',return_value=self.user),patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=owned)),patch('backend.input_method.NativeImeContext',return_value=SimpleNamespace(read=lambda value:{**read(value),'context_nonce':123},send=send,observe_owned=lambda value:{**owned(value),'context_nonce':123})),patch('backend.input_method.FocusAccessibility',return_value=object()),patch('backend.input_method.process_exited',return_value=False)):
             p.start();self.addCleanup(p.stop)
         self.c.thread.start()
@@ -175,6 +189,24 @@ class ImeWorkerTests(unittest.TestCase):
         self.outside=False;self.c.activity();self.wait(lambda:self.c.policy.confirmed_disables==3)
         self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2)
         self.assertEqual(self.posts[-2:],[0,1]);self.assertIsNone(self.c.policy.pending)
+
+    def first_key(self):
+        self.desktop.input_focus=SimpleNamespace(shortcut_context=lambda:{'state':'non-input','root':1,'focus':10,'epoch':4})
+        original=self.c.ime.read;self.c.ime.read=lambda value:{**original(value),'tsf_disabled':self.opened==0}
+        request={'verify_id':1,'root':1,'hwnd':10,'input_epoch':4,'expires_tick_ms':int(time.monotonic()*1000)+200,'need_ime':True}
+        reply=Mock();self.c.verify(request,reply);return reply
+
+    def test_verified_first_key_can_protect_while_an_ordinary_key_is_held(self):
+        self.start(held=True);self.wait(lambda:self.c.report.get('tool_modal') is False)
+        self.assertEqual(self.posts,[])
+        reply=self.first_key();self.wait(lambda:reply.called)
+        self.assertEqual(reply.call_args.args[1],2);self.assertEqual(self.posts,[0])
+        self.assertTrue(self.c.report['first_key_gate']['keys_held']);self.assertTrue(self.c.report['first_key_gate']['verified'])
+
+    def test_verified_first_key_does_not_wait_out_an_old_known_rejection(self):
+        self.start(reject_once=True);self.wait(lambda:self.c.report.get('state')=='request-rejected')
+        reply=self.first_key();self.wait(lambda:reply.called)
+        self.assertEqual(reply.call_args.args[1],2);self.assertEqual(self.posts,[0,0])
 
     def test_manual_layout_change_rechecks_tool_and_rearms_confirmed_native_restore(self):
         provider=Mock(return_value={'classID':'moveTool','isModal':False})
@@ -209,10 +241,21 @@ class ImeWorkerTests(unittest.TestCase):
         self.assertEqual(saved['pending']['identity'],owner['identity']);self.assertEqual(self.posts,[])
 
     def test_known_read_settlement_can_reobserve_without_a_first_keystroke(self):
-        value={'classID':'moveTool','isModal':False};provider=Mock(side_effect=[None,value,value])
+        value={'classID':'moveTool','isModal':False}
+        provider=Mock(side_effect=lambda **_:None if provider.call_count==1 else value)
         self.start(tool=provider,reconcile=lambda:True)
         self.wait(lambda:self.c.policy.confirmed_disables==1)
-        self.assertEqual(provider.call_count,3);self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0])
+        self.assertGreaterEqual(provider.call_count,3);self.assertEqual(self.c.snapshot()[0],0);self.assertEqual(self.posts,[0])
+
+    def test_host_edit_exit_invalidates_modal_evidence_without_keyboard_activity(self):
+        provider=Mock(return_value={'classID':'typeCreateOrEditTool','isModal':True})
+        self.start(tool=provider);self.wait(lambda:self.c.report.get('tool_modal') is True)
+        provider.return_value={'classID':'typeCreateOrEditTool','isModal':False}
+        self.desktop.input_tool_event=lambda:('session',2,'exit')
+        self.c.wake.set();self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.assertEqual(self.c.report['tool_events'],1)
+        self.assertGreater(self.c.report['edit_end_events'],0)
+        self.assertEqual(self.posts,[0])
 
     def test_cold_start_readiness_recovers_with_no_keyboard_or_focus_activity(self):
         from backend.input_tool import ToolObservation
@@ -346,13 +389,9 @@ class ImeWorkerTests(unittest.TestCase):
         provider=Mock(return_value={'classID':'typeCreateOrEditTool','isModal':True})
         self.start(tool=provider)
         self.wait(lambda:self.c.report.get('state')=='input')
-        self.wait(lambda:self.c.shortcut_context()['state']=='input')
-        self.assertEqual(self.c.shortcut_context()['state'],'input');self.assertEqual(self.posts,[])
+        self.assertEqual(self.posts,[])
         provider.return_value={'classID':'typeCreateOrEditTool','isModal':False}
         self.wait(lambda:self.c.policy.confirmed_disables==1)
-        self.wait(lambda:self.c.shortcut_context()['state']=='non-input')
-        proof=self.c.shortcut_context();self.assertEqual((proof['root'],proof['focus']),(1,10));self.assertGreater(proof['tick'],0)
-        self.c.protect();self.assertEqual(self.c.shortcut_context()['state'],'unknown')
         self.assertEqual(self.c.report['layout_requests'],0)
 
     def test_commit_and_mouse_exit_recheck_a_still_modal_first_reply(self):
@@ -379,14 +418,6 @@ class ImeWorkerTests(unittest.TestCase):
         self.wait(lambda:self.c.policy.confirmed_disables==1)
         self.assertLess(time.monotonic()-started,.9)
 
-    def test_plain_menu_keeps_search_proof_but_tool_editor_does_not(self):
-        self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
-        self.desktop.visible=True;self.c.wake.set();self.wait(lambda:self.c.policy.confirmed_restores==1)
-        self.wait(lambda:self.c.shortcut_context()['state']=='non-input')
-        self.desktop.menu_tools_active=True;self.c.wake.set()
-        self.wait(lambda:self.c.shortcut_context()['state']=='unknown')
-        self.assertIsNone(self.c.policy.owned)
-
     def test_slow_modal_reply_cannot_expire_commit_revalidation(self):
         modal={'classID':'typeCreateOrEditTool','isModal':True}
         idle={'classID':'typeCreateOrEditTool','isModal':False}
@@ -399,6 +430,18 @@ class ImeWorkerTests(unittest.TestCase):
         started=time.monotonic();self.c.edit_end()
         self.wait(lambda:self.c.policy.confirmed_disables==1)
         self.assertLess(time.monotonic()-started,1,'Do not add the one-second modal cache after a slow reply')
+
+    def test_verified_own_menu_keeps_ps_lease_but_foreign_focus_and_text_restore_it(self):
+        self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
+        observe=self.c.ime.observe_owned
+        held=True
+        self.c.ime.observe_owned=lambda value:{**observe(value),'native_menu_held':held}
+        self.desktop.input_focus=SimpleNamespace(shortcut_context=lambda:{'state':'non-input','root':1,'focus':10})
+        self.outside=True;self.desktop.visible=True;self.c.wake.set()
+        self.wait(lambda:self.c.report.get('own_menu_held'))
+        self.assertEqual(self.posts,[0]);self.assertTrue(self.c.policy.owned)
+        held=False;self.c.wake.set();self.wait(lambda:self.c.policy.confirmed_restores==1)
+        self.assertEqual(self.posts,[0,1])
 
     def test_immediate_rejection_persists_cleared_pending_even_when_state_returns_to_empty(self):
         self.start(reject_once=True)

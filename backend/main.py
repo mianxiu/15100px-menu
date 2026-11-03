@@ -458,6 +458,7 @@ class Application(web.Application):
                              "hotkey_pid": self.desktop.native.pid if self.desktop and self.desktop.native else None},
                     "desktop": self.desktop.message if self.desktop else "无桌面模式",
                     "input_language": dict(self.desktop.input_language.report) if self.desktop and self.desktop.input_language else {'state':'unavailable'},
+                    "input_focus": dict(self.desktop.input_focus.report) if self.desktop and self.desktop.input_focus else {'state':'unavailable'},
                     "tray_error": self.tray.error if self.tray else ""}
             self.version_health.observe(value)
             value['version_health']=self.version_health.snapshot()
@@ -699,7 +700,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         try:
             event_args = {}
             if isinstance(action, dict):
-                event_args = {key:action[key] for key in ('menu_epoch','cursor','params','after_action','return_to_menu') if key in action}
+                event_args = {key:action[key] for key in ('menu_epoch','cursor','params','after_action','return_to_menu','input_guard') if key in action}
                 action = action['action']
                 if 'menu_epoch' in event_args and (not app.desktop or event_args['menu_epoch'] != app.desktop.menu_epoch):
                     return
@@ -716,8 +717,6 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
             await app.dispatch(mapping.get(action, "action.execute"), event_args if action in mapping else {**event_args,"name": action})
         except Exception as exc:
             logging.exception("Desktop action failed")
-            if action in ('tools.search','menu.tools.open') and app.desktop:
-                await asyncio.to_thread(app.desktop.hide)
             if action in ('mask.preview.update','mask.preview.commit') and not getattr(app,'_mask_preview',None) and app.desktop:
                 app.desktop.event({'type':'mask.preview','active':False})
             await app.broadcast({"type": "notice", "scope": "interaction", "ok": False, "message": str(exc)})
@@ -751,6 +750,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
                 tool_observer=ToolObservation(app.bridge.transport)
                 app.desktop.input_language_tool=tool_observer.read
                 app.desktop.input_language_reconcile=tool_observer.reconcile
+                app.desktop.input_tool_event=tool_observer.event
                 app.desktop.menu_context_requester=app.bridge.request_menu_context
                 app.desktop.menu_context_canceller=app.bridge.cancel_menu_context
             await asyncio.to_thread(app.desktop.start)

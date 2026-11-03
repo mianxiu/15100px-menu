@@ -25,7 +25,7 @@ class NativeImeContext:
         if window and win32gui.IsWindow(window) and win32gui.GetClassName(window)=='PhotoshopMenu.InputContext.v1' and list(win32process.GetWindowThreadProcessId(window))==[thread,pid]:
             if sample.get('state')=='outside' or self.user.GetPropW(window,'PhotoshopMenu.InputContext.Owner.v1')==os.getpid():return window
         if sample.get('state')=='outside':return None
-        # One thread-specific hook; no global injection or keyboard callback.
+        # Both sent focus notifications and queued input stay in the PS UI thread.
         if self.library is None:
             content=(resource_root()/'native/InputContext.dll').read_bytes()
             folder=runtime_dir()/'input-context'/hashlib.sha256(content).hexdigest();folder.mkdir(parents=True,exist_ok=True)
@@ -38,7 +38,10 @@ class NativeImeContext:
         if identity not in self.hooks:
             hook=self.user.SetWindowsHookExW(4,ctypes.cast(self.library.InputContextHook,ctypes.c_void_p),self.library._handle,thread)
             if not hook:raise ctypes.WinError()
-            self.hooks[identity]=hook
+            queued=self.user.SetWindowsHookExW(3,ctypes.cast(self.library.InputContextQueueHook,ctypes.c_void_p),self.library._handle,thread)
+            if not queued:
+                error=ctypes.get_last_error();self.user.UnhookWindowsHookEx(hook);raise ctypes.WinError(error)
+            self.hooks[identity]=(hook,queued)
         nonce=secrets.randbelow(0x7ffffffe)+1
         win32gui.SendMessageTimeout(root,self.attach,os.getpid(),nonce,2,200)
         window=self.user.GetPropW(root,'PhotoshopMenu.InputContext.Window.v1')
@@ -59,7 +62,7 @@ class NativeImeContext:
         status=self.command(window,1,sample['focus'])
         if not status&1 or status&8:raise RuntimeError('PS输入上下文恢复待核对')
         value.update(ime=window,ime_open=int(bool(status&4)),native_restored=bool(status&16),tsf_disabled=bool(status&32),native_events=bool(status&64),
-                     context_nonce=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Nonce.v1'),
+                     native_menu_held=bool(status&128),context_nonce=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Nonce.v1'),
                      context_revision=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Revision.v1') or 0)
         return value
 
@@ -82,5 +85,6 @@ class NativeImeContext:
         return ImeContext.observe_owned(self,owned)
 
     def close(self):
-        for hook in self.hooks.values():self.user.UnhookWindowsHookEx(hook)
+        for hooks in self.hooks.values():
+            for hook in hooks:self.user.UnhookWindowsHookEx(hook)
         self.hooks.clear()

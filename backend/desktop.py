@@ -188,6 +188,7 @@ class Desktop:
         self.window_lock = threading.RLock()
         self.panel_context = None
         self.input_language = None
+        self.input_focus = None
         self.layer_context_provider=None
         self.layer_monitor=None
         self.layer_context={}
@@ -201,6 +202,9 @@ class Desktop:
         self.gui = win32gui
         self.panel_context = PanelContext(win32gui)
         from .input_method import InputMethod
+        from .input_focus import InputFocus
+        self.input_focus=InputFocus(self)
+        self.input_focus.thread.start()
         self.input_language=InputMethod(self)
         self.input_language.thread.start()
         self.icons = WindowIcons()
@@ -236,14 +240,18 @@ class Desktop:
             return 0
         guard=self.preview_input_guard
         guarded=guard and not guard.get('release')
-        reader=getattr(getattr(self,'input_language',None),'shortcut_context',None)
+        reader=getattr(getattr(self,'input_focus',None),'shortcut_context',None)
         search=reader() if callable(reader) else {}
+        ime_reader=getattr(getattr(self,'input_language',None),'ready_context',None)
+        ime_ready=ime_reader() if callable(ime_reader) else {}
         value={"enabled": self.settings["enabled"],
             "text_input": bool(self.panel_context and (self.panel_context.current['kind'] == 'text' or self.panel_context.current.get('input_focused')) or
                                callable(reader) and (search.get('state')=='input' or not self.visible and search.get('state')!='non-input')),
             "color_editor": bool(self.visible and (getattr(self,'color_editor_active',False) or getattr(self,'menu_tools_active',False))),
             "search_non_input":search.get('state')=='non-input',
-            "search_root":search.get('root',0),"search_focus":search.get('focus',0),"search_tick":search.get('tick',0),
+            "editor_input":search.get('state')=='input',
+            "search_root":search.get('root',0),"search_focus":search.get('focus',0),"search_epoch":search.get('epoch',0),
+            "ime_ready":bool(ime_ready),"ime_root":ime_ready.get('root',0),"ime_focus":ime_ready.get('focus',0),"ime_epoch":ime_ready.get('epoch',0),
             "diagnostic_trace": bool(getattr(self,"diagnostic_trace",False)),
             "remote_compatibility": self.settings.get("remote_compatibility",False),
             "right_click_open": False,
@@ -320,6 +328,23 @@ class Desktop:
                     if self.preview_input_guard is guard:self.preview_input_guard=None
         self.preview_pending_feedback()
 
+    def _input_focus_verified(self,request,result):
+        if request.get('need_ime') and result in (1,2) and self.input_language:
+            self.input_language.verify(request,self._input_verify_reply)
+        else:self._input_verify_reply(request,result)
+
+    def _input_verify_reply(self,request,result):
+        if self.input_focus:self.input_focus.report['last_verification']={'id':request['verify_id'],'result':result,'need_ime':request['need_ime'],'input_epoch':request['input_epoch']}
+        logging.info('Native input verification: request=%s result=%s need_ime=%s epoch=%s',request['verify_id'],result,request['need_ime'],request['input_epoch'])
+        logging.info('Native input verification detail: guard=%s ime=%s gate=%s',getattr(self.input_focus,'report',{}).get('last_guard_verification'),getattr(self.input_language,'report',{}).get('last_ime_verification'),getattr(self.input_language,'report',{}).get('first_key_gate'))
+        self._native_config()
+        with self.native_lock:
+            if self.stop.is_set() or not self.native or self.native.poll() is not None:return
+            try:
+                self.native.stdin.write(json.dumps({'verify_reply':request['verify_id'],'input_result':result})+'\n')
+                self.native.stdin.flush()
+            except (OSError,ValueError):logging.exception('Native input verification reply failed')
+
     def _native_events(self):
         while not self.stop.is_set():
             self._read_native_events()
@@ -350,27 +375,41 @@ class Desktop:
                 if event.get("type") == "ready":
                     self.message = "C++ / Win32 原生热键 · 仅 Photoshop 前台生效"
                     self.ready.set()
+                    if self.input_focus:self.input_focus.invalidate(event.get('input_epoch',0))
+                elif event.get('type') == 'input.verify':
+                    if self.input_focus:self.input_focus.verify(event,self._input_focus_verified)
                 elif event.get('type') == 'panel.click':
                     if self.panel_context:
                         self.panel_context.record_click(event['hwnd'], event['root'])
                     if self.input_language:self.input_language.click(event['hwnd'],event['root'])
+                    if self.input_focus:self.input_focus.click(event['hwnd'],event['root'],event.get('input_epoch'))
                 elif event.get('type') == 'input.language.protect':
                     if self.input_language:self.input_language.protect()
+                    if self.input_focus:self.input_focus.protect(event.get('input_epoch'))
                 elif event.get('type') == 'input.language.activity':
                     if self.input_language:self.input_language.activity()
+                    if self.input_focus:
+                        if event.get('hwnd'):self.input_focus.focus_changed(event['hwnd'],event.get('input_epoch'))
+                        else:self.input_focus.activity(event.get('input_epoch'))
                 elif event.get('type') == 'input.language.edit_end':
                     if self.input_language:self.input_language.edit_end()
+                    if self.input_focus:self.input_focus.edit_end(event.get('input_epoch'))
                 elif event.get("type") == "action":
                     logging.info('Native hook action: %s cursor=%s', event['action'], event.get('cursor'))
-                    self.notify({'action':event['action'],'cursor':event['cursor']} if 'cursor' in event else event['action'])
+                    args={key:event[key] for key in ('action','cursor','input_guard') if key in event}
+                    self.notify(args if len(args)>1 else event['action'])
                 elif event.get('type') == 'trigger.trace':
                     from collections import deque
                     if not hasattr(self,'trigger_events'):self.trigger_events=deque(maxlen=64)
                     if getattr(self,'diagnostic_trace',False):self.trigger_events.append(event)
                     logging.info('Configured menu trigger decision: %s',event)
+                elif event.get('type') == 'search.trace':
+                    if self.input_focus:self.input_focus.report['last_search_trace']=event
+                    logging.info('Native F input guard decision: %s',event)
                 elif event.get('type') == 'caps.trace':
                     logging.info('CapsLock hook decision: %s', event)
                 elif event.get('type') == 'hook.health':
+                    if self.input_focus:self.input_focus.reconcile_epoch(event.get('input_epoch'))
                     logging.info('Native hook health: %s', event)
                 elif event.get('type') == 'caps.state':
                     logging.info('CapsLock system state: %s', event)
@@ -605,40 +644,55 @@ class Desktop:
         self.require_action_focus()
 
     @per_monitor_dpi
-    def open_menu_tools(self, mode, epoch=None):
-        with self.window_lock:
-            if epoch is not None and (not self.visible or self.menu_epoch != epoch):
-                raise RuntimeError('菜单已关闭或重新打开')
-            self.require_action_focus()
-            if mode=='search' and self.input_language and self.input_language.shortcut_context()['state']!='non-input':
-                raise RuntimeError('输入状态尚未确认可使用F，请先退出文字编辑')
-            if getattr(self,'mask_preview',None):raise RuntimeError('请先完成颜色或羽化调整')
-            if not self.visible:self.open(hold=True,keyboard_anchor=True)
-            if mode=='split':
-                value=self.menu_layer_context or {}
-                if value.get('kind') not in ('text','smart') or len(value.get('layer_ids',[]))!=1 or value.get('locked'):
-                    raise RuntimeError('请单选未锁定的文字图层或文字对象后打开文本工具')
-            self.hold_active=False;self.menu_tools_active=True
-            self.menu_epoch+=1
-            self.gui.SendMessage(self.hwnd,0x800d,1,self.menu_epoch)
-            self.gui.SendMessage(self.hwnd,0x8010,1,0)
-            import win32api
-            anchor=win32api.GetCursorPos()
-            rect=self.gui.GetWindowRect(self.target)
-            work=win32api.GetMonitorInfo(win32api.MonitorFromWindow(self.target,2))['Work']
-            dpi=self.icons.u.GetDpiForWindow(self.hwnd) or 96
-            bounds=panel_bounds(rect,work,(round(anchor[0]+12*dpi/96),round(anchor[1]+12*dpi/96)),round((432 if mode=='search' else 632)*dpi/96),round((274 if mode=='search' else 780)*dpi/96))
-            self.gui.SetWindowPos(self.hwnd,0,*bounds,0x4|0x10)
-            scale=dpi/96
-            self.preview_hint_anchor=[round(bounds[0]+bounds[2]*.5),round(bounds[1]+bounds[3]*.5)]
-            current=self.menu_epoch
-        sequence=self._native_config()
-        with self.native_applied:
-            ready=bool(sequence) and self.native_applied.wait_for(lambda:self.native_applied_sequence>=sequence,.5)
-        if not ready:
-            self.hide();raise RuntimeError('面板输入保护未就绪，本次未打开')
-        self.require_menu_tools(current)
-        return current
+    def open_menu_tools(self, mode, epoch=None,input_guard=None):
+        current=None
+        try:
+            with self.window_lock:
+                if epoch is not None and (not self.visible or self.menu_epoch != epoch):
+                    raise RuntimeError('菜单已关闭或重新打开')
+                self.require_action_focus()
+                if input_guard is not None:
+                    if (not isinstance(input_guard,dict) or set(input_guard)!={'root','focus','epoch'} or
+                        any(type(input_guard[k]) is not int or input_guard[k]<(0 if k=='epoch' else 1) for k in input_guard)):
+                        raise ValueError('无效的F输入保护身份')
+                    observed=self.input_focus.shortcut_context() if self.input_focus else {}
+                    if any(observed.get(k)!=value for k,value in input_guard.items()):
+                        raise RuntimeError('F触发后的输入上下文已改变，本次未打开')
+                if mode=='search' and self.input_focus and self.input_focus.shortcut_context()['state']!='non-input':
+                    raise RuntimeError('输入状态尚未确认可使用F，请先退出文字编辑')
+                if getattr(self,'mask_preview',None):raise RuntimeError('请先完成颜色或羽化调整')
+                if not self.visible:self.open(hold=True,keyboard_anchor=True)
+                current=self.menu_epoch
+                if mode=='split':
+                    value=self.menu_layer_context or {}
+                    if value.get('kind') not in ('text','smart') or len(value.get('layer_ids',[]))!=1 or value.get('locked'):
+                        raise RuntimeError('请单选未锁定的文字图层或文字对象后打开文本工具')
+                self.hold_active=False;self.menu_tools_active=True
+                if self.input_focus:self.input_focus.menu_open(mode)
+                self.menu_epoch+=1
+                current=self.menu_epoch
+                self.gui.SendMessage(self.hwnd,0x800d,1,self.menu_epoch)
+                self.gui.SendMessage(self.hwnd,0x8010,1,0)
+                import win32api
+                anchor=win32api.GetCursorPos()
+                rect=self.gui.GetWindowRect(self.target)
+                work=win32api.GetMonitorInfo(win32api.MonitorFromWindow(self.target,2))['Work']
+                dpi=self.icons.u.GetDpiForWindow(self.hwnd) or 96
+                bounds=panel_bounds(rect,work,(round(anchor[0]+12*dpi/96),round(anchor[1]+12*dpi/96)),round((432 if mode=='search' else 632)*dpi/96),round((274 if mode=='search' else 780)*dpi/96))
+                self.gui.SetWindowPos(self.hwnd,0,*bounds,0x4|0x10)
+                scale=dpi/96
+                self.preview_hint_anchor=[round(bounds[0]+bounds[2]*.5),round(bounds[1]+bounds[3]*.5)]
+                current=self.menu_epoch
+            sequence=self._native_config()
+            with self.native_applied:
+                ready=bool(sequence) and self.native_applied.wait_for(lambda:self.native_applied_sequence>=sequence,.5)
+            if not ready:
+                raise RuntimeError('面板输入保护未就绪，本次未打开')
+            self.require_menu_tools(current)
+            return current
+        except Exception:
+            if current is not None:self.hide_if_epoch(current)
+            raise
 
     @per_monitor_dpi
     @window_transition
@@ -1137,6 +1191,7 @@ class Desktop:
         # Capture ownership before ShowWindow, including ImGui submenus.
         foreground = self.gui.GetForegroundWindow()
         owned_foreground = self._is_menu_window(foreground)
+        input_panel_closed = self.menu_tools_active
         # A focus-neutral close must not strand our own hidden foreground.
         # Preserve session ownership until an actual foreign foreground is
         # observed; restore controls focus movement, not session validity.
@@ -1152,11 +1207,16 @@ class Desktop:
                 if hasattr(self.gui,'PostMessage'):
                     self.gui.PostMessage(self.hwnd,0x8019,self.target,0)
                 else:self.gui.SetForegroundWindow(self.target)
+                if input_panel_closed and self.input_language:self.input_language.edit_end()
             except Exception:
                 logging.info('Photoshop focus restore refused: before=%s target=%s', foreground, self.target)
         self.preview_pending_feedback()
         logging.info('Menu hidden: restore=%s before=%s after=%s', restore, foreground, self.gui.GetForegroundWindow())
         return {"message": "操作菜单已收起"}
+
+    @window_transition
+    def hide_if_epoch(self,epoch):
+        if self.visible and self.menu_epoch==epoch:return self.hide()
 
     def dismiss(self):
         with self.window_lock:
@@ -1207,6 +1267,7 @@ class Desktop:
     def close(self):
         self.stop.set()
         if self.input_language:self.input_language.thread.join(2)
+        if self.input_focus:self.input_focus.thread.join(2)
         if self.native:
             try:
                 self.native.stdin.close()

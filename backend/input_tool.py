@@ -3,6 +3,7 @@ import json
 import math
 import secrets
 import time
+import threading
 from datetime import datetime
 from .settings import atomic_json
 from .uxp_bridge import publish_request
@@ -10,9 +11,24 @@ from .uxp_bridge import publish_request
 
 class ToolObservation:
     def __init__(self,transport):
+        self.lock=threading.RLock()
         self.transport=transport
         self.path=transport.config.parent/'input-tool-pending.json'
         self.retry_after=None
+
+    def event(self):
+        try:
+            folder,heartbeat=self.transport.observe()
+            path=folder/'input-tool-event.json'
+            if path.stat().st_size>2048:return
+            value=json.loads(path.read_text('utf-8'))
+            token=json.loads(self.transport.config.read_text('utf-8-sig'))['token']
+            stamp=value.get('created_at_ms')
+            if (type(value.get('schema')) is int and value['schema']==1 and value.get('session')==heartbeat['session'] and value.get('token')==token and
+                type(value.get('sequence')) is int and value['sequence']>0 and value.get('state') in ('enter','exit') and
+                type(stamp) in (int,float) and math.isfinite(stamp) and 0<=time.time()*1000-stamp<=2000):
+                return value['session'],value['sequence'],value['state']
+        except (RuntimeError,OSError,ValueError,TypeError,AttributeError):pass
 
     def reconcile(self):
         if self.path.exists():
@@ -24,6 +40,9 @@ class ToolObservation:
         return False
 
     def read(self,publish=True,wait=True,identity=None):
+        with self.lock:return self._read(publish,wait,identity)
+
+    def _read(self,publish=True,wait=True,identity=None):
         try:
             folder,heartbeat=self.transport.observe()
             if identity is not None:

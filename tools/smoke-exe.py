@@ -35,6 +35,8 @@ async def exercise(executable, workspace, port, show_control=False):
         settings['enabled'] = False
         data.mkdir()
         (data/'settings.json').write_text(json.dumps(settings),encoding='utf-8')
+        # Exercise local startup/shutdown independently of a remote release check.
+        (data/'application-update.json').write_text(json.dumps({'auto_check':False}),encoding='utf-8')
         history_id = 'smoke-history-success'
         (data/'task-history.json').write_text(json.dumps({'protocol_version':1,'items':[
             {'id':history_id,'action':'label.red','label':'历史测试','channel':'com-jsx',
@@ -73,10 +75,11 @@ async def exercise(executable, workspace, port, show_control=False):
                 assert health['ready'] is True, 'HTTP responds before desktop components are ready'
                 assert Path(status['service']['executable']).resolve()==copy.resolve()
                 for _ in range(20):
-                    if status.get('input_language',{}).get('uia_available') is True:break
+                    if status.get('input_language',{}).get('uia_available') is True and 'root' in status.get('input_focus',{}):break
                     await asyncio.sleep(.1)
                     status=json.loads((await client.fetch(url+'/api/status')).body)
                 assert status.get('input_language',{}).get('uia_available') is True, status.get('input_language')
+                assert {'root','focus','epoch'}<=status.get('input_focus',{}).keys(),status.get('input_focus')
                 history=json.loads((await client.fetch(url+'/api/tasks')).body)
                 assert history['persistent'] and not history['persistence_error']
                 saved={item['id']:item for item in history['items']}

@@ -1,4 +1,4 @@
-// Win32 hooks: no allocation, pipe I/O or application calls in callbacks.
+// Win32 hooks: no allocation, pipe I/O or PS calls; transitions use one bounded decision.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tlhelp32.h>
@@ -14,10 +14,10 @@
 #include <vector>
 #include "ScreenSample.h"
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers, LanguageProtect, LanguageActivity, LanguageEditEnd };
-static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search", "input.language.protect", "input.language.activity", "input.language.edit_end"};
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers, LanguageProtect, LanguageActivity, LanguageEditEnd, SearchTrace, InputVerify };
+static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search", "input.language.protect", "input.language.activity", "input.language.edit_end", "search.trace"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false,searchAllowed=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr,searchRoot=nullptr,searchFocus=nullptr; ULONGLONG sequence=0,searchTick=0; std::array<Binding,16> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false,searchAllowed=false,editorInput=false,imeReady=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr,searchRoot=nullptr,searchFocus=nullptr,imeRoot=nullptr,imeFocus=nullptr; ULONGLONG sequence=0,searchEpoch=0,imeEpoch=0; std::array<Binding,16> bindings{}; };
 // Opt-in remote clicks qualify only on a matching release in the same verified
 // PS workspace. No hover, taskbar or injected Alt+Tab activation is added.
 struct RemoteClickIntent {
@@ -151,6 +151,8 @@ static bool injectRight(DWORD flags) {
     return SendInput(1,&input,sizeof(input))==1;
 }
 static Config config;
+static Config inputEvidence;
+static SRWLOCK inputEvidenceLock=SRWLOCK_INIT;
 static ULONGLONG diagnosticUntil=0;
 static KeyMachine keys;
 static HWND target=nullptr;
@@ -166,7 +168,20 @@ static std::atomic<bool> closing{false};
 static DWORD hookThread;
 static HANDLE available;
 static ULONGLONG lastInputTick=0,lastScanUs=0;
-static ULONGLONG lastEditorIntentTick=0;
+static ULONGLONG inputEpoch=0;
+static HANDLE inputDecision=nullptr;
+static std::atomic<ULONGLONG> inputRequest{0};
+static std::atomic<int> inputResult{0};
+static SRWLOCK inputDecisionLock=SRWLOCK_INIT;
+static bool inputChanged=true;
+static ULONGLONG unknownInputEpoch=~ULONGLONG(0);
+static void advanceInput(){++inputEpoch;inputChanged=true;}
+static void acceptInputReply(ULONGLONG request,int result) {
+    if(result<0 || result>2)return;
+    AcquireSRWLockExclusive(&inputDecisionLock);
+    if(inputRequest.load()==request && request!=0){inputResult.store(result);SetEvent(inputDecision);}
+    ReleaseSRWLockExclusive(&inputDecisionLock);
+}
 struct ActivationGate {
     bool active=false,allowed=false,switching=false,taskbarSwitching=false,directSwitching=false;
     ULONGLONG clicked=0;
@@ -238,7 +253,8 @@ struct HookEvent {
     DWORD ageMs=0;
     bool attempted=false,toggleOn=false,previousToggle=false;
     bool activationAllowed=false,activationActive=false,taskbarSwitching=false,directSwitching=false;
-    ULONGLONG activationIntent=0;
+    ULONGLONG activationIntent=0,inputEpoch=0,guardEpoch=0;
+    bool guardAllowed=false;
     wchar_t windowClass[64]{};
 };
 static std::array<HookEvent,1024> queue{};
@@ -280,6 +296,7 @@ static void emit(Action action,HWND hwnd=nullptr,HWND root=nullptr) {
     POINT cursor{};
     if (action==HoldRelease && !GetCursorPos(&cursor)) action=HoldCancel;
     queue[head.load(std::memory_order_relaxed)]={action,hwnd,root,cursor};
+    queue[head.load(std::memory_order_relaxed)].inputEpoch=inputEpoch;
     if(action==Configured)queue[head.load(std::memory_order_relaxed)].gapMs=config.sequence;
     if(action==HoldBegin){queue[head.load(std::memory_order_relaxed)].gapMs=GetTickCount64();GetCursorPos(&intentOrigin);queue[head.load(std::memory_order_relaxed)].cursor=intentOrigin;intentRevealed=false;}
     head.store(next,std::memory_order_release); SetEvent(available);
@@ -416,11 +433,11 @@ static bool menuWindow(HWND hwnd) {
     return pid && pid==owner;
 }
 static bool textLanguageIntent(int key,const KeyMachine& state) {
-    return key=='T' && !state.held[VK_CONTROL] && !state.held[VK_MENU] &&
+    return ((key==VK_F2 && !state.held[VK_CONTROL]) || (key=='T' && state.held[VK_CONTROL])) && !state.held[VK_MENU] &&
         !state.held[VK_CAPITAL] && !state.held[VK_LWIN] && !state.held[VK_RWIN];
 }
 static bool languageActivityKey(int key,const KeyMachine& state) {
-    return ((key>='A' && key<='Z') || key==VK_RETURN || key==VK_ESCAPE || key==VK_TAB) &&
+    return (key==VK_RETURN || key==VK_ESCAPE || key==VK_TAB) &&
         !state.held[VK_CONTROL] && !state.held[VK_MENU] && !state.held[VK_CAPITAL] &&
         !state.held[VK_LWIN] && !state.held[VK_RWIN];
 }
@@ -433,14 +450,19 @@ static bool languageEditEndEvent(int key,bool down,const KeyMachine& state,int& 
     if(!down && key==pending){pending=0;return true;}
     return false;
 }
-static void CALLBACK languageFocusEvent(HWINEVENTHOOK,DWORD,HWND hwnd,LONG,LONG,DWORD,DWORD) {
-    if(hwnd && photoshopProcessWindow(hwnd)){lastEditorIntentTick=GetTickCount64();emit(LanguageActivity);}
+static void CALLBACK languageFocusEvent(HWINEVENTHOOK,DWORD event,HWND hwnd,LONG,LONG,DWORD,DWORD) {
+    if(!hwnd)return;
+    if(photoshopProcessWindow(hwnd)) {
+        emit(LanguageActivity,hwnd);
+    } else if(event==EVENT_SYSTEM_FOREGROUND && !menuWindow(hwnd)) {
+        advanceInput();emit(LanguageActivity,hwnd);
+    }
 }
-static bool freshSearchProof(const Config& cfg,HWND root,HWND focus,ULONGLONG now,ULONGLONG intent) {
+static bool searchContextMatches(const Config& cfg,HWND root,HWND focus,ULONGLONG epoch) {
     return cfg.searchAllowed && root && focus && root==cfg.searchRoot && focus==cfg.searchFocus &&
-        cfg.searchTick>intent && cfg.searchTick<=now && now-cfg.searchTick<=1000;
+        cfg.searchEpoch==epoch;
 }
-static bool searchInputAllowed(const Config& cfg,HWND foreground,ULONGLONG now) {
+static bool searchInputAllowed(const Config& cfg,HWND foreground) {
     if(cfg.textInput || cfg.colorEditor)return false;
     const auto thread=GetWindowThreadProcessId(foreground,nullptr);
     GUITHREADINFO info{};info.cbSize=sizeof(info);
@@ -448,7 +470,35 @@ static bool searchInputAllowed(const Config& cfg,HWND foreground,ULONGLONG now) 
        info.hwndCaret)return false;
     wchar_t name[32]{};GetClassNameW(info.hwndFocus,name,32);
     if(wcscmp(name,L"Edit")==0 || wcscmp(name,L"RichEdit20W")==0 || wcscmp(name,L"RichEdit50W")==0 || wcscmp(name,L"ComboBox")==0)return false;
-    return freshSearchProof(cfg,GetAncestor(foreground,GA_ROOTOWNER),info.hwndFocus,now,lastEditorIntentTick);
+    return searchContextMatches(cfg,GetAncestor(foreground,GA_ROOTOWNER),info.hwndFocus,inputEpoch);
+}
+static bool photoshopInputFocus(HWND foreground) {
+    if(!photoshopProcessWindow(foreground))return false;
+    DWORD pid=0,focusPid=0;const auto thread=GetWindowThreadProcessId(foreground,&pid);
+    GUITHREADINFO info{};info.cbSize=sizeof(info);
+    if(!GetGUIThreadInfo(thread,&info) || !info.hwndFocus)return false;
+    GetWindowThreadProcessId(info.hwndFocus,&focusPid);return pid && focusPid==pid;
+}
+static int verifyInput(HWND foreground,bool needIme,HWND& root,HWND& focus) {
+    GUITHREADINFO info{};info.cbSize=sizeof(info);
+    const auto thread=GetWindowThreadProcessId(foreground,nullptr);
+    if(!inputDecision || !thread || !GetGUIThreadInfo(thread,&info) || !info.hwndFocus || info.hwndCapture || info.hwndMenuOwner || info.hwndMoveSize)return 0;
+    root=GetAncestor(foreground,GA_ROOTOWNER);focus=info.hwndFocus;
+    static ULONGLONG sequence=0;const auto request=++sequence;
+    unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
+    if(next==tail.load(std::memory_order_acquire))return 0;
+    AcquireSRWLockExclusive(&inputDecisionLock);
+    ResetEvent(inputDecision);inputResult.store(0);inputRequest.store(request);
+    ReleaseSRWLockExclusive(&inputDecisionLock);
+    HookEvent event{};event.action=InputVerify;event.root=root;event.hwnd=focus;
+    event.gapMs=request;event.inputEpoch=inputEpoch;event.attempted=needIme;event.activationIntent=GetTickCount64()+200;
+    queue[head.load(std::memory_order_relaxed)]=event;head.store(next,std::memory_order_release);SetEvent(available);
+    const auto ready=WaitForSingleObject(inputDecision,200)==WAIT_OBJECT_0;
+    AcquireSRWLockExclusive(&inputDecisionLock);
+    const auto result=inputResult.load();inputRequest.store(0);
+    ReleaseSRWLockExclusive(&inputDecisionLock);
+    if(!ready || closing.load() || GetForegroundWindow()!=foreground || !GetGUIThreadInfo(thread,&info) || info.hwndFocus!=focus || info.hwndCapture || info.hwndMenuOwner || info.hwndMoveSize)return 0;
+    return result;
 }
 static bool routeKey(KeyMachine& state,int raw,bool down,bool commandScope,bool processScope,
                      const Config& cfg,bool visible,Action& action,ULONGLONG now) {
@@ -498,35 +548,66 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
             }
         }
         Config localConfig=config;
-        localConfig.colorEditor=config.colorEditor && menuWindow(foreground);
-        if(input.vkCode=='F' && !repeat && (message==WM_KEYDOWN || message==WM_SYSKEYDOWN) && commandScope)
-            localConfig.searchAllowed=searchInputAllowed(config,foreground,lastInputTick);
+        Config evidence;
+        AcquireSRWLockShared(&inputEvidenceLock);evidence=inputEvidence;ReleaseSRWLockShared(&inputEvidenceLock);
+        localConfig.textInput=evidence.textInput;localConfig.editorInput=evidence.editorInput;
+        localConfig.searchAllowed=evidence.searchAllowed;localConfig.searchRoot=evidence.searchRoot;localConfig.searchFocus=evidence.searchFocus;localConfig.searchEpoch=evidence.searchEpoch;
+        localConfig.imeReady=evidence.imeReady;localConfig.imeRoot=evidence.imeRoot;localConfig.imeFocus=evidence.imeFocus;localConfig.imeEpoch=evidence.imeEpoch;
+        localConfig.colorEditor=evidence.colorEditor && menuWindow(foreground);
+        if(input.vkCode=='F')localConfig.searchAllowed=searchInputAllowed(localConfig,foreground);
+        const bool letter=input.vkCode>='A' && input.vkCode<='Z';
+        if(letter && keys.pending==-1 && !keys.modified() && !repeat && (message==WM_KEYDOWN || message==WM_SYSKEYDOWN) && commandScope &&
+           !localConfig.colorEditor && photoshopInputFocus(foreground)) {
+            GUITHREADINFO info{};info.cbSize=sizeof(info);GetGUIThreadInfo(GetWindowThreadProcessId(foreground,nullptr),&info);
+            const auto root=GetAncestor(foreground,GA_ROOTOWNER);
+            const bool freshInput=localConfig.editorInput && localConfig.searchEpoch==inputEpoch && localConfig.searchRoot==root && localConfig.searchFocus==info.hwndFocus;
+            const bool imeReady=localConfig.imeReady && localConfig.imeEpoch==inputEpoch && localConfig.imeRoot==root && localConfig.imeFocus==info.hwndFocus;
+            const bool searchReady=input.vkCode=='F' && localConfig.searchAllowed;
+            if((inputChanged || (!freshInput && !(input.vkCode=='F'?searchReady:imeReady))) && unknownInputEpoch!=inputEpoch) {
+                HWND verifiedRoot=nullptr,verifiedFocus=nullptr;
+                const int result=verifyInput(foreground,input.vkCode!='F',verifiedRoot,verifiedFocus);
+                inputChanged=false;
+                if(!result)unknownInputEpoch=inputEpoch;
+                if(input.vkCode=='F' && result==2) {
+                    localConfig.textInput=false;localConfig.searchAllowed=true;localConfig.searchRoot=verifiedRoot;localConfig.searchFocus=verifiedFocus;localConfig.searchEpoch=inputEpoch;
+                } else if(input.vkCode=='F')localConfig.searchAllowed=false;
+                commandScope=commandScope && GetForegroundWindow()==foreground;
+            } else if(input.vkCode=='F')localConfig.searchAllowed=searchReady;
+        }
         bool unusedPrefix=keys.pending!=-1 && !keys.used;
         bool blocked=routeKey(keys,input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
                      commandScope,processScope,localConfig,IsWindowVisible(config.overlay),action,GetTickCount64());
         static int pendingEditEnd=0;
         const bool down=message==WM_KEYDOWN || message==WM_SYSKEYDOWN;
         if(!processScope)pendingEditEnd=0;
-        if(processScope && !blocked && (!down || !repeat) && !(input.flags&LLKHF_INJECTED)) {
-            if(languageEditEndEvent(input.vkCode,down,keys,pendingEditEnd)){lastEditorIntentTick=lastInputTick;emit(LanguageEditEnd);}
-            else if(down && textLanguageIntent(input.vkCode,keys)){lastEditorIntentTick=lastInputTick;emit(LanguageProtect);}
-            else if(down && languageActivityKey(input.vkCode,keys)){lastEditorIntentTick=lastInputTick;emit(LanguageActivity);}
+        const bool inputEvent=input.vkCode=='F' || input.vkCode=='T' || input.vkCode==VK_RETURN || input.vkCode==VK_ESCAPE || input.vkCode==VK_TAB || input.vkCode==VK_F2;
+        const bool psInput=inputEvent && photoshopInputFocus(foreground);
+        if(inputEvent && !psInput)pendingEditEnd=0;
+        if(psInput && !blocked && (!down || !repeat)) {
+            if(languageEditEndEvent(input.vkCode,down,keys,pendingEditEnd)){advanceInput();emit(LanguageEditEnd);}
+            else if(down && textLanguageIntent(input.vkCode,keys)){advanceInput();emit(LanguageProtect);}
+            else if(down && languageActivityKey(input.vkCode,keys)){
+                advanceInput();emit(LanguageActivity);
+            }
+            else if(down && ((input.vkCode=='F' && !keys.modified()) || input.vkCode=='T'))emit(LanguageActivity,foreground);
         }
         bool traceConfigured=false;
+        if(config.diagnostic && GetTickCount64()<diagnosticUntil && input.vkCode=='F')traceConfigured=true;
         if(config.diagnostic && GetTickCount64()<diagnosticUntil) for(const auto& b:config.bindings)
             if(b.action==Toggle && b.count && b.keys[b.count-1]==alias(input.vkCode))traceConfigured=true;
         if (input.vkCode==VK_CAPITAL || traceConfigured) {
             unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
             if (next!=tail.load(std::memory_order_acquire)) {
-                HookEvent event{};event.action=traceConfigured?TriggerTrace:CapsTrace;event.hwnd=foreground;
+                HookEvent event{};event.action=traceConfigured?(input.vkCode=='F'?SearchTrace:TriggerTrace):CapsTrace;event.hwnd=foreground;
                 event.key=alias(input.vkCode);event.matched=action;
                 event.modifiers=(keys.held[16]?1:0)|(keys.held[17]?2:0)|(keys.held[18]?4:0)|(keys.held[20]?8:0);
-                event.attempted=config.textInput;
+                event.attempted=localConfig.textInput;
                 GetWindowThreadProcessId(foreground,&event.pid);
                 GetClassNameW(foreground,event.windowClass,64);
                 event.flags=input.flags;event.time=input.time;event.message=static_cast<UINT>(message);
                 event.command=commandScope;event.process=processScope;event.enabled=config.enabled;
                 event.repeat=repeat;event.owned=owned;event.blocked=blocked;
+                event.inputEpoch=inputEpoch;event.guardEpoch=localConfig.searchEpoch;event.guardAllowed=localConfig.searchAllowed;
                 event.activationAllowed=activation.allowed;event.activationActive=activation.active;
                 event.taskbarSwitching=activation.taskbarSwitching;event.activationIntent=activation.clicked;
                 event.decisionUs=microseconds()-timing.start;
@@ -537,7 +618,7 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
             } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
         }
         if (blocked) {
-            emit(action); return 1;
+            emit(action,action==SearchLayers?localConfig.searchFocus:nullptr,action==SearchLayers?localConfig.searchRoot:nullptr); return 1;
         }
         if(unusedPrefix && keys.used && action==None)emit(HoldCancel);
     }
@@ -593,7 +674,6 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
         if (up && previewPointer(index,true,false))return 1;
         if (index>=0 && !up) {
             POINT point=reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->pt;
-            if(photoshopProcessWindow(WindowFromPoint(point)))lastEditorIntentTick=lastInputTick;
             if(previewPointer(index,false,previewGuardWindow(WindowFromPoint(point))))return 1;
             if (index==0 && !(reinterpret_cast<const MSLLHOOKSTRUCT*>(data)->flags&LLMHF_INJECTED)) {
                 HWND clicked=WindowFromPoint(point);
@@ -609,9 +689,9 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
                 keys.cancelGesture();
                 emit(Hide);mouseConsumed[index]=true;return 1;
             }
-            if (!visible && config.enabled) {
+            if (config.enabled) {
                 HWND child=WindowFromPoint(point),root=GetAncestor(child,GA_ROOT);
-                if (photoshop(root)) emit(PanelClick,child,root);
+                if (photoshop(root) && photoshopProcessWindow(root)){advanceInput();emit(PanelClick,child,root);}
             }
             if (visible && !inside(config.overlay,point) && !menuWindow(GetAncestor(WindowFromPoint(point),GA_ROOT))) {
                 bool scoped=scope();
@@ -639,6 +719,7 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
 }
 static void stop() {
     closing.store(true); PostThreadMessageW(hookThread,WM_QUIT,0,0); SetEvent(available);
+    if(inputDecision){AcquireSRWLockExclusive(&inputDecisionLock);inputRequest.store(0);inputResult.store(0);SetEvent(inputDecision);ReleaseSRWLockExclusive(&inputDecisionLock);}
 }
 // Restricted internal JSON schema, parsed on the pipe thread, never in a hook.
 static Config parse(const std::string& line) {
@@ -652,9 +733,14 @@ static Config parse(const std::string& line) {
     next.enabled=field("enabled","(true|false)")=="true";
     if (std::regex_search(line,match,std::regex("\"text_input\"\\s*:\\s*(true|false)"))) next.textInput=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"search_non_input\"\\s*:\\s*(true|false)"))) next.searchAllowed=match[1]=="true";
+    if (std::regex_search(line,match,std::regex("\"editor_input\"\\s*:\\s*(true|false)"))) next.editorInput=match[1]=="true";
+    if (std::regex_search(line,match,std::regex("\"ime_ready\"\\s*:\\s*(true|false)"))) next.imeReady=match[1]=="true";
+    if (std::regex_search(line,match,std::regex("\"ime_root\"\\s*:\\s*([0-9]+)"))) next.imeRoot=reinterpret_cast<HWND>(std::stoull(match[1]));
+    if (std::regex_search(line,match,std::regex("\"ime_focus\"\\s*:\\s*([0-9]+)"))) next.imeFocus=reinterpret_cast<HWND>(std::stoull(match[1]));
+    if (std::regex_search(line,match,std::regex("\"ime_epoch\"\\s*:\\s*([0-9]+)"))) next.imeEpoch=std::stoull(match[1]);
     if (std::regex_search(line,match,std::regex("\"search_root\"\\s*:\\s*([0-9]+)"))) next.searchRoot=reinterpret_cast<HWND>(std::stoull(match[1]));
     if (std::regex_search(line,match,std::regex("\"search_focus\"\\s*:\\s*([0-9]+)"))) next.searchFocus=reinterpret_cast<HWND>(std::stoull(match[1]));
-    if (std::regex_search(line,match,std::regex("\"search_tick\"\\s*:\\s*([0-9]+)"))) next.searchTick=std::stoull(match[1]);
+    if (std::regex_search(line,match,std::regex("\"search_epoch\"\\s*:\\s*([0-9]+)"))) next.searchEpoch=std::stoull(match[1]);
     if (std::regex_search(line,match,std::regex("\"color_editor\"\\s*:\\s*(true|false)"))) next.colorEditor=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"diagnostic_trace\"\\s*:\\s*(true|false)"))) next.diagnostic=match[1]=="true";
     if (std::regex_search(line,match,std::regex("\"remote_compatibility\"\\s*:\\s*(true|false)"))) next.remoteCompatibility=match[1]=="true";
@@ -688,7 +774,17 @@ static void readSettings() {
         std::string line;
         while (std::getline(std::cin,line)) {
             if (line.find("\"quit\"")!=std::string::npos) break;
+            if(line.find("\"verify_reply\"")!=std::string::npos) {
+                std::smatch id,result;
+                if(!std::regex_search(line,id,std::regex("\"verify_reply\"\\s*:\\s*([0-9]+)")) ||
+                   !std::regex_search(line,result,std::regex("\"input_result\"\\s*:\\s*([012])\\s*[,}]")))continue;
+                ULONGLONG request=0;
+                try{request=std::stoull(id[1]);}catch(...){continue;}
+                acceptInputReply(request,std::stoi(result[1]));
+                continue;
+            }
             auto next=std::make_unique<Config>(parse(line));
+            AcquireSRWLockExclusive(&inputEvidenceLock);inputEvidence=*next;ReleaseSRWLockExclusive(&inputEvidenceLock);
             if (!PostThreadMessageW(hookThread,WM_APP,0,reinterpret_cast<LPARAM>(next.get()))) break;
             next.release();
         }
@@ -712,6 +808,18 @@ static void writeActions() {
             auto event=outgoing[nextOutput++];Action action=event.action;
             const char* type=action==Ready?"ready":action==Error?"error":action==Configured?"configured":"action";
             std::string line;
+            if(action==Ready) {
+                line="{\"type\":\"ready\",\"input_epoch\":"+std::to_string(event.inputEpoch)+"}\n";
+                DWORD written=0;
+                if(!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()){stop();return;}
+                continue;
+            }
+            if(action==InputVerify) {
+                line="{\"type\":\"input.verify\",\"verify_id\":"+std::to_string(event.gapMs)+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"input_epoch\":"+std::to_string(event.inputEpoch)+",\"need_ime\":"+(event.attempted?"true":"false")+",\"expires_tick_ms\":"+std::to_string(event.activationIntent)+"}\n";
+                DWORD written=0;
+                if(!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()){stop();return;}
+                continue;
+            }
             if (action==ActivationTrace) {
                 std::wstring wideClass(event.windowClass);std::string windowClass(wideClass.begin(),wideClass.end());
                 windowClass=std::regex_replace(windowClass,std::regex("[^A-Za-z0-9_.# -]"),"_");
@@ -745,19 +853,19 @@ static void writeActions() {
                     ",\"renew_us\":"+std::to_string(event.renewUs)+",\"timer_gap_ms\":"+std::to_string(event.gapMs)+
                     ",\"callback_peak_us\":"+std::to_string(event.peakUs)+",\"dropped_total\":"+std::to_string(event.dropped)+
                     ",\"renew_ok\":"+(event.blocked?"true":"false")+",\"renew_attempted\":"+(event.attempted?"true":"false")+
-                    ",\"scan_on_worker\":true}\n";
+                    ",\"input_epoch\":"+std::to_string(event.inputEpoch)+",\"scan_on_worker\":true}\n";
                 DWORD written=0;
                 if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) {stop();return;}
                 continue;
             }
-            if (action==CapsTrace || action==TriggerTrace) {
+            if (action==CapsTrace || action==TriggerTrace || action==SearchTrace) {
                 std::string windowClass;
                 for (wchar_t c:event.windowClass) {
                     if (!c) break;
                     if (c==L'"' || c==L'\\') windowClass+='\\';
                     windowClass+=c>=32 && c<=126?static_cast<char>(c):'?';
                 }
-                line=std::string("{\"type\":\"")+(action==TriggerTrace?"trigger.trace":"caps.trace")+"\",\"key\":"+std::to_string(event.key)+",\"modifiers\":"+std::to_string(event.modifiers)+",\"matched_action\":\""+names[event.matched]+"\",\"text_input\":"+(event.attempted?"true":"false")+",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
+                line=std::string("{\"type\":\"")+(action==SearchTrace?"search.trace":action==TriggerTrace?"trigger.trace":"caps.trace")+"\",\"key\":"+std::to_string(event.key)+",\"modifiers\":"+std::to_string(event.modifiers)+",\"matched_action\":\""+names[event.matched]+"\",\"text_input\":"+(event.attempted?"true":"false")+",\"input_epoch\":"+std::to_string(event.inputEpoch)+",\"guard_epoch\":"+std::to_string(event.guardEpoch)+",\"guard_allowed\":"+(event.guardAllowed?"true":"false")+",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+
                     ",\"pid\":"+std::to_string(event.pid)+",\"window_class\":\""+windowClass+"\",\"message\":"+std::to_string(event.message)+
                     ",\"flags\":"+std::to_string(event.flags)+",\"key_time_ms\":"+std::to_string(event.time)+
                     ",\"command_scope\":"+(event.command?"true":"false")+",\"process_scope\":"+(event.process?"true":"false")+
@@ -773,13 +881,14 @@ static void writeActions() {
                 if (!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()) {stop();return;}
                 continue;
             }
-            if (action==LanguageProtect) line="{\"type\":\"input.language.protect\"}\n";
-            else if (action==LanguageActivity) line="{\"type\":\"input.language.activity\"}\n";
-            else if (action==LanguageEditEnd) line="{\"type\":\"input.language.edit_end\"}\n";
-            else if (action==PanelClick) line="{\"type\":\"panel.click\",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+"}\n";
+            if (action==LanguageProtect) line="{\"type\":\"input.language.protect\",\"input_epoch\":"+std::to_string(event.inputEpoch)+"}\n";
+            else if (action==LanguageActivity) line="{\"type\":\"input.language.activity\",\"input_epoch\":"+std::to_string(event.inputEpoch)+",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+"}\n";
+            else if (action==LanguageEditEnd) line="{\"type\":\"input.language.edit_end\",\"input_epoch\":"+std::to_string(event.inputEpoch)+"}\n";
+            else if (action==PanelClick) line="{\"type\":\"panel.click\",\"input_epoch\":"+std::to_string(event.inputEpoch)+",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+"}\n";
             else {
                 line=std::string("{\"type\":\"")+type+"\",\"action\":\""+names[action]+"\"";
                 if(action==Configured)line+=",\"configuration_sequence\":"+std::to_string(event.gapMs);
+                if(action==SearchLayers)line+=",\"input_guard\":{\"epoch\":"+std::to_string(event.inputEpoch)+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+",\"focus\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+"}";
                 if (action==HoldRelease || action==HoldBegin) line+=",\"cursor\":["+std::to_string(event.cursor.x)+","+std::to_string(event.cursor.y)+"]";
                 line+="}\n";
             }
@@ -838,8 +947,11 @@ static int selfTest() {
         std::cout<<"Modifier reconciliation passed: missed releases, real holds, left/right pairs, consumed modifiers, Caps recovery and OS sampling\n";
     }
     KeyMachine languageKeys;
-    check(textLanguageIntent('T',languageKeys) && !textLanguageIntent(VK_F2,languageKeys) && !textLanguageIntent('A',languageKeys));
-    check(languageActivityKey('A',languageKeys) && languageActivityKey('V',languageKeys) && languageActivityKey(VK_ESCAPE,languageKeys) && !languageActivityKey(VK_SHIFT,languageKeys));
+    check(!textLanguageIntent('T',languageKeys) && textLanguageIntent(VK_F2,languageKeys) && !textLanguageIntent('A',languageKeys));
+    check(!languageActivityKey('A',languageKeys) && !languageActivityKey('V',languageKeys) && languageActivityKey(VK_ESCAPE,languageKeys) && !languageActivityKey(VK_SHIFT,languageKeys));
+    check(!languageActivityKey('F',languageKeys) && !languageActivityKey('F',languageKeys));
+    check(!languageActivityKey('A',languageKeys) && !languageActivityKey('V',languageKeys));
+    check(!textLanguageIntent('T',languageKeys) && languageActivityKey(VK_RETURN,languageKeys) && languageActivityKey(VK_TAB,languageKeys));
     check(languageEditEndKey(VK_ESCAPE,languageKeys) && !languageEditEndKey(VK_RETURN,languageKeys));
     languageKeys.held[VK_CONTROL]=true;check(languageEditEndKey(VK_RETURN,languageKeys) && !languageActivityKey(VK_RETURN,languageKeys));
     languageKeys.held[VK_MENU]=true;check(!languageEditEndKey(VK_RETURN,languageKeys));languageKeys.held[VK_MENU]=false;languageKeys.held[VK_CONTROL]=false;
@@ -850,7 +962,7 @@ static int selfTest() {
     check(languageEditEndEvent(VK_RETURN,false,languageKeys,pendingEdit) && pendingEdit==0);
     check(!languageEditEndEvent(VK_RETURN,false,languageKeys,pendingEdit));
     for(int modifier:{VK_CONTROL,VK_MENU,VK_CAPITAL,VK_LWIN,VK_RWIN}) {
-        languageKeys.held[modifier]=true;check(!textLanguageIntent('T',languageKeys));languageKeys.held[modifier]=false;
+        languageKeys.held[modifier]=true;check(textLanguageIntent('T',languageKeys)==(modifier==VK_CONTROL));languageKeys.held[modifier]=false;
         languageKeys.held[modifier]=true;check(!languageActivityKey('A',languageKeys));languageKeys.held[modifier]=false;
     }
     ScreenSampleClicks samples;
@@ -929,13 +1041,12 @@ static int selfTest() {
         c.searchAllowed=false;KeyMachine unverified;
         check(!unverified.event('F',true,true,c,false,action) && action==None);
         check(!unverified.event('F',false,true,c,false,action));
-        c.searchAllowed=true;c.searchRoot=reinterpret_cast<HWND>(10);c.searchFocus=reinterpret_cast<HWND>(11);c.searchTick=100;
-        check(freshSearchProof(c,c.searchRoot,c.searchFocus,100,99));
-        check(!freshSearchProof(c,c.searchRoot,c.searchFocus,100,100));
-        check(!freshSearchProof(c,c.searchRoot,c.searchFocus,99,98));
-        check(!freshSearchProof(c,c.searchRoot,c.searchFocus,1101,99));
-        check(!freshSearchProof(c,reinterpret_cast<HWND>(12),c.searchFocus,100,99));
-        check(!freshSearchProof(c,c.searchRoot,reinterpret_cast<HWND>(12),100,99));
+        c.searchAllowed=true;c.searchRoot=reinterpret_cast<HWND>(10);c.searchFocus=reinterpret_cast<HWND>(11);c.searchEpoch=100;
+        check(searchContextMatches(c,c.searchRoot,c.searchFocus,100));
+        check(!searchContextMatches(c,c.searchRoot,c.searchFocus,101));
+        check(!searchContextMatches(c,c.searchRoot,c.searchFocus,99));
+        check(!searchContextMatches(c,reinterpret_cast<HWND>(12),c.searchFocus,100));
+        check(!searchContextMatches(c,c.searchRoot,reinterpret_cast<HWND>(12),100));
     }
     // Complete remote click pairs only: opt-in, same valid workspace and 2s.
     RemoteClickIntent remote;
@@ -1209,22 +1320,58 @@ static int searchInputSelfTest() {
         HWND focus=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE,0,0,40,40,window,nullptr,nullptr,nullptr);
         HWND edit=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|WS_VISIBLE,50,0,120,24,window,nullptr,nullptr,nullptr);
         check(focus && edit);ShowWindow(window,SW_SHOW);SetForegroundWindow(window);SetFocus(focus);check(GetForegroundWindow()==window);
-        Config cfg;cfg.searchAllowed=true;cfg.searchRoot=window;cfg.searchFocus=focus;cfg.searchTick=GetTickCount64();lastEditorIntentTick=0;
+        Config cfg;cfg.searchAllowed=true;cfg.searchRoot=window;cfg.searchFocus=focus;cfg.searchEpoch=0;inputEpoch=0;
         const auto route=[&](){
-            Config local=cfg;local.searchAllowed=searchInputAllowed(cfg,window,GetTickCount64());
+            Config local=cfg;local.searchAllowed=searchInputAllowed(cfg,window);
             KeyMachine machine;Action action;const bool blocked=routeKey(machine,'F',true,true,true,local,false,action,GetTickCount64());
             check(machine.event('F',false,true,local,false,action)==blocked);return blocked;
         };
         check(route());
+        available=CreateEventW(nullptr,FALSE,FALSE,nullptr);inputDecision=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+        check(available && inputDecision);
+        ULONGLONG previousRequest=0;
+        for(const int wanted:{1,0,2}) {
+            std::atomic<bool> matched{false};
+            std::thread observer([&]{
+                if(WaitForSingleObject(available,1000)!=WAIT_OBJECT_0)return;
+                const auto index=tail.load();const auto event=queue[index];tail.store((index+1)%queue.size());
+                matched.store(event.action==InputVerify && event.root==window && event.hwnd==focus && event.attempted==(wanted==2));
+                if(wanted==0){previousRequest=event.gapMs;return;}
+                acceptInputReply(previousRequest,2);
+                acceptInputReply(event.gapMs,wanted);
+            });
+            HWND verifiedRoot=nullptr,verifiedFocus=nullptr;
+            const auto result=verifyInput(window,wanted==2,verifiedRoot,verifiedFocus);observer.join();
+            check(matched.load() && result==wanted && verifiedRoot==window && verifiedFocus==focus);
+            if(!wanted){acceptInputReply(previousRequest,2);check(WaitForSingleObject(inputDecision,0)==WAIT_TIMEOUT);}
+        }
+        CloseHandle(inputDecision);inputDecision=nullptr;CloseHandle(available);available=nullptr;
+        KeyMachine burst;Action action;
+        for(int i=0;i<1000;++i) {
+            cfg.searchEpoch=inputEpoch;
+            for(int key:{'A','V','T'}) {
+                check(!routeKey(burst,key,true,true,true,cfg,false,action,GetTickCount64()));
+                check(!languageActivityKey(key,burst));
+                check(!routeKey(burst,key,false,true,true,cfg,false,action,GetTickCount64()));
+            }
+            Config fresh=cfg;fresh.searchAllowed=searchInputAllowed(cfg,window);
+            check(routeKey(burst,'F',true,true,true,fresh,false,action,GetTickCount64()) && action==SearchLayers);
+            check(routeKey(burst,'F',false,true,true,fresh,false,action,GetTickCount64()));
+        }
         check(CreateCaret(focus,nullptr,1,14)!=0 && ShowCaret(focus)!=0);check(!route());
+        check(!languageActivityKey('A',burst));
         HideCaret(focus);cfg.searchAllowed=false;check(!route());
         cfg.searchAllowed=true;check(!route());DestroyCaret();check(route());
-        lastEditorIntentTick=GetTickCount64();check(!route());
-        Sleep(20);cfg.searchTick=GetTickCount64();check(route());
-        SetFocus(edit);cfg.searchFocus=edit;cfg.searchTick=GetTickCount64();check(!route());
+        ++inputEpoch;check(!route());
+        for(int i=0;i<1000;++i)for(int key:{'A','V','T'})
+            check(!languageActivityKey(key,burst));
+        check(!route());
+        check(!languageActivityKey('F',burst));
+        cfg.searchEpoch=inputEpoch;check(route());
+        SetFocus(edit);cfg.searchFocus=edit;cfg.searchEpoch=inputEpoch;check(!route());
         SetFocus(focus);cfg.searchFocus=edit;check(!route());
-        cfg.searchFocus=focus;cfg.searchTick=GetTickCount64()-1001;check(!route());
-        DestroyWindow(window);std::cout<<"Search input self-test passed: real visible/hidden caret, native Edit, stale focus, input intent, expiry and paired F release\n";return 0;
+        cfg.searchFocus=focus;cfg.searchEpoch=inputEpoch;check(route());
+        DestroyWindow(window);std::cout<<"Search input self-test passed: bounded first-key decisions, input/non-input replies, expired reply isolation, 1000 rapid A/V/T/F sequences, visible/hidden caret, native Edit, stale focus, input generations and paired release\n";return 0;
     } catch(...) {DestroyCaret();DestroyWindow(window);throw;}
 }
 static bool renewHooks(HHOOK& keyHook,HHOOK& mouseHook) {
@@ -1324,6 +1471,8 @@ int main(int argc,char** argv) {
     DWORD parent=argc==3 && std::string(argv[1])=="--parent"?std::stoul(argv[2]):0;
     hookThread=GetCurrentThreadId(); MSG message; PeekMessageW(&message,nullptr,0,0,PM_NOREMOVE);
     available=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+    inputDecision=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+    if(!available || !inputDecision)return 1;
     if (!available) return 1;
     for (int vk:{160,161,162,163,164,165,91,92}) if (GetAsyncKeyState(vk)&0x8000) keys.seed(vk);
     winRight.physical=(GetAsyncKeyState(VK_LWIN)&0x8000)!=0;
@@ -1395,6 +1544,7 @@ int main(int argc,char** argv) {
             unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
             if (next!=tail.load(std::memory_order_acquire)) {
                 HookEvent event{};event.action=HookHealth;event.scanUs=lastScanUs;event.renewUs=finished-started;event.attempted=attempted;
+                event.inputEpoch=inputEpoch;
                 event.gapMs=now-previousMaintenance;event.peakUs=callbackPeakUs.exchange(0,std::memory_order_relaxed);
                 event.dropped=droppedEvents.load(std::memory_order_relaxed);event.blocked=renewed;
                 queue[head.load(std::memory_order_relaxed)]=event;

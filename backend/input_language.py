@@ -147,7 +147,7 @@ class InputLanguage:
         self.policy.owned=None;self.policy.attempted=None;self.policy.restore_attempt=None
         self.report['retired_exited_owners']=self.report.get('retired_exited_owners',0)+1
 
-    def sample(self):
+    def sample(self,include_accessibility=True):
         import win32gui,win32process,win32api
         from .photoshop_windows import workspace_root
         gui=win32gui;foreground=gui.GetForegroundWindow()
@@ -169,12 +169,12 @@ class InputLanguage:
         focus=info.focus or 0;layout=self.user.GetKeyboardLayout(thread)
         if not focus or not layout:return {'state':'unknown'}
         focus_thread,focus_pid=win32process.GetWindowThreadProcessId(focus)
-        if focus_thread!=thread or focus_pid!=pid or (gui.GetAncestor(focus,3) or focus)!=root:return {'state':'unknown'}
+        if focus_thread!=thread or focus_pid!=pid or (gui.GetAncestor(focus,3) or focus)!=root:return {'state':'unknown','foreign_focus':focus}
         name=gui.GetClassName(focus) if focus and gui.IsWindow(focus) else ''
         state='input' if info.caret or name in ('Edit','RichEdit20W','RichEdit50W','ComboBox') else 'unknown'
         row={}
         input_panel=self.desktop.visible and (getattr(self.desktop,'color_editor_active',False) or getattr(self.desktop,'menu_tools_active',False))
-        if state=='unknown' and self.accessibility is not None and not self.busy() and not input_panel:
+        if include_accessibility and state=='unknown' and self.accessibility is not None and not self.busy() and not input_panel:
             try:
                 row=self.accessibility.read()
                 self.report.pop('uia_error_type',None)

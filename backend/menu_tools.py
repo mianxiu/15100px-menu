@@ -24,8 +24,12 @@ class MenuTools:
         require_available(self.app)
         if self.pending or self.app.panel_lock.locked():raise RuntimeError('工具正在处理，本次未接受')
         async with self.app.panel_lock:
-            epoch=await asyncio.to_thread(self.app.desktop.open_menu_tools,mode,args.get('menu_epoch'))
-            require_available(self.app)
+            guard={'input_guard':args['input_guard']} if 'input_guard' in args else {}
+            epoch=await asyncio.to_thread(self.app.desktop.open_menu_tools,mode,args.get('menu_epoch'),**guard)
+            try:require_available(self.app)
+            except Exception:
+                await asyncio.to_thread(self.app.desktop.hide_if_epoch,epoch)
+                raise
             self.epoch=epoch
             self.last_request=0
             self.search=LayerSearch(self.app);self.text=TextTools(self.app)

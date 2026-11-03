@@ -6,6 +6,24 @@ from backend.input_context import NativeImeContext
 
 
 class NativeContextTransportTests(unittest.TestCase):
+    def test_both_thread_hooks_are_owned_and_partial_install_is_unwound(self):
+        import os
+        for queued in (0,222):
+            value=NativeImeContext.__new__(NativeImeContext);value.controls={};value.hooks={}
+            value.library=SimpleNamespace(_handle=7,InputContextHook=1,InputContextQueueHook=2)
+            value.user=SimpleNamespace(SetWindowsHookExW=Mock(side_effect=[111,queued]),UnhookWindowsHookEx=Mock(),
+                GetPropW=Mock(side_effect=lambda hwnd,name:os.getpid() if name.endswith('Owner.v1') else 123))
+            value.attach=9;sample={'root':1,'identity':[1,2,'created',3],'state':'unknown'}
+            with patch('backend.input_context.ctypes.cast',return_value=8),patch('backend.input_context.ctypes.get_last_error',return_value=5),patch('win32gui.SendMessageTimeout'),patch('win32gui.IsWindow',return_value=True),patch('win32gui.GetClassName',return_value='PhotoshopMenu.InputContext.v1'),patch('win32process.GetWindowThreadProcessId',return_value=[3,2]):
+                if queued:
+                    self.assertEqual(value.control(sample),123)
+                    self.assertEqual([c.args[0] for c in value.user.SetWindowsHookExW.call_args_list],[4,3])
+                    value.close();self.assertEqual([c.args[0] for c in value.user.UnhookWindowsHookEx.call_args_list],[111,222])
+                else:
+                    with self.assertRaises(OSError):value.control(sample)
+                    value.user.UnhookWindowsHookEx.assert_called_once_with(111)
+                self.assertEqual(value.hooks,{})
+
     def test_native_profile_command_has_bounded_cold_start_budget(self):
         value=NativeImeContext.__new__(NativeImeContext)
         value.user=SimpleNamespace(GetPropW=Mock(return_value=123));value.message=99

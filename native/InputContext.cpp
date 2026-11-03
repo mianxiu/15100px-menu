@@ -1,6 +1,7 @@
 // Runs only in the verified PS UI thread. No text or document data is read.
 #include <windows.h>
 #include <imm.h>
+#include <tlhelp32.h>
 #include "InputContextTsf.h"
 
 static const wchar_t* controlClass=L"PhotoshopMenu.InputContext.v1";
@@ -21,6 +22,51 @@ static bool restoreFailed=false,changing=false;
 static bool restored=false;
 static ULONG_PTR revision=1;
 static InputContextTsf tsf;
+static bool menuHandoff=false;
+#ifdef INPUT_CONTEXT_SELF_TEST
+static bool testTrace=false;
+#endif
+static HANDLE menuProcess=nullptr;
+static DWORD menuPid=0;
+
+static bool ownMenu(HWND window) {
+    if(!window || !owner || WaitForSingleObject(owner,0)!=WAIT_TIMEOUT)return false;
+    window=GetAncestor(window,GA_ROOT);
+    wchar_t name[64]{};GetClassNameW(window,name,64);
+    if(wcscmp(name,L"PhotoshopMenuImGui")!=0)return false;
+    DWORD pid=0;GetWindowThreadProcessId(window,&pid);
+    if(menuProcess && menuPid==pid && WaitForSingleObject(menuProcess,0)==WAIT_TIMEOUT)return true;
+    if(menuProcess){CloseHandle(menuProcess);menuProcess=nullptr;menuPid=0;}
+    const auto snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+    if(snapshot==INVALID_HANDLE_VALUE)return false;
+    PROCESSENTRY32W entry{};entry.dwSize=sizeof(entry);bool valid=false;
+    for(BOOL found=Process32FirstW(snapshot,&entry);found;found=Process32NextW(snapshot,&entry))
+        if(entry.th32ProcessID==pid){valid=entry.th32ParentProcessID==ownerId && _wcsicmp(entry.szExeFile,L"MenuHost.exe")==0;break;}
+    CloseHandle(snapshot);if(!valid)return false;
+    const auto process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,pid);
+    FILETIME created{},exited{},kernel{},user{},ownerCreated{};
+    if(!process)return false;
+    valid=GetProcessTimes(process,&created,&exited,&kernel,&user) && GetProcessTimes(owner,&ownerCreated,&exited,&kernel,&user) &&
+        CompareFileTime(&created,&ownerCreated)>=0 && WaitForSingleObject(process,0)==WAIT_TIMEOUT;
+    if(!valid){CloseHandle(process);return false;}
+    menuProcess=process;menuPid=pid;return true;
+}
+static bool ownMenuThread(DWORD thread) {
+    bool found=false;
+    if(thread)EnumThreadWindows(thread,[](HWND window,LPARAM data)->BOOL{
+        if(!ownMenu(window))return TRUE;
+        *reinterpret_cast<bool*>(data)=true;return FALSE;
+    },reinterpret_cast<LPARAM>(&found));
+    return found;
+}
+static bool menuReturning() {
+    const auto window=GetForegroundWindow(),focus=GetFocus();
+    return menuHandoff && (!window || window==root) && (!focus || focus==root || focus==disabledWindow);
+}
+static bool menuActive() {
+    const auto window=GetForegroundWindow();
+    return ownMenu(window) || (window==root && ownMenu(GetFocus()));
+}
 
 static void contextChanged() {
     // Defer mutation until the TSF notification callback has returned.
@@ -42,11 +88,11 @@ static bool restore() {
     if(current && current!=originalContext){disabledWindow=nullptr;originalContext=nullptr;restored=true;return true;}
     changing=true;ImmAssociateContext(disabledWindow,originalContext);changing=false;
     if(associated(disabledWindow)!=originalContext){restoreFailed=true;return false;}
-    disabledWindow=nullptr;originalContext=nullptr;restoreFailed=false;restored=true;return true;
+    disabledWindow=nullptr;originalContext=nullptr;restoreFailed=false;restored=true;menuHandoff=false;return true;
 }
 static bool foreground() {
     const auto window=GetForegroundWindow();
-    return window && (GetAncestor(window,GA_ROOTOWNER)==root || window==root);
+    return window?(GetAncestor(window,GA_ROOTOWNER)==root || window==root || ownMenu(window)):menuReturning();
 }
 static bool ownFocus(HWND window) {
     DWORD pid=0;
@@ -54,8 +100,21 @@ static bool ownFocus(HWND window) {
 }
 static void verifyContext() {
     if(disabledWindow && (associated(disabledWindow) || !tsf.currentDisabled())) {
+#ifdef INPUT_CONTEXT_SELF_TEST
+        if(testTrace)std::fprintf(stderr,"restore: changed context associated=%p tsf_current=%d\n",associated(disabledWindow),tsf.currentDisabled());
+#endif
         revision=revision==0x7fffffff?1:revision+1;
         SetPropW(control,revisionProperty,reinterpret_cast<HANDLE>(revision));
+        GUITHREADINFO info{};info.cbSize=sizeof(info);
+        const auto focus=GetFocus();const auto activeContext=focus?associated(focus):nullptr;
+        const bool handoff=menuHandoff && !associated(disabledWindow) && foreground() &&
+            (focus==disabledWindow || focus==root) && GetGUIThreadInfo(0,&info) &&
+            !info.hwndCaret && !info.hwndCapture && !info.hwndMenuOwner && !info.hwndMoveSize &&
+            (!activeContext || ImmGetCompositionStringW(activeContext,GCS_COMPSTR,nullptr,0)<=0);
+        if(handoff) {
+            changing=true;const bool rebound=tsf.restore() && tsf.start() && tsf.currentDisabled();changing=false;
+            if(rebound)return;
+        }
         restore();
     }
 }
@@ -63,7 +122,8 @@ static LRESULT state(HWND focus) {
     DWORD pid=0;
     if(focus && (GetWindowThreadProcessId(focus,&pid)!=GetCurrentThreadId() || pid!=GetCurrentProcessId()))return 9;
     return 1 | (disabledWindow?2:0) | (!disabledWindow && focus && (associated(focus) || InputContextTsf::available())?4:0) |
-        (restoreFailed?8:0) | (restored?16:0) | (tsf.keyboard && tsf.currentDisabled()?32:0) | (tsf.watching()?64:0);
+        (restoreFailed?8:0) | (restored?16:0) | (tsf.keyboard && tsf.currentDisabled()?32:0) | (tsf.watching()?64:0) |
+        (disabledWindow && (menuActive() || menuReturning())?128:0);
 }
 static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM lParam) {
     if(message==controlMessage && (wParam>>8)==nonce) {
@@ -72,12 +132,12 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
         if(operation==1)return state(focus);
         if(operation==4){
             verifyContext();
-            if(disabledWindow==focus && foreground() && ownFocus(focus))deadline=GetTickCount64()+1500;
+            if(disabledWindow==focus && foreground() && (ownFocus(focus) || menuActive()))deadline=GetTickCount64()+1500;
             return state(focus);
         }
         if(operation==2) {
             GUITHREADINFO info{};info.cbSize=sizeof(info);
-            if(disabledWindow || !foreground() || !ownFocus(focus) || !GetGUIThreadInfo(0,&info) || info.hwndCaret || info.hwndCapture || info.hwndMenuOwner || info.hwndMoveSize)return state(focus)|8;
+            if(disabledWindow || !GetForegroundWindow() || menuActive() || !foreground() || !ownFocus(focus) || !GetGUIThreadInfo(0,&info) || info.hwndCaret || info.hwndCapture || info.hwndMenuOwner || info.hwndMoveSize)return state(focus)|8;
             const auto context=associated(focus);
             if(!context && !InputContextTsf::available())return state(focus)|8;
             if(context && ImmGetCompositionStringW(context,GCS_COMPSTR,nullptr,0)>0)return state(focus)|8;
@@ -92,7 +152,12 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
     if(message==contextChangedMessage){verifyContext();return 0;}
     if(message==WM_TIMER) {
         const bool exited=!owner || WaitForSingleObject(owner,0)!=WAIT_TIMEOUT;
-        if(disabledWindow && (exited || !foreground() || GetFocus()!=disabledWindow || GetTickCount64()>deadline))restore();
+        if(disabledWindow && (exited || !foreground() || (GetFocus()!=disabledWindow && !menuActive() && !menuReturning()) || GetTickCount64()>deadline)){
+#ifdef INPUT_CONTEXT_SELF_TEST
+            if(testTrace)std::fprintf(stderr,"restore: timer exited=%d foreground=%p focus=%p disabled=%p expired=%d\n",exited,GetForegroundWindow(),GetFocus(),disabledWindow,GetTickCount64()>deadline);
+#endif
+            restore();
+        }
         verifyContext();
         if(exited && !disabledWindow)DestroyWindow(window);
         return 0;
@@ -100,6 +165,7 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
     if(message==WM_DESTROY) {
         KillTimer(window,1);RemovePropW(root,controlProperty);RemovePropW(window,nonceProperty);RemovePropW(window,ownerProperty);RemovePropW(window,revisionProperty);
         if(owner)CloseHandle(owner);
+        if(menuProcess){CloseHandle(menuProcess);menuProcess=nullptr;menuPid=0;}
         owner=nullptr;control=nullptr;root=nullptr;ownerId=0;
         return 0;
     }
@@ -110,14 +176,34 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
     if(!QueryFullProcessImageNameW(process,0,path,&length))return false;
     const auto name=wcsrchr(path,L'\\');return _wcsicmp(name?name+1:path,expected)==0;
 }
+static void observeMessage(const CWPSTRUCT& event) {
+        if(disabledWindow && event.message==WM_ACTIVATEAPP)menuHandoff=ownMenuThread(DWORD(event.lParam)) || ownMenu(GetForegroundWindow());
+        if(disabledWindow && event.message==WM_KILLFOCUS && ownMenu(reinterpret_cast<HWND>(event.wParam)))menuHandoff=true;
+        if(disabledWindow && menuHandoff && event.message==WM_KEYDOWN && !ownMenu(event.hwnd) &&
+           (event.wParam!='T' || !(GetKeyState(VK_CONTROL)&0x8000)) && event.wParam!=VK_RETURN && event.wParam!=VK_F2){verifyContext();menuHandoff=false;}
+        if(!changing && disabledWindow && event.hwnd!=control && !ownMenu(event.hwnd) &&
+            ((event.message==WM_KILLFOCUS && !ownMenu(reinterpret_cast<HWND>(event.wParam)) && !ownMenu(GetForegroundWindow()) && !menuReturning()) || event.message==WM_INPUTLANGCHANGE || event.message==WM_LBUTTONDOWN || event.message==WM_LBUTTONDBLCLK || event.message==WM_RBUTTONDOWN ||
+             (event.message==WM_ACTIVATEAPP && !event.wParam && !ownMenu(GetForegroundWindow()) && !ownMenuThread(DWORD(event.lParam))) ||
+             (event.message==WM_KEYDOWN && ((event.wParam=='T' && (GetKeyState(VK_CONTROL)&0x8000)) || event.wParam==VK_RETURN || event.wParam==VK_F2)))){
+#ifdef INPUT_CONTEXT_SELF_TEST
+            if(testTrace)std::fprintf(stderr,"restore: message=%x hwnd=%p disabled=%p w=%p foreground=%p\n",event.message,event.hwnd,disabledWindow,reinterpret_cast<void*>(event.wParam),GetForegroundWindow());
+#endif
+            restore();
+        }
+}
+extern "C" __declspec(dllexport) LRESULT CALLBACK InputContextQueueHook(int code,WPARAM wParam,LPARAM lParam) {
+    if(code>=0 && wParam==PM_REMOVE) {
+        const auto& message=*reinterpret_cast<MSG*>(lParam);
+        const CWPSTRUCT event{message.lParam,message.wParam,message.message,message.hwnd};
+        observeMessage(event);
+    }
+    return CallNextHookEx(nullptr,code,wParam,lParam);
+}
 extern "C" __declspec(dllexport) LRESULT CALLBACK InputContextHook(int code,WPARAM wParam,LPARAM lParam) {
     if(code>=0) {
         if(!attachMessage){attachMessage=RegisterWindowMessageW(L"PhotoshopMenu.InputContext.Attach.v1");controlMessage=RegisterWindowMessageW(L"PhotoshopMenu.InputContext.Control.v1");}
         const auto& event=*reinterpret_cast<CWPSTRUCT*>(lParam);
-        if(!changing && disabledWindow && event.hwnd!=control &&
-            (event.message==WM_KILLFOCUS || event.message==WM_INPUTLANGCHANGE || event.message==WM_LBUTTONDOWN || event.message==WM_LBUTTONDBLCLK || event.message==WM_RBUTTONDOWN ||
-             (event.message==WM_ACTIVATEAPP && !event.wParam) ||
-             (event.message==WM_KEYDOWN && (event.wParam=='T' || event.wParam==VK_RETURN || event.wParam==VK_F2))))restore();
+        observeMessage(event);
         if(event.message==attachMessage && event.wParam && event.lParam>0) {
             wchar_t name[64]{};GetClassNameW(event.hwnd,name,64);
             if(wcscmp(name,L"Photoshop")!=0 || event.hwnd!=GetAncestor(event.hwnd,GA_ROOTOWNER))return CallNextHookEx(nullptr,code,wParam,lParam);

@@ -4,11 +4,37 @@ from backend.panel_context import PanelContext, classify_chain, panel_flags, LAY
 
 
 class PanelContextTests(unittest.TestCase):
+    def test_stale_native_f_cannot_open_or_close_a_newer_menu(self):
+        from backend.desktop import Desktop
+        from types import SimpleNamespace
+        d=Desktop('http://localhost',lambda action:None);d.visible=True;d.menu_epoch=9
+        d.input_focus=SimpleNamespace(shortcut_context=lambda:{'state':'non-input','root':10,'focus':11,'epoch':2})
+        d.require_action_focus=Mock();d.hide=Mock()
+        with self.assertRaisesRegex(RuntimeError,'上下文已改变'):
+            d.open_menu_tools('search',input_guard={'root':10,'focus':11,'epoch':1})
+        d.hide.assert_not_called();self.assertTrue(d.visible)
+        d.hide_if_epoch(8);d.hide.assert_not_called()
+        d.hide_if_epoch(9);d.hide.assert_called_once_with()
+
+    def test_search_close_revalidates_ime_only_on_own_photoshop_handoff(self):
+        from backend.desktop import Desktop
+        for restore,own,tools in ((True,True,True),(False,True,True),(True,False,True),(True,True,False)):
+            with self.subTest(restore=restore,own=own,tools=tools):
+                d=Desktop('http://localhost',lambda action:None)
+                d.hwnd=10;d.target=20;d.visible=True;d.menu_tools_active=tools
+                d.gui=Mock();d.gui.GetForegroundWindow.return_value=10;d.gui.IsWindow.return_value=True
+                d._is_menu_window=Mock(return_value=own);d._is_photoshop=Mock(return_value=True)
+                d._native_config=Mock();d.preview_pending_feedback=Mock();d.input_language=Mock()
+                d.hide(restore=restore)
+                self.assertFalse(d.menu_tools_active)
+                if restore and own and tools:d.input_language.edit_end.assert_called_once_with()
+                else:d.input_language.edit_end.assert_not_called()
+
     def test_delayed_search_request_is_rejected_after_canvas_edit_starts(self):
         from types import SimpleNamespace
         from backend.desktop import Desktop
         d=Desktop('http://localhost',lambda action:None);d.require_action_focus=Mock()
-        d.input_language=SimpleNamespace(shortcut_context=lambda:{'state':'input'})
+        d.input_focus=SimpleNamespace(shortcut_context=lambda:{'state':'input'})
         with self.assertRaisesRegex(RuntimeError,'输入状态'):d.open_menu_tools('search')
         self.assertFalse(d.visible)
 
@@ -27,13 +53,14 @@ class PanelContextTests(unittest.TestCase):
         d=Desktop('http://localhost',lambda action:None)
         d.native=Mock();d.native.poll.return_value=None
         d.panel_context=SimpleNamespace(current={'kind':'canvas','input_focused':False})
-        proof={'state':'input','root':10,'focus':11,'tick':100}
-        d.input_language=SimpleNamespace(shortcut_context=lambda:dict(proof))
+        proof={'state':'input','root':10,'focus':11,'epoch':100}
+        d.input_focus=SimpleNamespace(shortcut_context=lambda:dict(proof))
+        d.input_language=SimpleNamespace(shortcut_context=lambda:self.fail('F must not read IME policy or recovery'))
         d._native_config();value=json.loads(d.native.stdin.write.call_args.args[0])
         self.assertTrue(value['text_input']);self.assertFalse(value['search_non_input'])
         proof['state']='non-input';d._native_config();value=json.loads(d.native.stdin.write.call_args.args[0])
         self.assertTrue(value['search_non_input']);self.assertFalse(value['text_input']);self.assertEqual(value['search_root'],10)
-        self.assertEqual(value['search_focus'],11);self.assertEqual(value['search_tick'],100)
+        self.assertEqual(value['search_focus'],11);self.assertEqual(value['search_epoch'],100)
 
     def test_ps2551_report_signature_and_unrelated_palettes(self):
         chain=[('PSViewC',''),('OWL.Palette',''),('OWL.Dock',''),('Photoshop','')]
