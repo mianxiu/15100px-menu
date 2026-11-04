@@ -130,7 +130,7 @@ function App() {
   function InputHealthPanel(){return <section><h2>{t('Hook与输入保护')}</h2>
     <dl class="diagnostic-facts"><For each={inputHealthRows(state().input_diagnostics)}>{([label,value])=><div><dt>{t(label)}</dt><dd>{t(String(value))}</dd></div>}</For></dl>
     <p class="caption">{t('健康上报只证明组件仍在通信，不能证明每个按键都已收到。F明细仅在统一诊断采集期间记录，不记录输入正文。')}</p>
-    <details><summary>{t('最近按键与保护详情')}</summary><For each={[...(state().input_diagnostics?.events || [])].reverse().filter(e=>e.message===256 || e.message===260).slice(0,12)}>{event=><p class="caption">{new Date(event.received_at_ms).toLocaleTimeString()} · {event.key===70?'F':event.key===20?'Caps':`VK ${event.key}`} · {t(keyDecisions[event.decision] || '拦截结果待核对')}</p>}</For><pre>{JSON.stringify({focus:state().input_diagnostics?.focus,ime:state().input_diagnostics?.ime,configuration:state().input_diagnostics?.configuration},null,2)}</pre></details>
+    <details><summary>{t('最近按键与保护详情')}</summary><For each={[...(state().input_diagnostics?.events || [])].reverse().filter(e=>e.message===256 || e.message===260).slice(0,12)}>{event=><p class="caption">{new Date(event.received_at_ms).toLocaleTimeString()} · {event.key===70?'F':event.key===20?'Caps':`VK ${event.key}`} · {t(keyDecisions[event.decision] || '拦截结果待核对')}</p>}</For><pre>{JSON.stringify({tool_observation:state().input_diagnostics?.tool_observation,focus:state().input_diagnostics?.focus,ime:state().input_diagnostics?.ime,configuration:state().input_diagnostics?.configuration},null,2)}</pre></details>
   </section>;}
   function StabilityPanel(){
     const [profile,setProfile]=createSignal('standard');

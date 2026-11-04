@@ -14,8 +14,10 @@ export function diagnosticClock(value={},now=0){
 }
 
 export const keyDecisions={'action-emitted':'原生动作已发出（不代表执行成功）',disabled:'快捷键已暂停','outside-photoshop':'前台未识别为Photoshop','activation-rejected':'PS激活条件未满足','workspace-rejected':'工作区范围未通过','modified-key':'存在组合键','input-protected':'输入保护未放行','focus-changed':'焦点版本不匹配','no-action':'按键已收到，未匹配动作'};
+export const toolReadReasons={'transport-unavailable':'工具读取通道不可用','invalid-host-identity':'PS进程身份无效','previous-host-heartbeat':'执行插件尚未属于当前PS','executor-too-old':'执行插件版本不支持工具读取','pending-invalid':'原工具观察记录损坏','pending-changed':'原工具观察身份已变化','publication-failed':'工具读取未能发布','pending-session-changed':'原工具观察属于旧会话','response-too-large':'工具返回记录超限','response-invalid':'工具返回终态无效','response-time-invalid':'工具返回时间无效','response-fields-invalid':'工具返回字段无效','request-unconfirmed':'原工具读取尚未确认','expired-before-read':'工具读取在宿主执行前已过期','unsupported-tool-state':'PS返回的工具字段不兼容','host-tool-failed':'PS工具接口读取失败','tool-state-stale':'工具返回状态已失鲜'};
 export function inputHealthRows(value={}){
  const focus=value.focus || {},ime=value.ime || {},health=value.health || {},config=value.configuration || {};
+ const observer=value.tool_observation || {};
  const stateNames={unavailable:'桌面组件不可用',stopped:'热键进程已停止',starting:'等待组件就绪','awaiting-health':'等待首次健康上报',stale:'健康上报已过期','maintenance-failed':'Hook维护失败',reporting:'健康上报持续更新'};
  const focusNames={'non-input':'已确认非输入区',input:'输入区，快捷键让行',unknown:'未确认，保护中',outside:'Photoshop不在前台'};
  const imeNames={...focusNames,'legacy-layout-recovery':'旧布局请求待恢复','journal-invalid':'恢复记录无法读取','request-not-confirmed':'请求尚未确认','request-rejected':'请求已拒绝'};
@@ -35,6 +37,7 @@ export function inputHealthRows(value={}){
   ['焦点保护',focusNames[focus.state] || '等待状态'],
   ['焦点识别 UIA',yes(focus.uia_available)],
   ['当前工具',focus.tool || '未取得'],
+  ['工具状态读取',observer.state==='ready'?'已取得工具状态':toolReadReasons[observer.reason] || '等待状态'],
   ['IME状态',imeNames[ime.state] || ime.state || '未取得'],
   ['IME请求待核对',yes(ime.pending || ime.legacy_pending || false)],
   ['已确认禁用／恢复',`${ime.confirmed_disables ?? 0} / ${ime.confirmed_restores ?? 0}`],

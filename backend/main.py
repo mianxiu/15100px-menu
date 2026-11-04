@@ -754,6 +754,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
                 app.desktop.input_language_tool=tool_observer.read
                 app.desktop.input_language_reconcile=tool_observer.reconcile
                 app.desktop.input_tool_event=tool_observer.event
+                app.desktop.input_tool_observation=tool_observer.snapshot
                 app.desktop.menu_context_requester=app.bridge.request_menu_context
                 app.desktop.menu_context_canceller=app.bridge.cancel_menu_context
             await asyncio.to_thread(app.desktop.start)

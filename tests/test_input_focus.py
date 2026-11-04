@@ -145,6 +145,27 @@ class InputFocusTests(unittest.TestCase):
         self.assertEqual(self.desktop.input_language_tool.call_count,calls+1)
         self.assertNotIn('tool_error_type',self.guard.report)
 
+    def test_uia_unavailable_canvas_path_reads_tool_and_still_requires_current_click(self):
+        self.start();self.wait(lambda:self.guard.shortcut_context()['state']=='non-input')
+        original=self.guard.sample
+        self.guard.sample=lambda:{**original(),'accessibility':{}}
+        self.desktop.panel_context=SimpleNamespace(describe=lambda hwnd,root:'canvas')
+        self.guard.accessibility=None
+        self.guard.click(11,10)
+        self.wait(lambda:self.guard.shortcut_context()['state']=='non-input')
+        self.assertGreater(self.desktop.input_language_tool.call_count,1)
+        self.desktop.input_language_tool.return_value={'classID':'typeCreateOrEditTool','isModal':True}
+        self.guard.refresh();self.wait(lambda:self.guard.shortcut_context()['state']=='input')
+        self.guard.protect();self.assertIsNone(self.guard.snapshot()[3])
+        self.wait(lambda:self.guard.shortcut_context()['state']=='unknown')
+
+    def test_uia_initialization_recovers_without_a_new_key_or_focus_notification(self):
+        self.start();self.wait(lambda:self.guard.shortcut_context()['state']=='non-input')
+        self.guard.accessibility=None;self.guard.report['uia_error_type']='COMError'
+        self.guard.wake.set()
+        self.wait(lambda:self.guard.accessibility is not None)
+        self.assertNotIn('uia_error_type',self.guard.report)
+
     def test_native_generation_change_and_hook_restart_require_new_observation(self):
         guard=InputFocus(SimpleNamespace())
         guard.publish('non-input',{'root':10,'focus':11},0)

@@ -49,6 +49,7 @@ class InputFocus(InputLanguage):
         with self.lock:
             if type(epoch) is int:self.native_epoch=epoch
             self.serial+=1
+            self.intent=None
             self.menu_origin=None
             self.current={'state':'unknown','root':0,'focus':0,'epoch':self.native_epoch}
             self.report.update(self.current)
@@ -111,7 +112,7 @@ class InputFocus(InputLanguage):
                 self.report['uia_error_type']=type(error).__name__
                 import logging
                 logging.exception('Shortcut input observer initialization failed')
-            client_refresh=-1
+            client_refresh=-1;next_uia_check=time.monotonic()+1
             while not self.desktop.stop.is_set():
                 self.wake.wait(.05);self.wake.clear()
                 if self.desktop.stop.is_set():break
@@ -122,9 +123,12 @@ class InputFocus(InputLanguage):
                     # The menu has its own input context; retain the PS guard for return.
                     if self.desktop._is_menu_window(win32gui.GetForegroundWindow()):continue
                     with self.lock:serial=self.serial;refresh=self.refresh_serial
-                    if 'uia_error_type' in self.report and refresh!=client_refresh:
+                    if 'uia_error_type' in self.report and (refresh!=client_refresh or time.monotonic()>=next_uia_check):
                         client_refresh=refresh
-                        try:self.accessibility=FocusAccessibility()
+                        next_uia_check=time.monotonic()+1
+                        try:
+                            self.accessibility=FocusAccessibility()
+                            self.report.pop('uia_error_type',None)
                         except Exception as error:self.report['uia_error_type']=type(error).__name__
                     sample=self.sample()
                     self.report['observation']={**{k:sample[k] for k in ('state','root','focus','pid','class','layout','workspace','blocked','foreign_focus') if k in sample},
@@ -143,7 +147,8 @@ class InputFocus(InputLanguage):
                     if key!=context:context=key;tool=None;examined=None
                     row=sample.get('accessibility',{})
                     need_tool=(sample.get('workspace') and sample.get('state')=='unknown' and
-                               control_state(row,sample.get('pid'))!='input' and row.get(30003) in CONTAINERS)
+                               control_state(row,sample.get('pid'))!='input' and
+                               (row.get(30003) in CONTAINERS or self.accessibility is None and self.snapshot()[3] is not None))
                     reconcile=getattr(self.desktop,'input_language_reconcile',None)
                     if need_tool and key==examined and tool is None and not self.busy() and not sample.get('blocked') and reconcile and reconcile():examined=None
                     if need_tool and (key!=examined or refresh!=refreshed) and not self.busy() and not sample.get('blocked'):

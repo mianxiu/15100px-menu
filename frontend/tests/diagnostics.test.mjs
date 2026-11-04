@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {diagnosticClock,diagnosticScopes,diagnosticFinding,inputHealthRows,keyDecisions} from '../src/diagnostics.mjs';
+import {diagnosticClock,diagnosticScopes,diagnosticFinding,inputHealthRows,keyDecisions,toolReadReasons} from '../src/diagnostics.mjs';
 import {translate} from '../src/i18n.mjs';
 
 test('hook status and F decisions remain distinct and every visible label translates',()=>{
@@ -10,6 +10,8 @@ test('hook status and F decisions remain distinct and every visible label transl
  assert.equal(new Map(rows).get('Hook状态'),'健康上报持续更新');
  for(const [key,value]of [...rows,...inputHealthRows()])for(const text of [key,String(value)])if(/[\u3400-\u9fff]/u.test(text))assert.notEqual(translate(text,'en'),text,text);
  for(const text of Object.values(keyDecisions))assert.notEqual(translate(text,'en'),text);
+ for(const text of Object.values(toolReadReasons))assert.notEqual(translate(text,'en'),text);
+ assert.equal(new Map(inputHealthRows({tool_observation:{state:'failed',reason:'pending-session-changed'}})).get('工具状态读取'),'原工具观察属于旧会话');
 });
 
 test('scoped checks and uncertain loader evidence are explicit',()=>{

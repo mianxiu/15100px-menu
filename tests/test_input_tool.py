@@ -5,11 +5,39 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from backend.input_tool import ToolObservation
+from backend.input_tool import ToolObservation,ToolReadError
 from backend.settings import atomic_json
 
 
 class ToolObservationTests(unittest.TestCase):
+    def test_trusted_host_failure_is_classified_without_exporting_raw_errors(self):
+        request=self.pending()
+        error='Error: Unsupported tool state: '+json.dumps({'classID':'moveTool','isModal':'undefined','fields':['SECRET'], 'token':'SECRET'})
+        self.reply(request,phase='failed',error=error)
+        with self.assertRaises(ToolReadError) as raised:self.reader.read()
+        self.assertEqual(raised.exception.reason,'unsupported-tool-state')
+        report=self.reader.snapshot();self.assertEqual(report['last_failure']['isModal'],'undefined')
+        self.assertNotIn('SECRET',json.dumps(report));self.assertNotIn('private-test-token',json.dumps(report))
+        saved=self.root/'input-tool-last-failure.json';self.assertTrue(saved.is_file())
+        self.assertNotIn('SECRET',saved.read_text());self.assertFalse(self.reader.path.exists())
+
+    def test_unknown_request_reports_reason_without_republishing_or_erasing_it(self):
+        request=self.pending(session='previous');before=self.reader.path.read_bytes()
+        with self.assertRaises(ToolReadError):self.reader.read()
+        self.assertEqual(self.reader.snapshot()['reason'],'pending-session-changed')
+        self.assertEqual(self.reader.path.read_bytes(),before)
+        self.assertFalse((self.folder/'input-tool-request.json').exists())
+
+    def test_failure_evidence_write_failure_keeps_original_pending_identity(self):
+        from backend.input_tool import atomic_json as write
+        request=self.pending();self.reply(request,phase='failed',error='SECRET native error')
+        before=self.reader.path.read_bytes()
+        def save(path,value):
+            if path.name=='input-tool-last-failure.json':raise OSError('evidence unavailable')
+            write(path,value)
+        with patch('backend.input_tool.atomic_json',side_effect=save),self.assertRaises(OSError):self.reader.read()
+        self.assertEqual(self.reader.path.read_bytes(),before)
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name);self.folder=self.root/'plugin';self.folder.mkdir()

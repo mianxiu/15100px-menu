@@ -26,6 +26,7 @@ def input_report(desktop):
         'configuration':{'sent':desktop.native_sequence,'applied':desktop.native_applied_sequence,
                          'acknowledged':running and desktop.native_sequence>0 and desktop.native_applied_sequence>=desktop.native_sequence},
         'trace_active':bool(getattr(desktop,'diagnostic_trace',False)),
+        'tool_observation':desktop.input_tool_observation() if callable(getattr(desktop,'input_tool_observation',None)) else {},
         'events':list(getattr(desktop,'hotkey_events',())),
         'focus':{**pick(focus,('state','root','focus','epoch','tool','tool_modal','tool_reads','uia_available','uia_error_type','error_type','tool_error_type')),
                  'verification':verification(focus.get('last_verification')),'guard_verification':verification(focus.get('last_guard_verification')),
