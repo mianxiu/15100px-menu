@@ -356,25 +356,37 @@ class LanguageWorkerTests(unittest.TestCase):
 
 
 class LanguageSamplingTests(unittest.TestCase):
-    def sample(self,pair=list,foreign=None,caret=False,caret_visible=True):
+    def sample(self,pair=list,foreign=None,caret=False,caret_visible=True,image='C:\\Adobe\\Photoshop.exe',query_ok=True):
         controller=InputLanguage(SimpleNamespace(visible=False))
         controller.accessibility=SimpleNamespace(read=Mock(return_value=FocusAccessibilityTests().row(50033)))
         def gui_info(thread,pointer):
             pointer._obj.focus=10;pointer._obj.caret=10 if caret else 0;pointer._obj.flags=int(caret and caret_visible)
             return True
         controller.user=SimpleNamespace(GetGUIThreadInfo=gui_info,GetKeyboardLayout=lambda thread:0x8040804)
-        handle=SimpleNamespace(Close=lambda:None)
+        handle=SimpleNamespace(Close=Mock())
+        handle_type=type('Handle',(),{'__int__':lambda self:7,'Close':lambda self:handle.Close()})
+        def query(process,flags,buffer,length):
+            self.assertEqual(process,7);self.assertEqual(flags,0)
+            buffer.value=image;return query_ok
+        kernel=SimpleNamespace(QueryFullProcessImageNameW=Mock(side_effect=query))
         import win32gui,win32process,win32api
         with ExitStack() as stack:
             stack.enter_context(patch.multiple(win32gui,GetForegroundWindow=Mock(return_value=1),
                 IsWindowVisible=Mock(return_value=True),IsIconic=Mock(return_value=False),
                 IsWindow=Mock(return_value=True),GetClassName=Mock(return_value='OWL.Document'),GetAncestor=Mock(return_value=1)))
             stack.enter_context(patch.multiple(win32process,GetWindowThreadProcessId=Mock(side_effect=lambda hwnd:pair(foreign if hwnd==10 and foreign else (3,2))),
-                GetModuleFileNameEx=Mock(return_value='C:\\Adobe\\Photoshop.exe'),GetProcessTimes=Mock(return_value={'CreationTime':'created'})))
-            stack.enter_context(patch.object(win32api,'OpenProcess',return_value=handle))
+                GetModuleFileNameEx=Mock(side_effect=AssertionError('Must not require process-memory access')),GetProcessTimes=Mock(return_value={'CreationTime':'created'})))
+            opened=stack.enter_context(patch.object(win32api,'OpenProcess',return_value=handle_type()))
+            stack.enter_context(patch('backend.input_language.ctypes.WinDLL',return_value=kernel))
             stack.enter_context(patch('backend.photoshop_windows.workspace_root',return_value=1))
             value=controller.sample()
+            opened.assert_called_once_with(0x1000,False,2);handle.Close.assert_called_once()
         return value,controller.accessibility.read
+
+    def test_image_query_failure_and_foreign_executable_never_grant_input_permission(self):
+        value,reader=self.sample(image='C:\\Other\\Editor.exe')
+        self.assertEqual(value,{'state':'outside'});reader.assert_not_called()
+        with self.assertRaises(OSError):self.sample(query_ok=False)
 
     def test_real_sampling_accepts_pywin32_list_as_well_as_tuple_pairs(self):
         for pair in (list,tuple):

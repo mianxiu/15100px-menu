@@ -132,6 +132,19 @@ class InputFocusTests(unittest.TestCase):
         count=self.desktop.input_language_tool.call_count
         time.sleep(.1);self.assertEqual(self.desktop.input_language_tool.call_count,count)
 
+    def test_unavailable_tool_remains_unknown_without_repeated_reads_until_reconciled(self):
+        self.start();self.wait(lambda:self.guard.shortcut_context()['state']=='non-input')
+        self.desktop.input_language_tool.side_effect=RuntimeError('UXP not ready')
+        self.guard.refresh();self.wait(lambda:self.guard.report.get('tool_error_type')=='RuntimeError')
+        calls=self.desktop.input_language_tool.call_count
+        time.sleep(.16);self.assertEqual(self.desktop.input_language_tool.call_count,calls)
+        self.assertEqual(self.guard.shortcut_context()['state'],'unknown')
+        self.desktop.input_language_tool.side_effect=None
+        self.desktop.input_language_reconcile=Mock(side_effect=lambda:True)
+        self.guard.wake.set();self.wait(lambda:self.guard.shortcut_context()['state']=='non-input')
+        self.assertEqual(self.desktop.input_language_tool.call_count,calls+1)
+        self.assertNotIn('tool_error_type',self.guard.report)
+
     def test_native_generation_change_and_hook_restart_require_new_observation(self):
         guard=InputFocus(SimpleNamespace())
         guard.publish('non-input',{'root':10,'focus':11},0)

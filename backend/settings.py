@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -79,12 +80,23 @@ def validate(data):
     return result
 
 
+def publish_json(temporary,path):
+    deadline=time.monotonic()+.25
+    while True:
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError as error:
+            if getattr(error,'winerror',None) not in (5,32) or time.monotonic()>=deadline:raise
+            time.sleep(.004)
+
+
 def atomic_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temporary, path)
+    publish_json(temporary,path)
 
 
 class Settings:

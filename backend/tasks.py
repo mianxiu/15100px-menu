@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+from .settings import publish_json
 from pathlib import Path
 import time
 import uuid
@@ -74,7 +75,7 @@ class TaskStore:
             json.dump(data, stream, ensure_ascii=False, indent=2)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, self.path)
+        publish_json(temporary, self.path)
 
     def _persist(self):
         if self.path and not self.persistence_error:

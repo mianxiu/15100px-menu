@@ -151,12 +151,12 @@ class ImeTransportTests(unittest.TestCase):
 
 
 class ImeWorkerTests(unittest.TestCase):
-    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None,created='created',reject_once=False,held=False):
+    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None,created='created',reject_once=False,held=False,legacy_exited=False,start_outside=False):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         self.desktop=SimpleNamespace(runtime=Path(temp.name),visible=False,settings={'enabled':True},stop=threading.Event(),input_language_busy=lambda:False,input_language_tool=lambda **_:{'classID':'moveTool','isModal':False})
         if tool is not None:self.desktop.input_language_tool=tool
         if reconcile is not None:self.desktop.input_language_reconcile=reconcile
-        self.c=InputMethod(self.desktop);self.layout=0x8040804;self.native_restored=False;self.opened=1;self.kind=50033;self.focus=10;self.revision=1;self.outside=False;self.posts=[]
+        self.c=InputMethod(self.desktop);self.layout=0x8040804;self.native_restored=False;self.opened=1;self.kind=50033;self.focus=10;self.revision=1;self.outside=start_outside;self.posts=[]
         if legacy is not None:(self.desktop.runtime/'input-language-owned.json').write_text(json.dumps(legacy),'utf-8')
         def observe():
             if self.outside:return {'state':'outside'}
@@ -170,7 +170,7 @@ class ImeWorkerTests(unittest.TestCase):
             if acknowledge:self.opened=value['wanted']
         def layouts(count,values):values[0]=0x8040804;values[1]=0x4090409;return 2
         self.user=SimpleNamespace(GetKeyboardLayout=Mock(return_value=0x8040804),GetKeyboardLayoutList=Mock(side_effect=layouts),PostMessageW=Mock(),GetAsyncKeyState=Mock(side_effect=lambda key:0x8000 if held and key==65 else 0),GetTickCount64=Mock(side_effect=lambda:int(time.monotonic()*1000)))
-        for p in (patch('backend.input_method.ctypes.WinDLL',return_value=self.user),patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=owned)),patch('backend.input_method.NativeImeContext',return_value=SimpleNamespace(read=lambda value:{**read(value),'context_nonce':123},send=send,observe_owned=lambda value:{**owned(value),'context_nonce':123})),patch('backend.input_method.FocusAccessibility',return_value=object()),patch('backend.input_method.process_exited',return_value=False)):
+        for p in (patch('backend.input_method.ctypes.WinDLL',return_value=self.user),patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=owned)),patch('backend.input_method.NativeImeContext',return_value=SimpleNamespace(read=lambda value:{**read(value),'context_nonce':123},send=send,observe_owned=lambda value:{**owned(value),'context_nonce':123})),patch('backend.input_method.FocusAccessibility',return_value=object()),patch('backend.input_method.process_exited',side_effect=lambda identity:legacy_exited and identity[2]=='old-process')):
             p.start();self.addCleanup(p.stop)
         self.c.thread.start()
         def stop():self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2);self.assertFalse(self.c.thread.is_alive())
@@ -239,6 +239,58 @@ class ImeWorkerTests(unittest.TestCase):
         self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2)
         saved=json.loads((self.desktop.runtime/'input-language-owned.json').read_text())
         self.assertEqual(saved['pending']['identity'],owner['identity']);self.assertEqual(self.posts,[])
+
+    def test_exited_legacy_pending_stays_unknown_and_intact_while_new_process_gets_ime(self):
+        owner=legacy_tests.ExitedLanguageOwnerTests().owner();owner['identity'][2]='old-process'
+        original={'owned':owner,'pending':{**owner,'switch':False}}
+        self.start(legacy=original,legacy_exited=True)
+        self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.assertEqual(json.loads((self.desktop.runtime/'input-language-owned.json').read_text()),original)
+        self.assertIsNotNone(self.c.legacy.policy.pending);self.assertTrue(self.c.report['legacy_unknown_preserved'])
+        archives=list(self.desktop.runtime.glob('input-language-unknown-exited-*.json'));self.assertEqual(len(archives),1)
+        evidence=json.loads(archives[0].read_text())
+        self.assertEqual(evidence['result_status'],'unknown');self.assertFalse(evidence['original_slot_released'])
+        self.assertFalse(evidence['marked_restored']);self.assertEqual(json.loads(evidence['original_journal_utf8']),original)
+        self.assertEqual(self.posts,[0]);self.user.PostMessageW.assert_not_called()
+        self.kind=50004;self.c.activity();self.wait(lambda:self.c.policy.confirmed_restores==1)
+        self.assertEqual(json.loads((self.desktop.runtime/'input-language-owned.json').read_text()),original)
+
+    def test_legacy_archive_failure_preserves_block_and_original_record(self):
+        owner=legacy_tests.ExitedLanguageOwnerTests().owner();owner['identity'][2]='old-process'
+        original={'owned':owner,'pending':{**owner,'switch':False}}
+        with patch('backend.input_method.atomic_json',side_effect=OSError('archive unavailable')):
+            self.start(legacy=original,legacy_exited=True)
+            self.wait(lambda:self.c.report.get('error_type')=='OSError')
+            self.assertEqual(self.posts,[]);self.assertIsNone(self.c.legacy_exited)
+            self.assertEqual(json.loads((self.desktop.runtime/'input-language-owned.json').read_text()),original)
+
+    def test_legacy_unknown_bytes_survive_outside_startup_and_new_process_handoff(self):
+        owner=legacy_tests.ExitedLanguageOwnerTests().owner();owner['identity'][2]='old-process'
+        original={'owned':owner,'pending':{**owner,'switch':False}}
+        self.start(legacy=original,legacy_exited=True,start_outside=True)
+        path=self.desktop.runtime/'input-language-owned.json';original_bytes=json.dumps(original).encode('utf-8')
+        self.wait(lambda:self.c.report.get('legacy_pending'))
+        self.assertEqual(path.read_bytes(),original_bytes);self.assertEqual(self.posts,[])
+        self.outside=False;self.c.wake.set();self.wait(lambda:self.c.policy.confirmed_disables==1)
+        self.assertEqual(path.read_bytes(),original_bytes)
+        archive=next(self.desktop.runtime.glob('input-language-unknown-exited-*.json'))
+        self.assertEqual(json.loads(archive.read_text())['original_journal_utf8'].encode('utf-8'),original_bytes)
+
+    def test_legacy_pending_same_process_and_changed_journal_never_bypass_protection(self):
+        from backend.input_language import InputLanguage
+        with tempfile.TemporaryDirectory() as folder:
+            desktop=SimpleNamespace(runtime=Path(folder));c=InputMethod(desktop);c.user=Mock()
+            c.legacy=InputLanguage(desktop);owner=legacy_tests.ExitedLanguageOwnerTests().owner()
+            c.legacy.policy.owned=owner;c.legacy.policy.pending={**owner,'switch':False,'wanted':owner['original']}
+            c.legacy.retire_exited_owner=Mock()
+            original={'owned':owner,'pending':c.legacy.policy.pending}
+            path=desktop.runtime/'input-language-owned.json';path.write_text(json.dumps(original),'utf-8')
+            with patch('backend.input_method.process_exited',return_value=True) as exited:
+                self.assertFalse(c.legacy_step({**sample('unknown'),'identity':owner['identity'],'layout':owner['wanted']}))
+                exited.assert_not_called();self.assertIsNone(c.legacy_exited)
+                path.write_text(json.dumps({**original,'pending':{**original['pending'],'wanted':owner['wanted']}}),'utf-8')
+                with self.assertRaisesRegex(RuntimeError,'身份已变化'):c.legacy_step({**sample(),'identity':[1,2,'new-process',3]})
+            self.assertIsNone(c.legacy_exited);c.user.PostMessageW.assert_not_called()
 
     def test_known_read_settlement_can_reobserve_without_a_first_keystroke(self):
         value={'classID':'moveTool','isModal':False}
@@ -446,9 +498,11 @@ class ImeWorkerTests(unittest.TestCase):
     def test_immediate_rejection_persists_cleared_pending_even_when_state_returns_to_empty(self):
         self.start(reject_once=True)
         self.wait(lambda:self.c.report.get('state')=='request-rejected')
+        self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2)
+        self.assertFalse(self.c.thread.is_alive())
         path=self.desktop.runtime/'input-method-owned.json'
-        self.wait(lambda:json.loads(path.read_text('utf-8'))['pending'] is None)
-        self.assertIsNone(json.loads(path.read_text('utf-8'))['owned'])
+        saved=json.loads(path.read_text('utf-8'))
+        self.assertIsNone(saved['pending']);self.assertIsNone(saved['owned'])
 
     def test_nonactivating_caps_close_and_known_busy_end_rearm_without_a_keystroke(self):
         self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)

@@ -139,10 +139,16 @@ class InputFocus(InputLanguage):
                     row=sample.get('accessibility',{})
                     need_tool=(sample.get('workspace') and sample.get('state')=='unknown' and
                                control_state(row,sample.get('pid'))!='input' and row.get(30003) in CONTAINERS)
+                    reconcile=getattr(self.desktop,'input_language_reconcile',None)
+                    if need_tool and key==examined and tool is None and not self.busy() and not sample.get('blocked') and reconcile and reconcile():examined=None
                     if need_tool and (key!=examined or refresh!=refreshed) and not self.busy() and not sample.get('blocked'):
                         examined=key;refreshed=refresh
                         self.report['tool_reads']+=1
-                        tool=self.desktop.input_language_tool(identity=sample['identity'])
+                        try:
+                            tool=self.desktop.input_language_tool(identity=sample['identity'])
+                            self.report.pop('tool_error_type',None)
+                        except (RuntimeError,OSError,ValueError) as error:
+                            tool=None;self.report['tool_error_type']=type(error).__name__
                         sample=self.sample()
                         if (tuple(sample.get('identity',[])),sample.get('focus'),sample.get('layout'),self.snapshot()[0])!=key:continue
                     if not need_tool:tool=None;examined=None

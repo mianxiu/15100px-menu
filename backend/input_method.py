@@ -106,7 +106,7 @@ class ImeContext:
 class InputMethod(InputLanguage):
     def __init__(self,desktop):
         super().__init__(desktop)
-        self.policy=ImePolicy();self.legacy=None;self.legacy_saved=None;self.ime=None
+        self.policy=ImePolicy();self.legacy=None;self.legacy_saved=None;self.legacy_exited=None;self.ime=None
         self.context_schema=1
         self.edit_refresh_until=0
         self.verification=None;self.ready={}
@@ -190,6 +190,26 @@ class InputMethod(InputLanguage):
     def legacy_step(self,sample):
         if not self.legacy:return True
         legacy=self.legacy;path=self.desktop.runtime/'input-language-owned.json'
+        if legacy.policy.pending and sample.get('root') and sample.get('identity'):
+            identities=[row['identity'] for row in (legacy.policy.owned,legacy.policy.pending) if row]
+            independent=all(sample['identity'][1:3]!=identity[1:3] for identity in identities)
+            if independent and self.legacy_exited is None and all(process_exited(identity) for identity in identities):
+                original=path.read_bytes();key=hashlib.sha256(original).hexdigest()
+                saved=json.loads(original)
+                if saved.get('owned')!=legacy.policy.owned or {k:v for k,v in saved.get('pending',{}).items() if k!='time'}!={k:v for k,v in legacy.policy.pending.items() if k!='time'}:
+                    raise RuntimeError('旧布局未知记录身份已变化；保留原保护')
+                archive=path.parent/('input-language-unknown-exited-'+key+'.json')
+                evidence={'result_status':'unknown','original_journal_utf8':original.decode('utf-8'),
+                          'identities':identities,'original_processes_exited':True,
+                          'original_slot_released':False,'request_republished':False,'marked_restored':False}
+                atomic_json(archive,evidence)
+                if json.loads(archive.read_text('utf-8'))!=evidence or path.read_bytes()!=original:
+                    raise RuntimeError('旧布局未知记录归档未核验；保留原保护')
+                self.legacy_exited=identities
+            # The original slot stays pinned; only a different, freshly verified PS session may proceed.
+            if self.legacy_exited and all(sample['identity'][1:3]!=identity[1:3] for identity in self.legacy_exited):
+                self.report.update(legacy_pending=True,legacy_unknown_preserved=True,legacy_scope='original-process-exited')
+                return True
         legacy.retire_exited_owner()
         if not legacy.policy.owned and not legacy.policy.pending:
             self.legacy=None;self.report['legacy_pending']=False;return True
@@ -235,7 +255,7 @@ class InputMethod(InputLanguage):
                 saved=read_layout_journal(self.desktop.runtime/'input-language-owned.json',list(layouts)[:count])
                 if saved['owned'] or saved['pending']:
                     self.legacy=InputLanguage(self.desktop);self.legacy.policy.owned=saved['owned'];self.legacy.policy.pending=saved['pending']
-                    if self.legacy.policy.pending:self.legacy.policy.pending['time']=time.monotonic()-2
+                    self.legacy_saved=json.loads(json.dumps(saved))
             except Exception as error:self.report.update(state='journal-invalid',error_type=type(error).__name__);return
             try:self.accessibility=FocusAccessibility()
             except Exception as error:

@@ -153,9 +153,15 @@ class InputLanguage:
         gui=win32gui;foreground=gui.GetForegroundWindow()
         if not foreground or not gui.IsWindowVisible(foreground) or gui.IsIconic(foreground):return {'state':'outside'}
         thread,pid=win32process.GetWindowThreadProcessId(foreground)
-        handle=win32api.OpenProcess(0x410,False,pid)
+        handle=win32api.OpenProcess(0x1000,False,pid)
         try:
-            if win32process.GetModuleFileNameEx(handle,0).rsplit('\\',1)[-1].casefold()!='photoshop.exe':return {'state':'outside'}
+            kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+            kernel.QueryFullProcessImageNameW.argtypes=[W.HANDLE,W.DWORD,W.LPWSTR,ctypes.POINTER(W.DWORD)]
+            kernel.QueryFullProcessImageNameW.restype=W.BOOL
+            image=ctypes.create_unicode_buffer(32768);length=W.DWORD(len(image))
+            if not kernel.QueryFullProcessImageNameW(int(handle),0,image,ctypes.byref(length)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if image.value.rsplit('\\',1)[-1].casefold()!='photoshop.exe':return {'state':'outside'}
             created=str(win32process.GetProcessTimes(handle)['CreationTime'])
         finally:handle.Close()
         workspace=workspace_root(gui,foreground)
