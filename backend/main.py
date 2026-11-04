@@ -29,7 +29,7 @@ from .language import read_language, save_language
 from .recent_documents import RecentDocuments
 from .application_updates import ApplicationUpdates
 from .uxp_auto_update import UxpAutoUpdate
-from .diagnostics import Diagnostics
+from .diagnostics import Diagnostics,input_report
 from .version_health import VersionHealth
 from .stability import StabilityTest
 
@@ -356,10 +356,12 @@ class Application(web.Application):
                 'application_update':self.application_updates.snapshot(),
                 'graphics':getattr(self.desktop,'graphics',{}) if self.desktop else {},
                 'menu_context_delivery':getattr(self.desktop,'menu_context_delivery',{}) if self.desktop else {}}
+            self.diagnostics.input_provider=lambda:input_report(self.desktop)
             result=self.diagnostics.start(scope)
             if desktop and scope in ('all','menu'):
                 from collections import deque
                 desktop.trigger_events=deque(maxlen=64);desktop.diagnostic_trace=True;desktop._native_config()
+                desktop.hotkey_events.clear()
                 self.diagnostics.provider=lambda:{'events':list(desktop.trigger_events),'activation':getattr(desktop,'activation_snapshot',None),'configured_trigger':desktop.settings['shortcuts']['toggle'],'enabled':desktop.settings['enabled']}
                 def finish_trace(_):
                     desktop.diagnostic_trace=False;desktop._native_config()
@@ -459,6 +461,7 @@ class Application(web.Application):
                     "desktop": self.desktop.message if self.desktop else "无桌面模式",
                     "input_language": dict(self.desktop.input_language.report) if self.desktop and self.desktop.input_language else {'state':'unavailable'},
                     "input_focus": dict(self.desktop.input_focus.report) if self.desktop and self.desktop.input_focus else {'state':'unavailable'},
+                    "input_diagnostics": input_report(self.desktop),
                     "tray_error": self.tray.error if self.tray else ""}
             self.version_health.observe(value)
             value['version_health']=self.version_health.snapshot()

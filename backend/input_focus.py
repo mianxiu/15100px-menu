@@ -1,5 +1,6 @@
 """Read-only text-input guard, independent of IME ownership and recovery."""
 import ctypes
+import time
 from .input_language import InputLanguage
 from .input_accessibility import FocusAccessibility,control_state,CONTAINERS
 
@@ -126,6 +127,10 @@ class InputFocus(InputLanguage):
                         try:self.accessibility=FocusAccessibility()
                         except Exception as error:self.report['uia_error_type']=type(error).__name__
                     sample=self.sample()
+                    self.report['observation']={**{k:sample[k] for k in ('state','root','focus','pid','class','layout','workspace','blocked','foreign_focus') if k in sample},
+                                                'accessibility':dict(sample.get('accessibility',{})),
+                                                'observed_at_ms':round(time.time()*1000)}
+                    self.report['uia_available']=self.accessibility is not None
                     if sample.get('foreign_focus') and self.desktop._is_menu_window(sample['foreign_focus']):continue
                     event_reader=getattr(self.desktop,'input_tool_event',None)
                     event=event_reader() if sample.get('root') and event_reader else None

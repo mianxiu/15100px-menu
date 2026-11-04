@@ -2,7 +2,7 @@ import {render} from 'solid-js/web';
 import {createSignal, createMemo, createEffect, onMount, onCleanup, For, Show} from 'solid-js';
 import {Client} from './client.mjs';
 import {translate} from './i18n.mjs';
-import {diagnosticClock,diagnosticScopes,diagnosticComponents,diagnosticFinding} from './diagnostics.mjs';
+import {diagnosticClock,diagnosticScopes,diagnosticComponents,diagnosticFinding,inputHealthRows,keyDecisions} from './diagnostics.mjs';
 import {healthView,healthFinding} from './version-health.mjs';
 import {applyMenuTheme} from './theme.mjs';
 import {stabilityIssue} from './stability.mjs';
@@ -120,13 +120,18 @@ function App() {
     createEffect(()=>{if(state().diagnostics?.phase!=='collecting')return;
       const timer=setInterval(()=>setNow(performance.now()),200);onCleanup(()=>clearInterval(timer));});
     const clock=()=>diagnosticClock(state().diagnostics,now());
-    return <section><h2>{t("统一诊断")}</h2><label class="option-row"><span>{t("检测范围")}</span><select aria-label={t("检测范围")} value={scope()} disabled={disabled() || state().stability?.active || state().diagnostics?.phase==='collecting'} onChange={e=>setScope(e.target.value)}><For each={diagnosticScopes}>{([id,label])=><option value={id}>{t(label)}</option>}</For></select></label><Show when={scope()==='all' || scope()==='menu'}><p>{t("点击开始后有5秒准备时间。请切回PS、点击图层列表，再按下面的菜单快捷键；PS前方的小提示会显示采集倒计时。")}</p><p><kbd>{state().settings.shortcuts?.toggle}</kbd></p></Show>
+    return <section><h2>{t("统一诊断")}</h2><label class="option-row"><span>{t("检测范围")}</span><select aria-label={t("检测范围")} value={scope()} disabled={disabled() || state().stability?.active || state().diagnostics?.phase==='collecting'} onChange={e=>setScope(e.target.value)}><For each={diagnosticScopes}>{([id,label])=><option value={id}>{t(label)}</option>}</For></select></label><Show when={scope()==='all' || scope()==='menu'}><p>{t("开始后5秒内切回PS，点击画布或图层列表，在采集倒计时内分别按菜单唤出键和 F；输入故障可再进入文字或数值框，退出后重试。")}</p><p><kbd>{state().settings.shortcuts?.toggle}</kbd><kbd>F</kbd></p></Show>
       <div class="diagnostic-progress"><span role="status">{t(clock().label)}</span><Show when={clock().showSeconds}><strong aria-live="off">{clock().seconds} {t("秒")}</strong></Show></div>
       <Show when={state().diagnostics?.phase==='collecting' && state().diagnostics?.stage==='sampling'}><p class="caption">{state().diagnostics.samples_done || 0} / {state().diagnostics.samples_total || 10} {t("个采样")}</p></Show>
       <For each={Object.entries(state().diagnostics?.components || {})}>{([id,phase])=><p class="caption">{t(diagnosticComponents[id])} · {t(({collecting:'检测中',completed:'已完成',failed:'未完成'})[phase] || '等待检测')}</p>}</For>
       <For each={state().diagnostics?.findings || []}>{code=><p role="status">{t(diagnosticFinding(code))}</p>}</For>
       <div class="buttons"><button disabled={disabled() || state().stability?.active || state().diagnostics?.phase==='collecting'} onClick={()=>perform('diagnostics.start',{scope:scope()})}>{t("开始只读诊断")}</button><button disabled={disabled() || !state().diagnostics?.ready} onClick={exportDiagnostics}>{t("导出统一报告")}</button></div><p class="caption">{t("综合检测合并菜单／热键、UXP安装加载、图层读取耗时、任务与更新状态，生成一份JSON；单项失败仍可导出其余结果。")}</p><p class="caption">{t("仅读取窗口结构、插件加载日志和已有状态，不读取输入文字、文档内容或凭据，不向PS提交操作。")}</p></section>;
   }
+  function InputHealthPanel(){return <section><h2>{t('Hook与输入保护')}</h2>
+    <dl class="diagnostic-facts"><For each={inputHealthRows(state().input_diagnostics)}>{([label,value])=><div><dt>{t(label)}</dt><dd>{t(String(value))}</dd></div>}</For></dl>
+    <p class="caption">{t('健康上报只证明组件仍在通信，不能证明每个按键都已收到。F明细仅在统一诊断采集期间记录，不记录输入正文。')}</p>
+    <details><summary>{t('最近按键与保护详情')}</summary><For each={[...(state().input_diagnostics?.events || [])].reverse().filter(e=>e.message===256 || e.message===260).slice(0,12)}>{event=><p class="caption">{new Date(event.received_at_ms).toLocaleTimeString()} · {event.key===70?'F':event.key===20?'Caps':`VK ${event.key}`} · {t(keyDecisions[event.decision] || '拦截结果待核对')}</p>}</For><pre>{JSON.stringify({focus:state().input_diagnostics?.focus,ime:state().input_diagnostics?.ime,configuration:state().input_diagnostics?.configuration},null,2)}</pre></details>
+  </section>;}
   function StabilityPanel(){
     const [profile,setProfile]=createSignal('standard');
     const test=()=>state().stability || {};
@@ -171,7 +176,7 @@ function App() {
     <Show when={!state().photoshop.status_fresh}><p class="error">{t("状态等待更新 · 显示缓存")}</p></Show>
     <div class="buttons"><Show when={!state().photoshop.connected || state().photoshop_start?.active}><button class="primary" disabled={managedBusy()} onClick={()=>perform('photoshop.start')}>{state().photoshop_start?.active?t("正在启动…"):t("启动 Photoshop")}</button></Show><button disabled={disabled()} onClick={()=>perform('status',{refresh:true})}>{t("刷新连接状态")}</button><button onClick={()=>choose('settings')}>{t("菜单设置")}</button><button onClick={()=>choose('plugins')}>{t("插件管理")}</button></div>
     </section>
-    <VersionHealthPanel/><StabilityPanel/><DiagnosticPanel/><section class="compact-section"><details><summary>{t("启动状态")}</summary><PhotoshopStartup/></details></section>
+    <VersionHealthPanel/><InputHealthPanel/><StabilityPanel/><DiagnosticPanel/><section class="compact-section"><details><summary>{t("启动状态")}</summary><PhotoshopStartup/></details></section>
     <section class="compact-section"><details><summary>{t("连接详情")}</summary><dl class="info-list"><div><dt>{t("当前面板：")}</dt><dd>{t(state().menu?.panel_context?.label) || t("通用操作")}</dd></div><div><dt>{t("上次读取：")}</dt><dd>{state().photoshop.status_updated_at ? new Date(state().photoshop.status_updated_at).toLocaleTimeString(state().language || 'zh-CN') : '—'}</dd></div><div><dt>{t("当前运行版本")}</dt><dd>v{state().version || '—'}</dd></div><div><dt>{t("程序：")}</dt><dd>{state().service?.executable || t("此服务未提供程序路径")}</dd></div></dl><p>{t(state().desktop)}</p><Show when={state().tray_error}><p class="error">{t("托盘：")}{state().tray_error}</p></Show><button class="danger" disabled={managedBusy()} onClick={()=>perform('service.quit')}>{t("退出后台服务")}</button></details></section>
   </div>;}
   function UxpInstalled(){return <div class="panel-scroll"><section>

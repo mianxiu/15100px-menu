@@ -2,9 +2,65 @@ import asyncio,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch,AsyncMock
 from backend.diagnostics import Diagnostics
-from backend.diagnostics import trigger_summary,runtime_report,uxp_findings
+from backend.diagnostics import trigger_summary,runtime_report,uxp_findings,input_report,key_evidence
 
 class DiagnosticTests(unittest.IsolatedAsyncioTestCase):
+    def test_hook_liveness_is_not_key_delivery_and_stale_health_is_explicit(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        import threading
+        d=SimpleNamespace(native=Mock(pid=42),ready=threading.Event(),native_sequence=4,native_applied_sequence=3)
+        d.native.poll.return_value=None
+        self.assertEqual(input_report(d)['state'],'starting')
+        d.ready.set();self.assertEqual(input_report(d)['state'],'awaiting-health')
+        d.hook_health=(100,{'renew_ok':True,'renew_attempted':False,'dropped_total':7})
+        with patch('backend.diagnostics.time.monotonic',return_value=101):
+            r=input_report(d);self.assertEqual(r['state'],'reporting');self.assertFalse(r['configuration']['acknowledged'])
+            self.assertEqual(r['events'],[]);self.assertEqual(r['health_age_ms'],1000)
+        with patch('backend.diagnostics.time.monotonic',return_value=104):self.assertEqual(input_report(d)['state'],'stale')
+        d.native.poll.return_value=0;self.assertEqual(input_report(d)['state'],'stopped')
+        self.assertFalse(input_report(d)['configuration']['acknowledged'])
+
+    def test_input_evidence_never_exports_text_paths_credentials_or_unknown_properties(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        import json,threading
+        d=SimpleNamespace(native=Mock(pid=3),ready=threading.Event(),native_sequence=1,native_applied_sequence=1,
+            input_focus=SimpleNamespace(report={'state':'unknown','token':'SECRET','observation':{'class':'PSViewC','name':'SECRET','accessibility':{30003:50033,30005:'SECRET',30040:False}},'last_verification':{'result':0,'text':'SECRET'}}),
+            input_language=SimpleNamespace(report={'state':'unknown','pending':True,'path':'SECRET','first_key_gate':{'reason':'unknown','body':'SECRET'}}))
+        d.native.poll.return_value=None
+        r=input_report(d);self.assertNotIn('SECRET',json.dumps(r));self.assertTrue(r['ime']['pending'])
+        self.assertEqual(r['focus']['observation']['accessibility'],{'30003':50033,'30040':False})
+        event=key_evidence({'key':70,'enabled':True,'process_scope':True,'activation_allowed':True,'command_scope':True,'text_input':True,'text':'SECRET'})
+        self.assertEqual(event['decision'],'input-protected');self.assertNotIn('SECRET',json.dumps(event))
+        event=key_evidence({**event,'matched_action':'tools.search'})
+        self.assertEqual(event['decision'],'action-emitted')
+
+    async def test_native_failure_keeps_cached_input_evidence_and_bounded_timeline(self):
+        with tempfile.TemporaryDirectory() as folder:
+            d=Diagnostics(folder,'panel.ps1',15153);d.input_provider=lambda:{'state':'stale','focus':{'state':'unknown'}}
+            with patch.object(d,'run_script',side_effect=TimeoutError()),patch('backend.diagnostics.asyncio.sleep',new=AsyncMock()):
+                d.start('menu');await d.task
+            r=d.export();self.assertTrue(r['partial']);self.assertEqual(r['input_diagnostics']['state'],'stale')
+            self.assertEqual(d.snapshot()['components']['input'],'completed')
+            self.assertEqual(r['components']['menu']['reason'],'timed_out');self.assertEqual(r['components']['input']['phase'],'completed')
+            for _ in range(100):d.progress('sampling','test')
+            self.assertEqual(len(d.input_samples),64)
+
+    def test_native_f_trace_and_health_reach_the_report(self):
+        from backend.desktop import Desktop
+        from types import SimpleNamespace
+        from io import StringIO
+        import json
+        d=Desktop('http://localhost',lambda action:None)
+        import threading
+        d.ready=threading.Event()
+        rows=[{'type':'hook.health','renew_ok':True,'dropped_total':0}]+[{'type':'search.trace','key':70,'message':256,'enabled':True,'process_scope':True,'activation_allowed':True,'command_scope':True,'guard_allowed':False}]*80
+        d.native=SimpleNamespace(pid=4,poll=lambda:None,stdout=StringIO('\n'.join(map(json.dumps,rows))))
+        d._read_native_events()
+        self.assertIsNotNone(d.hook_health);self.assertEqual(len(d.hotkey_events),64)
+        self.assertEqual(input_report(d)['events'][-1]['decision'],'input-protected')
+
     def test_runtime_export_excludes_documents_credentials_and_raw_errors(self):
         report=runtime_report({'application':{'version':'146','executable':'SECRET_PATH'},
             'photoshop':{'document':'SECRET_DOCUMENT','layer_context':{'layer_ids':[1,2],'document_name':'SECRET_DOCUMENT','kind':'pixel'},

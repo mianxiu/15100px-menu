@@ -173,3 +173,7 @@ pre{background:var(--ui-fill);color:var(--ui-text);white-space:pre-wrap;overflow
 
 .diagnostic-progress{display:flex;align-items:center;justify-content:space-between;gap:var(--ui-gap);margin-top:12px;padding:var(--ui-pad);border:1px solid var(--ui-border);border-radius:var(--ui-radius);background:var(--ui-fill)}
 .diagnostic-progress strong{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--ui-accent)}
+.diagnostic-facts{margin:var(--ui-gap) 0;font-size:var(--ui-secondary-size);line-height:var(--ui-secondary-line)}
+.diagnostic-facts>div{display:flex;flex-wrap:wrap;justify-content:space-between;gap:var(--ui-gap);padding:var(--ui-gap) 0;border-bottom:1px solid var(--ui-border)}
+.diagnostic-facts dt{color:var(--ui-muted)}
+.diagnostic-facts dd{margin:0;overflow-wrap:anywhere}

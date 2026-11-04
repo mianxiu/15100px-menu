@@ -4,10 +4,58 @@ from pathlib import Path
 
 SCOPES={'all','menu','uxp','runtime'}
 
+def pick(source,keys):
+    return {k:source[k] for k in keys if k in source and isinstance(source[k],(str,int,float,bool,type(None)))}
+
+def input_report(desktop):
+    """Cached evidence only; a live process or heartbeat does not prove key delivery."""
+    if not desktop:return {'state':'unavailable','read_only':True}
+    native=desktop.native
+    running=bool(native and native.poll() is None)
+    health=getattr(desktop,'hook_health',None)
+    age=max(0,round((time.monotonic()-health[0])*1000)) if health else None
+    state=('stopped' if not running else 'starting' if not desktop.ready.is_set() else
+           'awaiting-health' if health is None else 'stale' if age>3500 else
+           'maintenance-failed' if health[1].get('renew_ok') is False else 'reporting')
+    focus=dict(getattr(getattr(desktop,'input_focus',None),'report',{}))
+    ime=dict(getattr(getattr(desktop,'input_language',None),'report',{}))
+    observation=focus.get('observation') or {}
+    return {'read_only':True,'state':state,'process_running':running,'pid':native.pid if native else None,
+        'generation':getattr(desktop,'hook_generation',0),'health_age_ms':age,
+        'health':pick(health[1] if health else {},('scan_us','renew_us','timer_gap_ms','callback_peak_us','dropped_total','renew_ok','renew_attempted','input_epoch')),
+        'configuration':{'sent':desktop.native_sequence,'applied':desktop.native_applied_sequence,
+                         'acknowledged':running and desktop.native_sequence>0 and desktop.native_applied_sequence>=desktop.native_sequence},
+        'trace_active':bool(getattr(desktop,'diagnostic_trace',False)),
+        'events':list(getattr(desktop,'hotkey_events',())),
+        'focus':{**pick(focus,('state','root','focus','epoch','tool','tool_modal','tool_reads','uia_available','uia_error_type','error_type','tool_error_type')),
+                 'verification':verification(focus.get('last_verification')),'guard_verification':verification(focus.get('last_guard_verification')),
+                 'observation':{**pick(observation,('state','root','focus','pid','class','layout','workspace','blocked','foreign_focus','observed_at_ms')),
+                                'accessibility':{str(k):v for k,v in (observation.get('accessibility') or {}).items() if str(k) in ('30002','30003','30008','30010','30020','30022','30033','30040','30043','30046','30048') and type(v) in (int,bool,type(None))}}},
+        'ime':{**pick(ime,('state','mechanism','pending','owned','legacy_pending','uia_available','tool','tool_modal','tool_reads','confirmed_disables','confirmed_restores','disable_requests','restore_requests','ime_open','keyboard_layout','focus_class','tsf_disabled','native_events','context_revision','error_type','error_code','native_error_code')),
+               'verification':verification(ime.get('last_ime_verification')),
+               'first_key_gate':pick(ime.get('first_key_gate') or {},('state','reason','elapsed_ms','input_epoch'))}}
+
+def verification(row):
+    return pick(row or {},('id','result','need_ime','input_epoch','reason','elapsed_ms','received_at_ms'))
+
+def key_decision(event):
+    if event.get('matched_action') not in (None,'','None'):return 'action-emitted'
+    if not event.get('enabled'):return 'disabled'
+    if not event.get('process_scope'):return 'outside-photoshop'
+    if not event.get('activation_allowed'):return 'activation-rejected'
+    if not event.get('command_scope'):return 'workspace-rejected'
+    if event.get('key')==70:
+        if event.get('modifiers'):return 'modified-key'
+        if event.get('text_input') or not event.get('guard_allowed'):return 'input-protected'
+        if event.get('input_epoch')!=event.get('guard_epoch'):return 'focus-changed'
+    return 'no-action'
+
+def key_evidence(event):
+    row=pick(event,('type','key','modifiers','matched_action','text_input','input_epoch','guard_epoch','guard_allowed','hwnd','pid','window_class','message','flags','key_time_ms','command_scope','process_scope','enabled','repeat','owned_before','blocked','activation_allowed','activation_active','taskbar_switching','decision_us','delivery_age_ms','dropped_total'))
+    return {**row,'decision':key_decision(row),'received_at_ms':round(time.time()*1000)}
+
 def runtime_report(value):
     """Export cached counters only, never documents, credentials or raw errors."""
-    def pick(source,keys):
-        return {k:source[k] for k in keys if k in source and isinstance(source[k],(str,int,float,bool,type(None)))}
     ps=value.get('photoshop',{});layer=ps.get('layer_context') or {}
     observed={}
     for name in ('background','menu'):
@@ -60,6 +108,7 @@ class Diagnostics:
         self.folder=Path(runtime)/'diagnostics';self.script=Path(script);self.port=port
         self.uxp_script=Path(uxp_script) if uxp_script else self.script.with_name('inspect-uxp.ps1')
         self.runtime_provider=None
+        self.input_provider=None;self.input_samples=[]
         self.provider=None;self.listener=None;self.deadline=0;self.task=None;self.report=None;self.state={'phase':'idle','message':'尚未采集诊断'}
 
     def snapshot(self):
@@ -67,6 +116,9 @@ class Diagnostics:
                 'remaining_ms':max(0,math.ceil((self.deadline-time.monotonic())*1000)) if self.deadline else 0}
 
     def progress(self,stage,message,duration=0,**extra):
+        if self.input_provider and len(self.input_samples)<64:
+            sample=self.input_provider()
+            self.input_samples.append({'stage':stage,'captured_at_ms':round(time.time()*1000),'input':{k:v for k,v in sample.items() if k!='events'}})
         self.deadline=time.monotonic()+duration/1000 if duration else 0
         self.state.update(stage=stage,message=message,**extra)
         if self.listener:self.listener(self.snapshot())
@@ -80,13 +132,13 @@ class Diagnostics:
                 stage=event['stage'];remaining=event.get('remaining_ms',0);completed=event.get('samples_done',0)
                 if stage not in ('sampling','processing') or type(remaining) is not int or not 0<=remaining<=30000 or type(completed) is not int or not 0<=completed<=10:continue
             except (ValueError,KeyError,TypeError):continue
-            self.progress(stage,'正在采集：请在PS中按菜单唤出键' if stage=='sampling' else '采集结束，正在整理报告',remaining,samples_done=completed,samples_total=10)
+            self.progress(stage,'正在采集：请在PS中按菜单唤出键和 F' if stage=='sampling' else '采集结束，正在整理报告',remaining,samples_done=completed,samples_total=10)
 
 
     def start(self,scope='menu'):
         if not isinstance(scope,str) or scope not in SCOPES:raise ValueError('无效的诊断范围')
         if self.task and not self.task.done():raise RuntimeError('诊断正在采集，请稍候')
-        self.scope=scope;self.report=None;self.state={'phase':'collecting','scope':scope,'components':{}}
+        self.scope=scope;self.report=None;self.input_samples=[];self.state={'phase':'collecting','scope':scope,'components':{}}
         if scope in ('all','menu'):self.progress('prepare','准备：请切回PS并点击图层列表',5000,samples_done=0,samples_total=10)
         else:self.progress('starting','正在准备只读检测')
         self.task=asyncio.create_task(self.collect());return self.snapshot()
@@ -141,6 +193,11 @@ class Diagnostics:
                     self.state['components'][kind]='failed'
                     reason='timed_out' if isinstance(error,TimeoutError) else 'tool_unavailable' if isinstance(error,OSError) else 'invalid_report' if isinstance(error,ValueError) else 'collection_failed'
                 report['components'][kind]={'phase':self.state['components'][kind],'elapsed_ms':round((time.monotonic()-started)*1000),'reason':reason}
+            if self.input_provider:
+                report['input_diagnostics']=self.input_provider()
+                report['input_samples']=list(self.input_samples)
+                report['components']['input']={'phase':'completed','reason':'cached-state-only'}
+                self.state['components']['input']='completed'
             if not any(v['phase']=='completed' for v in report['components'].values()):raise RuntimeError('No diagnostic section completed')
             if self.provider and scope in ('all','menu'):
                 report['trigger_decisions']=self.provider()

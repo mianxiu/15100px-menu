@@ -1,6 +1,16 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {diagnosticClock,diagnosticScopes,diagnosticFinding} from '../src/diagnostics.mjs';
+import {diagnosticClock,diagnosticScopes,diagnosticFinding,inputHealthRows,keyDecisions} from '../src/diagnostics.mjs';
+import {translate} from '../src/i18n.mjs';
+
+test('hook status and F decisions remain distinct and every visible label translates',()=>{
+ const rows=inputHealthRows({state:'reporting',events:[{key:70,message:256,decision:'input-protected'},{key:70,message:257,decision:'no-action'}],focus:{state:'unknown'},configuration:{acknowledged:false}});
+ assert.equal(new Map(rows).get('最近 F'),'输入保护未放行');
+ assert.equal(new Map(inputHealthRows()).get('最近 F'),'尚无本轮按键记录');
+ assert.equal(new Map(rows).get('Hook状态'),'健康上报持续更新');
+ for(const [key,value]of [...rows,...inputHealthRows()])for(const text of [key,String(value)])if(/[\u3400-\u9fff]/u.test(text))assert.notEqual(translate(text,'en'),text,text);
+ for(const text of Object.values(keyDecisions))assert.notEqual(translate(text,'en'),text);
+});
 
 test('scoped checks and uncertain loader evidence are explicit',()=>{
  assert.deepEqual(diagnosticScopes.map(row=>row[0]),['all','menu','uxp','runtime']);

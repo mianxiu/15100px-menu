@@ -10,6 +10,7 @@ import threading
 import time
 import secrets
 import json
+from collections import deque
 from functools import wraps
 from .window_icons import WindowIcons
 from .settings import DEFAULTS, chord, ALIASES, MODIFIERS
@@ -176,6 +177,9 @@ class Desktop:
         self.token = secrets.token_hex(24)
         self.message = "桌面功能未启动"
         self.native = None
+        self.hook_health=None
+        self.hotkey_events=deque(maxlen=64)
+        self.hook_generation=0
         self.native_lock = threading.Lock()
         self.native_payload = None
         self.native_sequence=0
@@ -233,6 +237,9 @@ class Desktop:
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
                 bufsize=1, creationflags=0x08000000)
             self.native_payload = None
+            self.hook_health=None
+            self.hotkey_events.clear()
+            self.hook_generation+=1
         self._native_config()
 
     def _native_config(self):
@@ -334,7 +341,7 @@ class Desktop:
         else:self._input_verify_reply(request,result)
 
     def _input_verify_reply(self,request,result):
-        if self.input_focus:self.input_focus.report['last_verification']={'id':request['verify_id'],'result':result,'need_ime':request['need_ime'],'input_epoch':request['input_epoch']}
+        if self.input_focus:self.input_focus.report['last_verification']={'id':request['verify_id'],'result':result,'need_ime':request['need_ime'],'input_epoch':request['input_epoch'],'received_at_ms':round(time.time()*1000)}
         logging.info('Native input verification: request=%s result=%s need_ime=%s epoch=%s',request['verify_id'],result,request['need_ime'],request['input_epoch'])
         logging.info('Native input verification detail: guard=%s ime=%s gate=%s',getattr(self.input_focus,'report',{}).get('last_guard_verification'),getattr(self.input_language,'report',{}).get('last_ime_verification'),getattr(self.input_language,'report',{}).get('first_key_gate'))
         self._native_config()
@@ -372,6 +379,9 @@ class Desktop:
         try:
             for line in self.native.stdout:
                 event = json.loads(line)
+                if event.get('type') in ('caps.trace','trigger.trace','search.trace'):
+                    from .diagnostics import key_evidence
+                    self.hotkey_events.append(key_evidence(event))
                 if event.get("type") == "ready":
                     self.message = "C++ / Win32 原生热键 · 仅 Photoshop 前台生效"
                     self.ready.set()
@@ -409,6 +419,7 @@ class Desktop:
                 elif event.get('type') == 'caps.trace':
                     logging.info('CapsLock hook decision: %s', event)
                 elif event.get('type') == 'hook.health':
+                    self.hook_health=(time.monotonic(),dict(event))
                     if self.input_focus:self.input_focus.reconcile_epoch(event.get('input_epoch'))
                     logging.info('Native hook health: %s', event)
                 elif event.get('type') == 'caps.state':
