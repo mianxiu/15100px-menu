@@ -12,6 +12,8 @@ test('hook status and F decisions remain distinct and every visible label transl
  for(const text of Object.values(keyDecisions))assert.notEqual(translate(text,'en'),text);
  for(const text of Object.values(toolReadReasons))assert.notEqual(translate(text,'en'),text);
  assert.equal(new Map(inputHealthRows({tool_observation:{state:'failed',reason:'pending-session-changed'}})).get('工具状态读取'),'原工具观察属于旧会话');
+ const imeRows=new Map(inputHealthRows({ime:{pending:false,legacy_pending:true,legacy_scope:'original-process-exited'}}));
+ assert.equal(imeRows.get('当前IME请求待核对'),'否');assert.equal(imeRows.get('旧布局未知记录'),'历史未知已保留（原PS已退出）');
 });
 
 test('scoped checks and uncertain loader evidence are explicit',()=>{

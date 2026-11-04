@@ -40,7 +40,7 @@ def validate(folder, *, allow_previous_floor=False):
         content.decode('utf-8-sig')
     return data
 
-def photoshop_running():
+def photoshop_process_ids():
     import ctypes
     from ctypes import wintypes as W
     class Entry(ctypes.Structure):
@@ -55,12 +55,17 @@ def photoshop_running():
     if handle==ctypes.c_void_p(-1).value: raise ctypes.WinError(ctypes.get_last_error())
     try:
         entry=Entry();entry.size=ctypes.sizeof(entry)
+        result=[]
         ok=api.Process32FirstW(handle,ctypes.byref(entry))
         while ok:
-            if entry.name.lower()=='photoshop.exe':return True
+            if entry.name.lower()=='photoshop.exe':result.append(entry.pid)
             ok=api.Process32NextW(handle,ctypes.byref(entry))
-        return False
+        if ctypes.get_last_error()!=18:raise ctypes.WinError(ctypes.get_last_error())
+        return tuple(result)
     finally:api.CloseHandle(handle)
+
+def photoshop_running():
+    return bool(photoshop_process_ids())
 
 class UxpManager:
     def __init__(self, runtime, builtin, roaming=None, running=None, hosts=None):

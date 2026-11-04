@@ -32,7 +32,7 @@ def input_report(desktop):
                  'verification':verification(focus.get('last_verification')),'guard_verification':verification(focus.get('last_guard_verification')),
                  'observation':{**pick(observation,('state','root','focus','pid','class','layout','workspace','blocked','foreign_focus','observed_at_ms')),
                                 'accessibility':{str(k):v for k,v in (observation.get('accessibility') or {}).items() if str(k) in ('30002','30003','30008','30010','30020','30022','30033','30040','30043','30046','30048') and type(v) in (int,bool,type(None))}}},
-        'ime':{**pick(ime,('state','mechanism','pending','owned','legacy_pending','uia_available','tool','tool_modal','tool_reads','confirmed_disables','confirmed_restores','disable_requests','restore_requests','ime_open','keyboard_layout','focus_class','tsf_disabled','native_events','context_revision','error_type','error_code','native_error_code')),
+        'ime':{**pick(ime,('state','mechanism','pending','owned','legacy_pending','legacy_scope','legacy_unknown_preserved','uia_available','tool','tool_modal','tool_reads','confirmed_disables','confirmed_restores','disable_requests','restore_requests','ime_open','keyboard_layout','focus_class','tsf_disabled','native_events','context_revision','error_type','error_code','native_error_code')),
                'verification':verification(ime.get('last_ime_verification')),
                'first_key_gate':pick(ime.get('first_key_gate') or {},('state','reason','elapsed_ms','input_epoch'))}}
 

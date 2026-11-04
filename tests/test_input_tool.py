@@ -5,11 +5,115 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from backend.input_tool import ToolObservation,ToolReadError
+from backend.input_tool import ToolObservation,ToolReadError,previous_tool_producer_exited
 from backend.settings import atomic_json
 
 
 class ToolObservationTests(unittest.TestCase):
+    def old_session(self,**changes):
+        self.identity=[10,20,'2026-11-04 15:00:00+00:00',30]
+        self.heartbeat['session']='1793804500000-beef'
+        request=self.pending(session='1700000000000-dead',expires_at_ms=1700000001000,**changes)
+        wire={**request,'token':'private-test-token'}
+        atomic_json(self.folder/'input-tool-request.json',wire)
+        (self.folder/('input-tool-request-'+request['id']+'.tmp')).write_bytes(b'original temporary evidence')
+        self.reply(request,completed_at_ms=1700000000100)
+        return request
+
+    def test_previous_session_is_archived_unknown_before_an_independent_read(self):
+        old=self.old_session();raw=self.reader.path.read_bytes();published=[]
+        def publish(source,destination):
+            archive=list((self.root/'input-tool-unknown-history').glob('*.json'));self.assertEqual(len(archive),1)
+            evidence=json.loads(archive[0].read_text());self.assertEqual(evidence['state'],'unknown')
+            self.assertFalse(evidence['original_republished']);self.assertFalse(evidence['marked_successful'])
+            self.assertEqual(evidence['request'],old)
+            saved={row['name']:bytes.fromhex(row['bytes_hex']) for row in evidence['files']}
+            self.assertEqual(saved['input-tool-pending.json'],raw)
+            self.assertIn('input-tool-response.json',saved);self.assertIn('input-tool-request-'+old['id']+'.tmp',saved)
+            wire=json.loads(source.read_text());self.assertNotEqual(wire['id'],old['id']);self.assertEqual(wire['session'],self.heartbeat['session'])
+            source.replace(destination);published.append(wire['id']);self.reply(wire)
+        with patch('backend.input_tool.previous_tool_producer_exited',return_value=True),patch('backend.input_tool.publish_request',side_effect=publish):
+            result=self.reader.read(identity=self.identity)
+        self.assertEqual(result['isModal'],False);self.assertEqual(len(published),1)
+        self.assertEqual(self.reader.snapshot()['last_retired_unknown']['state'],'unknown')
+        self.assertNotIn('private-test-token',json.dumps(self.reader.snapshot()))
+
+    def test_reconciliation_can_retire_only_the_cached_current_identity_without_publishing(self):
+        old=self.old_session();self.reader.identity=self.identity
+        with patch('backend.input_tool.previous_tool_producer_exited',return_value=True),patch('backend.input_tool.publish_request') as publish:
+            self.assertTrue(self.reader.reconcile());publish.assert_not_called()
+        self.assertFalse(self.reader.path.exists())
+        self.assertEqual(self.reader.snapshot()['last_retired_unknown']['request_id'],old['id'])
+
+    def test_unconfirmed_producer_and_non_readonly_envelope_keep_the_old_slot(self):
+        old=self.old_session();raw=self.reader.path.read_bytes()
+        with patch('backend.input_tool.time.monotonic',return_value=1),patch('backend.input_tool.previous_tool_producer_exited',return_value=False),patch('backend.input_tool.publish_request') as publish:
+            with self.assertRaises(ToolReadError):self.reader.read(identity=self.identity)
+            publish.assert_not_called();self.assertEqual(self.reader.path.read_bytes(),raw)
+        wire=json.loads((self.folder/'input-tool-request.json').read_text());wire['operation']='document.write'
+        atomic_json(self.folder/'input-tool-request.json',wire)
+        with patch('backend.input_tool.time.monotonic',return_value=3),patch('backend.input_tool.previous_tool_producer_exited',return_value=True),patch('backend.input_tool.publish_request') as publish:
+            with self.assertRaises(ToolReadError):self.reader.read(identity=self.identity)
+            publish.assert_not_called();self.assertEqual(self.reader.path.read_bytes(),raw)
+
+    def test_archive_failure_and_changed_producer_never_release_unknown(self):
+        self.old_session();raw=self.reader.path.read_bytes()
+        with patch('backend.input_tool.time.monotonic',return_value=1),patch('backend.input_tool.previous_tool_producer_exited',return_value=True),patch('backend.input_tool.atomic_json',side_effect=OSError('archive failed')),patch('backend.input_tool.publish_request') as publish:
+            with self.assertRaises(OSError):self.reader.read(identity=self.identity)
+            publish.assert_not_called();self.assertEqual(self.reader.path.read_bytes(),raw)
+        with patch('backend.input_tool.time.monotonic',return_value=3),patch('backend.input_tool.previous_tool_producer_exited',side_effect=[True,False]),patch('backend.input_tool.publish_request') as publish:
+            with self.assertRaises(ToolReadError):self.reader.read(identity=self.identity)
+            publish.assert_not_called();self.assertEqual(self.reader.path.read_bytes(),raw)
+        # A new heartbeat is a diagnostic update, not a change to the original request.
+        atomic_json(self.folder/'probe-last.json',{'session':self.heartbeat['session'],'tick':123})
+        with patch('backend.input_tool.time.monotonic',return_value=5),patch('backend.input_tool.previous_tool_producer_exited',return_value=True),patch('backend.input_tool.publish_request') as publish:
+            self.reader.identity=self.identity;self.assertTrue(self.reader.reconcile());publish.assert_not_called()
+
+    def test_waiting_for_producer_exit_is_bounded_and_rechecks_without_a_new_key(self):
+        self.old_session();self.reader.identity=self.identity
+        with patch('backend.input_tool.previous_tool_producer_exited',return_value=False) as proof,patch('backend.input_tool.time.monotonic',return_value=10),patch('backend.input_tool.publish_request') as publish:
+            self.assertFalse(self.reader.reconcile());self.assertFalse(self.reader.reconcile())
+            self.assertEqual(proof.call_count,1);publish.assert_not_called()
+        with patch('backend.input_tool.previous_tool_producer_exited',return_value=True),patch('backend.input_tool.time.monotonic',return_value=12),patch('backend.input_tool.publish_request') as publish:
+            self.assertTrue(self.reader.reconcile());publish.assert_not_called()
+
+    def test_legacy_producer_proof_requires_one_pinned_newer_ps_process(self):
+        identity=[10,20,'2026-11-04 15:00:00+00:00',30]
+        handle=SimpleNamespace(Close=lambda:None)
+        with patch('backend.uxp_management.photoshop_process_ids',return_value=(20,)),patch('win32api.OpenProcess',return_value=handle),patch('win32process.GetProcessTimes',return_value={'CreationTime':identity[2]}),patch('win32event.WaitForSingleObject',return_value=258):
+            self.assertTrue(previous_tool_producer_exited('1700000000000-dead',identity))
+            self.assertFalse(previous_tool_producer_exited('1793804500000-dead',identity))
+            self.assertFalse(previous_tool_producer_exited('not-a-session',identity))
+            with patch('backend.uxp_management.photoshop_process_ids',return_value=(20,21)):
+                self.assertFalse(previous_tool_producer_exited('1700000000000-dead',identity))
+            with patch('win32process.GetProcessTimes',return_value={'CreationTime':'reused PID'}):
+                self.assertFalse(previous_tool_producer_exited('1700000000000-dead',identity))
+            with patch('backend.uxp_management.photoshop_process_ids',side_effect=OSError('inventory denied')):
+                self.assertFalse(previous_tool_producer_exited('1700000000000-dead',identity))
+
+    def test_corrupt_archive_keeps_unknown_slot_and_all_host_requests_unchanged(self):
+        from backend.input_tool import atomic_json as write
+        self.old_session();raw=self.reader.path.read_bytes()
+        def corrupt(path,value):
+            if path.parent.name=='input-tool-unknown-history':
+                value=json.loads(json.dumps(value));value['files'][0]['bytes_hex']='00'
+            write(path,value)
+        with patch('backend.input_tool.previous_tool_producer_exited',return_value=True),patch('backend.input_tool.atomic_json',side_effect=corrupt),patch('backend.input_tool.publish_request') as publish:
+            with self.assertRaises(ToolReadError) as raised:self.reader.read(identity=self.identity)
+            self.assertEqual(raised.exception.reason,'retirement-blocked')
+            publish.assert_not_called();self.assertEqual(self.reader.path.read_bytes(),raw)
+
+    def test_ambiguous_original_mailbox_is_not_retired(self):
+        self.old_session();raw=self.reader.path.read_bytes()
+        self.reader.transport.storage=self.root/'storage'
+        duplicate=self.reader.transport.storage/'other/External/com.15100px.menu.offline-probe/PluginData'
+        duplicate.mkdir(parents=True)
+        (duplicate/'input-tool-request.json').write_bytes((self.folder/'input-tool-request.json').read_bytes())
+        with patch('backend.input_tool.previous_tool_producer_exited',return_value=True),patch('backend.input_tool.publish_request') as publish:
+            with self.assertRaises(ToolReadError):self.reader.read(identity=self.identity)
+            publish.assert_not_called();self.assertEqual(self.reader.path.read_bytes(),raw)
+        self.assertEqual(self.reader.snapshot()['retirement']['reason'],'original-readonly-envelope-ambiguous')
+
     def test_trusted_host_failure_is_classified_without_exporting_raw_errors(self):
         request=self.pending()
         error='Error: Unsupported tool state: '+json.dumps({'classID':'moveTool','isModal':'undefined','fields':['SECRET'], 'token':'SECRET'})

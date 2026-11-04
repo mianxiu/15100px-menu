@@ -14,7 +14,7 @@ export function diagnosticClock(value={},now=0){
 }
 
 export const keyDecisions={'action-emitted':'原生动作已发出（不代表执行成功）',disabled:'快捷键已暂停','outside-photoshop':'前台未识别为Photoshop','activation-rejected':'PS激活条件未满足','workspace-rejected':'工作区范围未通过','modified-key':'存在组合键','input-protected':'输入保护未放行','focus-changed':'焦点版本不匹配','no-action':'按键已收到，未匹配动作'};
-export const toolReadReasons={'transport-unavailable':'工具读取通道不可用','invalid-host-identity':'PS进程身份无效','previous-host-heartbeat':'执行插件尚未属于当前PS','executor-too-old':'执行插件版本不支持工具读取','pending-invalid':'原工具观察记录损坏','pending-changed':'原工具观察身份已变化','publication-failed':'工具读取未能发布','pending-session-changed':'原工具观察属于旧会话','response-too-large':'工具返回记录超限','response-invalid':'工具返回终态无效','response-time-invalid':'工具返回时间无效','response-fields-invalid':'工具返回字段无效','request-unconfirmed':'原工具读取尚未确认','expired-before-read':'工具读取在宿主执行前已过期','unsupported-tool-state':'PS返回的工具字段不兼容','host-tool-failed':'PS工具接口读取失败','tool-state-stale':'工具返回状态已失鲜'};
+export const toolReadReasons={'transport-unavailable':'工具读取通道不可用','invalid-host-identity':'PS进程身份无效','previous-host-heartbeat':'执行插件尚未属于当前PS','executor-too-old':'执行插件版本不支持工具读取','pending-invalid':'原工具观察记录损坏','pending-changed':'原工具观察身份已变化','publication-failed':'工具读取未能发布','pending-session-changed':'原工具观察属于旧会话','response-too-large':'工具返回记录超限','response-invalid':'工具返回终态无效','response-time-invalid':'工具返回时间无效','response-fields-invalid':'工具返回字段无效','request-unconfirmed':'原工具读取尚未确认','expired-before-read':'工具读取在宿主执行前已过期','unsupported-tool-state':'PS返回的工具字段不兼容','host-tool-failed':'PS工具接口读取失败','tool-state-stale':'工具返回状态已失鲜','retirement-blocked':'旧工具观察归档或退出核验未通过'};
 export function inputHealthRows(value={}){
  const focus=value.focus || {},ime=value.ime || {},health=value.health || {},config=value.configuration || {};
  const observer=value.tool_observation || {};
@@ -39,7 +39,8 @@ export function inputHealthRows(value={}){
   ['当前工具',focus.tool || '未取得'],
   ['工具状态读取',observer.state==='ready'?'已取得工具状态':toolReadReasons[observer.reason] || '等待状态'],
   ['IME状态',imeNames[ime.state] || ime.state || '未取得'],
-  ['IME请求待核对',yes(ime.pending || ime.legacy_pending || false)],
+  ['当前IME请求待核对',yes(ime.pending || false)],
+  ['旧布局未知记录',ime.legacy_pending?(ime.legacy_scope==='original-process-exited'?'历史未知已保留（原PS已退出）':'待原会话恢复'):'无'],
   ['已确认禁用／恢复',`${ime.confirmed_disables ?? 0} / ${ime.confirmed_restores ?? 0}`],
   ['按键诊断采集中',yes(value.trace_active)]
  ];

@@ -265,3 +265,31 @@ class MinimumDeclarationMigrationTests(unittest.TestCase):
             self.assertEqual(auto.step(self.manager)['phase'],'waiting');hot.assert_not_called();install.assert_not_called()
             self.manager.running.return_value=False
             self.assertEqual(auto.step(self.manager)['phase'],'updated');install.assert_called_once();hot.assert_not_called()
+
+
+class PhotoshopProcessInventoryTests(unittest.TestCase):
+    def test_inventory_is_complete_and_filters_names(self):
+        import ctypes
+        from backend.uxp_management import photoshop_process_ids
+        if not hasattr(ctypes,'WinDLL'):self.skipTest('Windows inventory')
+        api=Mock();api.CreateToolhelp32Snapshot.return_value=42
+        rows=iter([('Photoshop.exe',10),('python.exe',20),('PHOTOSHOP.EXE',30)])
+        def step(handle,pointer):
+            try:name,pid=next(rows)
+            except StopIteration:return False
+            pointer._obj.name=name;pointer._obj.pid=pid;return True
+        api.Process32FirstW.side_effect=api.Process32NextW.side_effect=step
+        with patch('ctypes.WinDLL',return_value=api),patch('ctypes.get_last_error',return_value=18):
+            self.assertEqual(photoshop_process_ids(),(10,30))
+        api.CloseHandle.assert_called_once_with(42)
+
+    def test_partial_or_denied_inventory_is_never_treated_as_no_old_producer(self):
+        import ctypes
+        from backend.uxp_management import photoshop_process_ids
+        if not hasattr(ctypes,'WinDLL'):self.skipTest('Windows inventory')
+        api=Mock();api.CreateToolhelp32Snapshot.return_value=42
+        def first(handle,pointer):pointer._obj.name='Photoshop.exe';pointer._obj.pid=10;return True
+        api.Process32FirstW.side_effect=first;api.Process32NextW.return_value=False
+        with patch('ctypes.WinDLL',return_value=api),patch('ctypes.get_last_error',return_value=5):
+            with self.assertRaises(OSError):photoshop_process_ids()
+        api.CloseHandle.assert_called_once_with(42)

@@ -668,4 +668,9 @@ export default {
 "PS返回的工具字段不兼容":"Photoshop returned unsupported tool fields",
 "PS工具接口读取失败":"Photoshop tool API failed",
 "工具返回状态已失鲜":"Tool response is stale",
+"旧工具观察归档或退出核验未通过":"Old tool observation archive or producer-exit verification failed",
+"当前IME请求待核对":"Current IME request pending verification",
+"旧布局未知记录":"Legacy layout unknown record",
+"历史未知已保留（原PS已退出）":"Historical unknown retained (original Photoshop exited)",
+"待原会话恢复":"Awaiting original-session recovery",
 };
