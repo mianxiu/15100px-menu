@@ -26,7 +26,7 @@ def version(value):
 def manifest(folder):
     data = json.loads((Path(folder) / "manifest.json").read_text(encoding="utf-8"))
     if data.get("id") != PLUGIN_ID or data.get("api_version") != 1:
-        raise ValueError("不是兼容的 Photoshop Menu 脚本包")
+        raise ValueError("不是兼容的 151500px-menu 脚本包")
     version(data.get("version"))
     if not isinstance(data.get("sha256"), dict) or set(data["sha256"]) != set(FILES):
         raise ValueError("脚本包文件清单不完整")

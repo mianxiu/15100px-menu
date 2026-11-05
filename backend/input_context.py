@@ -24,7 +24,18 @@ class NativeImeContext:
         window=self.controls.get(tuple(sample['identity']))
         if window and win32gui.IsWindow(window) and win32gui.GetClassName(window)=='PhotoshopMenu.InputContext.v1' and list(win32process.GetWindowThreadProcessId(window))==[thread,pid]:
             if sample.get('state')=='outside' or self.user.GetPropW(window,'PhotoshopMenu.InputContext.Owner.v1')==os.getpid():return window
+        # The TSF service publishes the same control window on the root window,
+        # so both transports are consumed through one lookup.
+        published=self.user.GetPropW(root,'PhotoshopMenu.InputContext.Window.v1')
+        if published and win32gui.IsWindow(published) and win32gui.GetClassName(published)=='PhotoshopMenu.InputContext.v1' \
+           and list(win32process.GetWindowThreadProcessId(published))==[thread,pid] \
+           and self.user.GetPropW(published,'PhotoshopMenu.InputContext.Owner.v1')==os.getpid():
+            self.controls[tuple(sample['identity'])]=published;return published
         if sample.get('state')=='outside':return None
+        # A machine TSF service can only be loaded when it is selected as an
+        # input method, which would replace the user's IME, so this system keeps
+        # the in-process transport as the working channel. If a TSF-provided
+        # window ever appears the lookup above already uses it.
         # Both sent focus notifications and queued input stay in the PS UI thread.
         if self.library is None:
             content=(resource_root()/'native/InputContext.dll').read_bytes()

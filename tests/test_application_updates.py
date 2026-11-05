@@ -19,7 +19,7 @@ from urllib.request import Request
 
 
 def release(v='0.4.120'):
-    name='PhotoshopMenu-Backend-'+v+'.zip';tag='v'+v
+    name='151500px-menu-Backend-'+v+'.zip';tag='v'+v
     return {'id':41,'tag_name':tag,'draft':False,'prerelease':False,'body':'Changes',
             'assets':[{'id':n,'name':f,'state':'uploaded','size':size,
                        'browser_download_url':release_url(tag,f),'digest':None}
@@ -86,9 +86,9 @@ class UpdateValidationTests(unittest.TestCase):
     def package(self, folder, additional=None, checksum=None):
         exe=b'MZ example exe';path=folder/'package.zip'
         with zipfile.ZipFile(path,'w') as bundle:
-            bundle.writestr('PhotoshopMenu.exe',exe)
-            bundle.writestr('PhotoshopMenu.exe.sha256',(checksum or hashlib.sha256(exe).hexdigest())+'  PhotoshopMenu.exe\n')
-            bundle.writestr('PhotoshopMenu-UXP-0.4.120.zip',b'plugin')
+            bundle.writestr('151500px-menu.exe',exe)
+            bundle.writestr('151500px-menu.exe.sha256',(checksum or hashlib.sha256(exe).hexdigest())+'  151500px-menu.exe\n')
+            bundle.writestr('151500px-menu-UXP-0.4.120.zip',b'plugin')
             if additional:
                 entry=zipfile.ZipInfo('placeholder');entry.filename=additional
                 bundle.writestr(entry,b'bad')
@@ -99,7 +99,7 @@ class UpdateValidationTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 folder=Path(directory);package=self.package(folder,unsafe)
                 with self.subTest(path=unsafe),self.assertRaises(ValueError):unpack_package(package,folder,'0.4.120',sha256(package))
-                self.assertFalse((folder/'PhotoshopMenu.exe').exists())
+                self.assertFalse((folder/'151500px-menu.exe').exists())
         with tempfile.TemporaryDirectory() as directory:
             folder=Path(directory);package=self.package(folder)
             with self.assertRaises(ValueError):unpack_package(package,folder,'0.4.120','0'*64)
@@ -112,14 +112,14 @@ class UpdateValidationTests(unittest.TestCase):
             folder=Path(directory);package=self.package(folder)
             with patch('backend.application_updates.executable_version',return_value='0.4.120'):
                 result=unpack_package(package,folder,'0.4.120',sha256(package))
-                self.assertEqual(result['sha256'],sha256(folder/'PhotoshopMenu.exe'))
+                self.assertEqual(result['sha256'],sha256(folder/'151500px-menu.exe'))
 
     def test_apply_identity_downgrade_tamper_and_other_service_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime=Path(directory);folder=runtime/'application-updates'/uuid.uuid4().hex;folder.mkdir(parents=True)
-            target=runtime/'app/PhotoshopMenu.exe';target.parent.mkdir();target.write_bytes(b'old')
+            target=runtime/'app/151500px-menu.exe';target.parent.mkdir();target.write_bytes(b'old')
             helper=folder/'update-host.exe';helper.write_bytes(b'new')
-            source=folder/'PhotoshopMenu.exe';source.write_bytes(b'new')
+            source=folder/'151500px-menu.exe';source.write_bytes(b'new')
             job={'schema':1,'id':folder.name,'runtime':str(runtime),'target':str(target),'old_version':'0.4.119',
                  'new_version':'0.4.120','old_sha256':sha256(target),'new_sha256':sha256(source),
                  'pids':[123],'port':15151,'headless':True,'no_desktop':True}
@@ -127,6 +127,10 @@ class UpdateValidationTests(unittest.TestCase):
             def metadata(path):return '0.4.120' if Path(path)==source else '0.4.119'
             with patch('backend.update_helper.executable_version',side_effect=metadata):
                 self.assertEqual(validate_job(path,helper)[2],target)
+                legacy=target.with_name('PhotoshopMenu.exe');legacy.write_bytes(b'old')
+                job['target']=str(legacy);atomic_json(path,job)
+                self.assertEqual(validate_job(path,helper)[2],legacy)
+                job['target']=str(target);atomic_json(path,job)
                 source.write_bytes(b'changed')
                 with self.assertRaises(ValueError):validate_job(path,helper)
                 source.write_bytes(b'new');job['new_version']='0.4.119';atomic_json(path,job)
@@ -143,7 +147,7 @@ class UpdateValidationTests(unittest.TestCase):
 
     def test_replace_preserves_unrelated_files_and_receipt_ownership(self):
         with tempfile.TemporaryDirectory() as directory:
-            runtime=Path(directory);old=runtime/'PhotoshopMenu.exe';new=runtime/'candidate.exe'
+            runtime=Path(directory);old=runtime/'151500px-menu.exe';new=runtime/'candidate.exe'
             old.write_bytes(b'old');new.write_bytes(b'new');settings=runtime/'settings.json';settings.write_text('user settings')
             receipt=runtime/'offline-install.json';atomic_json(receipt,{'owned':{str(old):sha256(old)},'version':'0.4.119'})
             original=sha256(old);replace(new,old)
@@ -161,8 +165,8 @@ class UpdateValidationTests(unittest.TestCase):
         from backend.update_helper import apply
         with tempfile.TemporaryDirectory() as directory:
             runtime=Path(directory);folder=runtime/'application-updates'/uuid.uuid4().hex;folder.mkdir(parents=True)
-            target=runtime/'PhotoshopMenu.exe';target.write_bytes(b'old exe')
-            source=folder/'PhotoshopMenu.exe';source.write_bytes(b'new exe')
+            target=runtime/'151500px-menu.exe';target.write_bytes(b'old exe')
+            source=folder/'151500px-menu.exe';source.write_bytes(b'new exe')
             (runtime/'settings.json').write_bytes(b'keep user settings')
             atomic_json(runtime/'offline-install.json',{'owned':{str(target):sha256(target)},'version':'0.4.119'})
             saved=(runtime/'offline-install.json').read_bytes()

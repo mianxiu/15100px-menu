@@ -45,6 +45,14 @@ class InputFocus(InputLanguage):
         if not valid or state=='unknown' or now>request['expires_tick_ms']:reply(request,0);return
         reply(request,2 if state=='non-input' else 1)
 
+    def native_sync(self):
+        # The keyboard hook no longer waits for a verdict, so a changed verdict
+        # must reach it immediately instead of at the 100 ms monitor tick.
+        sync=getattr(self.desktop,'sync_native',None)
+        if callable(sync):
+            try:sync()
+            except Exception:pass
+
     def invalidate(self,epoch=None):
         with self.lock:
             if type(epoch) is int:self.native_epoch=epoch
@@ -54,6 +62,7 @@ class InputFocus(InputLanguage):
             self.current={'state':'unknown','root':0,'focus':0,'epoch':self.native_epoch}
             self.report.update(self.current)
         self.wake.set()
+        self.native_sync()
 
     def protect(self,epoch=None):self.invalidate(epoch)
     def activity(self,epoch=None):self.invalidate(epoch)
@@ -67,6 +76,7 @@ class InputFocus(InputLanguage):
             if type(epoch) is int:self.native_epoch=epoch
             self.menu_origin=None
             self.current={'state':'unknown','root':0,'focus':0,'epoch':self.native_epoch}
+        self.native_sync()
 
     def refresh(self):
         with self.lock:self.refresh_serial+=1
@@ -94,8 +104,10 @@ class InputFocus(InputLanguage):
         with self.lock:
             if serial!=self.serial:return
             value={'state':state,'root':sample.get('root',0),'focus':sample.get('focus',0),'epoch':self.native_epoch}
+            changed=self.current!=value
             self.current=value
             self.report.update(value)
+        if changed:self.native_sync()
 
     def run(self):
         import pythoncom,win32gui

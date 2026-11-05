@@ -14,10 +14,10 @@
 #include <vector>
 #include "ScreenSample.h"
 
-enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers, LanguageProtect, LanguageActivity, LanguageEditEnd, SearchTrace, InputVerify };
+enum Action { None, Toggle, Hide, Select, Color, Top, Bottom, Context, Dismiss, Ready, Error, Configured, PanelClick, HoldBegin, HoldRelease, HoldCancel, HoldPin, CapsTrace, HookHealth, CapsState, ActivationTrace, SelectAbove, SelectBelow, MoveUp, MoveDown, CopyStyle, PasteStyle, EditStyle, TriggerTrace, ExtendAbove, ExtendBelow, ConvertSmartObject, HoldReveal, SearchLayers, LanguageProtect, LanguageActivity, LanguageEditEnd, SearchTrace };
 static const char* names[] = {"", "toggle", "hide", "select", "color", "moveToTop", "moveToBottom", "context", "dismiss", "hooks", "configuration", "settings", "panel.click", "hold_begin", "hold_release", "hold_cancel", "hold_pin", "caps.trace", "hook.health", "caps.state", "activation.trace", "selectAbove", "selectBelow", "moveUp", "moveDown", "copyStyle", "pasteStyle", "editStyle", "trigger.trace", "extendAbove", "extendBelow", "convertSmartObject", "hold_reveal", "tools.search", "input.language.protect", "input.language.activity", "input.language.edit_end", "search.trace"};
 struct Binding { Action action=None; std::array<int,6> keys{}; int count=0; };
-struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false,searchAllowed=false,editorInput=false,imeReady=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr,searchRoot=nullptr,searchFocus=nullptr,imeRoot=nullptr,imeFocus=nullptr; ULONGLONG sequence=0,searchEpoch=0,imeEpoch=0; std::array<Binding,16> bindings{}; };
+struct Config { bool enabled=false, textInput=false,colorEditor=false,diagnostic=false,remoteCompatibility=false,searchAllowed=false,editorInput=false,imeReady=false; HWND overlay=nullptr,guardOwner=nullptr,guardPanel=nullptr,searchRoot=nullptr,searchFocus=nullptr,imeRoot=nullptr,imeFocus=nullptr; ULONGLONG sequence=0,searchEpoch=0,imeEpoch=0; std::array<Binding,16> bindings{}; bool evidenceFresh=true; };
 // Opt-in remote clicks qualify only on a matching release in the same verified
 // PS workspace. No hover, taskbar or injected Alt+Tab activation is added.
 struct RemoteClickIntent {
@@ -87,7 +87,7 @@ struct KeyMachine {
             return false;
         }
         if(key=='F' && !modified() && !held[VK_CAPITAL]) {
-            if(!cfg.searchAllowed || cfg.textInput || (cfg.colorEditor && visible))return false;
+            if(!cfg.searchAllowed || cfg.textInput || !cfg.evidenceFresh || (cfg.colorEditor && visible))return false;
             consumed[key]=true;action=SearchLayers;return true;
         }
         const Binding* match=nullptr;
@@ -98,7 +98,7 @@ struct KeyMachine {
             for (int i=0;i<b.count-1;++i) if (b.keys[i]==9) tabPrefix=true;
             if (b.keys[b.count-1]!=key) continue;
             bool matches=true;
-            for (int i=0;i<b.count;++i) if (!held[b.keys[i]] && !(b.keys[i]==VK_CAPITAL && visible && !cfg.textInput && !cfg.colorEditor)) matches=false;
+            for (int i=0;i<b.count;++i) if (!held[b.keys[i]] && !(b.keys[i]==VK_CAPITAL && visible && cfg.evidenceFresh && !cfg.textInput && !cfg.colorEditor)) matches=false;
             for (int m:{16,17,18,91,92}) {
                 bool requested=false;
                 for (int i=0;i<b.count;++i) if (b.keys[i]==m) requested=true;
@@ -169,19 +169,10 @@ static DWORD hookThread;
 static HANDLE available;
 static ULONGLONG lastInputTick=0,lastScanUs=0;
 static ULONGLONG inputEpoch=0;
-static HANDLE inputDecision=nullptr;
-static std::atomic<ULONGLONG> inputRequest{0};
-static std::atomic<int> inputResult{0};
-static SRWLOCK inputDecisionLock=SRWLOCK_INIT;
-static bool inputChanged=true;
-static ULONGLONG unknownInputEpoch=~ULONGLONG(0);
-static void advanceInput(){++inputEpoch;inputChanged=true;}
-static void acceptInputReply(ULONGLONG request,int result) {
-    if(result<0 || result>2)return;
-    AcquireSRWLockExclusive(&inputDecisionLock);
-    if(inputRequest.load()==request && request!=0){inputResult.store(result);SetEvent(inputDecision);}
-    ReleaseSRWLockExclusive(&inputDecisionLock);
-}
+// The hook only reads the last published input state. It never waits for a
+// host answer: a publication that predates the newest input generation cannot
+// authorise a single-key action, and an unknown state never disables chords.
+static void advanceInput(){++inputEpoch;}
 struct ActivationGate {
     bool active=false,allowed=false,switching=false,taskbarSwitching=false,directSwitching=false;
     ULONGLONG clicked=0;
@@ -363,9 +354,26 @@ static void refreshPhotoshopProcesses() {
 }
 static bool photoshopProcessWindow(HWND hwnd) {
     DWORD pid=0;GetWindowThreadProcessId(hwnd,&pid);
+    if(!pid)return false;
+    // A held handle keeps the process object alive, so a verified PID entry
+    // cannot be a recycled PID and needs no time-based revalidation.
     for (const auto& p:photoshopProcesses)
-        if (pid && pid==p.pid && p.handle && WaitForSingleObject(p.handle,0)==WAIT_TIMEOUT) return true;
-    return false;
+        if (p.pid==pid) return p.handle && WaitForSingleObject(p.handle,0)==WAIT_TIMEOUT;
+    // A miss verifies exactly one process: no full system enumeration, no
+    // background scanner, no time window in which a running Photoshop is
+    // unknown after it starts or restarts.
+    HANDLE handle=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,pid);
+    if(!handle)return false;
+    wchar_t path[32768]{};DWORD length=32768;
+    bool valid=QueryFullProcessImageNameW(handle,0,path,&length)!=0;
+    const wchar_t* name=wcsrchr(path,L'\\');name=name?name+1:path;
+    valid=valid && _wcsicmp(name,L"Photoshop.exe")==0 && WaitForSingleObject(handle,0)==WAIT_TIMEOUT;
+    if(!valid){CloseHandle(handle);return false;}
+    for (auto& p:photoshopProcesses) if (!p.handle) {p={pid,handle};return true;}
+    for (auto& p:photoshopProcesses)
+        if (WaitForSingleObject(p.handle,0)!=WAIT_TIMEOUT) {CloseHandle(p.handle);p={pid,handle};return true;}
+    CloseHandle(photoshopProcesses[0].handle);photoshopProcesses[0]={pid,handle};
+    return true;
 }
 // Only the frozen, process-verified Layers list. No tree enumeration, COM,
 // UIA, filesystem, allocations or blocking messages in the mouse hook.
@@ -479,27 +487,6 @@ static bool photoshopInputFocus(HWND foreground) {
     if(!GetGUIThreadInfo(thread,&info) || !info.hwndFocus)return false;
     GetWindowThreadProcessId(info.hwndFocus,&focusPid);return pid && focusPid==pid;
 }
-static int verifyInput(HWND foreground,bool needIme,HWND& root,HWND& focus) {
-    GUITHREADINFO info{};info.cbSize=sizeof(info);
-    const auto thread=GetWindowThreadProcessId(foreground,nullptr);
-    if(!inputDecision || !thread || !GetGUIThreadInfo(thread,&info) || !info.hwndFocus || info.hwndCapture || info.hwndMenuOwner || info.hwndMoveSize)return 0;
-    root=GetAncestor(foreground,GA_ROOTOWNER);focus=info.hwndFocus;
-    static ULONGLONG sequence=0;const auto request=++sequence;
-    unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
-    if(next==tail.load(std::memory_order_acquire))return 0;
-    AcquireSRWLockExclusive(&inputDecisionLock);
-    ResetEvent(inputDecision);inputResult.store(0);inputRequest.store(request);
-    ReleaseSRWLockExclusive(&inputDecisionLock);
-    HookEvent event{};event.action=InputVerify;event.root=root;event.hwnd=focus;
-    event.gapMs=request;event.inputEpoch=inputEpoch;event.attempted=needIme;event.activationIntent=GetTickCount64()+200;
-    queue[head.load(std::memory_order_relaxed)]=event;head.store(next,std::memory_order_release);SetEvent(available);
-    const auto ready=WaitForSingleObject(inputDecision,200)==WAIT_OBJECT_0;
-    AcquireSRWLockExclusive(&inputDecisionLock);
-    const auto result=inputResult.load();inputRequest.store(0);
-    ReleaseSRWLockExclusive(&inputDecisionLock);
-    if(!ready || closing.load() || GetForegroundWindow()!=foreground || !GetGUIThreadInfo(thread,&info) || info.hwndFocus!=focus || info.hwndCapture || info.hwndMenuOwner || info.hwndMoveSize)return 0;
-    return result;
-}
 static bool routeKey(KeyMachine& state,int raw,bool down,bool commandScope,bool processScope,
                      const Config& cfg,bool visible,Action& action,ULONGLONG now) {
     // Reserve only CapsLock in PS-owned non-workspace windows. Other keys keep
@@ -535,7 +522,12 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
             (message==WM_KEYUP || message==WM_SYSKEYUP) && activation.switching) {
             activationOrigin=foreground;activation.finishSwitch(processScope,lastInputTick);
         }
-        bool commandScope=scope(foreground) && activation.allowed;
+        // A Photoshop workspace (or our own menu over it) is the only
+        // qualification. The old activation heuristic is kept for diagnostics
+        // and the optional remote path; it must never decide whether a key
+        // works, because activation by Win+Tab, a taskbar thumbnail click, a
+        // remote session or a service restart is indistinguishable to a hook.
+        bool commandScope=scope(foreground);
         bool repeat=input.vkCode<256 && keys.physical[input.vkCode];
         bool owned=input.vkCode<256 && keys.consumed[alias(input.vkCode)];
         if (input.vkCode==VK_LWIN && !(input.flags&LLKHF_INJECTED)) {
@@ -554,26 +546,21 @@ static LRESULT CALLBACK keyboard(int code,WPARAM message,LPARAM data) {
         localConfig.searchAllowed=evidence.searchAllowed;localConfig.searchRoot=evidence.searchRoot;localConfig.searchFocus=evidence.searchFocus;localConfig.searchEpoch=evidence.searchEpoch;
         localConfig.imeReady=evidence.imeReady;localConfig.imeRoot=evidence.imeRoot;localConfig.imeFocus=evidence.imeFocus;localConfig.imeEpoch=evidence.imeEpoch;
         localConfig.colorEditor=evidence.colorEditor && menuWindow(foreground);
-        if(input.vkCode=='F')localConfig.searchAllowed=searchInputAllowed(localConfig,foreground);
-        const bool letter=input.vkCode>='A' && input.vkCode<='Z';
-        if(letter && keys.pending==-1 && !keys.modified() && !repeat && (message==WM_KEYDOWN || message==WM_SYSKEYDOWN) && commandScope &&
-           !localConfig.colorEditor && photoshopInputFocus(foreground)) {
-            GUITHREADINFO info{};info.cbSize=sizeof(info);GetGUIThreadInfo(GetWindowThreadProcessId(foreground,nullptr),&info);
-            const auto root=GetAncestor(foreground,GA_ROOTOWNER);
-            const bool freshInput=localConfig.editorInput && localConfig.searchEpoch==inputEpoch && localConfig.searchRoot==root && localConfig.searchFocus==info.hwndFocus;
-            const bool imeReady=localConfig.imeReady && localConfig.imeEpoch==inputEpoch && localConfig.imeRoot==root && localConfig.imeFocus==info.hwndFocus;
-            const bool searchReady=input.vkCode=='F' && localConfig.searchAllowed;
-            if((inputChanged || (!freshInput && !(input.vkCode=='F'?searchReady:imeReady))) && unknownInputEpoch!=inputEpoch) {
-                HWND verifiedRoot=nullptr,verifiedFocus=nullptr;
-                const int result=verifyInput(foreground,input.vkCode!='F',verifiedRoot,verifiedFocus);
-                inputChanged=false;
-                if(!result)unknownInputEpoch=inputEpoch;
-                if(input.vkCode=='F' && result==2) {
-                    localConfig.textInput=false;localConfig.searchAllowed=true;localConfig.searchRoot=verifiedRoot;localConfig.searchFocus=verifiedFocus;localConfig.searchEpoch=inputEpoch;
-                } else if(input.vkCode=='F')localConfig.searchAllowed=false;
-                commandScope=commandScope && GetForegroundWindow()==foreground;
-            } else if(input.vkCode=='F')localConfig.searchAllowed=searchReady;
+        // The hook never waits for the host. A publication authorises a
+        // single-key action only when it was produced for this exact input
+        // generation, workspace root and focus window; otherwise the key is
+        // passed through and no command runs. Explicit Caps chords are not
+        // gated by staleness (holding Caps is not typing).
+        localConfig.evidenceFresh=false;
+        if(commandScope) {
+            GUITHREADINFO evidenceFocus{};evidenceFocus.cbSize=sizeof(evidenceFocus);
+            const auto thread=GetWindowThreadProcessId(foreground,nullptr);
+            localConfig.evidenceFresh=thread!=0 && localConfig.searchEpoch==inputEpoch &&
+                GetGUIThreadInfo(thread,&evidenceFocus) && evidenceFocus.hwndFocus &&
+                evidenceFocus.hwndFocus==localConfig.searchFocus &&
+                GetAncestor(foreground,GA_ROOTOWNER)==localConfig.searchRoot;
         }
+        if(input.vkCode=='F')localConfig.searchAllowed=searchInputAllowed(localConfig,foreground);
         bool unusedPrefix=keys.pending!=-1 && !keys.used;
         bool blocked=routeKey(keys,input.vkCode,message==WM_KEYDOWN || message==WM_SYSKEYDOWN,
                      commandScope,processScope,localConfig,IsWindowVisible(config.overlay),action,GetTickCount64());
@@ -719,7 +706,6 @@ static LRESULT CALLBACK pointer(int code,WPARAM message,LPARAM data) {
 }
 static void stop() {
     closing.store(true); PostThreadMessageW(hookThread,WM_QUIT,0,0); SetEvent(available);
-    if(inputDecision){AcquireSRWLockExclusive(&inputDecisionLock);inputRequest.store(0);inputResult.store(0);SetEvent(inputDecision);ReleaseSRWLockExclusive(&inputDecisionLock);}
 }
 // Restricted internal JSON schema, parsed on the pipe thread, never in a hook.
 static Config parse(const std::string& line) {
@@ -770,25 +756,23 @@ static Config parse(const std::string& line) {
     return next;
 }
 static void readSettings() {
-    try {
-        std::string line;
-        while (std::getline(std::cin,line)) {
-            if (line.find("\"quit\"")!=std::string::npos) break;
-            if(line.find("\"verify_reply\"")!=std::string::npos) {
-                std::smatch id,result;
-                if(!std::regex_search(line,id,std::regex("\"verify_reply\"\\s*:\\s*([0-9]+)")) ||
-                   !std::regex_search(line,result,std::regex("\"input_result\"\\s*:\\s*([012])\\s*[,}]")))continue;
-                ULONGLONG request=0;
-                try{request=std::stoull(id[1]);}catch(...){continue;}
-                acceptInputReply(request,std::stoi(result[1]));
-                continue;
-            }
+    std::string line;
+    while (std::getline(std::cin,line)) {
+        if (line.find("\"quit\"")!=std::string::npos) break;
+        // Verification replies are no longer requested. Ignore legacy or late
+        // lines instead of parsing them as configuration.
+        if(line.find("\"verify_reply\"")!=std::string::npos)continue;
+        try {
             auto next=std::make_unique<Config>(parse(line));
             AcquireSRWLockExclusive(&inputEvidenceLock);inputEvidence=*next;ReleaseSRWLockExclusive(&inputEvidenceLock);
             if (!PostThreadMessageW(hookThread,WM_APP,0,reinterpret_cast<LPARAM>(next.get()))) break;
             next.release();
+        } catch (...) {
+            // One malformed or partial line must not remove every hook. Keep
+            // the last good configuration and report the failure.
+            PostThreadMessageW(hookThread,WM_APP+1,0,0);
         }
-    } catch (...) { PostThreadMessageW(hookThread,WM_APP+1,0,0); }
+    }
     PostThreadMessageW(hookThread,WM_QUIT,0,0);
 }
 static void writeActions() {
@@ -810,12 +794,6 @@ static void writeActions() {
             std::string line;
             if(action==Ready) {
                 line="{\"type\":\"ready\",\"input_epoch\":"+std::to_string(event.inputEpoch)+"}\n";
-                DWORD written=0;
-                if(!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()){stop();return;}
-                continue;
-            }
-            if(action==InputVerify) {
-                line="{\"type\":\"input.verify\",\"verify_id\":"+std::to_string(event.gapMs)+",\"root\":"+std::to_string(reinterpret_cast<uintptr_t>(event.root))+",\"hwnd\":"+std::to_string(reinterpret_cast<uintptr_t>(event.hwnd))+",\"input_epoch\":"+std::to_string(event.inputEpoch)+",\"need_ime\":"+(event.attempted?"true":"false")+",\"expires_tick_ms\":"+std::to_string(event.activationIntent)+"}\n";
                 DWORD written=0;
                 if(!WriteFile(output,line.data(),static_cast<DWORD>(line.size()),&written,nullptr) || written!=line.size()){stop();return;}
                 continue;
@@ -1327,25 +1305,6 @@ static int searchInputSelfTest() {
             check(machine.event('F',false,true,local,false,action)==blocked);return blocked;
         };
         check(route());
-        available=CreateEventW(nullptr,FALSE,FALSE,nullptr);inputDecision=CreateEventW(nullptr,FALSE,FALSE,nullptr);
-        check(available && inputDecision);
-        ULONGLONG previousRequest=0;
-        for(const int wanted:{1,0,2}) {
-            std::atomic<bool> matched{false};
-            std::thread observer([&]{
-                if(WaitForSingleObject(available,1000)!=WAIT_OBJECT_0)return;
-                const auto index=tail.load();const auto event=queue[index];tail.store((index+1)%queue.size());
-                matched.store(event.action==InputVerify && event.root==window && event.hwnd==focus && event.attempted==(wanted==2));
-                if(wanted==0){previousRequest=event.gapMs;return;}
-                acceptInputReply(previousRequest,2);
-                acceptInputReply(event.gapMs,wanted);
-            });
-            HWND verifiedRoot=nullptr,verifiedFocus=nullptr;
-            const auto result=verifyInput(window,wanted==2,verifiedRoot,verifiedFocus);observer.join();
-            check(matched.load() && result==wanted && verifiedRoot==window && verifiedFocus==focus);
-            if(!wanted){acceptInputReply(previousRequest,2);check(WaitForSingleObject(inputDecision,0)==WAIT_TIMEOUT);}
-        }
-        CloseHandle(inputDecision);inputDecision=nullptr;CloseHandle(available);available=nullptr;
         KeyMachine burst;Action action;
         for(int i=0;i<1000;++i) {
             cfg.searchEpoch=inputEpoch;
@@ -1371,7 +1330,29 @@ static int searchInputSelfTest() {
         SetFocus(edit);cfg.searchFocus=edit;cfg.searchEpoch=inputEpoch;check(!route());
         SetFocus(focus);cfg.searchFocus=edit;check(!route());
         cfg.searchFocus=focus;cfg.searchEpoch=inputEpoch;check(route());
-        DestroyWindow(window);std::cout<<"Search input self-test passed: bounded first-key decisions, input/non-input replies, expired reply isolation, 1000 rapid A/V/T/F sequences, visible/hidden caret, native Edit, stale focus, input generations and paired release\n";return 0;
+        // Removing the host round trip must not authorise a single-key action
+        // from a publication that predates the current generation or focus.
+        // An explicit Caps chord stays deterministic in the same state.
+        {
+            Config stale=cfg;stale.searchAllowed=true;stale.searchRoot=window;stale.searchFocus=focus;
+            stale.searchEpoch=inputEpoch-1;stale.evidenceFresh=false;
+            KeyMachine machine;
+            check(!machine.event('F',true,true,stale,false,action) && action==None);
+            Config bindings;bindings.enabled=true;bindings.bindings[0]={Toggle,{VK_CAPITAL},1};
+            bindings.bindings[1]={SelectAbove,{VK_CAPITAL,'W'},2};
+            Action chordAction=None;
+            check(machine.event(VK_CAPITAL,true,true,bindings,false,chordAction) && chordAction==HoldBegin);
+            check(machine.event('W',true,true,bindings,false,chordAction) && chordAction==SelectAbove);
+            // A stale publication also cannot make a pinned menu treat a bare
+            // letter as a Caps chord.
+            Config pinned=bindings;pinned.evidenceFresh=false;
+            KeyMachine staleBare;
+            check(!staleBare.event('W',true,true,pinned,true,action) && action==None);
+            pinned.evidenceFresh=true;
+            KeyMachine freshBare;
+            check(freshBare.event('W',true,true,pinned,true,action) && action==SelectAbove);
+        }
+        DestroyWindow(window);std::cout<<"Search input self-test passed: bounded first-key decisions, stale publications cannot authorise a single-key action or a pinned bare letter, explicit chords stay deterministic, 1000 rapid A/V/T/F sequences, visible/hidden caret, native Edit, stale focus and input generations\n";return 0;
     } catch(...) {DestroyCaret();DestroyWindow(window);throw;}
 }
 static bool renewHooks(HHOOK& keyHook,HHOOK& mouseHook) {
@@ -1471,13 +1452,10 @@ int main(int argc,char** argv) {
     DWORD parent=argc==3 && std::string(argv[1])=="--parent"?std::stoul(argv[2]):0;
     hookThread=GetCurrentThreadId(); MSG message; PeekMessageW(&message,nullptr,0,0,PM_NOREMOVE);
     available=CreateEventW(nullptr,FALSE,FALSE,nullptr);
-    inputDecision=CreateEventW(nullptr,FALSE,FALSE,nullptr);
-    if(!available || !inputDecision)return 1;
-    if (!available) return 1;
+    if(!available)return 1;
     for (int vk:{160,161,162,163,164,165,91,92}) if (GetAsyncKeyState(vk)&0x8000) keys.seed(vk);
     winRight.physical=(GetAsyncKeyState(VK_LWIN)&0x8000)!=0;
     SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_ABOVE_NORMAL);
-    refreshPhotoshopProcesses();
     HHOOK keyHook=SetWindowsHookExW(WH_KEYBOARD_LL,keyboard,GetModuleHandleW(nullptr),0);
     HHOOK mouseHook=SetWindowsHookExW(WH_MOUSE_LL,pointer,GetModuleHandleW(nullptr),0);
     std::thread writer(writeActions);
@@ -1496,25 +1474,16 @@ int main(int argc,char** argv) {
         stop();
     }).detach();
     emit(Ready);
-    std::thread processScanner([]{
-        while (!closing.load()) {
-            for (int i=0;i<20 && !closing.load();++i) Sleep(50);
-            if (closing.load()) break;
-            auto snapshot=scanPhotoshopProcesses();
-            if (snapshot && PostThreadMessageW(hookThread,WM_APP+22,0,reinterpret_cast<LPARAM>(snapshot.get()))) snapshot.release();
-        }
-    });
     sampleCapsState(true);
-    UINT_PTR capsTimer=SetTimer(nullptr,0,16,nullptr);
+    // CapsLock can only change through a key this hook already sees, so a
+    // quarter-second diagnostic sample is enough; 16 ms was a 62 Hz idle wake.
+    UINT_PTR capsTimer=SetTimer(nullptr,0,250,nullptr);
     UINT_PTR renewal=SetTimer(nullptr,0,1000,nullptr);
     if (!renewal || !capsTimer) {stop();}
-    unsigned renewalFailures=0;
+    unsigned renewalFailures=0,healthPasses=0;ULONGLONG reportedDrops=0;
     ULONGLONG previousMaintenance=GetTickCount64();
     while (GetMessageW(&message,nullptr,0,0)>0) {
-        if (message.message==WM_APP+22) {
-            std::unique_ptr<ProcessSnapshot> snapshot(reinterpret_cast<ProcessSnapshot*>(message.lParam));
-            applyProcesses(*snapshot);
-        } else if (message.message==WM_TIMER && message.wParam==capsTimer) {
+        if (message.message==WM_TIMER && message.wParam==capsTimer) {
             HWND foreground=GetForegroundWindow();
             observeActivation(foreground,photoshopKeyScope(foreground),GetTickCount64());
             sampleCapsState();
@@ -1541,17 +1510,25 @@ int main(int argc,char** argv) {
             auto finished=microseconds();
             if (renewed) renewalFailures=0;
             else {emit(Error);if (++renewalFailures>=3) stop();}
-            unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
-            if (next!=tail.load(std::memory_order_acquire)) {
-                HookEvent event{};event.action=HookHealth;event.scanUs=lastScanUs;event.renewUs=finished-started;event.attempted=attempted;
-                event.inputEpoch=inputEpoch;
-                event.gapMs=now-previousMaintenance;event.peakUs=callbackPeakUs.exchange(0,std::memory_order_relaxed);
-                event.dropped=droppedEvents.load(std::memory_order_relaxed);event.blocked=renewed;
-                queue[head.load(std::memory_order_relaxed)]=event;
-                head.store(next,std::memory_order_release);SetEvent(available);
-            } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
+            const auto dropped=droppedEvents.load(std::memory_order_relaxed);
+            // Report every two seconds (the diagnostics liveness window is
+            // 3.5 s), or at once when something got worse. One health line per
+            // second per idle host was pure log noise.
+            bool report=!renewed || dropped!=reportedDrops || (++healthPasses%2)==0;
+            if(report){
+                unsigned next=(head.load(std::memory_order_relaxed)+1)%queue.size();
+                if (next!=tail.load(std::memory_order_acquire)) {
+                    HookEvent event{};event.action=HookHealth;event.scanUs=lastScanUs;event.renewUs=finished-started;event.attempted=attempted;
+                    event.inputEpoch=inputEpoch;
+                    event.gapMs=now-previousMaintenance;event.peakUs=callbackPeakUs.exchange(0,std::memory_order_relaxed);
+                    event.dropped=dropped;event.blocked=renewed;
+                    queue[head.load(std::memory_order_relaxed)]=event;
+                    head.store(next,std::memory_order_release);SetEvent(available);
+                } else droppedEvents.fetch_add(1,std::memory_order_relaxed);
+                reportedDrops=dropped;
+            } else callbackPeakUs.store(0,std::memory_order_relaxed);
             previousMaintenance=now;
-            sampleCapsState(true);
+            sampleCapsState();
         } else if (message.message==WM_APP) {
             std::unique_ptr<Config> next(reinterpret_cast<Config*>(message.lParam));
             const bool beginDiagnostic=next->diagnostic && !config.diagnostic;
@@ -1568,10 +1545,7 @@ int main(int argc,char** argv) {
     if (capsTimer) KillTimer(nullptr,capsTimer);
     if (languageForeground) UnhookWinEvent(languageForeground);
     if (languageFocus) UnhookWinEvent(languageFocus);
-    closing.store(true);processScanner.join();
-    while (PeekMessageW(&message,nullptr,WM_APP+22,WM_APP+22,PM_REMOVE)) {
-        std::unique_ptr<ProcessSnapshot> snapshot(reinterpret_cast<ProcessSnapshot*>(message.lParam));
-    }
+    closing.store(true);
     UnhookWindowsHookEx(keyHook); UnhookWindowsHookEx(mouseHook);
     if (rightInjected) injectRight(MOUSEEVENTF_RIGHTUP);
     for (auto& p:photoshopProcesses) if (p.handle) CloseHandle(p.handle);

@@ -11,7 +11,9 @@ MAX_XMP=2097152
 
 
 def source(value):
-    if not isinstance(value,dict) or set(value)!={'schema','canvas','layer'} or type(value['schema']) is not int or value['schema']!=1:
+    if (not isinstance(value,dict) or type(value.get('schema')) is not int or
+            not (value['schema']==1 and set(value)=={'schema','canvas','layer'} or
+                 value['schema']==2 and set(value)=={'schema','canvas','layer','renderer'} and value['renderer']=='list-v1')):
         raise ValueError('不支持的文字对象源版本')
     canvas,layer=value['canvas'],value['layer']
     if not isinstance(canvas,dict) or set(canvas)!={'width','height','resolution','mode','depth','profile'}:

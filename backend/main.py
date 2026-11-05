@@ -32,6 +32,7 @@ from .uxp_auto_update import UxpAutoUpdate
 from .diagnostics import Diagnostics,input_report
 from .version_health import VersionHealth
 from .stability import StabilityTest
+from . import input_service
 
 APP_ID = "photoshop-menu"
 from .version import APP_VERSION
@@ -462,6 +463,7 @@ class Application(web.Application):
                     "input_language": dict(self.desktop.input_language.report) if self.desktop and self.desktop.input_language else {'state':'unavailable'},
                     "input_focus": dict(self.desktop.input_focus.report) if self.desktop and self.desktop.input_focus else {'state':'unavailable'},
                     "input_diagnostics": input_report(self.desktop),
+                    "input_service": input_service.status(),
                     "tray_error": self.tray.error if self.tray else ""}
             self.version_health.observe(value)
             value['version_health']=self.version_health.snapshot()
@@ -664,6 +666,19 @@ class Application(web.Application):
             # Let the response reach the browser before closing sockets.
             asyncio.get_running_loop().call_later(.2, self.stop_event.set)
             return {"message": "服务正在退出"}
+        if action == "input.service.status":
+            return input_service.status()
+        if action in ("input.service.install", "input.service.remove"):
+            # One elevation prompt per change; never run while a Photoshop
+            # operation owns the lock.
+            if self.operation_lock.locked() or self.bridge.busy:
+                raise RuntimeError("请等待当前操作结束后再更改输入法服务")
+            operation = action.rsplit(".", 1)[1]
+            if operation == "install":
+                input_service.set_owner(os.getpid())
+            result = await asyncio.to_thread(input_service.request, operation, self.runtime)
+            await self.broadcast({"type": "status", "data": await self.dispatch("status", {})})
+            return result
         raise ValueError("未知动作")
 
 
@@ -684,7 +699,7 @@ async def reuse(port, headless):
     if not headless:
         await client.fetch(HTTPRequest(f"http://127.0.0.1:{port}/api/service", method="POST",
                           headers={"Content-Type": "application/json"}, body=json.dumps({"action": "open"}), request_timeout=12))
-    print(f"已复用运行中的 Photoshop Menu v{running_version}：http://127.0.0.1:{port}")
+    print(f"已复用运行中的 151500px-menu v{running_version}：http://127.0.0.1:{port}")
 
 
 async def run(port=15151, headless=False, no_desktop=False, runtime=None):
@@ -757,6 +772,10 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
                 app.desktop.input_tool_observation=tool_observer.snapshot
                 app.desktop.menu_context_requester=app.bridge.request_menu_context
                 app.desktop.menu_context_canceller=app.bridge.cancel_menu_context
+            # Publish this service process for the TSF transport; harmless when
+            # the machine service is not registered.
+            try:input_service.set_owner(os.getpid())
+            except Exception:logging.exception("Input service owner publication failed")
             await asyncio.to_thread(app.desktop.start)
             await asyncio.to_thread(app.tray.start)
             if app.tray.error:
@@ -769,7 +788,7 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         status_task = asyncio.create_task(poll_status())
         app.application_updates.schedule=asyncio.create_task(app.application_updates.periodic())
         await app.photoshop_launcher.resume()
-        print(f"Photoshop Menu：http://127.0.0.1:{port}", flush=True)
+        print(f"151500px-menu：http://127.0.0.1:{port}", flush=True)
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda *_: loop.call_soon_threadsafe(app.stop_event.set))
         await app.stop_event.wait()
@@ -794,8 +813,20 @@ async def run(port=15151, headless=False, no_desktop=False, runtime=None):
         await app.bridge.close()
 
 
+def input_service_helper(argv):
+    """Elevated helper: only writes the machine registration and a receipt."""
+    parser = argparse.ArgumentParser(description="151500px-menu 输入法服务安装助手")
+    parser.add_argument("--input-service", choices=("install", "remove"), required=True)
+    parser.add_argument("--receipt", required=True)
+    args = parser.parse_args(argv)
+    value = input_service.apply_privileged(args.input_service, args.receipt)
+    return 0 if value.get("ok") else 1
+
+
 def cli():
-    parser = argparse.ArgumentParser(description="Photoshop Menu 本地应用")
+    if "--input-service" in sys.argv:
+        raise SystemExit(input_service_helper(sys.argv[1:]))
+    parser = argparse.ArgumentParser(description="151500px-menu 本地应用")
     parser.add_argument("--port", type=int, default=15151)
     parser.add_argument("--headless", action="store_true", help="启动后台且不自动打开管理窗口")
     parser.add_argument("--no-desktop", action="store_true", help="禁用窗口、快捷键和托盘")
@@ -815,5 +846,5 @@ def cli():
         logging.exception("Startup failed")
         if os.name == "nt" and getattr(sys, "frozen", False) and not args.headless:
             import ctypes
-            ctypes.windll.user32.MessageBoxW(None, str(exc), "Photoshop Menu — 启动失败", 0x10)
+            ctypes.windll.user32.MessageBoxW(None, str(exc), "151500px-menu — 启动失败", 0x10)
         raise SystemExit(str(exc)) from exc

@@ -86,7 +86,7 @@ public:
         expires=now+(value.value("phase",std::string())=="collecting"?40000:4000);
         if(!hint){
             WNDCLASSW wc{};wc.lpfnWndProc=procedure;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"PhotoshopMenuDiagnosticHint";RegisterClassW(&wc);
-            hint=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOPMOST,wc.lpszClassName,L"Photoshop Menu diagnostic countdown",WS_POPUP|WS_DISABLED,0,0,320,60,nullptr,nullptr,wc.hInstance,nullptr);
+            hint=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOPMOST,wc.lpszClassName,L"151500px-menu diagnostic countdown",WS_POPUP|WS_DISABLED,0,0,320,60,nullptr,nullptr,wc.hInstance,nullptr);
             if(!hint)return;
             SetLayeredWindowAttributes(hint,0,218,LWA_ALPHA);
         }

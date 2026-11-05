@@ -32,7 +32,7 @@ manifest=json.loads((Path(status['uxp']['plugin_dir'])/'manifest.json').read_tex
 assert manifest['id']=='com.15100px.menu.offline-probe'
 assert manifest['name']==plugin_name(args.language,heartbeat['probe_version'])
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
-assert sha(Path(status['service']['executable']))==sha(ROOT/'dist/PhotoshopMenu.exe')
+assert sha(Path(status['service']['executable']))==sha(ROOT/'dist/151500px-menu.exe')
 report={'version':status['version'],'language':status['language'],'uxp':status['uxp'],
         'heartbeat':heartbeat,'service':status['service'],'startup':status['photoshop_start'],
         'installed_equals_dist':True,'scope':'Real frozen backend and fresh UXP runtime manifest metadata. Native PS menu text not captured; no physical keyboard gesture acceptance.'}

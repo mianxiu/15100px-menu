@@ -11,6 +11,8 @@ Push-Location $PSScriptRoot
 try {
     & (Join-Path $PSScriptRoot 'tools\build-hotkey-host.ps1')
     & (Join-Path $PSScriptRoot 'tools\build-menu-host.ps1')
+    & (Join-Path $PSScriptRoot 'tools\build-input-context.ps1')
+    & (Join-Path $PSScriptRoot 'tools\build-input-service.ps1')
     if (-not $SkipFrontend) {
         Push-Location (Join-Path $PSScriptRoot 'frontend')
         try {
@@ -23,10 +25,10 @@ try {
     if (-not (Test-Path -LiteralPath 'frontend/dist/index.html')) {
         throw 'Missing frontend build.'
     }
-    & $menuPython -m PyInstaller --noconfirm --distpath $OutputDirectory PhotoshopMenu.spec
+    & $menuPython -m PyInstaller --noconfirm --distpath $OutputDirectory 151500px-menu.spec
     if ($LASTEXITCODE -ne 0) { throw 'EXE build failed.' }
-    $menuExe = Join-Path $OutputDirectory 'PhotoshopMenu.exe'
+    $menuExe = Join-Path $OutputDirectory '151500px-menu.exe'
     $menuDigest = (Get-FileHash -LiteralPath $menuExe -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$menuDigest  PhotoshopMenu.exe" | Set-Content -LiteralPath (Join-Path $OutputDirectory 'PhotoshopMenu.exe.sha256') -Encoding ascii
+    "$menuDigest  151500px-menu.exe" | Set-Content -LiteralPath (Join-Path $OutputDirectory '151500px-menu.exe.sha256') -Encoding ascii
     Write-Host "Built: $menuExe"
 } finally { Pop-Location }

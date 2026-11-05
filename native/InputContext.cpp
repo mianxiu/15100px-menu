@@ -191,6 +191,54 @@ static void observeMessage(const CWPSTRUCT& event) {
             restore();
         }
 }
+// Attach this in-process context helper to a Photoshop root window. Called by
+// the injected queue/call hooks (legacy transport) and directly by the TSF
+// service (InputService.dll), which is registered in HKLM instead of injected.
+static bool attach(HWND rootWindow,DWORD ownerProcess,ULONG_PTR nonceValue) {
+    if(!rootWindow || !ownerProcess)return false;
+    wchar_t name[64]{};GetClassNameW(rootWindow,name,64);
+    if(wcscmp(name,L"Photoshop")!=0 || rootWindow!=GetAncestor(rootWindow,GA_ROOTOWNER))return false;
+    if(control)return ownerId==ownerProcess;
+    const auto candidate=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,ownerProcess);
+    if(!candidate)return false;
+#ifdef INPUT_CONTEXT_SELF_TEST
+    const bool valid=ownerProcess==GetCurrentProcessId();
+#else
+    const bool valid=namedProcess(GetCurrentProcess(),L"Photoshop.exe") && (namedProcess(candidate,L"151500px-menu.exe") || namedProcess(candidate,L"PhotoshopMenu.exe"));
+#endif
+    if(!valid){CloseHandle(candidate);return false;}
+    // The control window must remain valid until PS exits, even after unhooking.
+    HMODULE pinned=nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
+                       reinterpret_cast<LPCWSTR>(&attach),&pinned);
+    WNDCLASSW wc{};wc.lpfnWndProc=procedure;wc.hInstance=module;wc.lpszClassName=controlClass;RegisterClassW(&wc);
+    root=rootWindow;ownerId=ownerProcess;owner=candidate;nonce=nonceValue;revision=1;tsf.notify=contextChanged;
+    control=CreateWindowExW(0,controlClass,L"",0,0,0,0,0,HWND_MESSAGE,nullptr,module,nullptr);
+    if(!control){CloseHandle(owner);owner=nullptr;ownerId=0;return false;}
+    if(!SetPropW(control,nonceProperty,reinterpret_cast<HANDLE>(nonce)) ||
+       !SetPropW(control,ownerProperty,reinterpret_cast<HANDLE>(ULONG_PTR(ownerId))) ||
+       !SetPropW(control,revisionProperty,reinterpret_cast<HANDLE>(revision)) ||
+       !SetPropW(root,controlProperty,control) || !SetTimer(control,1,100,nullptr)) {
+        DestroyWindow(control);control=nullptr;return false;
+    }
+    return true;
+}
+static bool detach() {
+    if(!control)return true;
+    restore();
+    DestroyWindow(control);
+    control=nullptr;
+    return true;
+}
+extern "C" __declspec(dllexport) BOOL WINAPI InputContextAttach(HWND rootWindow,DWORD ownerProcess,ULONG_PTR nonceValue) {
+    return attach(rootWindow,ownerProcess,nonceValue)?TRUE:FALSE;
+}
+extern "C" __declspec(dllexport) BOOL WINAPI InputContextDetach() {
+    return detach()?TRUE:FALSE;
+}
+extern "C" __declspec(dllexport) DWORD WINAPI InputContextOwner() {
+    return ownerId;
+}
 extern "C" __declspec(dllexport) LRESULT CALLBACK InputContextQueueHook(int code,WPARAM wParam,LPARAM lParam) {
     if(code>=0 && wParam==PM_REMOVE) {
         const auto& message=*reinterpret_cast<MSG*>(lParam);
@@ -204,32 +252,8 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK InputContextHook(int code,WPAR
         if(!attachMessage){attachMessage=RegisterWindowMessageW(L"PhotoshopMenu.InputContext.Attach.v1");controlMessage=RegisterWindowMessageW(L"PhotoshopMenu.InputContext.Control.v1");}
         const auto& event=*reinterpret_cast<CWPSTRUCT*>(lParam);
         observeMessage(event);
-        if(event.message==attachMessage && event.wParam && event.lParam>0) {
-            wchar_t name[64]{};GetClassNameW(event.hwnd,name,64);
-            if(wcscmp(name,L"Photoshop")!=0 || event.hwnd!=GetAncestor(event.hwnd,GA_ROOTOWNER))return CallNextHookEx(nullptr,code,wParam,lParam);
-            const auto candidate=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,DWORD(event.wParam));
-            if(candidate) {
-#ifdef INPUT_CONTEXT_SELF_TEST
-                const bool valid=DWORD(event.wParam)==GetCurrentProcessId();
-#else
-                const bool valid=namedProcess(GetCurrentProcess(),L"Photoshop.exe") && namedProcess(candidate,L"PhotoshopMenu.exe");
-#endif
-                if(valid && (!control || ownerId==DWORD(event.wParam))) {
-                    if(!control) {
-                        // The callback/window must remain valid until PS exits, even after unhooking.
-                        HMODULE pinned=nullptr;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,reinterpret_cast<LPCWSTR>(&InputContextHook),&pinned);
-                        WNDCLASSW wc{};wc.lpfnWndProc=procedure;wc.hInstance=module;wc.lpszClassName=controlClass;RegisterClassW(&wc);
-                        root=event.hwnd;ownerId=DWORD(event.wParam);owner=candidate;nonce=ULONG_PTR(event.lParam);revision=1;tsf.notify=contextChanged;
-                        control=CreateWindowExW(0,controlClass,L"",0,0,0,0,0,HWND_MESSAGE,nullptr,module,nullptr);
-                        if(control){
-                            if(!SetPropW(control,nonceProperty,reinterpret_cast<HANDLE>(nonce)) || !SetPropW(control,ownerProperty,reinterpret_cast<HANDLE>(ULONG_PTR(ownerId))) ||
-                               !SetPropW(control,revisionProperty,reinterpret_cast<HANDLE>(revision)) || !SetPropW(root,controlProperty,control) || !SetTimer(control,1,100,nullptr))DestroyWindow(control);
-                        }
-                        else {CloseHandle(owner);owner=nullptr;ownerId=0;}
-                    } else CloseHandle(candidate);
-                } else CloseHandle(candidate);
-            }
-        }
+        if(event.message==attachMessage && event.wParam && event.lParam>0)
+            attach(event.hwnd,DWORD(event.wParam),ULONG_PTR(event.lParam));
     }
     return CallNextHookEx(nullptr,code,wParam,lParam);
 }

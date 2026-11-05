@@ -28,10 +28,10 @@ import zipfile
 from .settings import atomic_json
 from .version import APP_VERSION
 
-REPO = 'mianxiu/15100px-menu'
+REPO = 'mianxiu/151500px-menu'
 API = 'https://api.github.com/repos/' + REPO + '/releases/latest'
 RELEASES = 'https://github.com/' + REPO + '/releases'
-MANIFEST = RELEASES+'/latest/download/PhotoshopMenu-update.json'
+MANIFEST = RELEASES+'/latest/download/151500px-menu-update.json'
 MAX_DOWNLOAD = 128 * 1024 * 1024
 CHECK_INTERVAL = 24 * 60 * 60
 HASH = re.compile(r'[0-9a-f]{64}')
@@ -96,7 +96,7 @@ def select_release(data, current):
     version(v); version(current)
     if tag != 'v'+v or type(data.get('id')) is not int or data['id'] <= 0:
         raise ValueError('发行记录无效')
-    name = 'PhotoshopMenu-Backend-'+v+'.zip'
+    name = '151500px-menu-Backend-'+v+'.zip'
     assets = data.get('assets')
     if not isinstance(assets,list):raise ValueError('发行附件无效')
     result = {'version':v,'tag':tag,'id':data['id'],'url':RELEASES+'/tag/'+tag,
@@ -130,16 +130,16 @@ def executable_version(path):
     if info['FileVersionLS']&65535:raise ValueError('应用版本资源无效')
     for table in info.get('Translation',[]) or win32api.GetFileVersionInfo(str(path),'\\VarFileInfo\\Translation'):
         prefix=f'\\StringFileInfo\\{table[0]:04x}{table[1]:04x}\\'
-        if (win32api.GetFileVersionInfo(str(path),prefix+'OriginalFilename')=='PhotoshopMenu.exe' and
-            win32api.GetFileVersionInfo(str(path),prefix+'ProductName')=='Photoshop Menu'):
+        if (win32api.GetFileVersionInfo(str(path),prefix+'OriginalFilename')=='151500px-menu.exe' and
+            win32api.GetFileVersionInfo(str(path),prefix+'ProductName')=='151500px-menu'):
             return '.'.join(map(str,result))
-    raise ValueError('安装包不是 Photoshop Menu 应用')
+    raise ValueError('安装包不是 151500px-menu 应用')
 
 
 def unpack_package(package, folder, expected_version, expected_sha):
     """Validate all entries, but extract only the EXE; no ZIP-supplied installer."""
     if sha256(package)!=expected_sha:raise ValueError('统一安装包 SHA256 不匹配')
-    destination=Path(folder)/'PhotoshopMenu.exe'
+    destination=Path(folder)/'151500px-menu.exe'
     with zipfile.ZipFile(package) as bundle:
         entries=bundle.infolist();names=[item.filename for item in entries]
         if len(entries)>150 or len(names)!=len({n.casefold() for n in names}) or sum(i.file_size for i in entries)>256*1024*1024:
@@ -149,13 +149,13 @@ def unpack_package(package, folder, expected_version, expected_sha):
             if (not item.filename or chr(0) in item.orig_filename or chr(92) in item.orig_filename or ':' in item.filename or p.is_absolute() or
                 '..' in p.parts or item.flag_bits&1 or (item.external_attr>>16)&0o170000==0o120000):
                 raise ValueError('安装包包含不安全路径或文件')
-        if not {'PhotoshopMenu.exe','PhotoshopMenu.exe.sha256','PhotoshopMenu-UXP-'+expected_version+'.zip'}.issubset(names):
+        if not {'151500px-menu.exe','151500px-menu.exe.sha256','151500px-menu-UXP-'+expected_version+'.zip'}.issubset(names):
             raise ValueError('需要统一后台安装包，不能使用独立 UXP 或源码 ZIP')
-        if not 0<bundle.getinfo('PhotoshopMenu.exe').file_size<=MAX_DOWNLOAD:
+        if not 0<bundle.getinfo('151500px-menu.exe').file_size<=MAX_DOWNLOAD:
             raise ValueError('应用大小无效')
-        if bundle.getinfo('PhotoshopMenu.exe.sha256').file_size>4096:raise ValueError('应用摘要文件过大')
-        exe_sha=parse_checksum(bundle.read('PhotoshopMenu.exe.sha256'),'PhotoshopMenu.exe')
-        with bundle.open('PhotoshopMenu.exe') as source, destination.open('xb') as target:
+        if bundle.getinfo('151500px-menu.exe.sha256').file_size>4096:raise ValueError('应用摘要文件过大')
+        exe_sha=parse_checksum(bundle.read('151500px-menu.exe.sha256'),'151500px-menu.exe')
+        with bundle.open('151500px-menu.exe') as source, destination.open('xb') as target:
             shutil.copyfileobj(source,target,1024*1024)
     if sha256(destination)!=exe_sha or executable_version(destination)!=expected_version:
         raise ValueError('应用文件校验或版本不匹配')
@@ -295,7 +295,7 @@ class ApplicationUpdates:
             self.change(staged=staged,phase='ready',message='更新包已下载并校验，空闲时可安装并重启后台',error='')
         except Exception:
             # Only files created in this unique stage; retain other stages/backups.
-            for name in ('package.zip','PhotoshopMenu.exe'):(folder/name).unlink(missing_ok=True)
+            for name in ('package.zip','151500px-menu.exe'):(folder/name).unlink(missing_ok=True)
             raise
 
     def set_auto(self, enabled):
@@ -321,11 +321,11 @@ class ApplicationUpdates:
         if self.worker and not self.worker.done():raise RuntimeError('请等待检查或下载完成')
         staged=self.snapshot().get('staged')
         if not staged:raise ValueError('请先下载并校验更高版本更新')
-        stage_folder=self.stage_folder(staged);source=stage_folder/'PhotoshopMenu.exe'
+        stage_folder=self.stage_folder(staged);source=stage_folder/'151500px-menu.exe'
         if sha256(source)!=staged['sha256'] or executable_version(source)!=staged['version']:
             raise ValueError('暂存应用已改变，请重新下载')
         target=Path(sys.executable).resolve()
-        if target.name!='PhotoshopMenu.exe' or target.is_relative_to(self.root):raise ValueError('实际运行入口不适合自动更新')
+        if target.name not in ('151500px-menu.exe', 'PhotoshopMenu.exe') or target.is_relative_to(self.root):raise ValueError('实际运行入口不适合自动更新')
         import win32com.client
         def process_ids():
             import pythoncom
@@ -342,7 +342,7 @@ class ApplicationUpdates:
         # A new job per attempt prevents a stale ready/result file from an
         # earlier cancelled helper causing shutdown without a live updater.
         folder=self.root/uuid.uuid4().hex;folder.mkdir()
-        await asyncio.to_thread(shutil.copy2,source,folder/'PhotoshopMenu.exe')
+        await asyncio.to_thread(shutil.copy2,source,folder/'151500px-menu.exe')
         helper=folder/'update-host.exe'
         # The verified new release supplies the helper as well. Keep the
         # --apply-update schema backward-compatible in subsequent releases.

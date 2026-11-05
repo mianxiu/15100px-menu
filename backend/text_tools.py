@@ -23,6 +23,9 @@ def mapped_parameters(value,split=False):
 
 
 def replace_parameters(value,*,allow_xmp=False):
+    if allow_xmp and isinstance(value,dict) and 'list_layout' in value:
+        if 'list_xmp' not in value:raise ValueError('列表排版缺少持久标记')
+        return {**replace_parameters({key:item for key,item in value.items() if key!='list_layout'},allow_xmp=True),'list_layout':text_list.format_parameters(value['list_layout'])}
     if allow_xmp and isinstance(value,dict) and 'list_xmp' in value:
         text_list.read(value['list_xmp'])
         base=replace_parameters({key:item for key,item in value.items() if key!='list_xmp'})
@@ -75,7 +78,7 @@ class TextTools:
             if len(target['layer_ids'])!=1 or snapshot['target'].get('session')!=result.get('session'):
                 raise RuntimeError('文字读取会话不一致')
             self.snapshot=snapshot
-            public={key:value for key,value in snapshot.items() if key not in ('list_xmp','object_xmp','object_source','object_render')}
+            public={key:value for key,value in snapshot.items() if key not in ('list_xmp','list_paragraphs','object_xmp','object_source','object_render')}
             if 'list_xmp' in snapshot:
                 try:public['list_options']=text_list.read(snapshot['list_xmp'])
                 except ValueError as error:public['list_warning']=str(error)
@@ -94,6 +97,8 @@ class TextTools:
         return await self.apply({'revision':args['revision'],'plan_id':result['plan_id']},menu_guard)
 
     async def vector(self,args,menu_guard=None):
+        from .text_object_render import edge_path
+        edge_path()
         if isinstance(args,dict) and set(args)=={'revision','plan_id'}:
             if not self.plan or (args['plan_id'],args['revision'])!=(self.plan[0],self.plan[1]['revision']) or self.plan[2]!='text.replace':raise ValueError('文字对象预览已改变')
             _,params,_=self.plan;self.plan=None
@@ -137,7 +142,13 @@ class TextTools:
             command='text.object';params={**params,'object_source':snapshot['object_source'],'object_render':snapshot['object_render']}
         if 'list_options' in params:
             if 'list_xmp' not in snapshot:raise ValueError('列表保存需要正常重启PS加载UXP0.3.81')
-            params={**{key:value for key,value in params.items() if key!='list_options'},'list_xmp':text_list.write(snapshot['list_xmp'],params['list_options'])}
+            enabled=params['list_options'] is not None
+            xml=text_list.write(snapshot['list_xmp'],params['list_options'])
+            if command!='text.object':
+                if 'list_paragraphs' not in snapshot:raise ValueError('列表排版需要正常重启PS加载UXP0.3.89')
+                formatting,xml=text_list.formatting(params['value'],params['origins'],snapshot['list_paragraphs'],xml,enabled)
+                params={**params,'list_layout':formatting}
+            params={**{key:value for key,value in params.items() if key!='list_options'},'list_xmp':xml}
         app=self.app
         async with app.operation_lock:
             await app.broadcast({'type':'operation','busy':True,'action':command})

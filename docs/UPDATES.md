@@ -1,12 +1,24 @@
 # GitHub 应用更新
 
-254当前打包版本：主程序0.4.254，内置UXP0.3.65。解压主ZIP运行PhotoshopMenu.exe，安装／更新内置UXP后须正常重启PS并核对实际加载65；已加载65且文件匹配时只更新主程序。安装和打开后台不会自动启动PS。逐层／单对象按钮、F查找及Caps拆分用法见[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide)。以下旧版本段落为历史记录，安装版本以本段及实际后台为准。
+## 从旧名称迁移
 
-v0.4.160／UXP 0.3.27 已切换本机实际入口；公开正式版仍为159，160尚未发布。更新插件须正常重启PS并核对加载0.3.27；画布目视待验收，参见[实时预览](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview)。
+项目现名为 **151500px-menu**。旧版程序内置了旧仓库地址和严格的下载校验，更名后请手动下载新名称安装包完成第一次迁移。
+
+1. 在旧后台的“运行日志”确认实际应用数据目录，等待任务结束。
+2. 保存文档并正常退出 Photoshop 和旧后台。
+3. 解压新名称安装包，运行 `151500px-menu.exe`。普通旧安装会继续使用原 `PhotoshopMenu` 数据目录；使用过自定义目录的用户，启动时继续传入原来的 `--data-dir`。
+4. 核对设置、快捷键与插件连接。后续更新使用新仓库。
+
+旧配置目录及插件内部身份用于识别原安装，请保留这些数据。新安装默认使用 `151500px-menu` 数据目录。0.4.310 起公开包已采用新名称；此前正式包仍为旧名称，需要按上述步骤手动迁移，下载与核验状态见[版本状态](https://github.com/mianxiu/151500px-menu/wiki/Versions)。
+
+
+当前打包版本：主程序0.4.310，内置UXP0.3.91。解压主ZIP运行151500px-menu.exe，安装／更新内置UXP后须正常重启PS并核对实际加载91；已加载91且文件匹配时只更新主程序。安装和打开后台不会自动启动PS。逐层／单对象按钮、F查找及Caps拆分用法见[Wiki](https://github.com/mianxiu/151500px-menu/wiki/Menu-guide)。以下旧版本段落为历史记录，安装版本以本段及实际后台为准。
+
+v0.4.160／UXP 0.3.27 已切换本机实际入口；公开正式版仍为159，160尚未发布。更新插件须正常重启PS并核对加载0.3.27；画布目视待验收，参见[实时预览](https://github.com/mianxiu/151500px-menu/wiki/Mask-preview)。
 
 从 v0.4.120 起后台可检查本仓库 GitHub Releases；当前v0.4.159入口为主导航中的“应用更新”。
 
-早于120的版本需正常退出后手动替换一次；120起可在后台更新。当前159内置UXP0.3.26；正式下载见[Latest](https://github.com/mianxiu/15100px-menu/releases/latest)，本次发布核验见[发行记录](../RELEASES.md)。颜色与羽化／密度实时预览需安装内置插件并正常重启加载UXP26，详见[操作与限制](MASK-PREVIEW.md)。需分别核对后台内置、磁盘安装与PS实际加载版本，仅替换EXE不会更新已加载插件。此前创建树与图层读取优化保持，只提示更高正式版本，不重复安装自身或降级。
+早于120的版本需正常退出后手动替换一次；120起可在后台更新。当前159内置UXP0.3.26；正式下载见[Latest](https://github.com/mianxiu/151500px-menu/releases/latest)，本次发布核验见[发行记录](../RELEASES.md)。颜色与羽化／密度实时预览需安装内置插件并正常重启加载UXP26，详见[操作与限制](MASK-PREVIEW.md)。需分别核对后台内置、磁盘安装与PS实际加载版本，仅替换EXE不会更新已加载插件。此前创建树与图层读取优化保持，只提示更高正式版本，不重复安装自身或降级。
 
 1. 默认每24小时自动检查正式版本，可关闭；不会自动下载或安装。手动检查不受每日间隔限制。
 2. 新版可用时点击“下载并校验”，下载在线程中完成、显示进度；断网或校验失败不改变现有程序，可重新下载。
@@ -15,12 +27,12 @@ v0.4.160／UXP 0.3.27 已切换本机实际入口；公开正式版仍为159，1
 
 只有检查和下载需要网络；菜单、任务核对和插件执行仍离线。无需GitHub账号、token、git或Adobe下载工具。使用用户系统／环境代理，不附带开发机代理地址，不改变PS防火墙规则。断网仍可使用统一ZIP：正常退出后台后替换EXE，按需更新内置插件。
 
-v0.4.144起，GitHub API返回403／429时读取同一仓库最新Release中的`PhotoshopMenu-update.json`小型清单，仍校验正式版本、仓库、标签、附件身份及下载摘要。备用清单不可用时明确报错，不把缓存版本宣称为最新；SSL／证书／DNS／超时均保留真实失败，不关闭HTTPS证书验证。受限的旧版142需要手动下载新版，或等待GitHub解除限制。
+v0.4.144起，GitHub API返回403／429时读取同一仓库最新Release中的`151500px-menu-update.json`小型清单，仍校验正式版本、仓库、标签、附件身份及下载摘要。备用清单不可用时明确报错，不把缓存版本宣称为最新；SSL／证书／DNS／超时均保留真实失败，不关闭HTTPS证书验证。受限的旧版142需要手动下载新版，或等待GitHub解除限制。
 
 ## 校验与恢复
 
-- 固定源为`mianxiu/15100px-menu`的`/releases/latest`，只接受已发布、非预览版本且版本号高于当前；不自动降级。
-- 附件必须为`PhotoshopMenu-Backend-<版本>.zip`及同名`.sha256`，HTTPS地址绑定仓库／标签／文件名，仅允许GitHub发行附件CDN重定向。
+- 固定源为`mianxiu/151500px-menu`的`/releases/latest`，只接受已发布、非预览版本且版本号高于当前；不自动降级。
+- 附件必须为`151500px-menu-Backend-<版本>.zip`及同名`.sha256`，HTTPS地址绑定仓库／标签／文件名，仅允许GitHub发行附件CDN重定向。
 - 核对GitHub SHA256 digest（如有）、ZIP SHA256、包内EXE SHA256、Windows产品身份和版本。拒绝不安全路径、重复条目、过大文件、独立UXP包及源码ZIP；仅提取EXE，不执行ZIP中其他脚本。SHA256校验不等同代码签名。
 - 暂存、任务和旧程序在数据目录`application-updates/`；检查偏好／发行缓存在`application-update.json`。下载及安装尝试使用独立目录，旧就绪标记不能触发新安装。不改菜单设置、UXP凭据和文档。
 - 忙碌、排队、PS启动中、未知结果待核对、菜单未收起时拒绝安装，准备期间拒绝新修改。不取消或重发PS命令，不转COM。
@@ -30,7 +42,7 @@ v0.4.144起，GitHub API返回403／429时读取同一仓库最新Release中的`
 
 发行页仅保留最新版，旧Git标签、源码历史与本地回退保留。146将检测工具合并到后台并内置两份脚本；更新主程序即可使用统一诊断，已加载UXP18时无需因此重装插件或重启PS；更旧或未加载的插件仍按插件管理提示核对／更新。
 
-发布统一ZIP和SHA256，不覆盖已发布附件。发布后用`tools/build-update-manifest.py --release-json <正式Release记录>`生成并上传`PhotoshopMenu-update.json`，匿名核验清单及安装包下载。按用户2026-10-16决定，核验新版完成后删除其他Release与其附件，发行页只保留最新版；保留Git标签、源码历史和本地回退副本。后续EXE须保持`--apply-update <job.json>`的schema 1兼容，供已安装版使用。不要把预览版、草稿、源码或独立UXP ZIP当作应用更新附件。
+发布统一ZIP和SHA256，不覆盖已发布附件。发布后用`tools/build-update-manifest.py --release-json <正式Release记录>`生成并上传`151500px-menu-update.json`，匿名核验清单及安装包下载。按用户2026-10-16决定，核验新版完成后删除其他Release与其附件，发行页只保留最新版；保留Git标签、源码历史和本地回退副本。后续EXE须保持`--apply-update <job.json>`的schema 1兼容，供已安装版使用。不要把预览版、草稿、源码或独立UXP ZIP当作应用更新附件。
 
 参考[GitHub Releases API](https://docs.github.com/en/rest/releases/releases)、[附件API](https://docs.github.com/en/rest/releases/assets)和[REST最佳实践](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api)。使用ETag条件请求；匿名请求仍可能限流，显示错误，不高频重试。
 

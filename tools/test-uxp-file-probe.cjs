@@ -17,7 +17,7 @@ async function main() {
   let selection={session:'test',document_id:1,layer_ids:[2],kind:'pixel',mask:15};
   const manifest = JSON.parse(fs.readFileSync('uxp/offline-probe/manifest.json','utf8'));
   let redrawCalls=0,refreshTokens=0,redrawResult='PSMENU_REDRAW_OK';
-  const uxp = {storage: {localFileSystem: {getDataFolder: async () => folder,
+  const uxp = {host:{version:'24.1.0'},storage: {localFileSystem: {getDataFolder: async () => folder,
     createSessionToken:entry=>{assert.equal(entry.name,'preview-redraw-24.jsx');refreshTokens++;return 'fixed-refresh-session-token';},
     getPluginFolder: async () => ({getEntry:async () => ({read:async () => JSON.stringify(manifest)})})}}};
   const app = {documents: [{title: 'untitled'}], activeDocument: {title: 'untitled'}};
@@ -33,7 +33,7 @@ async function main() {
   const heartbeat=writes.find(w=>w.name==='probe-last.json').value;
   assert.equal(heartbeat.phase, 'ready');
   assert.equal(heartbeat.document_redraw_available, false);
-  assert.equal(heartbeat.photoshop_version, 'unavailable');
+  assert.equal(heartbeat.photoshop_version, '24.1.0');
   assert.equal(heartbeat.plugin_name,manifest.name);
   assert.equal(heartbeat.command_label,'检查连接');
   assert.equal(JSON.parse(files.get('layer-context.json')).kind,'pixel');

@@ -250,7 +250,7 @@ async function finishResponse(folder,response) {
     const name=completedReceipts.shift();
     // Only IDs whose terminal result was persisted by this session enter this
     // list. Never sweep an old directory or delete an unknown request's proof.
-    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-'),name.replace('result-','preview-progress-'),name.replace('result-','execution-'),name.replace('result-','legacy-prepared-'),name.replace('result-','legacy-result-'),name.replace('result-','legacy-exited-'),name.replace('result-','text-object-input-'),name.replace('result-','text-object-expected-'),name.replace('result-','text-object-final-'),name.replace('result-','text-object-render-').replace('.json','.pdf'),name.replace('result-','text-object-before-').replace('.json','.pdf'),name.replace('result-','text-object-').replace('.json','.pdf')])
+    for(const file of [name,name.replace('result-','mask-preview-'),name.replace('result-','mask-preview-status-'),name.replace('result-','preview-progress-'),name.replace('result-','execution-'),name.replace('result-','legacy-prepared-'),name.replace('result-','legacy-result-'),name.replace('result-','legacy-exited-'),name.replace('result-','text-object-page-').replace('.json','.html'),name.replace('result-','text-object-layout-'),name.replace('result-','text-object-input-'),name.replace('result-','text-object-expected-'),name.replace('result-','text-object-final-'),name.replace('result-','text-object-render-').replace('.json','.pdf'),name.replace('result-','text-object-before-').replace('.json','.pdf'),name.replace('result-','text-object-').replace('.json','.pdf')])
       try {await (await folder.getEntry(file)).delete();}catch(_){}
   }
 }

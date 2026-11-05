@@ -14,16 +14,16 @@ class LanguageTests(unittest.TestCase):
                                 running=Mock(return_value=False),hosts=Mock(return_value=[]))
     def tearDown(self):self.temp.cleanup()
     def test_names_follow_manifest_version_and_do_not_duplicate_suffix(self):
-        original={'name':'Photoshop 快捷菜单 v0.3.4','version':'0.3.9','entrypoints':[{'id':'probe','label':{'default':'检查连接'}}]}
+        original={'name':'151500px-menu v0.3.4','version':'0.3.9','entrypoints':[{'id':'probe','label':{'default':'检查连接'}}]}
         for language in ('zh-CN','en'):
             result=localized_manifest(original,language)
             self.assertEqual(result['name'],plugin_name(language,'0.3.9'))
             self.assertEqual(localized_manifest(result,language),result)
-        self.assertEqual(original['name'],'Photoshop 快捷菜单 v0.3.4')
+        self.assertEqual(original['name'],'151500px-menu v0.3.4')
     def test_old_name_detected_and_only_manifest_updated(self):
         self.manager.install()
         data=json.loads((self.manager.plugin/'manifest.json').read_text('utf-8'))
-        data['name']='Photoshop 快捷菜单'
+        data['name']='151500px-menu'
         (self.manager.plugin/'manifest.json').write_text(json.dumps(data),'utf-8')
         from backend.uxp_management import digest
         state=self.manager.state();state['owned']['manifest.json']=digest(self.manager.plugin/'manifest.json')
@@ -82,7 +82,7 @@ class LanguageApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_ui_switch_does_not_apply_native_settings_or_plugin_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             app=Application(0,bridge=Mock(tasks=None,status=AsyncMock(return_value={'connected':False})),runtime=tmp);app.desktop=Mock(input_language=None,input_focus=None)
-            with patch.object(app,'broadcast',new_callable=unittest.mock.AsyncMock):
+            with patch.object(app,'broadcast',new_callable=unittest.mock.AsyncMock), patch('backend.main.input_report',return_value={}):
                 await app.dispatch('language.set',{'language':'en'})
             app.desktop.apply_settings.assert_not_called()
             self.assertFalse(app.uxp.plugin.exists() and app.uxp.plugin.is_relative_to(Path(tmp)))

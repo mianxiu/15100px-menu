@@ -10,7 +10,7 @@ import logging
 from .window_icons import WindowIcons
 from .paths import runtime_dir
 
-TITLE = "Photoshop Menu — 后台管理"
+TITLE = "151500px-menu — 后台管理"
 
 
 class ControlWindow:

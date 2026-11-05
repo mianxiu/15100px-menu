@@ -31,7 +31,7 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
-!PhotoshopMenu.spec
+!151500px-menu.spec
 
 # Installer logs
 pip-log.txt
@@ -173,6 +173,10 @@ native/HotkeyHost.exe
 
 /native/MenuHost.exe
 /native/InputContext.dll
+/native/InputService.dll
+/tools/test-input-service.exe
+/tools/ime-probe/
+/设计稿/
 uxp/offline-probe/probe-config.js
 
 # Local design exports and experiment documents

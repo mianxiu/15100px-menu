@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from backend.version import APP_VERSION
 parser=argparse.ArgumentParser()
-parser.add_argument('--exe',type=Path,default=ROOT/'dist/PhotoshopMenu.exe')
+parser.add_argument('--exe',type=Path,default=ROOT/'dist/151500px-menu.exe')
 args=parser.parse_args()
 import win32api
 info=win32api.GetFileVersionInfo(str(args.exe),'\\')
@@ -14,26 +14,26 @@ if (info['FileVersionMS'],info['FileVersionLS'])!=((parts[0]<<16)|parts[1],(part
     raise RuntimeError('Offline package requires PhotoshopMenu '+APP_VERSION)
 stage=ROOT/'.runtime/offline-payload/payload'
 (stage/'plugin').mkdir(parents=True,exist_ok=True)
-shutil.copy2(args.exe,stage/'PhotoshopMenu.exe')
+shutil.copy2(args.exe,stage/'151500px-menu.exe')
 for name in ('manifest.json','main.js','labels.js'):
     shutil.copy2(ROOT/'uxp/offline-probe'/name,stage/'plugin'/name)
-allowed=['PhotoshopMenu.exe','plugin/manifest.json','plugin/main.js','plugin/labels.js']
+allowed=['151500px-menu.exe','plugin/manifest.json','plugin/main.js','plugin/labels.js']
 extras=[p for p in stage.rglob('*') if p.is_file() and p.relative_to(stage).as_posix() not in allowed+['SHA256.json']]
 if extras:raise RuntimeError('Unexpected payload files; clean the staging folder: '+str(extras))
 (stage/'SHA256.json').write_text(json.dumps({p:hashlib.sha256((stage/p).read_bytes()).hexdigest() for p in allowed},indent=2),'utf-8')
 version=ROOT/'.runtime/offline-setup-version.txt'
 version.write_text((ROOT/'tools/windows-version.txt').read_text('utf-8-sig').replace(
-    'Photoshop Menu desktop application','Photoshop Menu offline installer').replace(
-    "'OriginalFilename', 'PhotoshopMenu.exe'","'OriginalFilename', 'OfflineSetup.exe'"),'utf-8')
+    '151500px-menu desktop application','151500px-menu offline installer').replace(
+    "'OriginalFilename', '151500px-menu.exe'","'OriginalFilename', 'OfflineSetup.exe'"),'utf-8')
 subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onefile','--windowed',
-    '--name','PhotoshopMenu-OfflineSetup-'+APP_VERSION,'--distpath',str(ROOT/'dist'),
+    '--name','151500px-menu-OfflineSetup-'+APP_VERSION,'--distpath',str(ROOT/'dist'),
     '--workpath',str(ROOT/'build/offline-setup'),'--specpath',str(ROOT/'.runtime'),
     '--paths',str(ROOT/'tools'),'--paths',str(ROOT),'--hidden-import','win32timezone',
     '--icon',str(ROOT/'frontend/public/icon.ico'),'--version-file',str(version),'--add-data',str(stage)+';payload',
     str(ROOT/'tools/offline_setup.py')],check=True)
-output=ROOT/('dist/PhotoshopMenu-OfflineSetup-'+APP_VERSION+'.exe')
+output=ROOT/('dist/151500px-menu-OfflineSetup-'+APP_VERSION+'.exe')
 output.with_suffix('.exe.sha256').write_text(hashlib.sha256(output.read_bytes()).hexdigest()+'  '+output.name+'\n','ascii')
-archive=ROOT/('dist/PhotoshopMenu-Offline-'+APP_VERSION+'.zip')
+archive=ROOT/('dist/151500px-menu-Offline-'+APP_VERSION+'.zip')
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as bundle:
     for file in (output,output.with_suffix('.exe.sha256'),ROOT/'OFFLINE-INSTALL.md',ROOT/'PERFORMANCE.md'):
         bundle.write(file,file.name)

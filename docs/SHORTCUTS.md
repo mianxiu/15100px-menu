@@ -2,11 +2,11 @@
 
 ## Caps 突然无法唤出
 
-先确认PS主窗口已激活、没有处于输入或原生对话框，且功能已启用。284修正了Shift／Ctrl／Alt实际松开后，组件仍保留旧按下状态导致Caps无匹配动作的问题；主程序更新会同步更新热键组件，UXP沿用0.3.80，不需要重启PS。该修复不放开输入、焦点或忙碌限制；其他原因仍按[Wiki故障排查](https://github.com/mianxiu/15100px-menu/wiki/Troubleshooting)检查。
+先确认PS主窗口已激活、没有处于输入或原生对话框，且功能已启用。284修正了Shift／Ctrl／Alt实际松开后，组件仍保留旧按下状态导致Caps无匹配动作的问题；主程序更新会同步更新热键组件，UXP沿用0.3.80，不需要重启PS。该修复不放开输入、焦点或忙碌限制；其他原因仍按[Wiki故障排查](https://github.com/mianxiu/151500px-menu/wiki/Troubleshooting)检查。
 
 ## 画布文字编辑与单独F
 
-295开发候选让单独F共用IME的画布输入识别；确认正在输入或状态未知时交还PS，只有当前焦点的新鲜非输入证据才打开查找，迟到请求也重新检查。Shift+F仍交给PS，Caps+F图层样式绑定保持。Ctrl+Enter、Esc松键及点击退出后会重新观察，再决定是否恢复临时IME保护。异步识别仍有立即首键边界；294用户实测立即A仍出候选，295实体输入尚待确认，不把专项测试当作实机通过。实际候选与公开下载见[Wiki版本页](https://github.com/mianxiu/15100px-menu/wiki/Versions)。
+295开发候选让单独F共用IME的画布输入识别；确认正在输入或状态未知时交还PS，只有当前焦点的新鲜非输入证据才打开查找，迟到请求也重新检查。Shift+F仍交给PS，Caps+F图层样式绑定保持。Ctrl+Enter、Esc松键及点击退出后会重新观察，再决定是否恢复临时IME保护。异步识别仍有立即首键边界；294用户实测立即A仍出候选，295实体输入尚待确认，不把专项测试当作实机通过。实际候选与公开下载见[Wiki版本页](https://github.com/mianxiu/151500px-menu/wiki/Versions)。
 
 ## 后续快捷键统一响应要求
 
@@ -22,4 +22,4 @@
 
 本轮源码／隔离验证：333后台、37前端回归；1664种下拉组合与真实后台解析器一致。双逻辑处理器、Below Normal下的无窗口Chrome／独立后台验证了选择、未完成与冲突拦截、保存／重载／放弃、未绑定、四主题和520px窄窗口；真实浏览器截图已检查，主屏前台句柄保持。受限浏览器使用软件渲染，不代表复现PS集显性能；这也不是实体Windows下拉弹出、Caps键鼠或故障机验收。
 
-UXP继续0.3.23，原生组件未改，不需要为这项功能重启PS。本机已切换实际155，EXE／dist／HTTP前端与包内资源匹配；只读浏览器逐项核对14项原绑定，用户配置保持、PS未重启，主屏焦点保持。最终EXE启动／重启核验通过，实体Windows下拉与真实Caps仍待单独验收；使用说明同步到[Wiki](https://github.com/mianxiu/15100px-menu/wiki/Shortcut-settings)。
+UXP继续0.3.23，原生组件未改，不需要为这项功能重启PS。本机已切换实际155，EXE／dist／HTTP前端与包内资源匹配；只读浏览器逐项核对14项原绑定，用户配置保持、PS未重启，主屏焦点保持。最终EXE启动／重启核验通过，实体Windows下拉与真实Caps仍待单独验收；使用说明同步到[Wiki](https://github.com/mianxiu/151500px-menu/wiki/Shortcut-settings)。

@@ -2042,7 +2042,7 @@ int main() {
     HICON iconHandle=iconPath.empty()?nullptr:static_cast<HICON>(LoadImageW(nullptr,iconPath.c_str(),IMAGE_ICON,32,32,LR_LOADFROMFILE));
     wc.hIcon=wc.hIconSm=iconHandle;RegisterClassExW(&wc);
     contextMode=previewKind=="context";
-    window=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOREDIRECTIONBITMAP,wc.lpszClassName,preview.empty()?L"Photoshop Menu - Actions":L"Photoshop Menu - Preview",
+    window=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOREDIRECTIONBITMAP,wc.lpszClassName,preview.empty()?L"151500px-menu - Actions":L"151500px-menu - Preview",
         WS_POPUP,100,100,contextMode?260:360,contextMode?240:300,nullptr,nullptr,wc.hInstance,nullptr);
     if (!window || !createDevice(window)) {std::cerr<<"DirectX 11 initialization failed\n";return 1;}
     IMGUI_CHECKVERSION();ImGui::CreateContext();auto& io=ImGui::GetIO();

@@ -8,14 +8,14 @@ from backend.paths import ROOT, resource_root, runtime_dir, overlay_command
 
 class PackagingTests(unittest.TestCase):
     def test_uxp_resources_are_whitelisted_without_credentials(self):
-        spec=(ROOT/'PhotoshopMenu.spec').read_text('utf-8')
+        spec=(ROOT/'151500px-menu.spec').read_text('utf-8')
         for name in ('manifest.json','main.js','labels.js'):
             self.assertIn('uxp/offline-probe/'+name,spec)
         self.assertNotIn('probe-config.js',spec)
         self.assertNotIn('uxp-config.json',spec)
     def test_installed_entry_uses_its_own_data_root(self):
         with tempfile.TemporaryDirectory() as folder:
-            installed=Path(folder)/'redirected/PhotoshopMenu/app/PhotoshopMenu.exe'
+            installed=Path(folder)/'redirected/PhotoshopMenu/app/151500px-menu.exe'
             with patch.object(sys,'frozen',True,create=True),patch.object(sys,'executable',str(installed)),patch.dict('os.environ',{'LOCALAPPDATA':str(Path(folder)/'different-user-location')}):
                 self.assertEqual(runtime_dir(),installed.resolve().parent.parent)
     def test_development_resources_and_data_are_in_project(self):
@@ -32,7 +32,7 @@ class PackagingTests(unittest.TestCase):
                  patch.object(sys, '_MEIPASS', str(Path(folder)/'extracted'), create=True), \
                  patch.dict('os.environ', {'LOCALAPPDATA': str(Path(folder)/'user')}):
                 self.assertEqual(resource_root(), Path(folder)/'extracted')
-                self.assertEqual(runtime_dir(), Path(folder)/'user'/'PhotoshopMenu')
+                self.assertEqual(runtime_dir(), Path(folder)/'user'/'151500px-menu')
                 args = overlay_command('http://localhost:15151', 'secret', runtime_dir())
                 self.assertEqual(args[0], str(Path(folder)/'extracted/native/MenuHost.exe'))
                 self.assertNotIn('-m', args)

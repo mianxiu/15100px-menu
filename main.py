@@ -1,4 +1,4 @@
-"""Start the Photoshop Menu local application."""
+"""Start the 151500px-menu local application."""
 import sys
 
 if __name__ == "__main__":

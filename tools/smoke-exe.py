@@ -26,7 +26,7 @@ async def exercise(executable, workspace, port, show_control=False):
         raise RuntimeError('Smoke-test port is already in use')
     with tempfile.TemporaryDirectory(prefix='EXE 测试 ', dir=workspace) as folder:
         folder = Path(folder)
-        copy = folder/'PhotoshopMenu.exe'
+        copy = folder/'151500px-menu.exe'
         shutil.copy2(executable,copy)
         data = folder/'用户数据'
         # This isolated service must not compete with the user's live CapsLock
@@ -173,7 +173,7 @@ async def exercise(executable, workspace, port, show_control=False):
                     if show_control:
                         await request('control.open')
                         if Path(os.environ.get('PROGRAMFILES(X86)','C:/Program Files (x86)')).joinpath('Microsoft/Edge/Application/msedge.exe').is_file():
-                            assert win32gui.FindWindow(None,'Photoshop Menu — 后台管理'),'Management app window did not open'
+                            assert win32gui.FindWindow(None,'151500px-menu — 后台管理'),'Management app window did not open'
                     duplicate=subprocess.Popen([str(copy),'--headless','--port',str(port),'--data-dir',str(data)],
                         cwd=str(folder),env=env,creationflags=subprocess.CREATE_NO_WINDOW)
                     assert await asyncio.to_thread(duplicate.wait,15)==0,'Duplicate launch failed'

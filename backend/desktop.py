@@ -17,7 +17,7 @@ from .settings import DEFAULTS, chord, ALIASES, MODIFIERS
 from .paths import ROOT, runtime_dir, overlay_command
 from .panel_context import PanelContext, panel_flags
 
-TITLE = "Photoshop Menu - Actions"
+TITLE = "151500px-menu - Actions"
 MAX_CONTEXT_PACKET_BYTES = 256 * 1024
 
 
@@ -287,6 +287,11 @@ class Desktop:
                     logging.exception("Native hotkey settings failed")
                     return 0
             return self.native_sequence
+
+    def sync_native(self):
+        # Called by the input observers as soon as a verdict changes. The hook
+        # never waits for it; this only shortens the conservative window.
+        self._native_config()
 
     def prepare_preview_input_guard(self,preview):
         owner=self.target

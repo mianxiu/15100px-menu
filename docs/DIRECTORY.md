@@ -70,4 +70,4 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 
 159公开交付：dist仅当前六项；旧158发行包、实际EXE与配置已按上述目录保留，所有Git标签与源码历史保持。
 
-160本机候选：实际入口和dist/PhotoshopMenu.exe为160／UXP27；dist现为160候选完整5项，与.runtime/release160-ready一致；正式159包／清单已归档保留，160尚无公开更新清单。旧159实际入口／配置及完整dist分别保存在.local/recovery/releases/0.4.159-before160与.local/archive/dist/v0.4.159-before160。画布目视确认前不发布或删除159 Release。
+160本机候选：实际入口和dist/151500px-menu.exe为160／UXP27；dist现为160候选完整5项，与.runtime/release160-ready一致；正式159包／清单已归档保留，160尚无公开更新清单。旧159实际入口／配置及完整dist分别保存在.local/recovery/releases/0.4.159-before160与.local/archive/dist/v0.4.159-before160。画布目视确认前不发布或删除159 Release。

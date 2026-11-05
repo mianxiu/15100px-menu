@@ -72,25 +72,25 @@ def main():
         # or removing the installed uninstaller itself. No process is killed.
         installed=Path(sys.executable).resolve()
         if getattr(sys,'frozen',False) and installed.name=='OfflineSetup.exe' and installed.parent.name=='app':
-            temporary=Path(tempfile.mkdtemp(prefix='PhotoshopMenu-maintenance-'))/'OfflineSetup.exe'
+            temporary=Path(tempfile.mkdtemp(prefix='151500px-menu-maintenance-'))/'OfflineSetup.exe'
             shutil.copy2(sys.executable,temporary)
             rootargs=[] if args.data_root else ['--data-root',str(installed.parent.parent)]
             subprocess.Popen([str(temporary),*sys.argv[1:],*rootargs,'--wait-for-pid',str(os.getpid())],creationflags=subprocess.CREATE_NO_WINDOW)
             return 0
         names=running_names()
-        if 'photoshopmenu.exe' in names:
-            raise RuntimeError('请等待操作完成，再从托盘退出 Photoshop Menu，然后重新运行安装包。安装器不会强制结束进程。')
+        if {'photoshopmenu.exe', '151500px-menu.exe'}.intersection(names):
+            raise RuntimeError('请等待操作完成，再从托盘退出 151500px-menu，然后重新运行安装包。安装器不会强制结束进程。')
         local=Path(os.environ['LOCALAPPDATA']); roaming=Path(os.environ['APPDATA'])
         if args.data_root:
-            if args.data_root.name!='PhotoshopMenu':raise RuntimeError('Invalid installation root')
+            if args.data_root.name not in ('PhotoshopMenu', '151500px-menu'):raise RuntimeError('Invalid installation root')
             local=args.data_root.parent
-        start=roaming/'Microsoft/Windows/Start Menu/Programs/Photoshop Menu'
-        shortcuts=[start/'Photoshop Menu.lnk',start/'Uninstall.lnk',start/'Rollback.lnk']
+        start=roaming/'Microsoft/Windows/Start Menu/Programs/151500px-menu'
+        shortcuts=[start/'151500px-menu.lnk',start/'Uninstall.lnk',start/'Rollback.lnk']
         if not args.data_root and shortcuts[0].is_file():
             import win32com.client
             existing=Path(win32com.client.Dispatch('WScript.Shell').CreateShortcut(str(shortcuts[0])).TargetPath).resolve()
             candidate=existing.parent.parent
-            if existing.name=='PhotoshopMenu.exe' and existing.parent.name=='app' and candidate.name=='PhotoshopMenu' and (candidate/'offline-install.json').is_file() and (candidate/'uxp-config.json').is_file():
+            if existing.name=='151500px-menu.exe' and existing.parent.name=='app' and candidate.name in ('PhotoshopMenu', '151500px-menu') and (candidate/'offline-install.json').is_file() and (candidate/'uxp-config.json').is_file():
                 # A subsequent installer launched outside the original host must
                 # update its existing root rather than create a second profile.
                 local=candidate.parent
@@ -116,7 +116,7 @@ def main():
                 raise RuntimeError('请先保存并正常关闭 Photoshop，再重新运行安装包。插件版本或凭据有变化，需要下次启动重新加载。')
             result=installer.install(source/'payload',Path(sys.executable) if getattr(sys,'frozen',False) else Path(__file__),links,preserve_plugin=running)
             result['minimum_photoshop']=MIN_PHOTOSHOP_TEXT;result['photoshop_installations']=hosts
-            message='离线安装完成。请正常打开 Photoshop，再通过开始菜单运行 Photoshop Menu。插件会随 PS 自动加载。'
+            message='离线安装完成。请正常打开 Photoshop，再通过开始菜单运行 151500px-menu。插件会随 PS 自动加载。'
             if not args.no_launch:
                 concrete=(installer.root/'uxp-config.json').resolve().parent
                 subprocess.Popen([str(Path(result['executable']).resolve()),'--data-dir',str(concrete)],creationflags=subprocess.CREATE_NO_WINDOW)
@@ -127,11 +127,11 @@ def main():
             if 'photoshop.exe' in names:raise RuntimeError('请先保存并正常关闭 Photoshop，再回退版本。')
             result=installer.rollback();message='已恢复安装前版本。请正常打开 Photoshop 和菜单程序。'
         if args.result_file:args.result_file.write_text(json.dumps({'ok':True,**result},indent=2),'utf-8')
-        if not args.quiet:ctypes.windll.user32.MessageBoxW(None,message,'Photoshop Menu',0x40)
+        if not args.quiet:ctypes.windll.user32.MessageBoxW(None,message,'151500px-menu',0x40)
         return 0
     except Exception as error:
         if args.result_file:args.result_file.write_text(json.dumps({'ok':False,'error':str(error)}),'utf-8')
-        if not args.quiet:ctypes.windll.user32.MessageBoxW(None,str(error),'Photoshop Menu',0x10)
+        if not args.quiet:ctypes.windll.user32.MessageBoxW(None,str(error),'151500px-menu',0x10)
         return 1
 
 if __name__=='__main__':sys.exit(main())

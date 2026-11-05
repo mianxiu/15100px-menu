@@ -1,6 +1,6 @@
 # 153：按文档大小读取创建树
 
-Photoshop Menu v0.4.153／UXP0.3.23已构建并切换本机运行入口；真实PS24.0.1测试通过。更新EXE后还需正常重启PS，确认后台实际加载插件0.3.23，才会使用新算法。正式下载见[Latest](https://github.com/mianxiu/15100px-menu/releases/latest)。
+151500px-menu v0.4.153／UXP0.3.23已构建并切换本机运行入口；真实PS24.0.1测试通过。更新EXE后还需正常重启PS，确认后台实际加载插件0.3.23，才会使用新算法。正式下载见[Latest](https://github.com/mianxiu/151500px-menu/releases/latest)。
 
 ## 使用与算法范围
 

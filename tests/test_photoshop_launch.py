@@ -126,7 +126,7 @@ class WorkerTests(unittest.TestCase):
                  patch('backend.photoshop_launch.exe_version',return_value='23.2.9'):
                 with self.assertRaisesRegex(RuntimeError,'23.3.0'):registered_executable()
     def test_frozen_worker_uses_the_same_exe_without_service_args(self):
-        with patch.object(sys,'frozen',True,create=True),patch.object(sys,'executable','C:/app/PhotoshopMenu.exe'):
+        with patch.object(sys,'frozen',True,create=True),patch.object(sys,'executable','C:/app/151500px-menu.exe'):
             command=worker_command(Path('C:/data/request.json'))
             self.assertEqual(command[1:3],['--ps-launch-worker','C:\\data\\request.json'])
             self.assertNotIn('--headless',command)

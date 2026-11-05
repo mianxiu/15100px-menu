@@ -34,7 +34,7 @@ $menuBase.CloseFigure()
 try {
  $menuGraphics.Clear([System.Drawing.Color]::Transparent);$menuGraphics.SmoothingMode=[System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
  $menuGraphics.ScaleTransform(8,8);$menuGraphics.FillPath($menuBackground,$menuBase);$menuGraphics.FillPath($menuInk,$menuOutline)
- $menuSvg='<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Photoshop Menu">' + "`n"
+ $menuSvg='<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="151500px-menu">' + "`n"
  $menuSvg+='<rect width="128" height="128" rx="'+$menuDesign.radius+'" fill="'+$menuDesign.background+'"/>' + "`n"
  $menuSvg+='<path d="'+$menuDesign.ps_outline+'" fill="'+$menuDesign.foreground+'" fill-rule="evenodd"/>' + "`n"
  foreach($stroke in $menuDesign.strokes){

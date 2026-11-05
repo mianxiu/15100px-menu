@@ -8,7 +8,7 @@ from backend.version import APP_VERSION
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--release-json',type=Path,required=True)
-parser.add_argument('--output',type=Path,default=ROOT/'dist/PhotoshopMenu-update.json')
+parser.add_argument('--output',type=Path,default=ROOT/'dist/151500px-menu-update.json')
 args=parser.parse_args()
 raw=json.loads(args.release_json.read_text('utf-8'))
 value=select_release(raw,APP_VERSION)

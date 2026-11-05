@@ -15,6 +15,7 @@ a = Analysis(
                       (str(root / 'native/HotkeyHost.exe'), 'native'),
                       (str(root / 'native/MenuHost.exe'), 'native'),
                       (str(root / 'native/InputContext.dll'), 'native'),
+                      (str(root / 'native/InputService.dll'), 'native'),
                       (str(root / 'native/fonts'), 'native/fonts'),
                       (str(root / 'native/vendor/imgui/LICENSE.txt'), 'native/licenses/imgui'),
                       (str(root / 'native/vendor/json/LICENSE.MIT'), 'native/licenses/json'),
@@ -27,7 +28,7 @@ a = Analysis(
     hookspath=[], runtime_hooks=[], excludes=['tkinter', 'matplotlib', 'dearpygui'], noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name='PhotoshopMenu',
+exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name='151500px-menu',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
           console=False, disable_windowed_traceback=False,
           icon=str(root / 'frontend/public/icon.ico'),

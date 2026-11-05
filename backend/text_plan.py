@@ -125,7 +125,7 @@ def list_edits(text,params):
             counters[level+1:]=[0]*(5-level)
             style=params['numbering']
             prefix='.'.join(map(str,counters[:level+1]))+'.' if style=='hierarchical' else number(counters[level],('decimal','lower-alpha','lower-roman')[level%3] if style=='mixed' else style)
-        indent='    '*level;prefix+=' '
+        indent='    '*level;prefix+='\t'
         if leading!=indent:edits.append((line.start(),start,indent))
         if text[start:end]!=prefix:edits.append((start,end,prefix))
     return edits,count

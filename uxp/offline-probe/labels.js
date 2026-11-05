@@ -824,7 +824,7 @@ function createStabilityFixture(ps,session,capture,documentTarget) {
       if(context.isCancelled || Date.now()>request.expires_at_ms || !equal(documentTarget(),request.target))throw Error('Test document set changed');
       const saved=originals(),active=request.target.active_document_id;
       let doc;
-      try {doc=await ps.app.createDocument({name:'Photoshop Menu Test '+run.slice(0,8),width:128,height:128,resolution:72,mode:'RGBColorMode',fill:request.test_background===true?'white':'transparent'});}
+      try {doc=await ps.app.createDocument({name:'151500px-menu Test '+run.slice(0,8),width:128,height:128,resolution:72,mode:'RGBColorMode',fill:request.test_background===true?'white':'transparent'});}
       catch(error){if(!equal(documentTarget(),request.target))error.resultUnknown=true;throw error;}
       if(!doc || !Number.isInteger(doc.id) || request.target.document_ids.includes(doc.id)){
         const error=Error('Test creation outcome unknown');error.resultUnknown=true;throw error;
@@ -2250,7 +2250,7 @@ function createTextTools(ps,session,capture,readTree) {
       if(typeof value!=='string'||!value.length||value.length>20000||/[\n\0]/.test(value)||!Number.isInteger(params.count)||params.count<0||params.count>40001||
           !Array.isArray(origins)||origins.length!==value.length+1||origins.some((origin,index)=>!Number.isInteger(origin)||origin<0||origin>raw.textKey.length||index>0&&origin<origins[index-1]))throw Error('文字预览计划无效');
       for(const char of value)if(char.length===1&&char.charCodeAt(0)>=0xd800&&char.charCodeAt(0)<=0xdfff)throw Error('文字包含不完整的Unicode字符');
-      return {value:mappedText(raw,value,origins),count:params.count};
+      return {value:mappedText(raw,value,origins),count:params.count,origins};
     }
     if(!params||typeof params.find!=='string'||!params.find||params.find.length>200||typeof params.replacement!=='string'||params.replacement.length>500)throw Error('查找内容不能为空，查找／替换内容超出上限');
     const find=params.find.replace(/\r\n|\n/g,'\r'),replacement=params.replacement.replace(/\r\n|\n/g,'\r');
@@ -2265,7 +2265,7 @@ function createTextTools(ps,session,capture,readTree) {
     append(cursor,text.length);origins.push(cursor<text.length?text.length:(lastHit>=0?lastHit:text.length));
     const value=parts.join('');
     if(!value.length||value.length>20000)throw Error('替换后的文本为空或超过20000字符');
-    return {value:mappedText(raw,value,origins),count};
+    return {value:mappedText(raw,value,origins),count,origins};
   }
   function mappedText(raw,value,origins) {
     const result={_obj:'textLayer',textKey:value};
@@ -2305,7 +2305,7 @@ function createTextTools(ps,session,capture,readTree) {
     if(!Number.isFinite(value?._value))return NaN;
     return value._unit==='pixelsUnit'?value._value:value._unit==='pointsUnit'&&Number.isFinite(resolution)&&resolution>0?value._value*resolution/72:NaN;
   }
-  function stylesMatch(actual,wanted,resolution) {
+  function stylesMatch(actual,wanted,resolution,original,origins,listFormatting=false) {
     for(const [key,field] of [['textStyleRange','textStyle'],['paragraphStyleRange','paragraphStyle']]) {
       const a=styleRuns(actual,key),b=styleRuns(wanted,key);let ai=0,bi=0;
       const signatures=ranges=>ranges.map(row=>{
@@ -2313,7 +2313,10 @@ function createTextTools(ps,session,capture,readTree) {
         if(baseline?._unit==='pointsUnit'&&resolution===undefined)resolution=ps.app.activeDocument.resolution;
         const offset=baseline===undefined||baseline===0?0:pixels(baseline,resolution);
         if(field==='textStyle'&&Number.isFinite(offset))delete style.baselineShift;
-        return {style:stable(style),offset};
+        if(field==='paragraphStyle')for(const key of ['startIndent','firstLineIndent'])if(style[key]!==undefined){if(resolution===undefined)resolution=ps.app.activeDocument.resolution;style[key]=style[key]===0?0:pixels(style[key],resolution);}
+        const fontless={...style};for(const key of ['fontPostScriptName','fontScript','fontTechnology'])delete fontless[key];
+        return {style:stable(style),fontless:stable(fontless),font:style.fontPostScriptName,
+          available:row[field].fontAvailable===true||row[field].baseParentStyle?.fontAvailable===true,offset};
       });
       const signaturesA=signatures(a),signaturesB=signatures(b);
       for(let offset=0;offset<=wanted.textKey.length;offset++) {
@@ -2321,7 +2324,14 @@ function createTextTools(ps,session,capture,readTree) {
         while(bi<b.length-1&&offset>=b[bi].to)bi++;
         const left=signaturesA[ai],right=signaturesB[bi];
         // Compare the same physical shift across descriptor unit conversions.
-        if(left.style!==right.style || Number.isFinite(left.offset)&&Number.isFinite(right.offset)&&Math.abs(left.offset-right.offset)>.0001)return false;
+        const inserted=original&&origins&&offset<wanted.textKey.length&&wanted.textKey.codePointAt(offset)!==original.textKey.codePointAt(origins[offset]);
+        // PS chooses a fallback for a new glyph absent from the requested font.
+        const forcedSymbol=listFormatting?.marker_font==='SegoeUISymbol'&&right.font==='SegoeUISymbol';
+        const fallback=field==='textStyle'&&!forcedSymbol&&inserted&&left.available&&typeof left.font==='string'&&left.font!==right.font&&left.fontless===right.fontless;
+        const paragraphDefaults=field==='paragraphStyle'&&listFormatting&&Object.entries(JSON.parse(right.style)).every(([key,value])=>{
+          const actual=JSON.parse(left.style)[key];return ['startIndent','firstLineIndent'].includes(key)&&Number.isFinite(actual)&&Number.isFinite(value)?Math.abs(actual-value)<.001:same(actual,value);
+        });
+        if(left.style!==right.style&&!fallback&&!paragraphDefaults || Number.isFinite(left.offset)&&Number.isFinite(right.offset)&&Math.abs(left.offset-right.offset)>.0001)return false;
       }
     }
     return true;
@@ -2341,13 +2351,87 @@ function createTextTools(ps,session,capture,readTree) {
       textShape:raw.textShape?.map(shape=>({shapeType:shape.shapeType,orientation:shape.orientation,transform:shape.transform,
         ...(shape.char?._value==='box'?{bounds:shape.bounds}:{}),char:shape.char}))};
   }
+  function paragraphLayout(raw) {
+    const resolution=ps.app.activeDocument.resolution;
+    const points=value=>value===undefined||value===0?0:pixels(value,resolution)*72/resolution;
+    return styleRuns(raw,'paragraphStyleRange').map(range=>{const style=styleSignature(range.paragraphStyle);return {from:range.from,to:range.to,start:points(style.startIndent),first:points(style.firstLineIndent)};});
+  }
+  async function formatList(raw,wanted,params,target,context) {
+    const rows=params?.paragraphs,resolution=ps.app.activeDocument.resolution;
+    if(typeof params?.enabled!=='boolean'||!Array.isArray(rows)||!rows.length||rows.length>1024||rows.length!==wanted.paragraphStyleRange.length||
+        rows.some((row,i)=>!Number.isInteger(row.from)||!Number.isInteger(row.to)||row.from!==wanted.paragraphStyleRange[i].from||row.to!==wanted.paragraphStyleRange[i].to||!Number.isInteger(row.prefix)||row.prefix<row.from||row.prefix>=row.to||['start','first'].some(k=>!Number.isFinite(row[k])||Math.abs(row[k])>1296)))throw Error('列表排版范围无效');
+    if(raw.orientation?._value!=='horizontal'||raw.textShape?.length!==1||!['paint','box'].includes(raw.textShape[0].char?._value)||raw.warp?.warpStyle?._value!=='warpNone')throw Error('列表排版目前需要水平普通文字');
+    if(wanted.paragraphStyleRange.some(range=>{const align=styleSignature(range.paragraphStyle).align;return align!==undefined&&align._value!=='left';}))throw Error('列表排版目前需要左对齐段落，请先在PS中调整');
+    if(params.marker_font!==undefined) {
+      if(!params.enabled||params.marker_font!=='SegoeUISymbol')throw Error('列表符号字体参数无效');
+      let font;try{font=ps.app.fonts.getByName(params.marker_font);}catch(_){throw Error('PS未识别Segoe UI Symbol，请确认系统符号字体可用');}
+      if(font?.postScriptName!==params.marker_font)throw Error('列表符号字体身份不一致');
+      for(const row of rows) {
+        const prefix=wanted.textKey.slice(row.from,row.prefix),symbol=prefix.trim();
+        if(Array.from(symbol).length!==1||symbol.codePointAt(0)<=127)continue;
+        const from=row.from+prefix.search(/\S/),to=from+symbol.length;
+        wanted.textStyleRange=wanted.textStyleRange.flatMap(range=>{
+          if(range.to<=from||range.from>=to)return [range];
+          const style={...styleSignature(range.textStyle),_obj:'textStyle',fontPostScriptName:font.postScriptName,fontName:font.family,fontStyleName:font.style,fontScript:0,fontTechnology:1};
+          return [...(range.from<from?[{...clone(range),to:from}]:[]),{...clone(range),from:Math.max(from,range.from),to:Math.min(to,range.to),textStyle:style},...(range.to>to?[{...clone(range),from:to}]:[])];
+        });
+      }
+      if(wanted.textStyleRange.length>1024)throw Error('列表符号与正文样式超过范围上限');
+    }
+    let probe=null;
+    try {
+      const cache=new Map(),advances=[],columns=new Map();
+      for(let index=0;index<rows.length;index++) {
+        if(context.isCancelled)throw Error('列表排版已取消');
+        const row=rows[index],paragraph=wanted.paragraphStyleRange[index];let advance=0;
+        if(params.enabled&&row.prefix>row.from) {
+          const prefix=wanted.textKey.slice(row.from,row.prefix);
+          if(!prefix.endsWith('\t'))throw Error('列表正文起点缺少制表符');
+          const at=Math.min(row.prefix,wanted.textKey.length-1),single=mappedText(wanted,'M',[at,at]);
+          const text=prefix+'M',origins=Array.from({length:text.length+1},(_,i)=>Math.min(row.from+i,at)),full=mappedText(wanted,text,origins);
+          const key=stable([prefix,full.textStyleRange,single.textStyleRange]);
+          if(cache.has(key))advance=cache.get(key);
+          else {
+            if(probe===null) {
+              const seed={...clone(raw),...single,textShape:[{...clone(raw.textShape[0]),char:{_enum:'char',_value:'paint'}}]};
+              delete seed.textShape[0].bounds;
+              const [made]=await batch([{_obj:'make',_target:[{_ref:'textLayer'}],using:seed,_options:{dialogOptions:'silent'}}]);
+              const selected=await capture();
+              if(selected.document_id!==target.document_id||selected.layer_ids.length!==1||selected.active_layer_id===target.active_layer_id||made.layerID!==selected.active_layer_id)throw Error('列表测量图层身份无效');
+              probe=selected.active_layer_id;
+              await batch([{_obj:'set',_target:[{_ref:'layer',_id:probe}],to:{_obj:'layer',opacity:{_unit:'percentUnit',_value:0}},_options:{dialogOptions:'silent'}}]);
+            }
+            const write=value=>({_obj:'set',_target:[{_ref:'textLayer',_enum:'ordinal',_value:'targetEnum'}],to:{...value,paragraphStyleRange:[{from:0,to:value.textKey.length+1,paragraphStyle:{_obj:'paragraphStyle',align:{_enum:'alignmentType',_value:'left'},startIndent:{_unit:'pointsUnit',_value:0},firstLineIndent:{_unit:'pointsUnit',_value:0}}}]},_options:{dialogOptions:'silent'}});
+            const read={_obj:'get',_target:[{_ref:'property',_property:'textKey'},{_ref:'layer',_id:probe}],_options:{dialogOptions:'silent'}};
+            const measured=await batch([write(full),read,write(single),read]);
+            advance=(pixels(measured[1].textKey?.boundingBox?.right,resolution)-pixels(measured[3].textKey?.boundingBox?.right,resolution))*72/resolution;
+            if(!Number.isFinite(advance)||advance<=0||advance>1296)throw Error('无法核对列表符号宽度');
+            cache.set(key,advance);
+          }
+        }
+        const level=(wanted.textKey.slice(row.from,row.prefix).match(/^ */)?.[0].length||0)/4;
+        advances.push({advance,level});columns.set(level,Math.max(columns.get(level)||0,advance));
+      }
+      for(let index=0;index<rows.length;index++) {
+        const row=rows[index],paragraph=wanted.paragraphStyleRange[index],{advance,level}=advances[index];
+        // Shorter numbers move right so every body in this level shares a column.
+        const start=advance?row.start+row.first+columns.get(level):row.start,first=advance?-advance:row.first;
+        if(Math.abs(start)>1296||Math.abs(first)>1296)throw Error('列表缩进超出PS范围');
+        // Readback's implied values override edits if sent back to Photoshop.
+        const style=styleSignature(paragraph.paragraphStyle);
+        paragraph.paragraphStyle={...style,_obj:'paragraphStyle',...(advance?{align:{_enum:'alignmentType',_value:'left'}}:{}),startIndent:{_unit:'pointsUnit',_value:start},firstLineIndent:{_unit:'pointsUnit',_value:first}};
+      }
+    } finally {
+      if(probe!==null)await batch([{_obj:'delete',_target:[{_ref:'layer',_id:probe}],_options:{dialogOptions:'silent'}},{_obj:'select',_target:[{_ref:'layer',_id:target.active_layer_id}],makeVisible:false,_options:{dialogOptions:'silent'}}]);
+    }
+  }
   async function read() {
     snapshot=null;
     const target=await capture(),row=await descriptor(target,true);
     const revision=session+':text:'+String(++serial);
     snapshot={target,row,revision,time:Date.now()};
     if(row.layerKind===5)return {target,revision,name:row.name,object_xmp:row.XMPMetadataAsUTF8};
-    return {target,revision,text:row.textKey.textKey,name:row.name,list_xmp:row.XMPMetadataAsUTF8};
+    return {target,revision,text:row.textKey.textKey,name:row.name,list_xmp:row.XMPMetadataAsUTF8,list_paragraphs:paragraphLayout(row.textKey)};
   }
   async function prepareObject(request,params){
     const saved=snapshot;
@@ -2359,7 +2443,7 @@ function createTextTools(ps,session,capture,readTree) {
     const canvas=existing?params.object_source.canvas:{width:doc.width,height:doc.height,resolution:doc.resolution,mode:doc.mode===ps.constants.DocumentMode.RGB?'RGB':'unsupported',depth:doc.bitsPerChannel===ps.constants.BitsPerChannelType.EIGHT?8:0,profile:doc.colorProfileName};
     if(canvas.mode!=='RGB'||canvas.depth!==8)throw Error('矢量文字对象目前仅支持RGB8源');
     return {kind:existing?'smart-object':'text',row,before_xmp:row.XMPMetadataAsUTF8,...(!existing?{before_text:row.textKey}:{transform:row.smartObjectMore?.transform,before_render:params.object_render}),
-      source:{schema:1,canvas,layer:{name:row.name,text:{...raw,...wanted},xmp:Object.prototype.hasOwnProperty.call(params,'list_xmp')?params.list_xmp:(existing?params.object_source.layer.xmp:row.XMPMetadataAsUTF8)}}};
+      source:{schema:2,renderer:'list-v1',canvas,layer:{name:row.name,text:{...raw,...wanted},xmp:Object.prototype.hasOwnProperty.call(params,'list_xmp')?params.list_xmp:(existing?params.object_source.layer.xmp:row.XMPMetadataAsUTF8)}}};
   }
   async function finishObject(request,prepared,native,expected){
     if(native.phase!=='completed'){
@@ -2379,7 +2463,7 @@ function createTextTools(ps,session,capture,readTree) {
     const wanted=plan(saved.row.textKey,params);
     const tagging=Object.prototype.hasOwnProperty.call(params,'list_xmp');
     if(tagging&&(typeof params.list_xmp!=='string'||params.list_xmp.length>131072||params.list_xmp.includes('\0')))throw Error('列表标记数据无效');
-    if(wanted.value.textKey===saved.row.textKey.textKey&&(!tagging||params.list_xmp===(saved.row.XMPMetadataAsUTF8||'')))return {verified:true,count:0};
+    if(wanted.value.textKey===saved.row.textKey.textKey&&!params.list_layout&&(!tagging||params.list_xmp===(saved.row.XMPMetadataAsUTF8||'')))return {verified:true,count:0};
     let uncertain=false;
     try {return await ps.core.executeAsModal(async context=>{
       if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
@@ -2390,10 +2474,11 @@ function createTextTools(ps,session,capture,readTree) {
         if(context.isCancelled||Date.now()>request.expires_at_ms)throw Error('文本操作已取消');
         // PS24.0 rejects a document-qualified textLayer identifier. The modal
         // fresh capture above binds the active text reference to this exact ID.
+        if(params.list_layout){if(!tagging)throw Error('列表排版缺少持久标记');await formatList(before.textKey,wanted.value,params.list_layout,request.target,context);}
         await textWriter(before.textKey)(wanted.value);
         if(tagging&&params.list_xmp!==(before.XMPMetadataAsUTF8||''))await batch([{_obj:'set',_target:[{_ref:'property',_property:'XMPMetadataAsUTF8'},...ref(request.target)],to:{_obj:'layer',XMPMetadataAsUTF8:params.list_xmp},_options:{dialogOptions:'silent'}}]);
         const after=await descriptor(request.target);
-        if(after.textKey.textKey!==wanted.value.textKey||!stylesMatch(after.textKey,wanted.value)||!same(layout(after.textKey),layout(before.textKey)))throw Error('文本或样式读回不一致');
+        if(after.textKey.textKey!==wanted.value.textKey||!stylesMatch(after.textKey,wanted.value,undefined,before.textKey,wanted.origins,params.list_layout)||!same(layout(after.textKey),layout(before.textKey)))throw Error('文本或样式读回不一致');
         if((after.XMPMetadataAsUTF8||'')!==(tagging?params.list_xmp:(before.XMPMetadataAsUTF8||'')))throw Error('列表标记读回不一致');
         await context.hostControl.resumeHistory(history,true);snapshot=null;
         return {verified:true,count:wanted.count};

@@ -1,8 +1,8 @@
-# Photoshop Menu
+# 151500px-menu
 
 为 Windows Photoshop 提供随鼠标唤出的快捷菜单。按 **CapsLock**，就近完成选层、排序、标色、新建、调色、智能对象转换和文字拆分；按 **F** 搜索图层。
 
-**[下载最新版](https://github.com/mianxiu/15100px-menu/releases/latest) · [快速开始](https://github.com/mianxiu/15100px-menu/wiki/Quick-start) · [完整文档](https://github.com/mianxiu/15100px-menu/wiki) · [反馈问题](https://github.com/mianxiu/15100px-menu/issues)**
+**[下载最新版](https://github.com/mianxiu/151500px-menu/releases/latest) · [快速开始](https://github.com/mianxiu/151500px-menu/wiki/Quick-start) · [完整文档](https://github.com/mianxiu/151500px-menu/wiki) · [反馈问题](https://github.com/mianxiu/151500px-menu/issues)**
 
 ## 主要功能
 
@@ -25,22 +25,22 @@
 
 ## 安装使用
 
-需要 **Windows 10／11 x64**。Photoshop 声明最低版本为 **23.3.0**，目前较完整的本机功能验证在 **PS 24.0.1**；其他版本和硬件的边界见[安装与兼容性](https://github.com/mianxiu/15100px-menu/wiki/Installation)。
+需要 **Windows 10／11 x64**。Photoshop 声明最低版本为 **23.3.0**，目前较完整的本机功能验证在 **PS 24.0.1**；其他版本和硬件的边界见[安装与兼容性](https://github.com/mianxiu/151500px-menu/wiki/Installation)。
 
-1. 下载 `PhotoshopMenu-Backend-<版本>.zip`，完整解压并运行 `PhotoshopMenu.exe`。
+1. 下载 `151500px-menu-Backend-<版本>.zip`，完整解压并运行 `151500px-menu.exe`。
 2. 双击托盘图标打开后台，保存文档并正常关闭 PS，在“插件管理”安装内置执行插件。
 3. 手动启动 PS，确认实际加载插件已连接且版本一致。
-4. 在 PS 中按 CapsLock，按[快速开始](https://github.com/mianxiu/15100px-menu/wiki/Quick-start)完成第一次操作。
+4. 在 PS 中按 CapsLock，按[快速开始](https://github.com/mianxiu/151500px-menu/wiki/Quick-start)完成第一次操作。
 
 发行包包含运行时，无需另装 Python、Node.js 或 Adobe 开发工具。主程序与 PS 插件使用本机通信；后台默认地址为 [http://127.0.0.1:15151/](http://127.0.0.1:15151/)。
 
 ## 查找说明
 
-[菜单与默认按键](https://github.com/mianxiu/15100px-menu/wiki/Menu-guide) · [颜色与蒙版](https://github.com/mianxiu/15100px-menu/wiki/Mask-preview) · [更新方法](https://github.com/mianxiu/15100px-menu/wiki/Updates) · [故障排查](https://github.com/mianxiu/15100px-menu/wiki/Troubleshooting)
+[菜单与默认按键](https://github.com/mianxiu/151500px-menu/wiki/Menu-guide) · [颜色与蒙版](https://github.com/mianxiu/151500px-menu/wiki/Mask-preview) · [更新方法](https://github.com/mianxiu/151500px-menu/wiki/Updates) · [故障排查](https://github.com/mianxiu/151500px-menu/wiki/Troubleshooting)
 
-正式下载与开发候选分开说明，见[版本状态](https://github.com/mianxiu/15100px-menu/wiki/Versions)。源码中可能包含尚未发布的改动。
+正式下载与开发候选分开说明，见[版本状态](https://github.com/mianxiu/151500px-menu/wiki/Versions)。源码中可能包含尚未发布的改动。
 
-开发者从[开发与构建](https://github.com/mianxiu/15100px-menu/wiki/Development)进入；后续 UI 遵循[共享规范](docs/UI-GUIDE.md)，文档遵循[写作规范](docs/DOCUMENTATION.md)。开发待办和历史变更分别记录在 [TODO](TODO.md) 与 [RELEASES](RELEASES.md)。
+开发者从[开发与构建](https://github.com/mianxiu/151500px-menu/wiki/Development)进入；后续 UI 遵循[共享规范](docs/UI-GUIDE.md)，文档遵循[写作规范](docs/DOCUMENTATION.md)。开发待办和历史变更分别记录在 [TODO](TODO.md) 与 [RELEASES](RELEASES.md)。
 
 ## 许可
 

@@ -46,6 +46,6 @@
 
 宿主修改使用Adobe规定的模态执行；历史与文档关闭使用其文档API：[Photoshop API](https://developer.adobe.com/photoshop/uxp/ps_reference)、[Document](https://developer.adobe.com/photoshop/uxp/ps_reference/classes/document/)。系统采样同时校验API返回值与计数器`CStatus`，无效数据不参与数值判断：[Microsoft PDH状态校验](https://learn.microsoft.com/en-us/windows/win32/perfctrs/checking-pdh-interface-return-values)。
 
-本机交付验证和故障机待验状态见发行记录；下载入口为[最新版Release](https://github.com/mianxiu/15100px-menu/releases/latest)。
+本机交付验证和故障机待验状态见发行记录；下载入口为[最新版Release](https://github.com/mianxiu/151500px-menu/releases/latest)。
 
 207验收中还暴露了后台读取剪贴板尺寸路径的进程堆异常，栈包含`GetClipboardData`／`GlobalSize`。读取现已串行化，并按剪贴板序号缓存已确认的尺寸，序号变化重新读取；不会复制像素或取消新建前的剪贴板身份检查。此项是并发防护，不能据此认定两台故障机具有相同根因。

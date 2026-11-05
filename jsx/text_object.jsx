@@ -41,7 +41,12 @@
     function target(start){
         if(!app.documents.length||app.activeDocument.id!==request.target.document_id||app.activeDocument.activeLayer.id!==request.target.active_layer_id)throw Error('Text object target changed');
         if(request.target.layer_ids.length!==1)throw Error('Select one text object');
-        if(start&&new Date().getTime()>request.expires_at_ms)throw Error('Text object request expired before execution');
+        if(start){
+            var now=new Date().getTime();
+            if(source.renderer==='list-v1'){
+                if(!(prepared.render_started_ms<=request.expires_at_ms&&prepared.render_started_ms>request.expires_at_ms-5000&&prepared.render_finished_ms>=prepared.render_started_ms&&now>=prepared.render_finished_ms-1000&&now-prepared.render_started_ms<=45000&&now-prepared.render_finished_ms<=5000))throw Error('文字对象排版身份已过期；未提交修改');
+            }else if(now>request.expires_at_ms)throw Error('Text object request expired before execution');
+        }
     }
     function put(d,key,v,list){
         var k=list?null:s(key),t=typeof v;
@@ -97,8 +102,8 @@
     }
     try{
         if(!/^[0-9a-f]{32}$/.test(request.id))throw Error('Invalid text object identity');
-        if(receipt.exists||pdf.exists||new File(folder+'/legacy-result-'+request.id+'.tmp').exists||new File(folder+'/text-object-before-'+request.id+'.pdf').exists||new File(folder+'/text-object-render-'+request.id+'.pdf').exists||new File(folder+'/text-object-final-'+request.id+'.json').exists){identityConflict=true;throw Error('Text object identity already used; preserve original unknown');}
-        if(request.command!=='text.object'||!source||source.schema!==1||!prepared)throw Error('Invalid text object command');
+        if(receipt.exists||pdf.exists&&source.renderer!=='list-v1'||new File(folder+'/legacy-result-'+request.id+'.tmp').exists||new File(folder+'/text-object-before-'+request.id+'.pdf').exists||new File(folder+'/text-object-render-'+request.id+'.pdf').exists||new File(folder+'/text-object-final-'+request.id+'.json').exists){identityConflict=true;throw Error('Text object identity already used; preserve original unknown');}
+        if(request.command!=='text.object'||!source||(source.schema!==1&&!(source.schema===2&&source.renderer==='list-v1'))||!prepared)throw Error('Invalid text object command');
         if(sha256('abc')!=='ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')throw Error('SHA256 self-check failed');
         target(true);doc=app.activeDocument;anchor=doc.activeLayer;history=doc.activeHistoryState;documentsBefore=documents();
         dialogs=app.displayDialogs;app.displayDialogs=DialogModes.NO;
@@ -110,6 +115,10 @@
             var check=new ActionReference();check.putIdentifier(s('layer'),anchor.id);var state=executeActionGet(check);
             if(anchor.opacity!==100||anchor.fillOpacity!==100||anchor.blendMode!==BlendMode.NORMAL||anchor.grouped||state.hasKey(s('layerEffects'))||state.hasKey(s('hasUserMask'))&&state.getBoolean(s('hasUserMask'))||state.hasKey(s('hasVectorMask'))&&state.getBoolean(s('hasVectorMask')))throw Error('Text object creation currently requires normal text without masks, effects or clipping');
         }
+        if(source.renderer==='list-v1'){
+            if(!/^[0-9a-f]{64}$/.test(prepared.vector_pdf_sha256)||!pdf.exists||pdf.length>16777216)throw Error('矢量文字输出凭据缺失');
+            pdf.encoding='BINARY';if(!pdf.open('r'))throw Error('无法核对矢量文字输出');var bytes;try{bytes=pdf.read();}finally{pdf.close();}if(sha256(bytes)!==prepared.vector_pdf_sha256)throw Error('矢量文字输出已改变');
+        }else{
         checkSourceFonts(source.layer.text);
         var raw=source.layer.text,shape=raw.textShape&&raw.textShape[0],matrix=raw.transform||{xx:1,yy:1,xy:0,yx:0};
         if(raw.kerningRange&&raw.kerningRange.length)throw Error('Manual kerning is not supported by the content editor');
@@ -127,6 +136,7 @@
         if(Math.abs(actualText.textClickPoint.horizontal._value-click.horizontal._value)>.00001||Math.abs(actualText.textClickPoint.vertical._value-click.vertical._value)>.00001)throw Error('Text anchor readback mismatch');
         var options=new PDFSaveOptions();options.preserveEditing=false;options.embedColorProfile=true;work.saveAs(pdf,options,true,Extension.LOWERCASE);
         work.close(SaveOptions.DONOTSAVECHANGES);work=null;app.activeDocument=doc;target();if(encode(documents())!==encode(documentsBefore))throw Error('Source document cleanup mismatch');
+        }
         if(doc.activeHistoryState.id!==history.id||metadata()!==prepared.before_xmp||prepared.kind==='text'&&encode(rawText())!==encode(prepared.before_text))throw Error('Original changed during source generation');
         var key='__psMenuTextObject_'+request.id;if($.global[key])throw Error('Text object already running');$.global[key]=replace;
         try{doc.suspendHistory('Vector text object','$.global['+encode(key)+']()');}finally{delete $.global[key];}

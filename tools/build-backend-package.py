@@ -12,13 +12,13 @@ from PyInstaller.archive.readers import CArchiveReader
 import win32api
 
 parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--exe',type=Path,default=ROOT/'dist/PhotoshopMenu.exe')
+parser.add_argument('--exe',type=Path,default=ROOT/'dist/151500px-menu.exe')
 parser.add_argument('--output-dir',type=Path,default=ROOT/'dist')
 args=parser.parse_args()
 exe=args.exe.resolve()
 output_dir=args.output_dir.resolve()
 output_dir.mkdir(parents=True,exist_ok=True)
-assert exe.name=='PhotoshopMenu.exe', 'The unified package must contain PhotoshopMenu.exe'
+assert exe.name=='151500px-menu.exe', 'The unified package must contain 151500px-menu.exe'
 parts=[int(p) for p in APP_VERSION.split('.')]
 info=win32api.GetFileVersionInfo(str(exe),'\\')
 assert (info['FileVersionMS'],info['FileVersionLS'])==((parts[0]<<16)|parts[1],parts[2]<<16)
@@ -28,11 +28,11 @@ assert resources=={'uxp/offline-probe/'+n for n in ('manifest.json','main.js','l
 for n in resources:assert archive.extract(names[n])==(ROOT/n).read_bytes()
 for n in ('native/MenuHost.exe','native/HotkeyHost.exe','native/InputContext.dll'):assert archive.extract(names[n])==(ROOT/n).read_bytes(),n
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
-exe_checksum=output_dir/'PhotoshopMenu.exe.sha256'
-exe_checksum.write_text(sha(exe)+'  PhotoshopMenu.exe\n','ascii')
-plugin=output_dir/('PhotoshopMenu-UXP-'+APP_VERSION+'.zip')
+exe_checksum=output_dir/'151500px-menu.exe.sha256'
+exe_checksum.write_text(sha(exe)+'  151500px-menu.exe\n','ascii')
+plugin=output_dir/('151500px-menu-UXP-'+APP_VERSION+'.zip')
 plugin.write_bytes(UxpManager(ROOT/'.runtime',ROOT/'uxp/offline-probe',ROOT/'.runtime/unused-package-root').export_builtin())
-output=output_dir/('PhotoshopMenu-Backend-'+APP_VERSION+'.zip')
+output=output_dir/('151500px-menu-Backend-'+APP_VERSION+'.zip')
 with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as bundle:
     for p in (exe,exe_checksum,ROOT/'OFFLINE-INSTALL.md',ROOT/'PERFORMANCE.md',ROOT/'RELEASES.md',ROOT/'LICENSE',ROOT/'THIRD_PARTY_NOTICES.md',plugin):bundle.write(p,p.name)
     bundle.write(ROOT/'docs/CONTEXT-COVERAGE.md','docs/CONTEXT-COVERAGE.md')

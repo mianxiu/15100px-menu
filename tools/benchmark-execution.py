@@ -25,7 +25,7 @@ async def main():
         # The menu service must be stopped to prevent competing writes from input.
         try:json.load(urlopen('http://127.0.0.1:15151/api/health',timeout=1))
         except OSError:pass
-        else:raise RuntimeError('Exit Photoshop Menu normally before benchmarking')
+        else:raise RuntimeError('Exit 151500px-menu normally before benchmarking')
         app.DoJavaScript('app.documents.add(64,64,72,"Menu performance scratch",NewDocumentMode.RGB,DocumentFill.TRANSPARENT);')
         scratch=app.ActiveDocument
         folder=Path('.runtime')/('benchmark-'+str(time.time_ns()));folder.mkdir()

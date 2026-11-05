@@ -146,6 +146,8 @@ class UxpTransport:
                     raise RuntimeError('文字处理计划需要正常重启PS加载UXP0.3.71；未提交修改')
                 if payload.get('command')=='text.replace' and 'list_xmp' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,81):
                     raise RuntimeError('列表保存需要正常重启PS加载UXP0.3.81；未提交修改')
+                if 'list_layout' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,89):
+                    raise RuntimeError('列表排版需要正常重启PS加载UXP0.3.89；未提交修改')
                 if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,78):
                     raise RuntimeError('文字拆分修复需要正常重启PS加载UXP0.3.78；未提交修改')
                 if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,80):
@@ -187,8 +189,8 @@ class UxpTransport:
                 if payload.get('command')=='shape.preview' and (version_tuple(heartbeat.get('photoshop_version'))<(24,1,0) or heartbeat.get('document_redraw_available') is not True):
                     raise RuntimeError('当前PS使用本地草稿，实时预览需要PS24.1及官方重绘API；未提交修改')
                 text_object=payload.get('command')=='text.object'
-                if text_object and (native_preview is None or version(heartbeat.get('probe_version'))<(0,3,82)):
-                    raise RuntimeError('矢量文字对象需要正常重启PS加载UXP0.3.82；未提交操作')
+                if text_object and (native_preview is None or version(heartbeat.get('probe_version'))<(0,3,90)):
+                    raise RuntimeError('智能文字对象需要正常重启PS加载UXP0.3.90；未提交操作')
                 legacy=payload.get('command')=='shape.legacy.preview' or text_object
                 if legacy and not text_object and (preview is None or native_preview is None or not legacy_preview_available(heartbeat)):
                     raise RuntimeError('旧版独立预览能力未就绪；未提交修改')
@@ -606,7 +608,16 @@ class UxpBridge(PhotoshopBridge):
                     model=ready['prepared']['source'];encoded=text_object.source(model)
                     xml=text_object.write(ready['prepared']['before_xmp'],model)
                     ready['prepared']['source_sha256']=hashlib.sha256(encoded).hexdigest()
+                    if model.get('renderer')=='list-v1':
+                        from .text_object_render import render
+                        started=int(time.time()*1000)
+                        if started>request['expires_at_ms']:raise ValueError('智能文字对象在开始排版前已过期；未提交修改')
+                        ready['prepared']['render_started_ms']=started
+                        pdf=render(model,folder,request['id'])
+                        ready['prepared'].update(vector_pdf_sha256=hashlib.sha256(pdf.read_bytes()).hexdigest(),render_finished_ms=int(time.time()*1000))
                     atomic_json(folder/('text-object-expected-'+request['id']+'.json'),{**{k:request[k] for k in ('id','session','operation','token')},'xmp':xml})
+                except FileExistsError:
+                    raise  # An existing identity never becomes a new preflight failure.
                 except (ValueError,KeyError,TypeError,OSError) as error:
                     rejected={**{k:request[k] for k in ('id','session','operation','token')},'schema':1,'phase':'failed','error':str(error),'not_executed':True,'result_unknown':False,'execution_exit':{'engine':'backend-preflight','not_started':True,'exited':True}}
                     atomic_json(folder/('legacy-result-'+request['id']+'.json'),rejected)

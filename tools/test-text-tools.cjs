@@ -5,8 +5,8 @@ const original={layerID:11,name:'mixed',layerKind:3,layerLocking:{protectAll:fal
  textStyleRange:[{_obj:'textStyleRange',from:0,to:2,textStyle:{fontPostScriptName:'Alpha',size:12,color:{red:1}}},{_obj:'textStyleRange',from:2,to:5,textStyle:{fontPostScriptName:'Beta',size:16}},{_obj:'textStyleRange',from:5,to:9,textStyle:{fontPostScriptName:'Gamma',size:20}}],
  paragraphStyleRange:[{_obj:'paragraphStyleRange',from:0,to:5,paragraphStyle:{align:'left'}},{_obj:'paragraphStyleRange',from:5,to:9,paragraphStyle:{align:'center'}}],
  antiAlias:{_value:'antiAliasCrisp'},textClickPoint:{x:1,y:2},orientation:'horizontal',textShape:[{char:{_value:'paint'},transform:{xx:1,yy:1}}],warp:{style:'none'},kerningRange:[]}};
-let row=clone(original),target={session:'s',document_id:1,active_layer_id:11,layer_ids:[11]},before,history=0,commits=0,writes=0,failWrite=false,wrongStyle=false,rollbackFail=false,materializeParagraphs=false,wrongXmp=false;
-const ps={core:{executeAsModal:async fn=>fn({isCancelled:false,hostControl:{suspendHistory:async()=>{history++;before=clone(row);return 'h';},resumeHistory:async(_,commit)=>{if(commit)commits++;else{if(rollbackFail)throw Error('rollback');row=before;}}}})},action:{batchPlay:async commands=>commands.map(c=>{
+let row=clone(original),target={session:'s',document_id:1,active_layer_id:11,layer_ids:[11]},before,history=0,commits=0,writes=0,failWrite=false,wrongStyle=false,rollbackFail=false,materializeParagraphs=false,wrongXmp=false,fallbackGlyph=false;
+const ps={app:{activeDocument:{resolution:72}},core:{executeAsModal:async fn=>fn({isCancelled:false,hostControl:{suspendHistory:async()=>{history++;before=clone(row);return 'h';},resumeHistory:async(_,commit)=>{if(commit)commits++;else{if(rollbackFail)throw Error('rollback');row=before;}}}})},action:{batchPlay:async commands=>commands.map(c=>{
  assert.equal(c._options.dialogOptions,'silent');
  if(c._obj==='multiGet')return clone(row);
  if(c._obj==='get'&&c._target[0]._property==='XMPMetadataAsUTF8')return {XMPMetadataAsUTF8:row.XMPMetadataAsUTF8||''};
@@ -18,6 +18,7 @@ const ps={core:{executeAsModal:async fn=>fn({isCancelled:false,hostControl:{susp
   if(!c.to.paragraphStyleRange)row.textKey.paragraphStyleRange=[{...clone(row.textKey.paragraphStyleRange[0]),from:0,to:row.textKey.textKey.length+1}];
   if(materializeParagraphs && c.to.paragraphStyleRange)for(const range of row.textKey.paragraphStyleRange)range.paragraphStyle={align:'left',hyphenate:false,...range.paragraphStyle};
   if(wrongStyle)row.textKey.textStyleRange[0].textStyle.fontPostScriptName='Wrong';
+  if(fallbackGlyph){const run=row.textKey.textStyleRange[0];row.textKey.textStyleRange=[{...clone(run),to:1,textStyle:{...run.textStyle,fontPostScriptName:'AvailableFallback',fontScript:25,fontTechnology:2,fontAvailable:true}},...row.textKey.textStyleRange.map((r,i)=>i===0?{...r,from:1}:r)];}
   return {};
  }
  throw Error(c._obj);
@@ -59,6 +60,11 @@ async function request(find,replacement){const read=await tools.read();return {t
  row=clone(original);row.XMPMetadataAsUTF8='foreign';read=await tools.read();assert.equal(read.list_xmp,'foreign');
  const tagged={target:read.target,text:{revision:read.revision,value:row.textKey.textKey,origins:Array.from({length:row.textKey.textKey.length+1},(_,i)=>i),count:0,list_xmp:'foreign + list options'},expires_at_ms:Date.now()+5000};
  const taggedHistory=history;await tools.replace(tagged);assert.equal(history,taggedHistory+1);assert.equal(row.XMPMetadataAsUTF8,'foreign + list options');assert.equal(row.textKey.textKey,original.textKey.textKey);
+ row=clone(original);read=await tools.read();fallbackGlyph=true;
+ const bullet={target:read.target,text:{revision:read.revision,value:'◦ '+original.textKey.textKey,origins:[0,0,...Array.from({length:original.textKey.textKey.length+1},(_,i)=>i)],count:1},expires_at_ms:Date.now()+5000};
+ await tools.replace(bullet);assert.equal(row.textKey.textStyleRange[0].textStyle.fontPostScriptName,'AvailableFallback');
+ row=clone(original);read=await tools.read();bullet.text.revision=read.revision;wrongStyle=true;await assert.rejects(tools.replace(bullet),/读回不一致/);assert.deepEqual(row,original);wrongStyle=false;fallbackGlyph=false;
+ row=clone(original);row.XMPMetadataAsUTF8='foreign + list options';read=await tools.read();tagged.text.revision=read.revision;
  read=await tools.read();tagged.text.revision=read.revision;tagged.text.list_xmp='new';row.XMPMetadataAsUTF8='externally changed';const staleWrites=writes;await assert.rejects(tools.replace(tagged),/样式已改变/);assert.equal(writes,staleWrites);
  read=await tools.read();tagged.text.revision=read.revision;wrongXmp=true;const prior=clone(row);await assert.rejects(tools.replace(tagged),/列表标记读回/);assert.deepEqual(row,prior);wrongXmp=false;
  read=await tools.read();tagged.text.revision=read.revision;tagged.text.list_xmp='x'.repeat(131073);await assert.rejects(tools.replace(tagged),/标记数据无效/);

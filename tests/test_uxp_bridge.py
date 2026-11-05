@@ -247,7 +247,7 @@ class UxpDiscoveryTests(unittest.TestCase):
         folder=self.heartbeat(24)
         self.transport.config.write_text(json.dumps({'token':'a'*64}),'utf-8')
         heartbeat=json.loads((folder/'probe-last.json').read_text('utf-8'))
-        heartbeat.update(session='s',probe_version='0.3.82')
+        heartbeat.update(session='s',probe_version='0.3.90')
         (folder/'probe-last.json').write_text(json.dumps(heartbeat),'utf-8')
         self.transport.pending.storage=self.transport.storage
         self.transport.task_id='e'*32

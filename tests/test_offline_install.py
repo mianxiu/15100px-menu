@@ -9,11 +9,11 @@ class OfflineInstallTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.base=Path(self.temp.name)
         self.payload=self.base/'payload';(self.payload/'plugin').mkdir(parents=True)
-        (self.payload/'PhotoshopMenu.exe').write_bytes(b'app')
+        (self.payload/'151500px-menu.exe').write_bytes(b'app')
         self.setup=self.base/'setup.exe';self.setup.write_bytes(b'setup')
         for name in ('manifest.json','main.js','labels.js'):
             (self.payload/'plugin'/name).write_bytes((ROOT/'uxp/offline-probe'/name).read_bytes())
-        files=['PhotoshopMenu.exe','plugin/manifest.json','plugin/main.js','plugin/labels.js']
+        files=['151500px-menu.exe','plugin/manifest.json','plugin/main.js','plugin/labels.js']
         (self.payload/'SHA256.json').write_text(json.dumps({p:module.digest(self.payload/p) for p in files}))
         self.installer=module.OfflineInstall(self.base/'Local',self.base/'Roaming')
     def tearDown(self):self.temp.cleanup()
@@ -37,7 +37,7 @@ class OfflineInstallTests(unittest.TestCase):
         self.assertEqual((self.installer.root/'uxp-config.json').read_bytes(),config)
         self.assertFalse((self.installer.plugin/'main.js').exists())
     def test_corrupt_payload_is_rejected_before_any_change(self):
-        (self.payload/'PhotoshopMenu.exe').write_bytes(b'corrupt')
+        (self.payload/'151500px-menu.exe').write_bytes(b'corrupt')
         with self.assertRaises(RuntimeError):self.installer.install(self.payload,self.setup)
         self.assertFalse(self.installer.root.exists())
     def test_partial_failure_restores_previous_files(self):
@@ -52,7 +52,7 @@ class OfflineInstallTests(unittest.TestCase):
         script=self.installer.plugin/'main.js';script.write_bytes(b'user change')
         with self.assertRaises(RuntimeError):self.installer.uninstall()
         self.assertEqual(script.read_bytes(),b'user change')
-        self.assertTrue((self.installer.root/'app/PhotoshopMenu.exe').exists())
+        self.assertTrue((self.installer.root/'app/151500px-menu.exe').exists())
     def test_restore_refuses_foreign_path(self):
         with self.assertRaises(RuntimeError):self.installer.restore(self.base/'not-a-backup')
     def test_install_refuses_foreign_plugin_directory(self):

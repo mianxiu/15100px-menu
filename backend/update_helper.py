@@ -23,7 +23,7 @@ def validate_job(path, executable):
         any(c not in '0123456789abcdef' for c in folder.name) or
         runtime/'application-updates'/data['id']!=folder or
         Path(executable).resolve()!=folder/'update-host.exe' or
-        target.name!='PhotoshopMenu.exe' or target.is_relative_to(folder.parent)):
+        target.name not in ('151500px-menu.exe', 'PhotoshopMenu.exe') or target.is_relative_to(folder.parent)):
         raise ValueError('更新任务身份或安装目标无效')
     if version(data['new_version'])<=version(data['old_version']):raise ValueError('更新版本必须更高')
     for name in ('new_sha256','old_sha256'):
@@ -32,7 +32,7 @@ def validate_job(path, executable):
         raise ValueError('更新进程无效')
     if type(data['port']) is not int or not 1<=data['port']<=65535:raise ValueError('更新端口无效')
     if any(type(data[name]) is not bool for name in ('headless','no_desktop')):raise ValueError('启动选项无效')
-    source=folder/'PhotoshopMenu.exe'
+    source=folder/'151500px-menu.exe'
     if sha256(source)!=data['new_sha256'] or executable_version(source)!=data['new_version']:
         raise ValueError('新应用文件校验失败')
     if sha256(target)!=data['old_sha256'] or executable_version(target)!=data['old_version']:
@@ -121,7 +121,7 @@ def apply(path):
         if sha256(target)!=data['old_sha256']:raise ValueError('运行入口在等待期间已改变，未安装更新')
         if sha256(source)!=data['new_sha256'] or executable_version(source)!=data['new_version']:
             raise ValueError('暂存应用在等待期间已改变，未安装更新')
-        backup=folder/'previous-PhotoshopMenu.exe';shutil.copy2(target,backup)
+        backup=folder/'previous-151500px-menu.exe';shutil.copy2(target,backup)
         receipt=Path(data['runtime'])/'offline-install.json'
         if receipt.exists():shutil.copy2(receipt,folder/'previous-offline-install.json')
         report('replacing','安装已校验的应用；保留旧版本以便恢复')
@@ -143,16 +143,16 @@ def apply(path):
             atomic_json(folder/'helper-ready.json',{'id':folder.name,'ready':False,'error':str(error)[:600]})
         # Restore only when the new entry is not running. Never force-stop it.
         if changed and process is not None and process.poll() is None:
-            report('error',str(error)[:600],manual_recovery=str(folder/'previous-PhotoshopMenu.exe'));return
+            report('error',str(error)[:600],manual_recovery=str(folder/'previous-151500px-menu.exe'));return
         if changed:
             try:
-                replace(folder/'previous-PhotoshopMenu.exe',target)
+                replace(folder/'previous-151500px-menu.exe',target)
                 saved=folder/'previous-offline-install.json'
                 if saved.exists():shutil.copy2(saved,Path(data['runtime'])/'offline-install.json')
                 launch(target,data)
                 report('rolled-back','新版启动失败，已恢复旧后台；未修改配置和 Photoshop 文档',error=str(error)[:600]);return
             except Exception as rollback_error:
-                report('error',str(error)[:400]+'；恢复失败：'+str(rollback_error)[:200],manual_recovery=str(folder/'previous-PhotoshopMenu.exe'));return
+                report('error',str(error)[:400]+'；恢复失败：'+str(rollback_error)[:200],manual_recovery=str(folder/'previous-151500px-menu.exe'));return
         if old_exited:
             try:
                 if sha256(target)==data['old_sha256']:

@@ -122,7 +122,7 @@ public:
         background=color(style.Colors[ImGuiCol_WindowBg]);text=color(style.Colors[ImGuiCol_Text]);border=color(style.Colors[ImGuiCol_Border]);accent=color(style.Colors[ImGuiCol_CheckMark]);
         if(!hint){
             WNDCLASSW wc{};wc.lpfnWndProc=procedure;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"PhotoshopMenuPreviewPendingHint";RegisterClassW(&wc);
-            hint=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOPMOST,wc.lpszClassName,L"Photoshop Menu preview pending",WS_POPUP|WS_DISABLED,0,0,1,1,nullptr,nullptr,wc.hInstance,nullptr);
+            hint=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOPMOST,wc.lpszClassName,L"151500px-menu preview pending",WS_POPUP|WS_DISABLED,0,0,1,1,nullptr,nullptr,wc.hInstance,nullptr);
             if(!hint)return;SetLayeredWindowAttributes(hint,0,230,LWA_ALPHA);
         }
         SetTimer(hint,1,50,nullptr);tick();

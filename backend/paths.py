@@ -13,14 +13,21 @@ def resource_root():
 ROOT = resource_root()
 
 
+def application_data_root(local):
+    local = Path(local)
+    legacy = local / 'PhotoshopMenu'
+    # Existing installations retain their complete state, including unknown requests.
+    return legacy if legacy.exists() else local / '151500px-menu'
+
+
 def runtime_dir():
     if getattr(sys, "frozen", False):
         executable=Path(sys.executable).resolve()
         # Bind an installed entry to its own data even when launched from a
         # packaged desktop host whose AppData writes are Windows-redirected.
-        if executable.parent.name.lower()=='app' and executable.parent.parent.name=='PhotoshopMenu':
+        if executable.parent.name.lower()=='app' and executable.parent.parent.name in ('PhotoshopMenu', '151500px-menu'):
             return executable.parent.parent
-        return Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local"))) / "PhotoshopMenu"
+        return application_data_root(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local")))
     return ROOT / ".runtime"
 
 

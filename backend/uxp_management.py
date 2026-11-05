@@ -25,7 +25,7 @@ def validate(folder, *, allow_previous_floor=False):
     folder = Path(folder)
     data = json.loads((folder/'manifest.json').read_text('utf-8-sig'))
     if data.get('id') != PLUGIN_ID or version(data.get('version'))[:2] != (0, 3):
-        raise ValueError('不是兼容的 Photoshop Menu UXP 插件（需要 0.3.x）')
+        raise ValueError('不是兼容的 151500px-menu UXP 插件（需要 0.3.x）')
     host = data.get('host', {})
     floors={MIN_PHOTOSHOP_TEXT,'24.0.1'} if allow_previous_floor else {MIN_PHOTOSHOP_TEXT}
     if host.get('app') != 'PS' or host.get('minVersion') not in floors:

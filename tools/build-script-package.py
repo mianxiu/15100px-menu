@@ -12,7 +12,7 @@ from backend.plugins import FILES, PLUGIN_ID, version
 
 
 def main():
-    parser = argparse.ArgumentParser(description="打包 Photoshop Menu JSX 升级包")
+    parser = argparse.ArgumentParser(description="打包 151500px-menu JSX 升级包")
     parser.add_argument("--version", required=True)
     parser.add_argument("--scripts", type=Path, default=ROOT / "jsx")
     parser.add_argument("--output", type=Path)
@@ -21,7 +21,7 @@ def main():
     files = {name: (args.scripts/name).read_bytes() for name in FILES}
     if files[FILES[2]].decode("utf-8").count("/*%Bool%*/") != 1:
         raise ValueError("移动脚本必须包含唯一的 /*%Bool%*/ 参数标记")
-    data = {"id":PLUGIN_ID, "version":args.version, "api_version":1, "name":"Photoshop Menu 图层操作",
+    data = {"id":PLUGIN_ID, "version":args.version, "api_version":1, "name":"151500px-menu 图层操作",
             "sha256":{name:hashlib.sha256(content).hexdigest() for name,content in files.items()}}
     output = args.output or ROOT / ".runtime" / f"{PLUGIN_ID}-{args.version}.zip"
     output.parent.mkdir(parents=True, exist_ok=True)

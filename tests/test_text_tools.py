@@ -13,7 +13,7 @@ class TextToolsTests(unittest.IsolatedAsyncioTestCase):
         app=SimpleNamespace(operation_lock=asyncio.Lock(),desktop=SimpleNamespace(focus_search_result=Mock()),
             bridge=SimpleNamespace(execute_text=AsyncMock(return_value={}),busy=False,layer_context={}),broadcast=AsyncMock())
         tools=TextTools(app);tools.available=Mock();target={'session':'s','document_id':1,'layer_ids':[2],'active_layer_id':2}
-        tools.snapshot={'revision':'r','text':'current PS text','target':target,'list_xmp':FOREIGN}
+        tools.snapshot={'revision':'r','text':'current PS text','target':target,'list_xmp':FOREIGN,'list_paragraphs':[{'from':0,'to':16,'start':12,'first':3}]}
         with patch('backend.text_tools.evaluate',side_effect=compute):
             result=await tools.preview({'revision':'r','draft':'current PS text','operation':'list',**OPTIONS})
         self.assertNotIn('list_xmp',result);app.bridge.execute_text.assert_not_called()
@@ -22,7 +22,7 @@ class TextToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(read(payload['list_xmp']),OPTIONS);self.assertNotIn('list_options',payload)
         self.assertEqual(replace_parameters(payload,allow_xmp=True),payload)
         with self.assertRaises(ValueError):replace_parameters(payload)
-        tools.snapshot={'revision':'r','text':'current PS text','target':target,'list_xmp':FOREIGN}
+        tools.snapshot={'revision':'r','text':'current PS text','target':target,'list_xmp':FOREIGN,'list_paragraphs':[{'from':0,'to':16,'start':12,'first':3}]}
         with patch('backend.text_tools.evaluate',side_effect=compute):
             await tools.write({'revision':'r','draft':'continue editing','list_options':{**OPTIONS,'start':'4'}})
         carried=app.bridge.execute_text.call_args.args[1]

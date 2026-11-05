@@ -23,7 +23,7 @@ from backend.settings import DEFAULTS, atomic_json
 
 async def main(args):
     profile=ROOT/'.runtime'/('github-update-e2e-'+uuid.uuid4().hex);profile.mkdir()
-    entry=profile/'PhotoshopMenu.exe';shutil.copy2(args.old_exe,entry)
+    entry=profile/'151500px-menu.exe';shutil.copy2(args.old_exe,entry)
     runtime=profile/'data';runtime.mkdir()
     settings={**DEFAULTS,'enabled':False};atomic_json(runtime/'settings.json',settings)
     atomic_json(runtime/'application-update.json',{'auto_check':False,'phase':'idle'})
@@ -78,7 +78,7 @@ async def main(args):
         receipt=json.loads((runtime/'offline-install.json').read_text('utf-8'))
         assert receipt['owned'][str(entry)]==new_hash and receipt['version']==new_version
         job=runtime/'application-updates'/final['application_update']['job']
-        assert sha256(job/'previous-PhotoshopMenu.exe')==old_hash
+        assert sha256(job/'previous-151500px-menu.exe')==old_hash
         assert final['application_update']['auto_check'] is False
         assert not final['menu']['native_hotkeys'] and not final['photoshop']['busy']
         report={'from':initial['version'],'to':final['version'],'anonymous_release':update['release']['url'],

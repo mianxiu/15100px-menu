@@ -6,6 +6,7 @@ import secrets
 import shutil
 import time
 from backend.version import APP_VERSION
+from backend.paths import application_data_root
 from backend.photoshop_version import MIN_PHOTOSHOP_TEXT
 from backend.uxp_management import validate as validate_uxp
 
@@ -17,13 +18,13 @@ def digest(path):
 
 class OfflineInstall:
     def __init__(self, local, roaming, shortcuts=None):
-        self.root = Path(local).resolve() / 'PhotoshopMenu'
+        self.root = application_data_root(Path(local).resolve())
         if (self.root/'uxp-config.json').is_file():
             self.root=(self.root/'uxp-config.json').resolve().parent
         self.plugin = Path(roaming).resolve() / 'Adobe/UXP/Plugins/External' / (PLUGIN_ID+'_PS')
         self.receipt = self.root / 'offline-install.json'
         self.shortcuts = list(shortcuts or [])
-        self.files = [self.root/'app/PhotoshopMenu.exe', self.root/'app/OfflineSetup.exe',
+        self.files = [self.root/'app/151500px-menu.exe', self.root/'app/OfflineSetup.exe',
                       self.root/'uxp-config.json', self.receipt,
                       *(self.plugin/name for name in PLUGIN_FILES), *self.shortcuts]
 
@@ -64,7 +65,7 @@ class OfflineInstall:
     def install(self, payload, setup, make_shortcuts=lambda:None, preserve_plugin=False):
         payload=Path(payload)
         hashes=json.loads((payload/'SHA256.json').read_text('utf-8'))
-        expected={'PhotoshopMenu.exe', 'plugin/manifest.json', 'plugin/main.js', 'plugin/labels.js'}
+        expected={'151500px-menu.exe', 'plugin/manifest.json', 'plugin/main.js', 'plugin/labels.js'}
         if set(hashes)!=expected:raise RuntimeError('Unexpected package contents')
         for relative,wanted in hashes.items():
             if digest(payload/relative)!=wanted:raise RuntimeError('Package checksum mismatch: '+relative)
@@ -84,7 +85,7 @@ class OfflineInstall:
         try:
             (self.root/'app').mkdir(parents=True,exist_ok=True)
             self.plugin.mkdir(parents=True,exist_ok=True)
-            shutil.copy2(payload/'PhotoshopMenu.exe',self.files[0])
+            shutil.copy2(payload/'151500px-menu.exe',self.files[0])
             shutil.copy2(setup,self.files[1])
             if not preserve_plugin:
                 for name in PLUGIN_FILES[:-1]:shutil.copy2(payload/'plugin'/name,self.plugin/name)

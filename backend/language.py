@@ -4,7 +4,7 @@ from pathlib import Path
 from .settings import atomic_json
 
 LANGUAGES = ('zh-CN', 'en')
-PLUGIN_NAMES = {'zh-CN':'Photoshop 快捷菜单', 'en':'Photoshop Quick Menu'}
+PLUGIN_NAMES = {'zh-CN':'151500px-menu', 'en':'151500px-menu'}
 COMMAND_NAMES = {'zh-CN':'检查连接', 'en':'Check connection'}
 
 def plugin_name(language, version):
