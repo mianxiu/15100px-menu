@@ -20,6 +20,7 @@
 | `.local/design/` | 用户的完整 Figma ZIP／JSON 原稿，忽略提交 |
 | `.local/archive/dist/` | 旧发行物与版本回退副本 |
 | `.local/archive/runtime/` | 历史诊断、预览、配置备份、浏览器数据及恢复资料 |
+| `.local/archive/cleanup-2026-11-07/` | 2026-11-07 从 `.runtime/`、`tools/ime-probe/` 移出的已完成计划／日志、v1–v5 探针与 Q5／Q6 结果、0.4.302／0.4.310 旧发行副本；根目录 `INDEX.md` 说明来源 |
 | `.local/recovery/releases/` | 实际运行入口及配置的版本回退副本（保留144-before145及145-before146） |
 | `.local/recovery/sample-documents/` | 原实验 PSD |
 | `.local/recovery/git-history/private-history-backup.git` | 公开前的原始 Git 历史备份 |
@@ -71,3 +72,11 @@ Figma 图标生成器默认读取 `.local/design/151500PX.figma-export.zip`，�
 159公开交付：dist仅当前六项；旧158发行包、实际EXE与配置已按上述目录保留，所有Git标签与源码历史保持。
 
 160本机候选：实际入口和dist/151500px-menu.exe为160／UXP27；dist现为160候选完整5项，与.runtime/release160-ready一致；正式159包／清单已归档保留，160尚无公开更新清单。旧159实际入口／配置及完整dist分别保存在.local/recovery/releases/0.4.159-before160与.local/archive/dist/v0.4.159-before160。画布目视确认前不发布或删除159 Release。
+
+## 2026-11-07 清理与归档
+
+- 只读盘点了项目根、`.runtime/`、`tools/ime-probe/`、`native/` 构建输出、`build/`／`dist/`、临时目录和 `.local/`。`dist/151500px-menu.exe` 与本机运行入口仍为 0.4.312 候选 1，未改动；0.4.312 源码、测试和版本号文件保持未提交修改，未还原。
+- 删除（可重新生成或测试残留，共 123 项／约 1.24 GB）：旧名称 PyInstaller 缓存 `build/PhotoshopMenu`、`.runtime/release-310*`、`.runtime/ime-311/release-downloads`（0.4.311 已发布 ZIP 的重复副本）、`.runtime/ime-312/perf/build/*.exe`、4 个已完成版本的 PyInstaller 缓存、`.runtime/github-update-e2e-*`、`.runtime/ui207-*`、`.runtime/EXE 测试 *`、`.runtime/MenuHost*.exe`、`__pycache__` 及 `%TEMP%\psmenu-input-service-*`。`update234` 因被 TODO／docs/TRAY.md 引用、`capslock-history` 仍被占用，均未删除。
+- 归档（不删除，共 155 项／约 132 MB）：`.local/archive/cleanup-2026-11-07/`，含 `runtime/plans/`（123 份已完成发行说明／计划／性能表）、`runtime/dsh-logs/`、`ime-probe/`（v1–v5 源码与 DLL、Q5／Q6 结果、执行计划）、`releases/0.4.302/` 与 `releases/0.4.310/`。归档根 `INDEX.md` 记录来源、内容和恢复方式；归档不进入 Git 或发行包。
+- 保留原位：`.runtime/ime-311/REPORT.md` 等 0.4.311 证据、`.runtime/ime-312/`（候选与报告，进行中）、`.runtime/ime-312*-task.md`、`.runtime/ime-312-plan.md`、`.runtime/ime-q8-signal-plan.md`、`tools/ime-probe/ImeProbe6.*`、`run-ime-probe.py`、`results/q7/`、`dist/`、本机运行入口与数据目录、`.local/recovery/ime-312/`、`.local/design/`、根目录 Python 环境。
+- 详细清单与释放空间记录：`.runtime/cleanup-2026-11-07/REPORT.md`（本地）。`.local/` 与 `.runtime/` 仍由 `.gitignore` 忽略，无需新增规则。
