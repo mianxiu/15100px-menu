@@ -72,10 +72,26 @@ class NativeImeContext:
         if not window:return value
         status=self.command(window,1,sample['focus'])
         if not status&1 or status&8:raise RuntimeError('PS输入上下文恢复待核对')
+        tick=self.user.GetPropW(window,'PhotoshopMenu.InputContext.PolicyTick.v1') or 0
         value.update(ime=window,ime_open=int(bool(status&4)),native_restored=bool(status&16),tsf_disabled=bool(status&32),native_events=bool(status&64),
                      native_menu_held=bool(status&128),context_nonce=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Nonce.v1'),
-                     context_revision=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Revision.v1') or 0)
+                     context_revision=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Revision.v1') or 0,
+                     focus_policy=bool(status&0x100),policy_residual=bool(status&0x200),
+                     policy_windows=(status>>16)&0xff,policy_reason=(status>>24)&0xff,policy_tick=tick)
         return value
+
+    def set_policy(self,window,enabled):
+        import win32gui
+        nonce=self.user.GetPropW(window,'PhotoshopMenu.InputContext.Nonce.v1')
+        if not nonce:raise RuntimeError('PS输入保护身份已失效')
+        return win32gui.SendMessageTimeout(window,self.message,(nonce<<8)|5,1 if enabled else 0,2,1000)[1]
+
+    def policy_state(self,window,status):
+        """Describe the native focus-policy reply without mutating it."""
+        if type(status) is not int:return {'focus_policy':False,'policy_windows':0,'policy_reason':0,'policy_residual':True}
+        tick=self.user.GetPropW(window,'PhotoshopMenu.InputContext.PolicyTick.v1') or 0
+        return {'focus_policy':bool(status&0x100),'policy_windows':(status>>16)&0xff,
+                'policy_reason':(status>>24)&0xff,'policy_residual':bool(status&0x200),'policy_tick':tick}
 
     def renew(self,owned,sample):
         if (sample.get('state')=='non-input' and sample.get('identity')==owned['identity'] and sample.get('layout')==owned['layout'] and

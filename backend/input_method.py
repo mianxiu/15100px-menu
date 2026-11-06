@@ -110,8 +110,10 @@ class InputMethod(InputLanguage):
         self.context_schema=1
         self.edit_refresh_until=0
         self.verification=None;self.ready={}
+        self.focus_policy=False;self.policy_window=0;self.policy_identity=None;self.policy_failures=0
         self.report={'state':'unknown','scope':'photoshop-temporary-ime','layout_requests':0,
-                     'disable_requests':0,'restore_requests':0}
+                     'disable_requests':0,'restore_requests':0,'focus_policy':False,'policy_windows':0,
+                     'policy_reason':0,'policy_residual':False,'policy_age_ms':None}
 
     def saved(self):return {'schema':self.context_schema,'owned':self.policy.owned,'pending':self.policy.pending}
 
@@ -127,8 +129,10 @@ class InputMethod(InputLanguage):
         if serial is None:serial=self.snapshot()[0]
         guard=getattr(self.desktop,'input_focus',None)
         focus=guard.shortcut_context() if guard else {}
-        ready=bool(self.policy.owned and not self.policy.pending and sample.get('ime_open')==0 and
-                   sample.get('tsf_disabled') is True and focus.get('state')=='non-input' and
+        protected=bool((self.policy.owned or sample.get('focus_policy')) and sample.get('ime_open')==0 and not sample.get('policy_residual') and
+                       (sample.get('tsf_disabled') is True or
+                        (sample.get('focus_policy') and int(sample.get('policy_windows') or 0)>0)))
+        ready=bool(protected and not self.policy.pending and focus.get('state')=='non-input' and
                    focus.get('root')==sample.get('root') and focus.get('focus')==sample.get('focus'))
         with self.lock:
             self.ready={key:focus[key] for key in ('root','focus','epoch')} if ready and serial==self.serial else {}
@@ -237,6 +241,72 @@ class InputMethod(InputLanguage):
             return value
         except Exception as error:self.report['tool_error_type']=type(error).__name__
 
+    def policy_fields(self,sample,status=None):
+        if status is not None:
+            sample.update(self.ime.policy_state(sample.get('ime') or self.policy_window,status))
+        tick=sample.get('policy_tick') or 0
+        sample['policy_age_ms']=max(0,self.tick()-tick) if tick else None
+        return sample
+
+    def stop_focus_policy(self):
+        """Restore every saved association and confirm the native policy is off."""
+        if not self.policy_window:
+            self.focus_policy=False;return True
+        import win32gui
+        window=self.policy_window
+        try:
+            if not win32gui.IsWindow(window):raise RuntimeError('PS输入保护窗口已结束')
+            status=self.ime.set_policy(window,False)
+        except Exception as error:
+            self.report['policy_error']=type(error).__name__
+            return False
+        fields=self.ime.policy_state(window,status)
+        if type(status) is not int or not status&1 or fields['policy_windows'] or fields['policy_residual']:
+            self.report['policy_error']='restore-unconfirmed'
+            return False
+        self.focus_policy=False;self.policy_window=0;self.policy_identity=None
+        self.report.pop('policy_error',None)
+        self.report.update(focus_policy=False,policy_windows=0,policy_residual=False,
+                           **{key:fields[key] for key in ('policy_reason','policy_tick')})
+        return True
+
+    def sync_focus_policy(self,sample,old_context=False):
+        """Enable the synchronous focus policy once PS and the component are attached.
+
+        No lease disable request is issued in this mode; old lease records stay
+        journaled and are never re-sent or cleared by this path.
+        """
+        if not callable(getattr(self.ime,'set_policy',None)) or not callable(getattr(self.ime,'policy_state',None)):
+            return sample
+        import win32gui
+        window=sample.get('ime');identity=tuple(sample.get('identity',[])) if sample.get('identity') else None
+        if self.policy_window and not win32gui.IsWindow(self.policy_window):
+            self.focus_policy=False;self.policy_window=0;self.policy_identity=None
+        if self.focus_policy and self.policy_window:
+            if not self.desktop.settings['enabled']:return self.stop_focus_policy()
+            if (identity and self.policy_identity and identity!=self.policy_identity) or (window and window!=self.policy_window):
+                # The previous PS session/control cannot own the new session.
+                if win32gui.IsWindow(self.policy_window):
+                    if not self.stop_focus_policy():return sample
+                self.focus_policy=False;self.policy_window=0;self.policy_identity=None
+        eligible=(self.context_schema==2 and not old_context and self.desktop.settings['enabled'] and
+                  window and identity and not self.policy.owned and not self.policy.pending)
+        if not self.focus_policy and eligible:
+            status=self.ime.set_policy(window,True)
+            if type(status) is int and status&1 and status&0x100 and not status&8 and not status&0x200:
+                self.focus_policy=True;self.policy_window=window;self.policy_identity=identity
+                self.policy_failures=0
+                self.policy_fields(sample,status)
+            else:
+                self.policy_failures+=1
+                self.report['policy_error']=int(status) if type(status) is int else 'none'
+        elif self.focus_policy and window:
+            self.policy_fields(sample)
+        if self.policy.owned or self.policy.pending:
+            self.report['policy_blocked']='legacy-lease-preserved'
+        else:self.report.pop('policy_blocked',None)
+        return sample
+
     def run(self):
         import pythoncom
         pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
@@ -274,6 +344,20 @@ class InputMethod(InputLanguage):
                 if self.desktop.stop.is_set():break
                 try:
                     serial,epoch,protected,_=self.snapshot();sample=self.sample()
+                    if not self.desktop.settings['enabled'] and self.focus_policy:self.stop_focus_policy()
+                    # Attach and arm the synchronous focus policy before any UXP
+                    # or tool read: PS startup must not delay shortcut protection.
+                    if (self.context_schema==2 and not old_context and self.desktop.settings['enabled'] and
+                            sample.get('root') and not self.focus_policy and not self.policy.owned and not self.policy.pending):
+                        try:
+                            early=self.ime.read(sample)
+                            self.sync_focus_policy(early,old_context)
+                            if self.focus_policy:
+                                for key in ('ime','ime_open','focus_policy','policy_windows','policy_reason','policy_residual',
+                                            'policy_tick','policy_age_ms','context_nonce','context_revision','native_restored',
+                                            'tsf_disabled','native_events','native_menu_held'):
+                                    if key in early:sample[key]=early[key]
+                        except Exception as error:self.report['policy_error']=type(error).__name__
                     event_reader=getattr(self.desktop,'input_tool_event',None)
                     event=event_reader() if sample.get('root') and event_reader else None
                     if event and event!=tool_event:
@@ -314,6 +398,7 @@ class InputMethod(InputLanguage):
                         sample['state']='input' if protected else self.focus_state(sample,evidence)
                         if blocked:sample['state']='unknown'
                         sample=self.ime.read(sample)
+                        self.sync_focus_policy(sample,old_context)
                     elif self.policy.owned or self.policy.pending:
                         sample=self.ime.observe_owned(self.policy.pending or self.policy.owned)
                     revision=(scope,sample.get('ime'),sample.get('context_nonce'),sample.get('context_revision'))
@@ -361,8 +446,9 @@ class InputMethod(InputLanguage):
                             self.report['recovery_revalidations']=self.report.get('recovery_revalidations',0)+1
                     elif recovering and not eligible:stable=None
                     token=(scope,sample.get('focus'),row.get(30003),epoch,episode,serial) if eligible else None
-                    request=self.policy.step(sample,token,time.monotonic())
-                    if self.policy.owned and not self.policy.pending and (not blocked or menu_held or retained) and callable(getattr(self.ime,'renew',None)):
+                    request=None if self.focus_policy else self.policy.step(sample,token,time.monotonic())
+                    if (not self.focus_policy and self.policy.owned and not self.policy.pending and (not blocked or menu_held or retained)
+                            and callable(getattr(self.ime,'renew',None))):
                         self.ime.renew(self.policy.owned,sample)
                     if request:
                         if request['disable'] and needs_tool and self.read_tool(sample)!=tool:
@@ -399,7 +485,10 @@ class InputMethod(InputLanguage):
                         ime_open=sample.get('ime_open'),keyboard_layout=sample.get('layout'),focus_class=sample.get('class'),
                         tsf_disabled=sample.get('tsf_disabled'),
                         native_events=sample.get('native_events'),context_revision=sample.get('context_revision'),
-                        own_menu_held=menu_held,
+                        own_menu_held=menu_held,focus_policy=self.focus_policy if self.focus_policy else bool(sample.get('focus_policy')),
+                        policy_windows=sample.get('policy_windows',0),policy_reason=sample.get('policy_reason',0),
+                        policy_residual=bool(sample.get('policy_residual')),policy_age_ms=sample.get('policy_age_ms'),
+                        policy_failures=self.policy_failures,
                         tool=tool.get('classID') if isinstance(tool,dict) else None,tool_modal=tool.get('isModal') if isinstance(tool,dict) else None)
                     saved=self.saved()
                     if saved!=persisted:atomic_json(path,saved);persisted=json.loads(json.dumps(saved))
@@ -413,6 +502,13 @@ class InputMethod(InputLanguage):
                     with self.lock:self.ready={}
                     self.complete_verification({})
         finally:
+            if self.ime and self.focus_policy:
+                until=time.monotonic()+1.5
+                while self.focus_policy and time.monotonic()<until:
+                    if self.stop_focus_policy():break
+                    time.sleep(.05)
+                self.report['focus_policy_shutdown']=not self.focus_policy
+                if self.focus_policy:self.report['policy_error']='shutdown-restore-unconfirmed'
             if self.ime and (self.policy.owned or self.policy.pending):
                 try:
                     sample=self.ime.observe_owned(self.policy.pending or self.policy.owned)

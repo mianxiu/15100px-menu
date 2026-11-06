@@ -49,7 +49,7 @@ async def exercise(executable, workspace, port, show_control=False):
                if key not in ('PYTHONHOME','PYTHONPATH','VIRTUAL_ENV')}
         async def session(restarted=False):
             process = subprocess.Popen([str(copy),'--headless','--port',str(port),'--data-dir',str(data)],
-                cwd=str(folder), env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+                cwd=str(folder), env=env, creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ws = None
             menu_pid = None
             try:
@@ -175,7 +175,7 @@ async def exercise(executable, workspace, port, show_control=False):
                         if Path(os.environ.get('PROGRAMFILES(X86)','C:/Program Files (x86)')).joinpath('Microsoft/Edge/Application/msedge.exe').is_file():
                             assert win32gui.FindWindow(None,'151500px-menu — 后台管理'),'Management app window did not open'
                     duplicate=subprocess.Popen([str(copy),'--headless','--port',str(port),'--data-dir',str(data)],
-                        cwd=str(folder),env=env,creationflags=subprocess.CREATE_NO_WINDOW)
+                        cwd=str(folder),env=env,creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     assert await asyncio.to_thread(duplicate.wait,15)==0,'Duplicate launch failed'
                 await request('service.quit')
                 assert await asyncio.to_thread(process.wait,15)==0,'EXE failed to exit cleanly'

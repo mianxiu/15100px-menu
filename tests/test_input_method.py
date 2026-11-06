@@ -151,7 +151,7 @@ class ImeTransportTests(unittest.TestCase):
 
 
 class ImeWorkerTests(unittest.TestCase):
-    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None,created='created',reject_once=False,held=False,legacy_exited=False,start_outside=False):
+    def start(self,acknowledge=True,legacy=None,tool=None,reconcile=None,created='created',reject_once=False,held=False,legacy_exited=False,start_outside=False,policy=False,unknown=False):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         self.desktop=SimpleNamespace(runtime=Path(temp.name),visible=False,settings={'enabled':True},stop=threading.Event(),input_language_busy=lambda:False,input_language_tool=lambda **_:{'classID':'moveTool','isModal':False})
         if tool is not None:self.desktop.input_language_tool=tool
@@ -160,7 +160,9 @@ class ImeWorkerTests(unittest.TestCase):
         if legacy is not None:(self.desktop.runtime/'input-language-owned.json').write_text(json.dumps(legacy),'utf-8')
         def observe():
             if self.outside:return {'state':'outside'}
-            return {**sample(), 'identity':[1,2,created,3],'focus':self.focus,'layout':self.layout,'state':'unknown','workspace':True,'pid':2,'class':'PSViewC','accessibility':legacy_tests.FocusAccessibilityTests().row(self.kind)}
+            value={**sample(), 'identity':[1,2,created,3],'focus':self.focus,'layout':self.layout,'state':'unknown','workspace':True,'pid':2,'class':'PSViewC','accessibility':legacy_tests.FocusAccessibilityTests().row(self.kind)}
+            if unknown:value.update(workspace=False,accessibility={})
+            return value
         self.c.sample=observe
         def read(value):return {**value,'layout':self.layout,'ime':20,'ime_open':self.opened,'native_restored':self.native_restored,'context_revision':self.revision}
         def owned(_):return read({**sample('outside'),'identity':[1,2,created,3],'focus':self.focus})
@@ -170,7 +172,24 @@ class ImeWorkerTests(unittest.TestCase):
             if acknowledge:self.opened=value['wanted']
         def layouts(count,values):values[0]=0x8040804;values[1]=0x4090409;return 2
         self.user=SimpleNamespace(GetKeyboardLayout=Mock(return_value=0x8040804),GetKeyboardLayoutList=Mock(side_effect=layouts),PostMessageW=Mock(),GetAsyncKeyState=Mock(side_effect=lambda key:0x8000 if held and key==65 else 0),GetTickCount64=Mock(side_effect=lambda:int(time.monotonic()*1000)))
-        for p in (patch('backend.input_method.ctypes.WinDLL',return_value=self.user),patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=owned)),patch('backend.input_method.NativeImeContext',return_value=SimpleNamespace(read=lambda value:{**read(value),'context_nonce':123},send=send,observe_owned=lambda value:{**owned(value),'context_nonce':123})),patch('backend.input_method.FocusAccessibility',return_value=object()),patch('backend.input_method.process_exited',side_effect=lambda identity:legacy_exited and identity[2]=='old-process')):
+        self.policy_calls=[]
+        native=SimpleNamespace(read=lambda value:{**read(value),'context_nonce':123},send=send,observe_owned=lambda value:{**owned(value),'context_nonce':123})
+        if policy:
+            def set_policy(window,enabled):
+                self.policy_calls.append(bool(enabled))
+                return (1|0x100|(1<<16)) if enabled else 1
+            def policy_state(window,status):
+                return {'focus_policy':bool(status&0x100),'policy_windows':(status>>16)&0xff,
+                        'policy_reason':9 if status&0x100 else 7,'policy_residual':bool(status&0x200),
+                        'policy_tick':int(time.monotonic()*1000) if status&0x100 else 0}
+            native.set_policy=set_policy;native.policy_state=policy_state
+        patches=[patch('backend.input_method.ctypes.WinDLL',return_value=self.user),
+                 patch('backend.input_method.ImeContext',return_value=SimpleNamespace(read=read,send=send,observe_owned=owned)),
+                 patch('backend.input_method.NativeImeContext',return_value=native),
+                 patch('backend.input_method.FocusAccessibility',return_value=object()),
+                 patch('backend.input_method.process_exited',side_effect=lambda identity:legacy_exited and identity[2]=='old-process')]
+        if policy:patches.append(patch('win32gui.IsWindow',return_value=True))
+        for p in patches:
             p.start();self.addCleanup(p.stop)
         self.c.thread.start()
         def stop():self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2);self.assertFalse(self.c.thread.is_alive())
@@ -230,6 +249,26 @@ class ImeWorkerTests(unittest.TestCase):
         self.start();self.wait(lambda:self.c.policy.confirmed_disables==1)
         self.desktop.settings['enabled']=False;self.c.activity();self.wait(lambda:self.c.policy.confirmed_restores==1)
         self.assertEqual(self.posts,[0,1])
+
+    def test_focus_policy_starts_before_uxp_evidence_without_a_lease(self):
+        self.start(policy=True,unknown=True)
+        self.wait(lambda:self.c.focus_policy)
+        self.assertEqual(self.posts,[])
+        self.wait(lambda:self.c.report.get('focus_policy'))
+        self.assertGreaterEqual(self.c.report.get('policy_windows',0),1)
+        self.desktop.settings['enabled']=False;self.c.activity()
+        self.wait(lambda:not self.c.focus_policy)
+        self.assertEqual(self.policy_calls,[True,False])
+        self.assertEqual(self.posts,[])
+
+    def test_focus_policy_is_restored_and_confirmed_on_shutdown(self):
+        self.start(policy=True)
+        self.wait(lambda:self.c.focus_policy)
+        self.desktop.stop.set();self.c.wake.set();self.c.thread.join(2)
+        self.assertFalse(self.c.thread.is_alive())
+        self.assertEqual(self.policy_calls,[True,False])
+        self.assertFalse(self.c.focus_policy)
+        self.assertEqual(self.posts,[])
 
     def test_legacy_unknown_layout_request_blocks_new_ime_changes_without_reissue(self):
         owner=legacy_tests.ExitedLanguageOwnerTests().owner();owner['identity'][2]='old-process'

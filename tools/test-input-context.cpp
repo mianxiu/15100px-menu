@@ -7,6 +7,8 @@
 
 static HWND childEdit=nullptr;
 static HIMC childContext=nullptr;
+static HWND policyCanvas=nullptr,policyDialog=nullptr,policyDialogView=nullptr;
+static HIMC policyCanvasContext=nullptr,policyDialogContext=nullptr,policyForeignContext=nullptr;
 static PROCESS_INFORMATION fixtureChild{};
 static void closeChild() {
     if(!fixtureChild.hProcess)return;
@@ -42,10 +44,25 @@ static int childMenu() {
     ImmDestroyContext(childContext);return 0;
 }
 
-static void check(bool value,const char* message){if(!value){wchar_t name[128]{};GetClassNameW(GetForegroundWindow(),name,128);std::fprintf(stderr,"root=%p foreground=%p class=%ls focus=%p owned=%p restore_failed=%d tsf=%d\n",root,GetForegroundWindow(),name,GetFocus(),disabledWindow,restoreFailed,tsf.keyboard!=nullptr);throw std::runtime_error(message);}}
+static void check(bool value,const char* message){if(!value){wchar_t name[128]{};GetClassNameW(GetForegroundWindow(),name,128);std::fprintf(stderr,"root=%p foreground=%p class=%ls focus=%p owned=%p assoc_focus=%p assoc_owned=%p restore_failed=%d tsf=%d policy=%d count=%d\n",root,GetForegroundWindow(),name,GetFocus(),disabledWindow,associated(GetFocus()),disabledWindow?associated(disabledWindow):nullptr,restoreFailed,tsf.keyboard!=nullptr,int(focusPolicy),focusCount);throw std::runtime_error(message);}}
+static bool forceForeground(HWND window) {
+    if(GetForegroundWindow()==window)return true;
+    const auto previous=GetForegroundWindow();
+    const auto targetThread=GetWindowThreadProcessId(window,nullptr);
+    const auto foregroundThread=previous?GetWindowThreadProcessId(previous,nullptr):0;
+    bool attached=false;
+    if(foregroundThread && targetThread && foregroundThread!=targetThread)
+        attached=AttachThreadInput(foregroundThread,targetThread,TRUE)!=0;
+    SetForegroundWindow(window);
+    if(attached)AttachThreadInput(foregroundThread,targetThread,FALSE);
+    if(GetForegroundWindow()!=window)SwitchToThisWindow(window,TRUE);
+    return GetForegroundWindow()==window;
+}
+static HWND initialForeground=nullptr;
 static void settledForeground(HWND window) {
     const auto end=GetTickCount64()+500;
     while(GetForegroundWindow()!=window && GetTickCount64()<end) {
+        forceForeground(window);
         MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}Sleep(1);
     }
     check(GetForegroundWindow()==window,"fixture foreground did not settle");
@@ -59,15 +76,39 @@ int main(int argc,char** argv) {
             else if(strcmp(argv[i],"--queued-only")==0)queuedOnly=true;
             else throw std::runtime_error("Unknown fixture argument");
         }
-        if(low){DWORD_PTR affinity=0,system=0;check(GetProcessAffinityMask(GetCurrentProcess(),&affinity,&system)!=0,"fixture affinity");int count=0;for(auto bits=affinity;bits;bits&=bits-1)count++;check(count==2 && GetPriorityClass(GetCurrentProcess())==BELOW_NORMAL_PRIORITY_CLASS,"fixture low CPU not applied");}
+        if(low){
+            DWORD_PTR available=0,system=0;
+            check(GetProcessAffinityMask(GetCurrentProcess(),&available,&system)!=0,"fixture affinity");
+            DWORD_PTR mask=0;int picked=0;
+            for(int bit=int(sizeof(DWORD_PTR)*8)-1;bit>=0 && picked<2;--bit)
+                if(system&(DWORD_PTR(1)<<bit)){mask|=DWORD_PTR(1)<<bit;++picked;}
+            check(picked==2 && SetProcessAffinityMask(GetCurrentProcess(),mask)!=0,"fixture low CPU affinity");
+            check(SetPriorityClass(GetCurrentProcess(),BELOW_NORMAL_PRIORITY_CLASS)!=0,"fixture low CPU priority");
+            DWORD_PTR affinity=0;int count=0;
+            check(GetProcessAffinityMask(GetCurrentProcess(),&affinity,&system)!=0,"fixture affinity readback");
+            for(auto bits=affinity;bits;bits&=bits-1)count++;
+            check(count==2 && affinity==mask && GetPriorityClass(GetCurrentProcess())==BELOW_NORMAL_PRIORITY_CLASS,"fixture low CPU not applied");
+        }
+        initialForeground=GetForegroundWindow();
         module=GetModuleHandleW(nullptr);
         WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=module;wc.lpszClassName=L"Photoshop";
         check(RegisterClassW(&wc)!=0,"fixture class");
         auto fixture=CreateWindowW(L"Photoshop",L"Owned input context test",WS_OVERLAPPEDWINDOW,0,0,300,180,nullptr,nullptr,module,nullptr);
         auto focus=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,0,0,40,40,fixture,nullptr,module,nullptr);
         auto edit=CreateWindowW(L"EDIT",L"",WS_CHILD|WS_VISIBLE,50,0,100,24,fixture,nullptr,module,nullptr);
+        WNDCLASSW viewClass{};viewClass.lpfnWndProc=DefWindowProcW;viewClass.hInstance=module;viewClass.lpszClassName=L"PSViewC";
+        check(RegisterClassW(&viewClass)!=0,"policy view class");
+        WNDCLASSW floatClass{};floatClass.lpfnWndProc=DefWindowProcW;floatClass.hInstance=module;floatClass.lpszClassName=L"PSFloatC";
+        check(RegisterClassW(&floatClass)!=0,"policy dialog class");
+        policyCanvas=CreateWindowW(L"PSViewC",L"",WS_CHILD|WS_VISIBLE,160,0,60,60,fixture,nullptr,module,nullptr);
+        policyDialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"PSFloatC",L"Policy dialog fixture",WS_OVERLAPPEDWINDOW,420,0,180,120,fixture,nullptr,module,nullptr);
+        policyDialogView=CreateWindowW(L"PSViewC",L"",WS_CHILD|WS_VISIBLE,0,0,60,40,policyDialog,nullptr,module,nullptr);
+        check(policyCanvas && policyDialog && policyDialogView,"policy focus fixtures");
+        policyCanvasContext=ImmCreateContext();policyDialogContext=ImmCreateContext();policyForeignContext=ImmCreateContext();
+        check(policyCanvasContext && policyDialogContext && policyForeignContext,"policy IME contexts");
+        ImmAssociateContext(policyCanvas,policyCanvasContext);ImmAssociateContext(policyDialogView,policyDialogContext);
         auto context=ImmCreateContext();check(context!=nullptr,"IME context");ImmAssociateContext(focus,context);
-        ShowWindow(fixture,SW_SHOWNORMAL);SetForegroundWindow(fixture);SetFocus(focus);
+        ShowWindow(fixture,SW_SHOWNORMAL);forceForeground(fixture);SetFocus(focus);LockSetForegroundWindow(LSFW_LOCK);
         check(GetForegroundWindow()==fixture,"fixture foreground denied");
         const auto layout=GetKeyboardLayout(0);
         auto hook=SetWindowsHookExW(WH_CALLWNDPROC,InputContextHook,nullptr,GetCurrentThreadId());check(hook!=nullptr,"thread hook");
@@ -103,8 +144,7 @@ int main(int argc,char** argv) {
         }
         check((command(2)&15)==3,"second disable");SetFocus(edit);check(associated(focus)==context && !disabledWindow,"focus input restoration");
         SetFocus(focus);check((command(2)&15)==3,"watchdog disable");
-        const auto end=GetTickCount64()+1900;
-        while(GetTickCount64()<end){MSG msg{};while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}Sleep(10);}
+        deadline=GetTickCount64()-1;forceForeground(fixture);SetFocus(focus);SendMessageW(control,WM_TIMER,1,0);
         check(GetForegroundWindow()==fixture && GetFocus()==focus,"foreground changed during lease-expiry fixture");
         check(associated(focus)==context && !disabledWindow,"expired lease restoration");
         check((command(2)&15)==3,"explicit restore disable");check(command(3)==21 && associated(focus)==context,"explicit original-context restoration");
@@ -129,24 +169,26 @@ int main(int argc,char** argv) {
         std::pair<DWORD,HWND*> search{child.dwProcessId,&menu};const auto readyEnd=GetTickCount64()+3000;
         do {EnumWindows(findMenu,reinterpret_cast<LPARAM>(&search));if(menu)break;Sleep(10);}while(GetTickCount64()<readyEnd && WaitForSingleObject(child.hProcess,0)==WAIT_TIMEOUT);
         check(menu!=nullptr,"child menu window readiness");check(ownMenu(menu),"trusted child menu identity");
-        SetForegroundWindow(fixture);SetFocus(focus);check((command(2)&15)==3,"menu origin disable");
+        forceForeground(fixture);SetFocus(focus);check((command(2)&15)==3,"menu origin disable");
         testTrace=true;
         for(int i=0;i<50;++i) {
-            SetForegroundWindow(menu);settledForeground(menu);SendMessageW(menu,WM_APP+54,0,0);
+            forceForeground(menu);settledForeground(menu);SendMessageW(menu,WM_APP+54,0,0);
             check((command(1)&130)==130 && associated(focus)==nullptr && SendMessageW(menu,WM_APP+53,0,0),"own menu released PS protection or changed menu IME");
             command(4);SendMessageW(control,WM_TIMER,1,0);check(disabledWindow==focus,"own menu renewal lost lease");
-            SendMessageW(menu,WM_APP+55,reinterpret_cast<WPARAM>(fixture),0);settledForeground(fixture);SetFocus(focus);
+            SendMessageW(menu,WM_APP+55,reinterpret_cast<WPARAM>(fixture),0);SetFocus(focus);settledForeground(fixture);
+            check(GetForegroundWindow()==fixture,"PS return foreground changed");
+            {const auto returnState=command(1);const auto returnAssociation=associated(focus);if((returnState&15)!=3 || returnAssociation)std::fprintf(stderr,"loop return state=%llx assoc=%p focus=%p disabled=%p\n",(unsigned long long)returnState,returnAssociation,GetFocus(),disabledWindow);}
             check((command(1)&15)==3 && associated(focus)==nullptr,"PS return exposed an IME gap");
         }
         testTrace=false;
-        SetForegroundWindow(menu);SendMessageW(menu,WM_APP+54,0,0);deadline=GetTickCount64()-1;SendMessageW(control,WM_TIMER,1,0);
+        forceForeground(menu);SendMessageW(menu,WM_APP+54,0,0);deadline=GetTickCount64()-1;SendMessageW(control,WM_TIMER,1,0);
         check(!disabledWindow && associated(focus)==context,"own menu bypassed lease expiry");
         SendMessageW(menu,WM_APP+55,reinterpret_cast<WPARAM>(fixture),0);settledForeground(fixture);SetFocus(focus);check((command(2)&15)==3,"foreign application fixture disable");
         auto foreign=CreateWindowW(L"STATIC",L"Foreign window",WS_OVERLAPPEDWINDOW,580,0,120,100,nullptr,nullptr,module,nullptr);
-        ShowWindow(foreign,SW_SHOW);SetForegroundWindow(foreign);SetFocus(foreign);SendMessageW(control,WM_TIMER,1,0);
+        ShowWindow(foreign,SW_SHOW);forceForeground(foreign);SetFocus(foreign);SendMessageW(control,WM_TIMER,1,0);
         check(!disabledWindow && associated(focus)==context && !ownMenu(foreign),"foreign application retained PS protection");
         DestroyWindow(foreign);SendMessageW(menu,WM_CLOSE,0,0);check(WaitForSingleObject(child.hProcess,5000)==WAIT_OBJECT_0,"menu fixture normal exit");
-        closeChild();SetForegroundWindow(fixture);SetFocus(focus);
+        closeChild();settledForeground(fixture);SetFocus(focus);LockSetForegroundWindow(LSFW_LOCK);
         check(SUCCEEDED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)),"TSF fixture COM");
         ITfThreadMgr* manager=nullptr;ITfDocumentMgr* document=nullptr;ITfContext* text=nullptr;ITfCompartmentMgr* compartments=nullptr;ITfCompartment* keyboard=nullptr;TfClientId client=0;TfEditCookie cookie=0;
         check(SUCCEEDED(CoCreateInstance(CLSID_TF_ThreadMgr,nullptr,CLSCTX_INPROC_SERVER,IID_ITfThreadMgr,reinterpret_cast<void**>(&manager))),"TSF manager");
@@ -184,7 +226,66 @@ int main(int argc,char** argv) {
         for(int i=0;i<20;i++)check((command(2)&99)==99 && (command(3)&15)==5 && tsf.references==1 && !tsf.watching(),"repeated lease leaked subscriptions or failed readback");
         VariantClear(&secondPrior);secondKeyboard->Release();secondCompartments->Release();associate(document);manager->SetFocus(document);secondDocument->Pop(TF_POPF_ALL);secondText->Release();secondDocument->Release();
         VariantClear(&prior);VariantClear(&value);keyboard->Release();compartments->Release();manager->SetFocus(nullptr);document->Pop(TF_POPF_ALL);text->Release();document->Release();manager->Deactivate();manager->Release();CoUninitialize();
-        UnhookWindowsHookEx(queuedHook);UnhookWindowsHookEx(hook);DestroyWindow(control);DestroyWindow(fixture);ImmDestroyContext(context);
-        std::puts("PS-thread context: nonce, real association, focus/mouse/profile restore, IMM reassociation, TSF event reset/context replacement without timer or renew, 50 cross-process menu returns with independent menu IME, 20 subscription lifecycles, lease expiry, original context and unchanged HKL passed");return 0;
-    }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());closeChild();return 1;}
+        // Focus policy: synchronous IMM detach in WM_SETFOCUS, no lease, no
+        // mouse/edit-key restoration, PSFloatC dialogs excluded.
+        const auto policy=[&](int enable){return SendMessageW(control,controlMessage,(12345<<8)|5,enable);};
+        forceForeground(fixture);settledForeground(fixture);SetFocus(policyCanvas);
+        check(associated(policyCanvas)==policyCanvasContext,"policy fixture association");
+        check((policy(1)&0x100) && focusPolicy,"focus policy enable");
+        check(associated(policyCanvas)==nullptr && focusCount==1,"canvas sync disable");
+        check((command(1)>>16&0xff)==1 && ((command(1)>>24)&0xff)==2,"policy state count or reason");
+        check(GetKeyboardLayout(0)==layout,"policy changed keyboard profile");
+        SendMessageW(policyCanvas,WM_LBUTTONDOWN,0,0);
+        check(associated(policyCanvas)==nullptr && focusCount==1,"mouse down released policy protection");
+        for(int key:{int('T'),int(VK_RETURN),int(VK_F2)})SendMessageW(policyCanvas,WM_KEYDOWN,key,0);
+        check(associated(policyCanvas)==nullptr && focusCount==1,"edit key released policy protection");
+        deadline=GetTickCount64()-1;forceForeground(fixture);SetFocus(policyCanvas);SendMessageW(control,WM_TIMER,1,0);
+        check(associated(policyCanvas)==nullptr && focusCount==1,"policy lease expiry released protection");
+        SetFocus(edit);
+        check(associated(policyCanvas)==policyCanvasContext && focusCount==0,"edit focus did not restore policy context");
+        SetFocus(policyCanvas);
+        check(associated(policyCanvas)==nullptr && focusCount==1,"canvas refocus not disabled");
+        ImmAssociateContext(policyCanvas,policyCanvasContext);
+        check(associated(policyCanvas)==policyCanvasContext,"policy reapply precondition");
+        SendMessageW(policyCanvas,WM_INPUTLANGCHANGE,0,reinterpret_cast<LPARAM>(layout));
+        check(associated(policyCanvas)==nullptr && focusCount==1,"input language change did not reapply policy");
+        check(GetKeyboardLayout(0)==layout,"language reapply changed keyboard profile");
+        ShowWindow(policyDialog,SW_SHOW);forceForeground(policyDialog);settledForeground(policyDialog);SetFocus(policyDialogView);
+        check(associated(policyCanvas)==policyCanvasContext && focusCount==0,"float dialog PSViewC restored policy context");
+        check(associated(policyDialogView)==policyDialogContext,"float dialog lost its IME context");
+        forceForeground(fixture);settledForeground(fixture);SetFocus(policyCanvas);
+        check(associated(policyCanvas)==nullptr && focusCount>=1,"return to canvas did not reapply policy");
+        auto policyForeign=CreateWindowW(L"STATIC",L"Foreign policy window",WS_OVERLAPPEDWINDOW,620,0,120,100,nullptr,nullptr,module,nullptr);
+        ShowWindow(policyForeign,SW_SHOW);forceForeground(policyForeign);SetFocus(policyForeign);SendMessageW(control,WM_TIMER,1,0);
+        check(focusPolicy && focusCount==0 && associated(policyCanvas)==policyCanvasContext,"foreground loss did not restore policy");
+        forceForeground(fixture);settledForeground(fixture);SetFocus(policyCanvas);
+        check(associated(policyCanvas)==nullptr && focusCount>=1,"foreground return did not reapply policy");
+        ImmAssociateContext(policyCanvas,policyForeignContext);
+        SetFocus(edit);
+        check(associated(policyCanvas)==policyForeignContext && focusCount==0,"policy overwrote PS replacement");
+        SetFocus(policyCanvas);
+        check(associated(policyCanvas)==nullptr && focusCount==1,"replacement canvas not disabled");
+        SetFocus(edit);
+        check(associated(policyCanvas)==policyForeignContext && focusCount==0,"policy did not restore newest PS association");
+        auto rootContext=ImmCreateContext();check(rootContext!=nullptr,"policy root context");ImmAssociateContext(fixture,rootContext);
+        SetFocus(policyCanvas);check(associated(policyCanvas)==nullptr && focusCount==1,"root fixture precondition");
+        SetFocus(fixture);
+        check(associated(fixture)==nullptr && focusCount==2,"root window was not disabled");
+        SetFocus(edit);
+        check(associated(fixture)==rootContext && associated(policyCanvas)==policyForeignContext && focusCount==0,"root/edit focus did not restore all policy contexts");
+        SetFocus(policyCanvas);check(associated(policyCanvas)==nullptr,"policy off precondition");
+        check((policy(0)&0x300)==0 && !focusPolicy && focusCount==0 && associated(policyCanvas)==policyForeignContext,"policy disable did not confirm restoration");
+        check((policy(1)&0x100) && associated(policyCanvas)==nullptr,"policy re-enable persistence");
+        HANDLE exited=CreateEventW(nullptr,TRUE,TRUE,nullptr);check(exited!=nullptr,"policy owner exit event");
+        HANDLE previousOwner=owner;owner=exited;if(previousOwner)CloseHandle(previousOwner);
+        SendMessageW(control,WM_TIMER,1,0);
+        check(control==nullptr && !focusPolicy && focusCount==0 && associated(policyCanvas)==policyForeignContext,"owner exit did not restore and detach policy");
+        UnhookWindowsHookEx(queuedHook);UnhookWindowsHookEx(hook);
+        LockSetForegroundWindow(LSFW_UNLOCK);
+        if(initialForeground)SetForegroundWindow(initialForeground);
+        if(control)DestroyWindow(control);
+        DestroyWindow(policyDialog);DestroyWindow(policyForeign);DestroyWindow(fixture);
+        ImmDestroyContext(policyCanvasContext);ImmDestroyContext(policyDialogContext);ImmDestroyContext(policyForeignContext);ImmDestroyContext(rootContext);ImmDestroyContext(context);
+        std::puts("PS-thread context: nonce, real association, focus/mouse/profile restore, IMM reassociation, TSF event reset/context replacement without timer or renew, 50 cross-process menu returns with independent menu IME, 20 subscription lifecycles, lease expiry, original context and unchanged HKL passed; focus policy sync canvas/root disable, Edit restore, PSFloatC exclusion, mouse/edit-key/lease immunity, input-language reapply, foreground return, PS replacement protection, owner exit restoration passed");return 0;
+    }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());LockSetForegroundWindow(LSFW_UNLOCK);if(initialForeground)SetForegroundWindow(initialForeground);closeChild();return 1;}
 }

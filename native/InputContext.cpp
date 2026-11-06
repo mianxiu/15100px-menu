@@ -9,6 +9,7 @@ static const wchar_t* controlProperty=L"PhotoshopMenu.InputContext.Window.v1";
 static const wchar_t* nonceProperty=L"PhotoshopMenu.InputContext.Nonce.v1";
 static const wchar_t* ownerProperty=L"PhotoshopMenu.InputContext.Owner.v1";
 static const wchar_t* revisionProperty=L"PhotoshopMenu.InputContext.Revision.v1";
+static const wchar_t* policyTickProperty=L"PhotoshopMenu.InputContext.PolicyTick.v1";
 static constexpr UINT contextChangedMessage=WM_APP+51;
 static UINT attachMessage=0,controlMessage=0;
 static HMODULE module=nullptr;
@@ -28,6 +29,24 @@ static bool testTrace=false;
 #endif
 static HANDLE menuProcess=nullptr;
 static DWORD menuPid=0;
+
+// Focus policy: the PS UI thread synchronously detaches the IME context of the
+// verified non-input focus target (root window or its PSViewC canvas) in the
+// WM_SETFOCUS callback. Every other focus target restores the saved association
+// before its own window procedure runs. A short save list keeps the original
+// HIMC per window; associations PS has replaced itself are never overwritten.
+enum PolicyReason : DWORD {
+    PolicyNone=0,PolicyDisableRoot=1,PolicyDisableView=2,PolicyRestoreOther=3,
+    PolicyRestoreForeground=4,PolicyReapplyLanguage=5,PolicyRestoreOwner=6,
+    PolicyOff=7,PolicyReapplyDrift=8,PolicyEnable=9,PolicyWindowGone=10
+};
+struct FocusEntry { HWND window=nullptr; HIMC context=nullptr; };
+static constexpr int focusCapacity=8;
+static FocusEntry focusEntries[focusCapacity];
+static int focusCount=0;
+static bool focusPolicy=false,policyRestoreFailed=false;
+static DWORD policyReason=0;
+static ULONGLONG policyTick=0;
 
 static bool ownMenu(HWND window) {
     if(!window || !owner || WaitForSingleObject(owner,0)!=WAIT_TIMEOUT)return false;
@@ -78,6 +97,72 @@ static HIMC associated(HWND window) {
     if(context)ImmReleaseContext(window,context);
     return context;
 }
+static void policyChanged(DWORD reason) {
+    policyReason=reason;policyTick=GetTickCount64();
+    if(control)SetPropW(control,policyTickProperty,reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(policyTick)));
+}
+static bool protectedFocus(HWND window) {
+    if(!window || !root || !IsWindow(window))return false;
+    if(window==root)return true;
+    wchar_t name[64]{};GetClassNameW(window,name,64);
+    // A PSViewC inside a floating dialog (PSFloatC) is a different top-level
+    // window and must keep its IME; only the canvas below the verified PS root
+    // counts as a non-input shortcut target.
+    return wcscmp(name,L"PSViewC")==0 && GetAncestor(window,GA_ROOT)==root;
+}
+static int focusIndex(HWND window) {
+    for(int i=0;i<focusCount;++i)if(focusEntries[i].window==window)return i;
+    return -1;
+}
+static DWORD focusReason(HWND window);
+static bool disableFocus(HWND window,DWORD reason) {
+    if(!focusPolicy || !protectedFocus(window))return false;
+    const auto current=associated(window);
+    auto index=focusIndex(window);
+    if(index<0) {
+        if(focusCount>=focusCapacity)return false;
+        index=focusCount++;
+        focusEntries[index].window=window;
+        focusEntries[index].context=current;
+    } else if(current && current!=focusEntries[index].context) {
+        // PS reassociated while the same non-input window stayed focused; the
+        // newest association is the one to restore on leaving that focus.
+        focusEntries[index].context=current;
+    }
+    if(current) {
+        changing=true;ImmAssociateContext(window,nullptr);changing=false;
+    }
+    if(associated(window)) {
+        focusEntries[index]=focusEntries[--focusCount];focusEntries[focusCount]={};
+        policyRestoreFailed=true;
+        return false;
+    }
+    policyChanged(reason);
+    return true;
+}
+static bool restoreFocus(DWORD reason) {
+    if(!focusCount){policyRestoreFailed=false;return true;}
+    bool ok=true;int keep=0;FocusEntry next[focusCapacity]{};
+    for(int i=focusCount-1;i>=0;--i) {
+        const auto entry=focusEntries[i];
+        focusEntries[i]={};
+        if(!entry.window || !IsWindow(entry.window))continue;
+        const auto current=associated(entry.window);
+        // PS replaced the association itself: leave its choice untouched.
+        if(current && current!=entry.context)continue;
+        if(current!=entry.context) {
+            changing=true;ImmAssociateContext(entry.window,entry.context);changing=false;
+            if(associated(entry.window)!=entry.context) {
+                next[keep++]=entry;ok=false;continue;
+            }
+        }
+    }
+    focusCount=keep;
+    for(int i=0;i<keep;++i)focusEntries[i]=next[i];
+    policyRestoreFailed=!ok;
+    policyChanged(reason);
+    return ok;
+}
 static bool restore() {
     if(!disabledWindow)return true;
     changing=true;const bool tsfRestored=tsf.restore();changing=false;
@@ -94,21 +179,57 @@ static bool foreground() {
     const auto window=GetForegroundWindow();
     return window?(GetAncestor(window,GA_ROOTOWNER)==root || window==root || ownMenu(window)):menuReturning();
 }
+static bool policyForeground() {
+    const auto window=GetForegroundWindow();
+    if(!window)return menuHandoff;
+    return window==root || GetAncestor(window,GA_ROOTOWNER)==root || ownMenu(window);
+}
 static bool ownFocus(HWND window) {
     DWORD pid=0;
     return window && GetWindowThreadProcessId(window,&pid)==GetCurrentThreadId() && pid==GetCurrentProcessId() && GetFocus()==window;
 }
 static void verifyContext() {
+    if(focusPolicy) {
+        const auto focus=GetFocus();
+        if(!protectedFocus(focus)) {
+            if(focusCount)restoreFocus(PolicyRestoreOther);
+            return;
+        }
+        if(focusIndex(focus)<0)disableFocus(focus,focusReason(focus));
+        // Drop entries whose window disappeared. A non-null association that PS
+        // restored itself is left untouched (and dropped when focus leaves),
+        // matching restore()'s existing replacement protection.
+        for(int i=focusCount-1;i>=0;--i) {
+            const auto window=focusEntries[i].window;
+            if(IsWindow(window) && protectedFocus(window))continue;
+            focusEntries[i]=focusEntries[--focusCount];focusEntries[focusCount]={};
+        }
+        return;
+    }
     if(disabledWindow && (associated(disabledWindow) || !tsf.currentDisabled())) {
+        const bool immChanged=associated(disabledWindow)!=nullptr;
+        const bool tsfChanged=!tsf.currentDisabled();
 #ifdef INPUT_CONTEXT_SELF_TEST
-        if(testTrace)std::fprintf(stderr,"restore: changed context associated=%p tsf_current=%d\n",associated(disabledWindow),tsf.currentDisabled());
+        if(testTrace)std::fprintf(stderr,"restore: changed context associated=%p tsf_current=%d handoff=%d menu=%d foreground=%p focus=%p disabled=%p\n",associated(disabledWindow),tsf.currentDisabled(),int(menuHandoff),int(menuActive()),GetForegroundWindow(),GetFocus(),disabledWindow);
 #endif
+        const auto focus=GetFocus();
+        if(!immChanged && tsfChanged && menuHandoff && foreground() && (focus==disabledWindow || focus==root)) {
+            // IMM remains detached, so the non-input shortcut protection is
+            // intact. Try to rebind TSF on the same PS focus after a menu or
+            // activation round-trip; never restore only because TSF focus moved.
+            GUITHREADINFO info{};info.cbSize=sizeof(info);
+            if(GetGUIThreadInfo(0,&info) && !info.hwndCaret && !info.hwndCapture && !info.hwndMenuOwner && !info.hwndMoveSize) {
+                changing=true;const bool rebound=tsf.restore() && tsf.start() && tsf.currentDisabled();changing=false;
+                if(rebound)return;
+            }
+            return;
+        }
         revision=revision==0x7fffffff?1:revision+1;
         SetPropW(control,revisionProperty,reinterpret_cast<HANDLE>(revision));
         GUITHREADINFO info{};info.cbSize=sizeof(info);
-        const auto focus=GetFocus();const auto activeContext=focus?associated(focus):nullptr;
+        const auto activeFocus=GetFocus();const auto activeContext=activeFocus?associated(activeFocus):nullptr;
         const bool handoff=menuHandoff && !associated(disabledWindow) && foreground() &&
-            (focus==disabledWindow || focus==root) && GetGUIThreadInfo(0,&info) &&
+            (activeFocus==disabledWindow || activeFocus==root) && GetGUIThreadInfo(0,&info) &&
             !info.hwndCaret && !info.hwndCapture && !info.hwndMenuOwner && !info.hwndMoveSize &&
             (!activeContext || ImmGetCompositionStringW(activeContext,GCS_COMPSTR,nullptr,0)<=0);
         if(handoff) {
@@ -121,27 +242,55 @@ static void verifyContext() {
 static LRESULT state(HWND focus) {
     DWORD pid=0;
     if(focus && (GetWindowThreadProcessId(focus,&pid)!=GetCurrentThreadId() || pid!=GetCurrentProcessId()))return 9;
-    return 1 | (disabledWindow?2:0) | (!disabledWindow && focus && (associated(focus) || InputContextTsf::available())?4:0) |
+    const bool protectedTarget=protectedFocus(focus);
+    LRESULT value=1 | (disabledWindow?2:0) |
+        (!disabledWindow && focus && !protectedTarget && (associated(focus) || InputContextTsf::available())?4:0) |
         (restoreFailed?8:0) | (restored?16:0) | (tsf.keyboard && tsf.currentDisabled()?32:0) | (tsf.watching()?64:0) |
-        (disabledWindow && (menuActive() || menuReturning())?128:0);
+        (((disabledWindow || (focusPolicy && focusCount))) && (menuActive() || menuReturning())?128:0);
+    if(focusPolicy)value|=0x100;
+    if(policyRestoreFailed || (!focusPolicy && focusCount) || (focusPolicy && protectedTarget && focusIndex(focus)<0))value|=0x200;
+    value|=LRESULT(focusCount&0xff)<<16;
+    value|=LRESULT(policyReason&0xff)<<24;
+    return value;
 }
 static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM lParam) {
     if(message==controlMessage && (wParam>>8)==nonce) {
         const auto focus=reinterpret_cast<HWND>(lParam);const auto operation=wParam&255;
-        if(operation==3){restore();return state(focus);}
+        if(operation==3){restore();restoreFocus(PolicyOff);return state(focus);}
         if(operation==1)return state(focus);
         if(operation==4){
-            verifyContext();
+            if(!focusPolicy)verifyContext();
             if(disabledWindow==focus && foreground() && (ownFocus(focus) || menuActive()))deadline=GetTickCount64()+1500;
             return state(focus);
         }
+        if(operation==5) {
+            if(lParam) {
+                if(!focusPolicy) {
+                    // A lease from the previous mechanism is restored before the
+                    // policy takes over; no pending request is reissued here.
+                    if(!restore())return state(GetFocus())|8;
+                    focusPolicy=true;policyRestoreFailed=false;
+                    policyChanged(PolicyEnable);
+                    const auto target=GetFocus();
+                    if(protectedFocus(target))disableFocus(target,focusReason(target));
+                    else restoreFocus(PolicyEnable);
+                }
+            } else if(focusPolicy) {
+                focusPolicy=false;
+                restoreFocus(PolicyOff);
+                restore();
+                policyChanged(PolicyOff);
+            }
+            return state(GetFocus());
+        }
         if(operation==2) {
+            if(focusPolicy)return state(focus)|8;
             GUITHREADINFO info{};info.cbSize=sizeof(info);
             if(disabledWindow || !GetForegroundWindow() || menuActive() || !foreground() || !ownFocus(focus) || !GetGUIThreadInfo(0,&info) || info.hwndCaret || info.hwndCapture || info.hwndMenuOwner || info.hwndMoveSize)return state(focus)|8;
             const auto context=associated(focus);
             if(!context && !InputContextTsf::available())return state(focus)|8;
             if(context && ImmGetCompositionStringW(context,GCS_COMPSTR,nullptr,0)>0)return state(focus)|8;
-            restored=false;originalContext=context;disabledWindow=focus;deadline=GetTickCount64()+1500;
+            restored=false;originalContext=context;disabledWindow=focus;deadline=GetTickCount64()+1500;menuHandoff=false;
             changing=true;const bool tsfDisabled=tsf.start();const auto previous=ImmAssociateContext(focus,nullptr);changing=false;
             if(!tsfDisabled || previous!=context || associated(focus) || !tsf.currentDisabled() || !ownFocus(focus)){restore();return state(focus)|8;}
             const auto status=state(focus);
@@ -152,21 +301,34 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
     if(message==contextChangedMessage){verifyContext();return 0;}
     if(message==WM_TIMER) {
         const bool exited=!owner || WaitForSingleObject(owner,0)!=WAIT_TIMEOUT;
-        if(disabledWindow && (exited || !foreground() || (GetFocus()!=disabledWindow && !menuActive() && !menuReturning()) || GetTickCount64()>deadline)){
+        if(focusPolicy) {
+            if(exited) {
+#ifdef INPUT_CONTEXT_SELF_TEST
+                if(testTrace)std::fprintf(stderr,"restore: owner exit policy windows=%d\n",focusCount);
+#endif
+                focusPolicy=false;restoreFocus(PolicyRestoreOwner);
+            } else if(!policyForeground()) {
+                restoreFocus(PolicyRestoreForeground);menuHandoff=false;
+            }
+        } else if(disabledWindow && (exited || !foreground() || (GetFocus()!=disabledWindow && !menuActive() && !menuReturning()) || GetTickCount64()>deadline)) {
 #ifdef INPUT_CONTEXT_SELF_TEST
             if(testTrace)std::fprintf(stderr,"restore: timer exited=%d foreground=%p focus=%p disabled=%p expired=%d\n",exited,GetForegroundWindow(),GetFocus(),disabledWindow,GetTickCount64()>deadline);
 #endif
             restore();
         }
         verifyContext();
-        if(exited && !disabledWindow)DestroyWindow(window);
+        if(!focusPolicy && focusCount && policyRestoreFailed && GetTickCount64()-policyTick>1000)restoreFocus(PolicyOff);
+        if(exited && !disabledWindow && !focusCount)DestroyWindow(window);
         return 0;
     }
     if(message==WM_DESTROY) {
-        KillTimer(window,1);RemovePropW(root,controlProperty);RemovePropW(window,nonceProperty);RemovePropW(window,ownerProperty);RemovePropW(window,revisionProperty);
+        focusPolicy=false;
+        restoreFocus(PolicyRestoreOwner);
+        restore();
+        KillTimer(window,1);RemovePropW(root,controlProperty);RemovePropW(window,nonceProperty);RemovePropW(window,ownerProperty);RemovePropW(window,revisionProperty);RemovePropW(window,policyTickProperty);
         if(owner)CloseHandle(owner);
         if(menuProcess){CloseHandle(menuProcess);menuProcess=nullptr;menuPid=0;}
-        owner=nullptr;control=nullptr;root=nullptr;ownerId=0;
+        owner=nullptr;control=nullptr;root=nullptr;ownerId=0;focusCount=0;
         return 0;
     }
     return DefWindowProcW(window,message,wParam,lParam);
@@ -176,13 +338,43 @@ static LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wParam,LPARAM 
     if(!QueryFullProcessImageNameW(process,0,path,&length))return false;
     const auto name=wcsrchr(path,L'\\');return _wcsicmp(name?name+1:path,expected)==0;
 }
+static DWORD focusReason(HWND window) {
+    if(window==root)return PolicyDisableRoot;
+    wchar_t name[64]{};GetClassNameW(window,name,64);
+    return wcscmp(name,L"PSViewC")==0?PolicyDisableView:PolicyDisableRoot;
+}
+static void applyFocusPolicy(HWND window,DWORD reason) {
+    if(!focusPolicy)return;
+    if(protectedFocus(window))disableFocus(window,reason);
+    else restoreFocus(PolicyRestoreOther);
+}
 static void observeMessage(const CWPSTRUCT& event) {
-        if(disabledWindow && event.message==WM_ACTIVATEAPP)menuHandoff=ownMenuThread(DWORD(event.lParam)) || ownMenu(GetForegroundWindow());
-        if(disabledWindow && event.message==WM_KILLFOCUS && ownMenu(reinterpret_cast<HWND>(event.wParam)))menuHandoff=true;
+        if((disabledWindow || focusPolicy) && event.message==WM_ACTIVATEAPP && !event.wParam)
+            menuHandoff=ownMenuThread(DWORD(event.lParam)) || ownMenu(GetForegroundWindow());
+        if(focusPolicy && event.message==WM_ACTIVATEAPP && event.wParam && !ownMenu(GetForegroundWindow()))menuHandoff=false;
+        if((disabledWindow || focusPolicy) && event.message==WM_KILLFOCUS && ownMenu(reinterpret_cast<HWND>(event.wParam)))menuHandoff=true;
         if(disabledWindow && menuHandoff && event.message==WM_KEYDOWN && !ownMenu(event.hwnd) &&
            (event.wParam!='T' || !(GetKeyState(VK_CONTROL)&0x8000)) && event.wParam!=VK_RETURN && event.wParam!=VK_F2){verifyContext();menuHandoff=false;}
-        if(!changing && disabledWindow && event.hwnd!=control && !ownMenu(event.hwnd) &&
-            ((event.message==WM_KILLFOCUS && !ownMenu(reinterpret_cast<HWND>(event.wParam)) && !ownMenu(GetForegroundWindow()) && !menuReturning()) || event.message==WM_INPUTLANGCHANGE || event.message==WM_LBUTTONDOWN || event.message==WM_LBUTTONDBLCLK || event.message==WM_RBUTTONDOWN ||
+        if(focusPolicy && event.hwnd!=control && !ownMenu(event.hwnd)) {
+            if(event.message==WM_SETFOCUS) {
+                const auto target=event.hwnd;
+                applyFocusPolicy(target,focusReason(target));
+                return;
+            }
+            if(event.message==WM_INPUTLANGCHANGE) {
+                // Keep the user's chosen IME/layout; only re-detach the current
+                // non-input PS association after a manual language switch.
+                applyFocusPolicy(GetFocus(),PolicyReapplyLanguage);
+                return;
+            }
+            if(event.message==WM_ACTIVATEAPP && !event.wParam && !ownMenu(GetForegroundWindow()) && !ownMenuThread(DWORD(event.lParam))) {
+                restoreFocus(PolicyRestoreForeground);
+                menuHandoff=false;
+                return;
+            }
+        }
+        if(!focusPolicy && !changing && disabledWindow && event.hwnd!=control && !ownMenu(event.hwnd) &&
+            ((event.message==WM_KILLFOCUS && reinterpret_cast<HWND>(event.wParam)!=disabledWindow && !ownMenu(reinterpret_cast<HWND>(event.wParam)) && !ownMenu(GetForegroundWindow()) && !menuReturning()) || event.message==WM_INPUTLANGCHANGE || event.message==WM_LBUTTONDOWN || event.message==WM_LBUTTONDBLCLK || event.message==WM_RBUTTONDOWN ||
              (event.message==WM_ACTIVATEAPP && !event.wParam && !ownMenu(GetForegroundWindow()) && !ownMenuThread(DWORD(event.lParam))) ||
              (event.message==WM_KEYDOWN && ((event.wParam=='T' && (GetKeyState(VK_CONTROL)&0x8000)) || event.wParam==VK_RETURN || event.wParam==VK_F2)))){
 #ifdef INPUT_CONTEXT_SELF_TEST
@@ -213,6 +405,7 @@ static bool attach(HWND rootWindow,DWORD ownerProcess,ULONG_PTR nonceValue) {
                        reinterpret_cast<LPCWSTR>(&attach),&pinned);
     WNDCLASSW wc{};wc.lpfnWndProc=procedure;wc.hInstance=module;wc.lpszClassName=controlClass;RegisterClassW(&wc);
     root=rootWindow;ownerId=ownerProcess;owner=candidate;nonce=nonceValue;revision=1;tsf.notify=contextChanged;
+    focusCount=0;focusPolicy=false;policyRestoreFailed=false;policyReason=0;policyTick=0;
     control=CreateWindowExW(0,controlClass,L"",0,0,0,0,0,HWND_MESSAGE,nullptr,module,nullptr);
     if(!control){CloseHandle(owner);owner=nullptr;ownerId=0;return false;}
     if(!SetPropW(control,nonceProperty,reinterpret_cast<HANDLE>(nonce)) ||
@@ -225,6 +418,8 @@ static bool attach(HWND rootWindow,DWORD ownerProcess,ULONG_PTR nonceValue) {
 }
 static bool detach() {
     if(!control)return true;
+    focusPolicy=false;
+    restoreFocus(PolicyOff);
     restore();
     DestroyWindow(control);
     control=nullptr;

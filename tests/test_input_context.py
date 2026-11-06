@@ -11,8 +11,15 @@ class NativeContextTransportTests(unittest.TestCase):
         for queued in (0,222):
             value=NativeImeContext.__new__(NativeImeContext);value.controls={};value.hooks={}
             value.library=SimpleNamespace(_handle=7,InputContextHook=1,InputContextQueueHook=2)
+            windows={'reads':0}
+            def published(hwnd,name):
+                if name.endswith('Owner.v1'):return os.getpid()
+                if name.endswith('Window.v1'):
+                    windows['reads']+=1
+                    return 0 if windows['reads']==1 else 123
+                return 0
             value.user=SimpleNamespace(SetWindowsHookExW=Mock(side_effect=[111,queued]),UnhookWindowsHookEx=Mock(),
-                GetPropW=Mock(side_effect=lambda hwnd,name:os.getpid() if name.endswith('Owner.v1') else 123))
+                GetPropW=Mock(side_effect=published))
             value.attach=9;sample={'root':1,'identity':[1,2,'created',3],'state':'unknown'}
             with patch('backend.input_context.ctypes.cast',return_value=8),patch('backend.input_context.ctypes.get_last_error',return_value=5),patch('win32gui.SendMessageTimeout'),patch('win32gui.IsWindow',return_value=True),patch('win32gui.GetClassName',return_value='PhotoshopMenu.InputContext.v1'),patch('win32process.GetWindowThreadProcessId',return_value=[3,2]):
                 if queued:

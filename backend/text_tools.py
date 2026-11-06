@@ -145,7 +145,7 @@ class TextTools:
             enabled=params['list_options'] is not None
             xml=text_list.write(snapshot['list_xmp'],params['list_options'])
             if command!='text.object':
-                if 'list_paragraphs' not in snapshot:raise ValueError('列表排版需要正常重启PS加载UXP0.3.89')
+                if 'list_paragraphs' not in snapshot:raise ValueError('列表排版需要正常重启PS加载UXP0.3.92')
                 formatting,xml=text_list.formatting(params['value'],params['origins'],snapshot['list_paragraphs'],xml,enabled)
                 params={**params,'list_layout':formatting}
             params={**{key:value for key,value in params.items() if key!='list_options'},'list_xmp':xml}

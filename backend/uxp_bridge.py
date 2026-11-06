@@ -146,8 +146,8 @@ class UxpTransport:
                     raise RuntimeError('文字处理计划需要正常重启PS加载UXP0.3.71；未提交修改')
                 if payload.get('command')=='text.replace' and 'list_xmp' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,81):
                     raise RuntimeError('列表保存需要正常重启PS加载UXP0.3.81；未提交修改')
-                if 'list_layout' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,89):
-                    raise RuntimeError('列表排版需要正常重启PS加载UXP0.3.89；未提交修改')
+                if 'list_layout' in payload.get('text',{}) and version(heartbeat.get('probe_version'))<(0,3,92):
+                    raise RuntimeError('列表排版需要正常重启PS加载UXP0.3.92；未提交修改')
                 if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,78):
                     raise RuntimeError('文字拆分修复需要正常重启PS加载UXP0.3.78；未提交修改')
                 if payload.get('command')=='text.split' and version(heartbeat.get('probe_version'))<(0,3,80):
